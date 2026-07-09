@@ -106,6 +106,10 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 }
 
 func GetChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
+	return getChannelWithoutFilter(group, model, retry, requestPath)
+}
+
+func getChannelWithoutFilter(group string, model string, retry int, requestPath string) (*Channel, error) {
 	var abilities []Ability
 
 	var err error = nil
@@ -144,6 +148,72 @@ func GetChannel(group string, model string, retry int, requestPath string) (*Cha
 	}
 	err = DB.First(&channel, "id = ?", channel.Id).Error
 	return &channel, err
+}
+
+func GetChannelWithFilter(group string, model string, retry int, requestPath string, filter ChannelCandidateFilter) (*Channel, error) {
+	if filter == nil {
+		return getChannelWithoutFilter(group, model, retry, requestPath)
+	}
+	return getChannelWithFilter(group, model, retry, requestPath, filter)
+}
+
+func getChannelWithFilter(group string, model string, retry int, requestPath string, filter ChannelCandidateFilter) (*Channel, error) {
+	var abilities []Ability
+
+	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) || common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+		err := channelQuery.Order("priority DESC, weight DESC").Find(&abilities).Error
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		err := channelQuery.Order("priority DESC, weight DESC").Find(&abilities).Error
+		if err != nil {
+			return nil, err
+		}
+	}
+	abilities = filterAbilitiesByRequestPath(abilities, requestPath)
+	if len(abilities) == 0 {
+		return nil, nil
+	}
+
+	channelIds := make([]int, 0, len(abilities))
+	seenChannelIds := make(map[int]struct{}, len(abilities))
+	for _, ability := range abilities {
+		if _, exists := seenChannelIds[ability.ChannelId]; exists {
+			continue
+		}
+		seenChannelIds[ability.ChannelId] = struct{}{}
+		channelIds = append(channelIds, ability.ChannelId)
+	}
+
+	var channels []*Channel
+	if err := DB.Where("id IN ?", channelIds).Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	channelMap := make(map[int]*Channel, len(channels))
+	for _, channel := range channels {
+		channelMap[channel.Id] = channel
+	}
+
+	candidates := make([]*Channel, 0, len(abilities))
+	seenCandidates := make(map[int]struct{}, len(abilities))
+	for _, ability := range abilities {
+		if _, exists := seenCandidates[ability.ChannelId]; exists {
+			continue
+		}
+		channel, exists := channelMap[ability.ChannelId]
+		if !exists {
+			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", ability.ChannelId)
+		}
+		if filter != nil && !filter(channel) {
+			continue
+		}
+		seenCandidates[ability.ChannelId] = struct{}{}
+		candidates = append(candidates, channel)
+	}
+
+	return selectRandomChannelByPriority(candidates, retry)
 }
 
 // filterAbilitiesByRequestPath restricts candidates by request path for the DB

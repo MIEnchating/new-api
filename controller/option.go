@@ -138,7 +138,7 @@ func UpdateOption(c *gin.Context) {
 		option.Value = fmt.Sprintf("%v", option.Value)
 	}
 	switch option.Key {
-	case "QuotaForInviter", "QuotaForInvitee":
+	case "QuotaForInviter", "QuotaForInvitee", "InviteRechargeRebateRatio":
 		if isPositiveOptionValue(option.Value.(string)) && !operation_setting.IsPaymentComplianceConfirmed() {
 			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
 			return
@@ -288,6 +288,24 @@ func UpdateOption(c *gin.Context) {
 		}
 	case "AutomaticRetryStatusCodes":
 		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
+		if err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
+	case "ChannelRouteCooldownSeconds":
+		seconds, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
+		if parseErr != nil || seconds < 0 || seconds > 31536000 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "渠道路由冷却时间必须在 0 到 31536000 秒之间",
+			})
+			return
+		}
+	case "error_response_setting.rules":
+		err = operation_setting.ValidateCustomErrorResponseRulesJSON(option.Value.(string))
 		if err != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,

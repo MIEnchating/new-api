@@ -72,6 +72,8 @@ const MODELS_SECTIONS = [
       <RoutingReliabilitySection
         defaultValues={{
           RetryTimes: settings.RetryTimes,
+          ChannelRouteCooldownEnabled: settings.ChannelRouteCooldownEnabled,
+          ChannelRouteCooldownSeconds: settings.ChannelRouteCooldownSeconds,
           ChannelDisableThreshold: settings.ChannelDisableThreshold,
           AutomaticDisableChannelEnabled:
             settings.AutomaticDisableChannelEnabled,
@@ -85,6 +87,10 @@ const MODELS_SECTIONS = [
             settings['monitor_setting.auto_test_channel_minutes'],
           'monitor_setting.channel_test_mode':
             settings['monitor_setting.channel_test_mode'],
+          'error_response_setting.enabled':
+            settings['error_response_setting.enabled'],
+          'error_response_setting.rules':
+            settings['error_response_setting.rules'],
         }}
       />
     ),

@@ -17,12 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { type ColumnDef } from '@tanstack/react-table'
+import type { ColumnDef } from '@tanstack/react-table'
 import { useTranslation } from 'react-i18next'
 
 import { BadgeCell, TruncatedCell } from '@/components/data-table'
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
+import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Progress } from '@/components/ui/progress'
 import {
@@ -35,13 +36,15 @@ import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { API_KEY_STATUSES } from '../constants'
-import { type ApiKey } from '../types'
+import { parseApiKeyGroupRouteConfig } from '../lib'
+import type { ApiKey } from '../types'
 import {
   ApiKeyCell,
   ModelLimitsCell,
   IpRestrictionsCell,
 } from './api-keys-cells'
 import { DataTableRowActions } from './data-table-row-actions'
+import { useApiKeys } from './api-keys-provider'
 
 function getQuotaProgressColor(percentage: number): string {
   if (percentage <= 10) return '[&_[data-slot=progress-indicator]]:bg-rose-500'
@@ -72,6 +75,7 @@ function useGroupRatios(): Record<string, number> {
 export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
   const { t } = useTranslation()
   const groupRatios = useGroupRatios()
+  const { setCurrentRow, setOpen } = useApiKeys()
   return [
     {
       id: 'select',
@@ -138,36 +142,37 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
       header: t('Quota'),
       cell: ({ row }) => {
         const apiKey = row.original
+        const used = apiKey.used_quota
         if (apiKey.unlimited_quota) {
           return (
-            <StatusBadge
-              label={t('Unlimited')}
-              variant='neutral'
-              copyable={false}
-              className='-ml-1.5'
-            />
+            <span className='-ml-1.5 block text-xs font-medium tabular-nums'>
+              {formatQuota(used)} / {t('Unlimited')}
+            </span>
           )
         }
 
-        const used = apiKey.used_quota
         const remaining = apiKey.remain_quota
         const total = used + remaining
-        const percentage = total > 0 ? (remaining / total) * 100 : 0
+        const remainingPercentage = total > 0 ? (remaining / total) * 100 : 0
 
         return (
           <Tooltip>
             <TooltipTrigger render={<div className='w-[150px] space-y-1' />}>
-              <div className='flex justify-between text-xs'>
+              <div className='text-xs'>
                 <span className='font-medium tabular-nums'>
-                  {formatQuota(remaining)}
+                  {formatQuota(used)}
                 </span>
                 <span className='text-muted-foreground tabular-nums'>
-                  {formatQuota(total)}
+                  {' '}
+                  / {formatQuota(total)}
                 </span>
               </div>
               <Progress
-                value={percentage}
-                className={cn('h-1.5', getQuotaProgressColor(percentage))}
+                value={remainingPercentage}
+                className={cn(
+                  'h-1.5',
+                  getQuotaProgressColor(remainingPercentage)
+                )}
               />
             </TooltipTrigger>
             <TooltipContent>
@@ -177,7 +182,7 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
                 </div>
                 <div>
                   {t('Remaining:')} {formatQuota(remaining)} (
-                  {percentage.toFixed(1)}%)
+                  {remainingPercentage.toFixed(1)}%)
                 </div>
                 <div>
                   {t('Total:')} {formatQuota(total)}
@@ -194,6 +199,47 @@ export function useApiKeysColumns(): ColumnDef<ApiKey>[] {
       header: t('Group'),
       cell: ({ row }) => {
         const apiKey = row.original
+        const routes = parseApiKeyGroupRouteConfig(apiKey.group_route_config)
+        if (routes.length > 0) {
+          return (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    className='-ml-2 h-auto justify-start px-2 py-1'
+                    aria-label={t('Route Groups')}
+                    onClick={() => {
+                      setCurrentRow(apiKey)
+                      setOpen('route-detail')
+                    }}
+                  />
+                }
+              >
+                <span className='flex max-w-full min-w-0 items-center gap-1.5 overflow-hidden text-xs'>
+                  {routes.slice(0, 2).map((route) => (
+                    <GroupBadge
+                      key={route.group}
+                      group={route.group}
+                      ratio={groupRatios[route.group]}
+                    />
+                  ))}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <div className='space-y-1 text-xs'>
+                  {routes.map((route) => (
+                    <div key={route.group}>
+                      {route.group}: {t('Priority')} {route.priority},{' '}
+                      {t('Cooldown')} {route.cooldown_seconds}s
+                    </div>
+                  ))}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          )
+        }
         const group = row.getValue('group') as string
         const ratio = group && group !== 'auto' ? groupRatios[group] : undefined
 

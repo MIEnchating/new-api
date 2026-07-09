@@ -22,7 +22,12 @@ import { z } from 'zod'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
 import { DEFAULT_GROUP } from '../constants'
-import { type ApiKeyFormData, type ApiKey } from '../types'
+import {
+  apiKeyGroupRouteSchema,
+  type ApiKeyFormData,
+  type ApiKey,
+  type ApiKeyGroupRoute,
+} from '../types'
 
 // ============================================================================
 // Form Schema
@@ -39,16 +44,28 @@ export function getApiKeyFormSchema(t: TFunction) {
       allow_ips: z.string().optional(),
       group: z.string().optional(),
       cross_group_retry: z.boolean().optional(),
+      group_route_enabled: z.boolean().optional(),
+      group_route_sticky: z.boolean().optional(),
+      group_routes: z
+        .array(
+          z.object({
+            group: z.string().min(1, t('Please select a group')),
+            priority: z.number().int().min(0, t('Priority must be zero or greater')),
+            cooldown_seconds: z
+              .number()
+              .int()
+              .min(1, t('Cooldown must be greater than 0 seconds'))
+              .max(31536000, t('Cooldown cannot exceed 31536000 seconds')),
+          })
+        )
+        .optional(),
       tokenCount: z.number().min(1).optional(),
     })
     .superRefine((data, ctx) => {
-      if (data.unlimited_quota) {
-        return
-      }
-
       if (
-        data.remain_quota_dollars === undefined ||
-        data.remain_quota_dollars < 0
+        !data.unlimited_quota &&
+        (data.remain_quota_dollars === undefined ||
+          data.remain_quota_dollars < 0)
       ) {
         ctx.addIssue({
           code: 'custom',
@@ -56,6 +73,31 @@ export function getApiKeyFormSchema(t: TFunction) {
           message: t('Quota must be zero or greater'),
         })
       }
+
+      if (!data.group_route_enabled) {
+        return
+      }
+
+      if (!data.group_routes || data.group_routes.length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['group_routes'],
+          message: t('Please add at least one route group'),
+        })
+        return
+      }
+
+      const groups = new Set<string>()
+      data.group_routes.forEach((route, index) => {
+        if (groups.has(route.group)) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['group_routes', index, 'group'],
+            message: t('Duplicate route group'),
+          })
+        }
+        groups.add(route.group)
+      })
     })
 }
 
@@ -74,6 +116,9 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   allow_ips: '',
   group: DEFAULT_GROUP,
   cross_group_retry: true,
+  group_route_enabled: false,
+  group_route_sticky: false,
+  group_routes: [{ group: DEFAULT_GROUP, priority: 1, cooldown_seconds: 60 }],
   tokenCount: 1,
 }
 
@@ -87,6 +132,24 @@ export function getApiKeyFormDefaultValues(
   }
 }
 
+export function parseApiKeyGroupRouteConfig(
+  config?: string | null
+): ApiKeyGroupRoute[] {
+  if (!config) {
+    return []
+  }
+  try {
+    const parsed = JSON.parse(config)
+    const result = z.array(apiKeyGroupRouteSchema).safeParse(parsed)
+    if (!result.success) {
+      return []
+    }
+    return [...result.data].sort((a, b) => b.priority - a.priority)
+  } catch {
+    return []
+  }
+}
+
 // ============================================================================
 // Form Data Transformation
 // ============================================================================
@@ -97,6 +160,7 @@ export function getApiKeyFormDefaultValues(
 export function transformFormDataToPayload(
   data: ApiKeyFormValues
 ): ApiKeyFormData {
+  const groupRoutes = data.group_route_enabled ? data.group_routes || [] : []
   return {
     name: data.name,
     remain_quota: data.unlimited_quota
@@ -109,8 +173,24 @@ export function transformFormDataToPayload(
     model_limits_enabled: data.model_limits.length > 0,
     model_limits: data.model_limits.join(','),
     allow_ips: data.allow_ips || '',
-    group: data.group || '',
-    cross_group_retry: data.group === 'auto' ? !!data.cross_group_retry : false,
+    group: data.group_route_enabled ? '' : data.group || '',
+    cross_group_retry:
+      !data.group_route_enabled && data.group === 'auto'
+        ? !!data.cross_group_retry
+        : false,
+    group_route_sticky: data.group_route_enabled
+      ? !!data.group_route_sticky
+      : false,
+    group_route_config:
+      groupRoutes.length > 0
+        ? JSON.stringify(
+            groupRoutes.map((route) => ({
+              group: route.group,
+              priority: route.priority,
+              cooldown_seconds: route.cooldown_seconds,
+            }))
+          )
+        : '',
   }
 }
 
@@ -120,6 +200,7 @@ export function transformFormDataToPayload(
 export function transformApiKeyToFormDefaults(
   apiKey: ApiKey
 ): ApiKeyFormValues {
+  const groupRoutes = parseApiKeyGroupRouteConfig(apiKey.group_route_config)
   return {
     name: apiKey.name,
     remain_quota_dollars: apiKey.unlimited_quota
@@ -134,8 +215,14 @@ export function transformApiKeyToFormDefaults(
       ? apiKey.model_limits.split(',').filter(Boolean)
       : [],
     allow_ips: apiKey.allow_ips || '',
-    group: apiKey.group || DEFAULT_GROUP,
-    cross_group_retry: !!apiKey.cross_group_retry,
+    group: groupRoutes.length > 0 ? DEFAULT_GROUP : apiKey.group || DEFAULT_GROUP,
+    cross_group_retry: groupRoutes.length > 0 ? false : !!apiKey.cross_group_retry,
+    group_route_enabled: groupRoutes.length > 0,
+    group_route_sticky: groupRoutes.length > 0 ? !!apiKey.group_route_sticky : false,
+    group_routes:
+      groupRoutes.length > 0
+        ? groupRoutes
+        : [{ group: DEFAULT_GROUP, priority: 1, cooldown_seconds: 60 }],
     tokenCount: 1,
   }
 }

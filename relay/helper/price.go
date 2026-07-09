@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -47,9 +48,12 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 		GroupSpecialRatio: -1,
 	}
 
-	// check auto group
-	autoGroup, exists := ctx.Get("auto_group")
-	if exists {
+	if routeGroup, exists := common.GetContextKey(ctx, constant.ContextKeyTokenGroupRouteGroup); exists {
+		if group, ok := routeGroup.(string); ok && group != "" {
+			logger.LogDebug(ctx, "final token route group: %s", group)
+			relayInfo.UsingGroup = group
+		}
+	} else if autoGroup, exists := ctx.Get("auto_group"); exists {
 		logger.LogDebug(ctx, "final group: %s", autoGroup)
 		relayInfo.UsingGroup = autoGroup.(string)
 	}

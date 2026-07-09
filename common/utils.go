@@ -294,6 +294,41 @@ func MessageWithRequestId(message string, id string) string {
 	return fmt.Sprintf("%s (request id: %s)", message, id)
 }
 
+func MessageWithoutRequestId(message string) string {
+	cleaned := strings.TrimSpace(message)
+	for {
+		next := stripTrailingRequestId(cleaned)
+		if next == cleaned {
+			return cleaned
+		}
+		cleaned = next
+	}
+}
+
+func stripTrailingRequestId(message string) string {
+	if !strings.HasSuffix(message, ")") {
+		return message
+	}
+
+	lowerMessage := strings.ToLower(message)
+	markers := []string{
+		" (request id:",
+		" (request_id:",
+		" (request-id:",
+		" (requestid:",
+	}
+	for _, marker := range markers {
+		index := strings.LastIndex(lowerMessage, marker)
+		if index >= 0 {
+			id := strings.TrimSpace(message[index+len(marker) : len(message)-1])
+			if id != "" && !strings.ContainsAny(id, " \t\r\n") {
+				return strings.TrimSpace(message[:index])
+			}
+		}
+	}
+	return message
+}
+
 func RandomSleep() {
 	// Sleep for 0-3000 ms
 	time.Sleep(time.Duration(rand.Intn(3000)) * time.Millisecond)

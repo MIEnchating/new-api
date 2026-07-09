@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -28,7 +29,82 @@ type Token struct {
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
+	GroupRouteConfig   string         `json:"group_route_config" gorm:"type:text"`
+	GroupRouteSticky   bool           `json:"group_route_sticky" gorm:"default:false"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
+}
+
+const TokenGroupRouteMaxCooldownSeconds = 31_536_000
+
+type TokenGroupRoute struct {
+	Group           string `json:"group"`
+	Priority        int    `json:"priority"`
+	CooldownSeconds int    `json:"cooldown_seconds"`
+}
+
+func NormalizeTokenGroupRoutes(routes []TokenGroupRoute) ([]TokenGroupRoute, error) {
+	if len(routes) == 0 {
+		return nil, nil
+	}
+
+	seen := make(map[string]struct{}, len(routes))
+	normalized := make([]TokenGroupRoute, 0, len(routes))
+	for _, route := range routes {
+		route.Group = strings.TrimSpace(route.Group)
+		if route.Group == "" {
+			return nil, errors.New("路由分组不能为空")
+		}
+		if _, ok := seen[route.Group]; ok {
+			return nil, fmt.Errorf("路由分组 %s 重复", route.Group)
+		}
+		seen[route.Group] = struct{}{}
+		if route.Priority < 0 {
+			return nil, fmt.Errorf("路由分组 %s 的优先级不能小于 0", route.Group)
+		}
+		if route.CooldownSeconds <= 0 {
+			return nil, fmt.Errorf("路由分组 %s 的冷却时间必须大于 0 秒", route.Group)
+		}
+		if route.CooldownSeconds > TokenGroupRouteMaxCooldownSeconds {
+			return nil, fmt.Errorf("路由分组 %s 的冷却时间不能超过 %d 秒", route.Group, TokenGroupRouteMaxCooldownSeconds)
+		}
+		normalized = append(normalized, route)
+	}
+
+	sort.SliceStable(normalized, func(i, j int) bool {
+		return normalized[i].Priority > normalized[j].Priority
+	})
+	return normalized, nil
+}
+
+func NormalizeTokenGroupRouteConfig(config string) (string, []TokenGroupRoute, error) {
+	config = strings.TrimSpace(config)
+	if config == "" {
+		return "", nil, nil
+	}
+	routes := make([]TokenGroupRoute, 0)
+	if err := common.Unmarshal([]byte(config), &routes); err != nil {
+		return "", nil, fmt.Errorf("路由配置格式错误: %w", err)
+	}
+	normalized, err := NormalizeTokenGroupRoutes(routes)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(normalized) == 0 {
+		return "", nil, nil
+	}
+	data, err := common.Marshal(normalized)
+	if err != nil {
+		return "", nil, fmt.Errorf("路由配置序列化失败: %w", err)
+	}
+	return string(data), normalized, nil
+}
+
+func (token *Token) GetGroupRoutes() []TokenGroupRoute {
+	_, routes, err := NormalizeTokenGroupRouteConfig(token.GroupRouteConfig)
+	if err != nil {
+		return nil
+	}
+	return routes
 }
 
 func (token *Token) Clean() {
@@ -302,7 +378,7 @@ func (token *Token) Update() (err error) {
 		}
 	}()
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error
+		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "group_route_config", "group_route_sticky").Updates(token).Error
 	return err
 }
 

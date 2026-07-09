@@ -24,10 +24,22 @@ const (
 )
 
 type Monitor struct {
-	Name   string  `json:"name"`
-	Uptime float64 `json:"uptime"`
-	Status int     `json:"status"`
-	Group  string  `json:"group,omitempty"`
+	Name        string      `json:"name"`
+	Uptime      float64     `json:"uptime"`
+	Uptime24    float64     `json:"uptime24"`
+	Uptime7     *float64    `json:"uptime7,omitempty"`
+	Status      int         `json:"status"`
+	Group       string      `json:"group,omitempty"`
+	Ping        *int        `json:"ping,omitempty"`
+	LastChecked string      `json:"lastChecked,omitempty"`
+	Heartbeats  []Heartbeat `json:"heartbeats,omitempty"`
+}
+
+type Heartbeat struct {
+	Status int    `json:"status"`
+	Time   string `json:"time,omitempty"`
+	Ping   *int   `json:"ping,omitempty"`
+	Msg    string `json:"msg,omitempty"`
 }
 
 type UptimeGroupResult struct {
@@ -83,7 +95,10 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 
 	var heartbeatData struct {
 		HeartbeatList map[string][]struct {
-			Status int `json:"status"`
+			Status int    `json:"status"`
+			Time   string `json:"time"`
+			Ping   *int   `json:"ping"`
+			Msg    string `json:"msg"`
 		} `json:"heartbeatList"`
 		UptimeList map[string]float64 `json:"uptimeList"`
 	}
@@ -115,10 +130,25 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 
 			if uptime, exists := heartbeatData.UptimeList[monitorID+uptimeKeySuffix]; exists {
 				monitor.Uptime = uptime
+				monitor.Uptime24 = uptime
+			}
+			if uptime, exists := resolveHistoryUptime(heartbeatData.UptimeList, monitorID); exists {
+				monitor.Uptime7 = float64Ptr(uptime)
 			}
 
 			if heartbeats, exists := heartbeatData.HeartbeatList[monitorID]; exists && len(heartbeats) > 0 {
 				monitor.Status = heartbeats[0].Status
+				monitor.LastChecked = heartbeats[0].Time
+				monitor.Ping = heartbeats[0].Ping
+				monitor.Heartbeats = make([]Heartbeat, 0, len(heartbeats))
+				for _, heartbeat := range heartbeats {
+					monitor.Heartbeats = append(monitor.Heartbeats, Heartbeat{
+						Status: heartbeat.Status,
+						Time:   heartbeat.Time,
+						Ping:   heartbeat.Ping,
+						Msg:    heartbeat.Msg,
+					})
+				}
 			}
 
 			result.Monitors = append(result.Monitors, monitor)
@@ -126,6 +156,19 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 	}
 
 	return result
+}
+
+func float64Ptr(value float64) *float64 {
+	return &value
+}
+
+func resolveHistoryUptime(uptimeList map[string]float64, monitorID string) (float64, bool) {
+	for _, suffix := range []string{"_168", "_7d", "_7", "_720", "_30d", uptimeKeySuffix} {
+		if uptime, exists := uptimeList[monitorID+suffix]; exists {
+			return uptime, true
+		}
+	}
+	return 0, false
 }
 
 func GetUptimeKumaStatus(c *gin.Context) {

@@ -61,6 +61,7 @@ function ChannelCardComponent({
 
   const fieldLabels: Record<string, string> = {
     balance: t('Used / Remaining'),
+    route_status: t('Route Status'),
     response_time: t('Response'),
     test_time: t('Last Tested'),
   }
@@ -75,6 +76,7 @@ function ChannelCardComponent({
   const priorityCell = renderCell('priority')
   const weightCell = renderCell('weight')
   const balanceCell = renderCell('balance')
+  const routeStatusCell = renderCell('route_status')
   const responseCell = renderCell('response_time')
   const testCell = renderCell('test_time')
 
@@ -155,6 +157,17 @@ function ChannelCardComponent({
             </div>
           </div>
         </div>
+
+        {!isTagRow && routeStatusCell ? (
+          <div className='min-w-0'>
+            <div className={cn('mb-1', labelClass)}>
+              {fieldLabels.route_status}
+            </div>
+            <div className='min-w-0 overflow-hidden text-sm'>
+              {routeStatusCell}
+            </div>
+          </div>
+        ) : null}
 
         {/* Last row: groups span the full width, showing every group (no label) */}
         <div className='min-w-0'>

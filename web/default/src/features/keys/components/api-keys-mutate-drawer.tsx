@@ -18,9 +18,21 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, KeyRound, Settings2, WalletCards } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import { useForm, type SubmitErrorHandler } from 'react-hook-form'
+import {
+  ChevronDown,
+  KeyRound,
+  Plus,
+  Route,
+  Settings2,
+  Trash2,
+  WalletCards,
+} from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  useFieldArray,
+  useForm,
+  type SubmitErrorHandler,
+} from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -76,7 +88,7 @@ import {
   transformFormDataToPayload,
   transformApiKeyToFormDefaults,
 } from '../lib'
-import { type ApiKey } from '../types'
+import type { ApiKey } from '../types'
 import {
   ApiKeyGroupCombobox,
   type ApiKeyGroupOption,
@@ -87,6 +99,14 @@ type ApiKeyMutateDrawerProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   currentRow?: ApiKey
+}
+
+function getFormErrorMessage(error: unknown): string | undefined {
+  if (!error || typeof error !== 'object') {
+    return undefined
+  }
+  const message = (error as { message?: unknown }).message
+  return typeof message === 'string' ? message : undefined
 }
 
 export function ApiKeysMutateDrawer({
@@ -119,14 +139,20 @@ export function ApiKeysMutateDrawer({
   })
 
   const models = modelsData?.data || []
-  const groupsRaw = groupsData?.data || {}
-  const groups: ApiKeyGroupOption[] = Object.entries(groupsRaw).map(
-    ([key, info]) => ({
-      value: key,
-      label: key,
-      desc: info.desc || key,
-      ratio: info.ratio,
-    })
+  const groupsRaw = groupsData?.data
+  const groups = useMemo<ApiKeyGroupOption[]>(
+    () =>
+      Object.entries(groupsRaw ?? {}).map(([key, info]) => ({
+        value: key,
+        label: key,
+        desc: info.desc || key,
+        ratio: info.ratio,
+      })),
+    [groupsRaw]
+  )
+  const routableGroups = useMemo(
+    () => groups.filter((group) => group.value !== 'auto'),
+    [groups]
   )
   const backendHasAuto = groups.some((g) => g.value === 'auto')
   const schema = getApiKeyFormSchema(t)
@@ -135,15 +161,21 @@ export function ApiKeysMutateDrawer({
     resolver: zodResolver(schema),
     defaultValues: getApiKeyFormDefaultValues(defaultUseAutoGroup),
   })
+  const routeFields = useFieldArray({
+    control: form.control,
+    name: 'group_routes',
+  })
 
   // Load existing data when updating
   useEffect(() => {
     if (open && isUpdate && currentRow) {
-      getApiKey(currentRow.id).then((result) => {
-        if (result.success && result.data) {
-          form.reset(transformApiKeyToFormDefaults(result.data))
-        }
-      })
+      void getApiKey(currentRow.id)
+        .then((result) => {
+          if (result.success && result.data) {
+            form.reset(transformApiKeyToFormDefaults(result.data))
+          }
+        })
+        .catch(() => undefined)
     } else if (open && !isUpdate) {
       form.reset(
         getApiKeyFormDefaultValues(defaultUseAutoGroup && backendHasAuto)
@@ -154,6 +186,10 @@ export function ApiKeysMutateDrawer({
   // Correct group after groups load: if the form value is not in available groups, fall back
   useEffect(() => {
     if (groups.length === 0) return
+    const fallbackRouteGroup =
+      routableGroups.find((g) => g.value === 'default')?.value ??
+      routableGroups[0]?.value ??
+      ''
     const currentGroup = form.getValues('group')
     if (currentGroup && !groups.some((g) => g.value === currentGroup)) {
       const fallback =
@@ -165,7 +201,17 @@ export function ApiKeysMutateDrawer({
         form.setValue('cross_group_retry', false)
       }
     }
-  }, [groups, form])
+
+    const currentRoutes = form.getValues('group_routes') || []
+    currentRoutes.forEach((route, index) => {
+      if (
+        route.group &&
+        !routableGroups.some((group) => group.value === route.group)
+      ) {
+        form.setValue(`group_routes.${index}.group`, fallbackRouteGroup)
+      }
+    })
+  }, [groups, routableGroups, form])
 
   const onSubmit = async (data: ApiKeyFormValues) => {
     setIsSubmitting(true)
@@ -215,7 +261,7 @@ export function ApiKeysMutateDrawer({
           triggerRefresh()
         }
       }
-    } catch (_error) {
+    } catch {
       toast.error(t(ERROR_MESSAGES.UNEXPECTED))
     } finally {
       setIsSubmitting(false)
@@ -249,6 +295,22 @@ export function ApiKeysMutateDrawer({
     : t('Enter quota in {{currency}}', { currency: currencyLabel })
   const selectedGroup = form.watch('group')
   const unlimitedQuota = form.watch('unlimited_quota')
+  const groupRouteEnabled = form.watch('group_route_enabled')
+  const fallbackRouteGroup =
+    routableGroups.find((g) => g.value === 'default')?.value ??
+    routableGroups[0]?.value ??
+    ''
+  const groupRoutesMessage = getFormErrorMessage(
+    form.formState.errors.group_routes
+  )
+  const nextRoutePriority = () => {
+    const priorities =
+      form.getValues('group_routes')?.map((route) => route.priority) || []
+    if (priorities.length === 0) {
+      return 1
+    }
+    return Math.max(Math.max(...priorities) - 1, 0)
+  }
 
   return (
     <Sheet
@@ -301,48 +363,227 @@ export function ApiKeysMutateDrawer({
 
               <FormField
                 control={form.control}
-                name='group'
+                name='group_route_enabled'
                 render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Group')}</FormLabel>
+                  <FormItem className={sideDrawerSwitchItemClassName()}>
+                    <div className='flex flex-col gap-0.5'>
+                      <FormLabel className='text-sm'>
+                        {t('Group routing')}
+                      </FormLabel>
+                      <FormDescription className='text-xs'>
+                        {t(
+                          'Route this key across multiple groups by priority and cooldown.'
+                        )}
+                      </FormDescription>
+                    </div>
                     <FormControl>
-                      <ApiKeyGroupCombobox
-                        options={groups}
-                        value={field.value}
-                        onValueChange={field.onChange}
-                        placeholder={t('Select a group')}
+                      <Switch
+                        checked={!!field.value}
+                        onCheckedChange={(checked) => {
+                          field.onChange(checked)
+                          if (checked && routeFields.fields.length === 0) {
+                            routeFields.append({
+                              group: fallbackRouteGroup,
+                              priority: 1,
+                              cooldown_seconds: 60,
+                            })
+                          }
+                        }}
                       />
                     </FormControl>
-                    <FormMessage />
                   </FormItem>
                 )}
               />
 
-              {selectedGroup === 'auto' && (
-                <FormField
-                  control={form.control}
-                  name='cross_group_retry'
-                  render={({ field }) => (
-                    <FormItem className={sideDrawerSwitchItemClassName()}>
-                      <div className='flex flex-col gap-0.5'>
-                        <FormLabel className='text-sm'>
-                          {t('Cross-group retry')}
-                        </FormLabel>
-                        <FormDescription className='line-clamp-2 text-xs sm:line-clamp-none'>
-                          {t(
-                            'When enabled, if channels in the current group fail, it will try channels in the next group in order.'
+              {groupRouteEnabled ? (
+                <div className='flex flex-col gap-3'>
+                  <SideDrawerSectionHeader
+                    title={t('Route Groups')}
+                    description={t('Higher priority groups are tried first')}
+                    icon={<Route className='size-4' />}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='group_route_sticky'
+                    render={({ field }) => (
+                      <FormItem className={sideDrawerSwitchItemClassName()}>
+                        <div className='flex flex-col gap-0.5'>
+                          <FormLabel className='text-sm'>
+                            {t('Route stickiness')}
+                          </FormLabel>
+                          <FormDescription className='text-xs'>
+                            {t(
+                              'After a fallback route succeeds, keep using that successful group until it fails.'
+                            )}
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch
+                            checked={!!field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                  <div className='flex flex-col gap-3'>
+                    {routeFields.fields.map((routeField, index) => (
+                      <div
+                        key={routeField.id}
+                        className='border-border/70 grid gap-3 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_7rem_8rem_auto] sm:items-start'
+                      >
+                        <FormField
+                          control={form.control}
+                          name={`group_routes.${index}.group`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Group')}</FormLabel>
+                              <FormControl>
+                                <ApiKeyGroupCombobox
+                                  options={routableGroups}
+                                  value={field.value}
+                                  onValueChange={field.onChange}
+                                  placeholder={t('Select a group')}
+                                  compact
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
                           )}
-                        </FormDescription>
-                      </div>
-                      <FormControl>
-                        <Switch
-                          checked={!!field.value}
-                          onCheckedChange={field.onChange}
                         />
-                      </FormControl>
-                    </FormItem>
+
+                        <FormField
+                          control={form.control}
+                          name={`group_routes.${index}.priority`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Priority')}</FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  type='number'
+                                  min='0'
+                                  step='1'
+                                  onChange={(e) =>
+                                    field.onChange(
+                                      Number.parseInt(e.target.value, 10) || 0
+                                    )
+                                  }
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name={`group_routes.${index}.cooldown_seconds`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Cooldown')}</FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  type='number'
+                                  min='1'
+                                  max='31536000'
+                                  step='1'
+                                  onChange={(e) =>
+                                    field.onChange(
+                                      Number.parseInt(e.target.value, 10) || 1
+                                    )
+                                  }
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <Button
+                          type='button'
+                          variant='outline'
+                          size='icon'
+                          className='mt-0 sm:mt-7'
+                          onClick={() => routeFields.remove(index)}
+                          aria-label={t('Remove route group')}
+                        >
+                          <Trash2 className='size-4' />
+                        </Button>
+                      </div>
+                    ))}
+
+                    <Button
+                      type='button'
+                      variant='outline'
+                      className='w-full justify-center gap-2'
+                      onClick={() =>
+                        routeFields.append({
+                          group: fallbackRouteGroup,
+                          priority: nextRoutePriority(),
+                          cooldown_seconds: 60,
+                        })
+                      }
+                    >
+                      <Plus className='size-4' />
+                      {t('Add route group')}
+                    </Button>
+                    {groupRoutesMessage && (
+                      <p className='text-destructive text-sm'>
+                        {t(groupRoutesMessage)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <FormField
+                    control={form.control}
+                    name='group'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Group')}</FormLabel>
+                        <FormControl>
+                          <ApiKeyGroupCombobox
+                            options={groups}
+                            value={field.value}
+                            onValueChange={field.onChange}
+                            placeholder={t('Select a group')}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  {selectedGroup === 'auto' && (
+                    <FormField
+                      control={form.control}
+                      name='cross_group_retry'
+                      render={({ field }) => (
+                        <FormItem className={sideDrawerSwitchItemClassName()}>
+                          <div className='flex flex-col gap-0.5'>
+                            <FormLabel className='text-sm'>
+                              {t('Cross-group retry')}
+                            </FormLabel>
+                            <FormDescription className='line-clamp-2 text-xs sm:line-clamp-none'>
+                              {t(
+                                'When enabled, if channels in the current group fail, it will try channels in the next group in order.'
+                              )}
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={!!field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
                   )}
-                />
+                </>
               )}
 
               <FormField
@@ -418,7 +659,9 @@ export function ApiKeysMutateDrawer({
                           min='1'
                           placeholder={t('Number of keys to create')}
                           onChange={(e) =>
-                            field.onChange(parseInt(e.target.value, 10) || 1)
+                            field.onChange(
+                              Number.parseInt(e.target.value, 10) || 1
+                            )
                           }
                         />
                       </FormControl>
@@ -454,7 +697,7 @@ export function ApiKeysMutateDrawer({
                           step={tokensOnly ? 1 : 0.01}
                           placeholder={quotaPlaceholder}
                           onChange={(e) =>
-                            field.onChange(parseFloat(e.target.value) || 0)
+                            field.onChange(Number.parseFloat(e.target.value) || 0)
                           }
                         />
                       </FormControl>

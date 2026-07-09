@@ -25,6 +25,7 @@ import type {
   GetApiKeysResponse,
   SearchApiKeysParams,
   ApiKeyFormData,
+  RouteStatus,
 } from './types'
 
 // ============================================================================
@@ -58,6 +59,16 @@ export async function searchApiKeys(
 export async function getApiKey(id: number): Promise<ApiResponse<ApiKey>> {
   const res = await api.get(`/api/token/${id}`)
   return res.data
+}
+
+export function getApiKeyRouteStatus(
+  id: number
+): Promise<ApiResponse<RouteStatus[]>> {
+  return api
+    .get(`/api/token/${id}/route/status`, {
+      params: { _: Date.now() },
+    })
+    .then((res) => res.data)
 }
 
 // Create a new API key

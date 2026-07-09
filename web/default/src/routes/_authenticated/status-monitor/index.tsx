@@ -16,15 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-// ============================================================================
-// Form Utilities
-// ============================================================================
-export {
-  getApiKeyFormSchema,
-  type ApiKeyFormValues,
-  API_KEY_FORM_DEFAULT_VALUES,
-  getApiKeyFormDefaultValues,
-  parseApiKeyGroupRouteConfig,
-  transformFormDataToPayload,
-  transformApiKeyToFormDefaults,
-} from './api-key-form'
+import { createFileRoute } from '@tanstack/react-router'
+
+import { StatusMonitor } from '@/features/status-monitor'
+
+export const Route = createFileRoute('/_authenticated/status-monitor/')({
+  component: StatusMonitor,
+})

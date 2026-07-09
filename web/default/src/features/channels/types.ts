@@ -22,6 +22,22 @@ import { z } from 'zod'
 // Channel Schema & Types
 // ============================================================================
 
+const routeGroupStatusSchema = z.object({
+  group: z.string(),
+  status: z.enum(['normal', 'cooling']).default('normal'),
+  cooling: z.boolean().default(false),
+  cooldown_until: z.number().optional(),
+  cooldown_remaining_seconds: z.number().optional(),
+})
+
+const channelRouteStatusSchema = z.object({
+  status: z.enum(['normal', 'cooling']).default('normal'),
+  cooling: z.boolean().default(false),
+  cooldown_until: z.number().optional(),
+  cooldown_remaining_seconds: z.number().optional(),
+  groups: z.array(routeGroupStatusSchema).optional(),
+})
+
 export const channelInfoSchema = z.object({
   is_multi_key: z.boolean().default(false),
   multi_key_size: z.number().default(0),
@@ -71,6 +87,7 @@ export const channelSchema = z.object({
     multi_key_mode: 'random',
   }),
   settings: z.string().default('{}'), // other_settings JSON
+  route_status: channelRouteStatusSchema.optional(),
 })
 
 export type Channel = z.infer<typeof channelSchema>

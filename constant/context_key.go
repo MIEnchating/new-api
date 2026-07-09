@@ -11,14 +11,20 @@ const (
 	ContextKeyRequestStartTime ContextKey = "request_start_time"
 
 	/* token related keys */
-	ContextKeyTokenUnlimited         ContextKey = "token_unlimited_quota"
-	ContextKeyTokenKey               ContextKey = "token_key"
-	ContextKeyTokenId                ContextKey = "token_id"
-	ContextKeyTokenGroup             ContextKey = "token_group"
-	ContextKeyTokenSpecificChannelId ContextKey = "specific_channel_id"
-	ContextKeyTokenModelLimitEnabled ContextKey = "token_model_limit_enabled"
-	ContextKeyTokenModelLimit        ContextKey = "token_model_limit"
-	ContextKeyTokenCrossGroupRetry   ContextKey = "token_cross_group_retry"
+	ContextKeyTokenUnlimited           ContextKey = "token_unlimited_quota"
+	ContextKeyTokenKey                 ContextKey = "token_key"
+	ContextKeyTokenId                  ContextKey = "token_id"
+	ContextKeyTokenGroup               ContextKey = "token_group"
+	ContextKeyTokenSpecificChannelId   ContextKey = "specific_channel_id"
+	ContextKeyTokenModelLimitEnabled   ContextKey = "token_model_limit_enabled"
+	ContextKeyTokenModelLimit          ContextKey = "token_model_limit"
+	ContextKeyTokenCrossGroupRetry     ContextKey = "token_cross_group_retry"
+	ContextKeyTokenGroupRoutes         ContextKey = "token_group_routes"
+	ContextKeyTokenGroupRouteGroup     ContextKey = "token_group_route_group"
+	ContextKeyTokenGroupRouteIndex     ContextKey = "token_group_route_index"
+	ContextKeyTokenGroupRouteCooldown  ContextKey = "token_group_route_cooldown"
+	ContextKeyTokenGroupRouteSticky    ContextKey = "token_group_route_sticky"
+	ContextKeyTokenGroupRouteStickyHit ContextKey = "token_group_route_sticky_hit"
 
 	/* channel related keys */
 	ContextKeyChannelId                ContextKey = "channel_id"
@@ -37,6 +43,9 @@ const (
 	ContextKeyChannelIsMultiKey        ContextKey = "channel_is_multi_key"
 	ContextKeyChannelMultiKeyIndex     ContextKey = "channel_multi_key_index"
 	ContextKeyChannelKey               ContextKey = "channel_key"
+	ContextKeyChannelRouteGroup        ContextKey = "channel_route_group"
+	ContextKeyChannelRouteChannelId    ContextKey = "channel_route_channel_id"
+	ContextKeyChannelRouteCooldown     ContextKey = "channel_route_cooldown"
 
 	ContextKeyAutoGroup           ContextKey = "auto_group"
 	ContextKeyAutoGroupIndex      ContextKey = "auto_group_index"

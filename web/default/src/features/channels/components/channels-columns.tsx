@@ -77,6 +77,7 @@ import {
 import { parseUpstreamUpdateMeta } from '../lib/upstream-update-utils'
 import type { Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
+import { ChannelRouteStatusBadge } from './channel-route-status-badge'
 import { useChannels } from './channels-provider'
 import { DataTableRowActions } from './data-table-row-actions'
 import { DataTableTagRowActions } from './data-table-tag-row-actions'
@@ -951,6 +952,18 @@ export function useChannelsColumns(
           }
           return false
         },
+        size: 120,
+        enableSorting: false,
+      },
+
+      // Route status column
+      {
+        id: 'route_status',
+        header: t('Route Status'),
+        meta: { mobileHidden: true },
+        cell: ({ row }) => (
+          <ChannelRouteStatusBadge routeStatus={row.original.route_status} />
+        ),
         size: 120,
         enableSorting: false,
       },

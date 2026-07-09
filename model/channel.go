@@ -53,10 +53,27 @@ type Channel struct {
 	// add after v0.8.5
 	ChannelInfo ChannelInfo `json:"channel_info" gorm:"type:json"`
 
-	OtherSettings string `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
+	OtherSettings string           `json:"settings" gorm:"column:settings"` // 其他设置，存储azure版本等不需要检索的信息，详见dto.ChannelOtherSettings
+	RouteStatus   *RouteStatusInfo `json:"route_status,omitempty" gorm:"-"`
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
+}
+
+type RouteStatusInfo struct {
+	Status                   string                 `json:"status"`
+	Cooling                  bool                   `json:"cooling"`
+	CooldownUntil            int64                  `json:"cooldown_until,omitempty"`
+	CooldownRemainingSeconds int64                  `json:"cooldown_remaining_seconds,omitempty"`
+	Groups                   []RouteGroupStatusInfo `json:"groups,omitempty"`
+}
+
+type RouteGroupStatusInfo struct {
+	Group                    string `json:"group"`
+	Status                   string `json:"status"`
+	Cooling                  bool   `json:"cooling"`
+	CooldownUntil            int64  `json:"cooldown_until,omitempty"`
+	CooldownRemainingSeconds int64  `json:"cooldown_remaining_seconds,omitempty"`
 }
 
 type ChannelInfo struct {

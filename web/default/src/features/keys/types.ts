@@ -22,6 +22,24 @@ import { z } from 'zod'
 // API Key Schema & Types
 // ============================================================================
 
+export const apiKeyGroupRouteSchema = z.object({
+  group: z.string(),
+  priority: z.number(),
+  cooldown_seconds: z.number(),
+})
+
+export type ApiKeyGroupRoute = z.infer<typeof apiKeyGroupRouteSchema>
+
+export const routeStatusSchema = z.object({
+  group: z.string().optional(),
+  status: z.enum(['normal', 'cooling']).default('normal'),
+  cooling: z.boolean().default(false),
+  cooldown_until: z.number().optional(),
+  cooldown_remaining_seconds: z.number().optional(),
+})
+
+export type RouteStatus = z.infer<typeof routeStatusSchema>
+
 export const apiKeySchema = z.object({
   id: z.number(),
   name: z.string(),
@@ -42,6 +60,8 @@ export const apiKeySchema = z.object({
     }, z.boolean())
     .optional()
     .default(false),
+  group_route_config: z.string().nullish().default(''),
+  group_route_sticky: z.boolean().optional().default(false),
   model_limits_enabled: z.boolean(),
   model_limits: z.string().nullish().default(''),
   allow_ips: z.string().nullish().default(''),
@@ -92,6 +112,8 @@ export interface ApiKeyFormData {
   allow_ips: string
   group: string
   cross_group_retry: boolean
+  group_route_config: string
+  group_route_sticky: boolean
 }
 
 // ============================================================================
@@ -103,4 +125,5 @@ export type ApiKeysDialogType =
   | 'update'
   | 'delete'
   | 'batch-delete'
+  | 'route-detail'
   | 'cc-switch'

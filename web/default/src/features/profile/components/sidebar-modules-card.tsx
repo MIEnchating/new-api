@@ -83,6 +83,11 @@ export function SidebarModulesCard() {
           description: t('System data statistics'),
         },
         {
+          key: 'status',
+          title: t('Status Monitor'),
+          description: t('Uptime Kuma service status page.'),
+        },
+        {
           key: 'token',
           title: t('Token Management'),
           description: t('API token management'),

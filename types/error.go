@@ -177,6 +177,29 @@ func (e *NewAPIError) SetMessage(message string) {
 	e.Err = errors.New(message)
 }
 
+func (e *NewAPIError) SetResponseMessage(message string) {
+	if e == nil {
+		return
+	}
+	e.Err = errors.New(message)
+	switch relayError := e.RelayError.(type) {
+	case OpenAIError:
+		relayError.Message = message
+		e.RelayError = relayError
+	case *OpenAIError:
+		if relayError != nil {
+			relayError.Message = message
+		}
+	case ClaudeError:
+		relayError.Message = message
+		e.RelayError = relayError
+	case *ClaudeError:
+		if relayError != nil {
+			relayError.Message = message
+		}
+	}
+}
+
 func (e *NewAPIError) ToOpenAIError() OpenAIError {
 	var result OpenAIError
 	switch e.errorType {

@@ -9,7 +9,9 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -29,6 +31,34 @@ func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
 		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
 	}
 	return maskedTokens
+}
+
+func normalizeTokenGroupRouteConfigForUser(userID int, config string) (string, error) {
+	normalized, routes, err := model.NormalizeTokenGroupRouteConfig(config)
+	if err != nil {
+		return "", err
+	}
+	if len(routes) == 0 {
+		return "", nil
+	}
+
+	userGroup, err := model.GetUserGroup(userID, false)
+	if err != nil {
+		return "", err
+	}
+	usableGroups := service.GetUserUsableGroups(userGroup)
+	for _, route := range routes {
+		if route.Group == "auto" {
+			return "", fmt.Errorf("密钥路由不支持 auto 分组")
+		}
+		if _, ok := usableGroups[route.Group]; !ok {
+			return "", fmt.Errorf("无权访问 %s 分组", route.Group)
+		}
+		if !ratio_setting.ContainsGroupRatio(route.Group) {
+			return "", fmt.Errorf("分组 %s 已被弃用", route.Group)
+		}
+	}
+	return normalized, nil
 }
 
 func GetAllTokens(c *gin.Context) {
@@ -75,6 +105,52 @@ func GetToken(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, buildMaskedTokenResponse(token))
+}
+
+type tokenGroupRouteStatus struct {
+	Group                    string `json:"group"`
+	Status                   string `json:"status"`
+	Cooling                  bool   `json:"cooling"`
+	CooldownUntil            int64  `json:"cooldown_until,omitempty"`
+	CooldownRemainingSeconds int64  `json:"cooldown_remaining_seconds,omitempty"`
+}
+
+func GetTokenRouteStatus(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	userId := c.GetInt("id")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	token, err := model.GetTokenByIds(id, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	_, routes, err := model.NormalizeTokenGroupRouteConfig(token.GroupRouteConfig)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	now := common.GetTimestamp()
+	statuses := make([]tokenGroupRouteStatus, 0, len(routes))
+	for _, route := range routes {
+		status := tokenGroupRouteStatus{
+			Group:   route.Group,
+			Status:  "normal",
+			Cooling: false,
+		}
+		until := service.GetTokenGroupRouteCooldownUntil(token.Id, route.Group, now)
+		if until > now {
+			status.Status = "cooling"
+			status.Cooling = true
+			status.CooldownUntil = until
+			status.CooldownRemainingSeconds = until - now
+		}
+		statuses = append(statuses, status)
+	}
+	common.ApiSuccess(c, statuses)
 }
 
 func GetTokenKey(c *gin.Context) {
@@ -187,6 +263,17 @@ func AddToken(c *gin.Context) {
 			return
 		}
 	}
+	groupRouteConfig, err := normalizeTokenGroupRouteConfigForUser(c.GetInt("id"), token.GroupRouteConfig)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if groupRouteConfig != "" {
+		token.Group = ""
+		token.CrossGroupRetry = false
+	} else {
+		token.GroupRouteSticky = false
+	}
 	// 检查用户令牌数量是否已达上限
 	maxTokens := operation_setting.GetMaxUserTokens()
 	count, err := model.CountUserTokens(c.GetInt("id"))
@@ -221,6 +308,8 @@ func AddToken(c *gin.Context) {
 		AllowIps:           token.AllowIps,
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
+		GroupRouteConfig:   groupRouteConfig,
+		GroupRouteSticky:   token.GroupRouteSticky,
 	}
 	err = cleanToken.Insert()
 	if err != nil {
@@ -241,6 +330,7 @@ func DeleteToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	service.ClearTokenGroupRouteSticky(id)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -289,6 +379,17 @@ func UpdateToken(c *gin.Context) {
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
 	} else {
+		groupRouteConfig, err := normalizeTokenGroupRouteConfigForUser(userId, token.GroupRouteConfig)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		if groupRouteConfig != "" {
+			token.Group = ""
+			token.CrossGroupRetry = false
+		} else {
+			token.GroupRouteSticky = false
+		}
 		// If you add more fields, please also update token.Update()
 		cleanToken.Name = token.Name
 		cleanToken.ExpiredTime = token.ExpiredTime
@@ -299,11 +400,16 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.AllowIps = token.AllowIps
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		cleanToken.GroupRouteConfig = groupRouteConfig
+		cleanToken.GroupRouteSticky = token.GroupRouteSticky
 	}
 	err = cleanToken.Update()
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	if statusOnly == "" {
+		service.ClearTokenGroupRouteSticky(cleanToken.Id)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -327,6 +433,9 @@ func DeleteTokenBatch(c *gin.Context) {
 	if err != nil {
 		common.ApiError(c, err)
 		return
+	}
+	for _, id := range tokenBatch.Ids {
+		service.ClearTokenGroupRouteSticky(id)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

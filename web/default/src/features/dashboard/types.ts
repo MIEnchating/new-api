@@ -168,11 +168,23 @@ export interface ProcessedFlowData {
 // Uptime Monitoring Types
 // ============================================================================
 
+export interface UptimeHeartbeat {
+  status: number
+  time?: string
+  ping?: number
+  msg?: string
+}
+
 export interface UptimeMonitor {
   name: string
   uptime: number
+  uptime24?: number
+  uptime7?: number
   status: number
   group?: string
+  ping?: number
+  lastChecked?: string
+  heartbeats?: UptimeHeartbeat[]
 }
 
 export interface UptimeGroupResult {

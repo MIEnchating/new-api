@@ -55,6 +55,27 @@ import {
 } from '@/lib/passkey'
 import { cn } from '@/lib/utils'
 
+const emptyLoginDefaults = {
+  username: '',
+  password: '',
+} satisfies z.infer<typeof loginFormSchema>
+
+const localLoginDefaults = {
+  username: 'xiaoge',
+  password: '123456789',
+} satisfies z.infer<typeof loginFormSchema>
+
+function getLoginFormDefaults() {
+  if (typeof window === 'undefined') {
+    return emptyLoginDefaults
+  }
+
+  const { hostname } = window.location
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1'
+
+  return isLocalhost ? localLoginDefaults : emptyLoginDefaults
+}
+
 export function UserAuthForm({
   className,
   redirectTo,
@@ -123,10 +144,7 @@ export function UserAuthForm({
 
   const form = useForm<z.infer<typeof loginFormSchema>>({
     resolver: zodResolver(loginFormSchema),
-    defaultValues: {
-      username: '',
-      password: '',
-    },
+    defaultValues: getLoginFormDefaults(),
   })
 
   const wechatQrCodeUrl = useMemo(() => {
@@ -168,7 +186,7 @@ export function UserAuthForm({
         await handleLoginSuccess(res.data as { id?: number } | null, redirectTo)
         toast.success(t('Welcome back!'))
       }
-    } catch (_error) {
+    } catch {
       // Errors are handled by global interceptor
     } finally {
       setIsLoading(false)
@@ -208,7 +226,7 @@ export function UserAuthForm({
       } else {
         toast.error(res?.message || loginFailedMessage)
       }
-    } catch (_error) {
+    } catch {
       toast.error(loginFailedMessage)
     } finally {
       setIsWeChatSubmitting(false)
