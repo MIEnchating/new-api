@@ -192,6 +192,11 @@ export interface UptimeGroupResult {
   monitors: UptimeMonitor[]
 }
 
+export interface UptimeStatusResponse {
+  success: boolean
+  data: UptimeGroupResult[]
+}
+
 // ============================================================================
 // Dashboard Filter Types
 // ============================================================================

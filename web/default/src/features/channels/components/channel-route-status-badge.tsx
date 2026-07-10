@@ -16,7 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { TFunction } from 'i18next'
+import { Timer } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge } from '@/components/status-badge'
@@ -33,22 +34,108 @@ type ChannelRouteStatusBadgeProps = {
   routeStatus?: Channel['route_status']
 }
 
-function formatRemaining(t: TFunction, seconds?: number) {
-  if (!seconds || seconds <= 0) return ''
-  return `${seconds}${t('seconds remaining')}`
+type CooldownStatus = {
+  cooling: boolean
+  cooldown_until?: number
+  cooldown_remaining_seconds?: number
 }
 
-export function ChannelRouteStatusBadge({
-  routeStatus,
-}: ChannelRouteStatusBadgeProps) {
-  const { t } = useTranslation()
-  const coolingGroups = routeStatus?.groups?.filter((group) => group.cooling) ?? []
-  const isCooling = routeStatus?.cooling || coolingGroups.length > 0
+type CooldownEntry = {
+  key: string
+  group?: string
+  until: number
+}
 
-  const badge = (
+function resolveCooldownUntil(status: CooldownStatus, receivedAt: number) {
+  if (status.cooldown_until && status.cooldown_until > 0) {
+    return status.cooldown_until
+  }
+  if (!status.cooling || !status.cooldown_remaining_seconds) {
+    return 0
+  }
+  return receivedAt + Math.max(0, status.cooldown_remaining_seconds)
+}
+
+function formatCountdown(seconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(seconds))
+  const hours = Math.floor(totalSeconds / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const remainingSeconds = totalSeconds % 60
+  const minuteText = String(minutes).padStart(2, '0')
+  const secondText = String(remainingSeconds).padStart(2, '0')
+
+  if (hours > 0) {
+    return `${String(hours).padStart(2, '0')}:${minuteText}:${secondText}`
+  }
+  return `${minuteText}:${secondText}`
+}
+
+export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
+  const { t } = useTranslation()
+  const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
+  const cooldownEntries = useMemo<CooldownEntry[]>(() => {
+    if (!props.routeStatus) {
+      return []
+    }
+
+    const receivedAt = Math.floor(Date.now() / 1000)
+    const groupEntries = (props.routeStatus.groups ?? [])
+      .map((group, index) => ({
+        key: `${group.group}-${index}`,
+        group: group.group,
+        until: resolveCooldownUntil(group, receivedAt),
+      }))
+      .filter((entry) => entry.until > 0)
+
+    if (groupEntries.length > 0) {
+      return groupEntries
+    }
+
+    const until = resolveCooldownUntil(props.routeStatus, receivedAt)
+    return until > 0 ? [{ key: 'channel', until }] : []
+  }, [props.routeStatus])
+  const activeCooldowns = cooldownEntries
+    .map((entry) => ({ ...entry, remaining: Math.max(0, entry.until - now) }))
+    .filter((entry) => entry.remaining > 0)
+  const remaining = activeCooldowns.reduce(
+    (maximum, entry) => Math.max(maximum, entry.remaining),
+    0
+  )
+  const isCooling = remaining > 0
+
+  useEffect(() => {
+    setNow(Math.floor(Date.now() / 1000))
+    if (!isCooling) {
+      return
+    }
+
+    const timer = window.setInterval(() => {
+      setNow(Math.floor(Date.now() / 1000))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [isCooling, props.routeStatus])
+
+  if (!props.routeStatus) {
+    return <span className='text-muted-foreground'>-</span>
+  }
+
+  const badge = isCooling ? (
     <StatusBadge
-      label={isCooling ? t('Cooling') : t('Normal')}
-      variant={isCooling ? 'warning' : 'success'}
+      variant='warning'
+      size='sm'
+      copyable={false}
+      icon={Timer}
+      aria-label={`${t('Cooling')} ${formatCountdown(remaining)}`}
+    >
+      <span>{t('Cooling')}</span>
+      <span className='font-mono tabular-nums'>
+        {formatCountdown(remaining)}
+      </span>
+    </StatusBadge>
+  ) : (
+    <StatusBadge
+      label={t('Normal')}
+      variant='success'
       size='sm'
       copyable={false}
     />
@@ -64,17 +151,19 @@ export function ChannelRouteStatusBadge({
         <TooltipTrigger render={<span />}>{badge}</TooltipTrigger>
         <TooltipContent side='top' className='max-w-xs'>
           <div className='space-y-1 text-xs'>
-            {coolingGroups.map((group) => (
-              <div key={group.group}>
-                {group.group}: {formatRemaining(t, group.cooldown_remaining_seconds)}
+            {activeCooldowns.map((entry) => (
+              <div
+                key={entry.key}
+                className='flex items-center justify-between gap-3'
+              >
+                <span className='truncate'>
+                  {entry.group ?? t('Remaining')}
+                </span>
+                <span className='font-mono tabular-nums'>
+                  {formatCountdown(entry.remaining)}
+                </span>
               </div>
             ))}
-            {coolingGroups.length === 0 && routeStatus?.cooldown_remaining_seconds ? (
-              <div>
-                {t('Remaining')}:{' '}
-                {formatRemaining(t, routeStatus.cooldown_remaining_seconds)}
-              </div>
-            ) : null}
           </div>
         </TooltipContent>
       </Tooltip>

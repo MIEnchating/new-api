@@ -21,6 +21,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   CircleDashed,
+  Clock3,
   RotateCw,
   Wrench,
   type LucideIcon,
@@ -53,8 +54,7 @@ const STATUS_META: Record<number, MonitorStatusMeta> = {
     label: 'Operational',
     icon: CheckCircle2,
     dotClassName: 'bg-emerald-500',
-    badgeClassName:
-      'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+    badgeClassName: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
   },
   0: {
     label: 'Down',
@@ -113,7 +113,10 @@ function formatDateTime(value: string | null | undefined) {
   return date.toLocaleString()
 }
 
-function getRelativeTime(value: string | null | undefined, t: (key: string, options?: Record<string, unknown>) => string) {
+function getRelativeTime(
+  value: string | null | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string
+) {
   if (!value) return '--'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return formatDateTime(value)
@@ -306,10 +309,15 @@ function MonitorRow(props: { monitor: UptimeMonitor }) {
         <MetricItem
           label={t('7-day uptime')}
           value={formatOptionalUptime(
-            props.monitor.uptime7 ?? props.monitor.uptime24 ?? props.monitor.uptime
+            props.monitor.uptime7 ??
+              props.monitor.uptime24 ??
+              props.monitor.uptime
           )}
         />
-        <MetricItem label={t('Latency')} value={formatPing(props.monitor.ping)} />
+        <MetricItem
+          label={t('Latency')}
+          value={formatPing(props.monitor.ping)}
+        />
         <MetricItem
           label={t('Last check')}
           value={getRelativeTime(props.monitor.lastChecked, t)}
@@ -367,9 +375,7 @@ export function StatusMonitor() {
   const [refreshing, setRefreshing] = useState(false)
   const [failed, setFailed] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-  const [refreshCountdown, setRefreshCountdown] = useState(
-    AUTO_REFRESH_SECONDS
-  )
+  const [refreshCountdown, setRefreshCountdown] = useState(AUTO_REFRESH_SECONDS)
   const [activeGroupKey, setActiveGroupKey] = useState(ALL_GROUP_KEY)
 
   const fetchStatus = useCallback(
@@ -390,8 +396,8 @@ export function StatusMonitor() {
       setRefreshCountdown(AUTO_REFRESH_SECONDS)
 
       return getUptimeStatus()
-        .then((res) => {
-          setGroups(res?.data ?? [])
+        .then((response) => {
+          setGroups(response?.data ?? [])
           setLastUpdated(new Date())
         })
         .catch(() => {
@@ -495,8 +501,9 @@ export function StatusMonitor() {
 
   const summary = useMemo(() => {
     const total = visibleMonitors.length
-    const operational = visibleMonitors.filter((monitor) => monitor.status === 1)
-      .length
+    const operational = visibleMonitors.filter(
+      (monitor) => monitor.status === 1
+    ).length
     const affected = total - operational
     const average =
       total === 0
@@ -560,7 +567,11 @@ export function StatusMonitor() {
               </span>
             </TabsTrigger>
             {groupOptions.map((group) => (
-              <TabsTrigger key={group.key} value={group.key} className='gap-1.5'>
+              <TabsTrigger
+                key={group.key}
+                value={group.key}
+                className='gap-1.5'
+              >
                 <span className='max-w-32 truncate sm:max-w-48'>
                   {group.label}
                 </span>
@@ -591,17 +602,32 @@ export function StatusMonitor() {
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Status Monitor')}</SectionPageLayout.Title>
       <SectionPageLayout.Actions>
-        <Button
-          type='button'
-          variant='outline'
-          size='sm'
-          onClick={handleManualRefresh}
-          disabled={loading || refreshing || !uptimeEnabled}
-          className='gap-2'
-        >
-          <RotateCw className={cn('size-4', refreshing && 'animate-spin')} />
-          {t('Refresh')}
-        </Button>
+        <div className='flex min-w-0 items-center gap-2 max-[360px]:w-[calc(100vw-1.5rem)] max-[360px]:justify-between'>
+          {lastUpdatedText ? (
+            <div className='text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs'>
+              <Clock3 className='size-3.5 shrink-0' />
+              <span className='truncate whitespace-nowrap'>
+                {lastUpdatedText}
+              </span>
+            </div>
+          ) : null}
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            onClick={handleManualRefresh}
+            disabled={loading || refreshing || !uptimeEnabled}
+            className='gap-2'
+          >
+            <RotateCw className={cn('size-4', refreshing && 'animate-spin')} />
+            {t('Refresh')}
+            {!loading && uptimeEnabled ? (
+              <span className='border-border min-w-8 border-l pl-2 text-right tabular-nums'>
+                {refreshCountdown}s
+              </span>
+            ) : null}
+          </Button>
+        </div>
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
         <div className='flex min-w-0 flex-col gap-4'>
@@ -629,16 +655,6 @@ export function StatusMonitor() {
               icon={CircleDashed}
             />
           </div>
-
-          {lastUpdatedText ? (
-            <div className='text-muted-foreground text-xs'>
-              {lastUpdatedText}
-              <span className='px-1.5'>·</span>
-              {t('Next refresh in {{seconds}}s', {
-                seconds: refreshCountdown,
-              })}
-            </div>
-          ) : null}
 
           {content}
         </div>

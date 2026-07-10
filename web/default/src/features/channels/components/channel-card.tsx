@@ -61,7 +61,6 @@ function ChannelCardComponent({
 
   const fieldLabels: Record<string, string> = {
     balance: t('Used / Remaining'),
-    route_status: t('Route Status'),
     response_time: t('Response'),
     test_time: t('Last Tested'),
   }
@@ -96,13 +95,16 @@ function ChannelCardComponent({
         data-state={isSelected ? 'selected' : undefined}
         className='flex flex-col gap-3'
       >
-        {/* Row 1: selection + type, with status badge + actions menu */}
+        {/* Row 1: selection + provider + route state, with actions on the right */}
         <div className='flex items-center justify-between gap-2'>
-          <div className='flex min-w-0 flex-1 items-center gap-2'>
+          <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
             {!isTagRow && selectCell && (
               <span className='shrink-0'>{selectCell}</span>
             )}
             <div className='min-w-0 overflow-hidden'>{typeCell}</div>
+            {!isTagRow && routeStatusCell ? (
+              <span className='shrink-0'>{routeStatusCell}</span>
+            ) : null}
           </div>
           <div className='flex shrink-0 items-center gap-1.5'>
             {showStatusBadge && statusCell}
@@ -157,17 +159,6 @@ function ChannelCardComponent({
             </div>
           </div>
         </div>
-
-        {!isTagRow && routeStatusCell ? (
-          <div className='min-w-0'>
-            <div className={cn('mb-1', labelClass)}>
-              {fieldLabels.route_status}
-            </div>
-            <div className='min-w-0 overflow-hidden text-sm'>
-              {routeStatusCell}
-            </div>
-          </div>
-        ) : null}
 
         {/* Last row: groups span the full width, showing every group (no label) */}
         <div className='min-w-0'>

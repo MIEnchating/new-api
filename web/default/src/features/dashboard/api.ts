@@ -21,7 +21,7 @@ import { api } from '@/lib/api'
 import type {
   FlowQuotaDataItem,
   QuotaDataItem,
-  UptimeGroupResult,
+  UptimeStatusResponse,
 } from './types'
 
 // ============================================================================
@@ -85,9 +85,8 @@ export async function getFlowQuotaDates(
 }
 
 // Get uptime monitoring status for all services
-export async function getUptimeStatus() {
-  const res = await api.get<{ success: boolean; data: UptimeGroupResult[] }>(
-    '/api/uptime/status'
-  )
-  return res.data
+export function getUptimeStatus() {
+  return api
+    .get<UptimeStatusResponse>('/api/uptime/status')
+    .then((res) => res.data)
 }
