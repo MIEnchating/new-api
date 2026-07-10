@@ -56,6 +56,16 @@ func ExtendWriteDeadline(c *gin.Context) {
 }
 
 func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult)) {
+	streamScannerHandler(c, resp, info, "", dataHandler)
+}
+
+// StreamScannerHandlerWithRequiredTerminal treats a stream that ends before
+// its handler calls StreamResult.Done as a truncated upstream response.
+func StreamScannerHandlerWithRequiredTerminal(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, terminalEvent string, dataHandler func(data string, sr *StreamResult)) {
+	streamScannerHandler(c, resp, info, terminalEvent, dataHandler)
+}
+
+func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, terminalEvent string, dataHandler func(data string, sr *StreamResult)) {
 
 	if resp == nil || dataHandler == nil {
 		return
@@ -177,15 +187,27 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	}
 
 	dataChan := make(chan string, 10)
+	handlerStoppedChan := make(chan bool, 1)
+	var closeDataOnce sync.Once
+	closeData := func() {
+		closeDataOnce.Do(func() {
+			close(dataChan)
+		})
+	}
 
 	wg.Add(1)
 	gopool.Go(func() {
+		handlerStopped := false
 		defer func() {
 			if r := recover(); r != nil {
 				logger.LogError(c, fmt.Sprintf("data handler goroutine panic: %v", r))
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("handler panic: %v", r))
+				handlerStopped = true
 			}
-			stop()
+			handlerStoppedChan <- handlerStopped
+			if handlerStopped {
+				stop()
+			}
 			wg.Done()
 		}()
 		sr := newStreamResult(info.StreamStatus)
@@ -198,6 +220,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				dataHandler(data, sr)
 			}()
 			if sr.IsStopped() {
+				handlerStopped = true
 				return
 			}
 		}
@@ -207,7 +230,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	wg.Add(1)
 	common.RelayCtxGo(ctx, func() {
 		defer func() {
-			close(dataChan)
+			closeData()
 			if r := recover(); r != nil {
 				logger.LogError(c, fmt.Sprintf("scanner goroutine panic: %v", r))
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("scanner panic: %v", r))
@@ -216,6 +239,9 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			logger.LogDebug(c, "scanner goroutine exited")
 			wg.Done()
 		}()
+
+		var endReason relaycommon.StreamEndReason
+		var endErr error
 
 		for scanner.Scan() {
 			// 检查是否需要停止
@@ -254,19 +280,44 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 					return
 				}
 			} else {
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
-				logger.LogDebug(c, "received [DONE], stopping scanner")
-				return
+				if terminalEvent == "" {
+					endReason = relaycommon.StreamEndReasonDone
+				} else {
+					endReason = relaycommon.StreamEndReasonScannerErr
+					endErr = fmt.Errorf("%w: received [DONE] before required terminal event %q", io.ErrUnexpectedEOF, terminalEvent)
+				}
+				logger.LogDebug(c, "received [DONE], finishing scanner")
+				break
 			}
 		}
 
-		if err := scanner.Err(); err != nil {
-			if err != io.EOF {
-				logger.LogError(c, "scanner error: "+err.Error())
-				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
+		if endReason == relaycommon.StreamEndReasonNone {
+			if err := scanner.Err(); err != nil {
+				endReason = relaycommon.StreamEndReasonScannerErr
+				endErr = err
+			} else if terminalEvent != "" {
+				endReason = relaycommon.StreamEndReasonScannerErr
+				endErr = fmt.Errorf("%w: required terminal event %q was not received", io.ErrUnexpectedEOF, terminalEvent)
+			} else {
+				endReason = relaycommon.StreamEndReasonEOF
 			}
 		}
-		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
+
+		// 先排空已扫描事件，避免 EOF 抢先覆盖最后一个终态事件的处理结果。
+		closeData()
+		if <-handlerStoppedChan {
+			return
+		}
+		select {
+		case <-stopChan:
+			return
+		default:
+		}
+
+		if endErr != nil {
+			logger.LogError(c, "scanner error: "+endErr.Error())
+		}
+		info.StreamStatus.SetEndReason(endReason, endErr)
 	})
 
 	// 主循环等待完成或超时
