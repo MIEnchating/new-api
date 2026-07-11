@@ -6,12 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       name:
-        description: 'reason'
+        description: "reason"
         required: false
   push:
     tags:
-      - '*'
-      - '!*-alpha*'
+      - "*"
+      - "!*-alpha*"
 
 jobs:
   linux:
@@ -50,7 +50,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: '>=1.25.1'
+          go-version: ">=1.25.1"
       - name: Build Backend (amd64)
         run: |
           go mod download
@@ -60,15 +60,12 @@ jobs:
           sudo apt-get update
           DEBIAN_FRONTEND=noninteractive sudo apt-get install -y gcc-aarch64-linux-gnu
           CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION' -extldflags '-static'" -o new-api-linux-arm64-$VERSION
-      - name: Release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload Linux builds
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          files: |
-            new-api-linux-*
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: linux-builds
+          path: new-api-linux-*
+          if-no-files-found: error
 
   macos:
     name: macOS Release
@@ -107,20 +104,17 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: '>=1.25.1'
+          go-version: ">=1.25.1"
       - name: Build Backend
         run: |
           go mod download
           go build -ldflags "-X 'new-api/common.Version=$VERSION'" -o new-api-macos-amd64-$VERSION
-      - name: Release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload macOS build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          files: |
-            new-api-macos-amd64-*
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          name: macos-build
+          path: new-api-macos-amd64-*
+          if-no-files-found: error
 
   windows:
     name: Windows Release
@@ -161,17 +155,44 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: '>=1.25.1'
+          go-version: ">=1.25.1"
       - name: Build Backend
         run: |
           go mod download
           go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION'" -o new-api-windows-amd64-$VERSION.exe
-      - name: Release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload Windows build
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          files: |
-            new-api-windows-amd64-*.exe
-          generate_release_notes: true
+          name: windows-build
+          path: new-api-windows-amd64-*.exe
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Download builds
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Generate release notes
+        run: node .github/scripts/generate-release-notes.mjs "$GITHUB_REF_NAME" release-notes.md
+      - name: Publish release
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: release-assets/*
+          draft: false
+          prerelease: false
+          make_latest: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
