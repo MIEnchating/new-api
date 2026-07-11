@@ -7,9 +7,17 @@ Makefile
 docs
 .eslintcache
 .gocache
+*.db
+*.db-journal
+.env
+.env.*
+.playwright-cli
+dev-logs
 /web/node_modules
 /web/default/node_modules
 /web/default/dist
+/web/default/.playwright-cli
+/web/default/output
 /web/classic/node_modules
 /web/classic/dist
 !THIRD-PARTY-LICENSES.md

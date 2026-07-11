@@ -36,6 +36,10 @@ data/
 token_estimator_test.go
 skills-lock.json
 .playwright-mcp
+.playwright-cli/
+dev-logs/
+web/default/.playwright-cli/
+web/default/output/
 
 # Local-only live probes and scratch test workspaces.
 .local-tests/
