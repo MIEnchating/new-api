@@ -47,6 +47,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { toIntlLocale } from '@/i18n/languages'
+import { isHttpUrl } from '@/lib/content-format'
 import {
   formatCurrencyFromUSD,
   formatQuotaWithCurrency,
@@ -624,6 +625,8 @@ export function useChannelsColumns(
           const settings = parseChannelSettings(channel.setting)
           const isPassThrough = settings.pass_through_body_enabled === true
           const hasParamOverride = Boolean(channel.param_override?.trim())
+          const remark = channel.remark?.trim() ?? ''
+          const remarkIsUrl = isHttpUrl(remark)
 
           return (
             <div className='flex max-w-full min-w-0 items-center gap-2'>
@@ -666,18 +669,28 @@ export function useChannelsColumns(
                   )}
                   <UpstreamUpdateTags channel={channel} />
                 </div>
-                {channel.remark && (
+                {remark && (
                   <TooltipProvider delay={200}>
                     <Tooltip>
                       <TooltipTrigger
                         render={
-                          <span className='text-muted-foreground text-xs' />
+                          remarkIsUrl ? (
+                            <a
+                              href={remark}
+                              target='_blank'
+                              rel='noopener noreferrer'
+                              className='text-info max-w-full truncate text-xs hover:underline'
+                              onClick={(event) => event.stopPropagation()}
+                            />
+                          ) : (
+                            <span className='text-muted-foreground max-w-full truncate text-xs' />
+                          )
                         }
                       >
-                        {truncateText(channel.remark, 40)}
+                        {truncateText(remark, 40)}
                       </TooltipTrigger>
                       <TooltipContent side='bottom' className='max-w-xs'>
-                        {channel.remark}
+                        {remark}
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
