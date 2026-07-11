@@ -140,7 +140,7 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
   const staticState = resolveStaticChannelState(props.channelStatus)
   if (staticState) {
     return (
-      <StatusBadge variant={staticState.variant} size='sm'>
+      <StatusBadge variant={staticState.variant} size='sm' copyable={false}>
         {t(staticState.label)}
       </StatusBadge>
     )
@@ -150,6 +150,7 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
     <StatusBadge
       variant='warning'
       size='sm'
+      copyable={false}
       aria-label={`${t('Cooling')} ${formatCountdown(remaining)}`}
     >
       <Timer data-icon='inline-start' />
@@ -159,7 +160,7 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
       </span>
     </StatusBadge>
   ) : (
-    <StatusBadge variant='success' size='sm'>
+    <StatusBadge variant='success' size='sm' copyable={false}>
       {t('Normal')}
     </StatusBadge>
   )
