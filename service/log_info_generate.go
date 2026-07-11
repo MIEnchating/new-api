@@ -113,7 +113,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendFinalRequestFormat(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
-	appendStreamStatus(relayInfo, other)
+	AppendStreamStatus(relayInfo, other)
 	return other
 }
 
@@ -124,7 +124,7 @@ func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other map[string]
 	other["po"] = relayInfo.ParamOverrideAudit
 }
 
-func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+func AppendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
 	if relayInfo == nil || other == nil || !relayInfo.IsStream || relayInfo.StreamStatus == nil {
 		return
 	}
@@ -133,9 +133,18 @@ func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 	if !ss.IsNormalEnd() || ss.HasErrors() {
 		status = "error"
 	}
+	completionState := "no_output"
+	if ss.EndReason == relaycommon.StreamEndReasonDone && !ss.HasErrors() {
+		completionState = "completed"
+	} else if relayInfo.SendResponseCount > 0 {
+		completionState = "partial_output"
+	}
 	streamInfo := map[string]interface{}{
-		"status":     status,
-		"end_reason": string(ss.EndReason),
+		"status":                 status,
+		"end_reason":             string(ss.EndReason),
+		"completion_state":       completionState,
+		"upstream_event_count":   relayInfo.ReceivedResponseCount,
+		"downstream_event_count": relayInfo.SendResponseCount,
 	}
 	if ss.EndError != nil {
 		streamInfo["end_error"] = ss.EndError.Error()

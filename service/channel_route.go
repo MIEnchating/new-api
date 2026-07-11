@@ -16,10 +16,20 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var channelRouteCooldowns sync.Map
+const (
+	ginKeyChannelRouteModel       = "channel_route_model"
+	ginKeyChannelRouteRequestPath = "channel_route_request_path"
+)
 
-func IsChannelRouteCooldownEnabled() bool {
+var channelRouteCooldowns sync.Map
+var channelRouteStickyChannels sync.Map
+
+func IsChannelRouteEnabled() bool {
 	return common.ChannelRouteCooldownEnabled && common.ChannelRouteCooldownSeconds > 0
+}
+
+func IsChannelRouteStickyEnabled() bool {
+	return IsChannelRouteEnabled() && common.ChannelRouteStickyEnabled
 }
 
 func channelRouteCooldownKey(group string, channelID int) string {
@@ -28,6 +38,63 @@ func channelRouteCooldownKey(group string, channelID int) string {
 
 func channelRouteMemoryKey(group string, channelID int) string {
 	return fmt.Sprintf("%s:%d", group, channelID)
+}
+
+func channelRouteStickyScope(group string, modelName string, requestPath string) string {
+	return group + "\x00" + modelName + "\x00" + requestPath
+}
+
+func channelRouteStickyKey(group string, modelName string, requestPath string) string {
+	return "channel_route_sticky:" + common.GenerateHMAC(channelRouteStickyScope(group, modelName, requestPath))
+}
+
+func GetChannelRouteStickyChannel(group string, modelName string, requestPath string) int {
+	if group == "" || modelName == "" {
+		return 0
+	}
+	if common.RedisEnabled && common.RDB != nil {
+		value, err := common.RedisGet(channelRouteStickyKey(group, modelName, requestPath))
+		if err == nil {
+			channelID, parseErr := strconv.Atoi(value)
+			if parseErr == nil && channelID > 0 {
+				return channelID
+			}
+		}
+	}
+	value, ok := channelRouteStickyChannels.Load(channelRouteStickyScope(group, modelName, requestPath))
+	if !ok {
+		return 0
+	}
+	channelID, ok := value.(int)
+	if !ok || channelID <= 0 {
+		channelRouteStickyChannels.Delete(channelRouteStickyScope(group, modelName, requestPath))
+		return 0
+	}
+	return channelID
+}
+
+func SetChannelRouteStickyChannel(group string, modelName string, requestPath string, channelID int) {
+	if group == "" || modelName == "" || channelID <= 0 {
+		return
+	}
+	if common.RedisEnabled && common.RDB != nil {
+		if err := common.RedisSet(channelRouteStickyKey(group, modelName, requestPath), strconv.Itoa(channelID), 0); err != nil {
+			common.SysLog("failed to set channel route sticky in redis: " + err.Error())
+		}
+	}
+	channelRouteStickyChannels.Store(channelRouteStickyScope(group, modelName, requestPath), channelID)
+}
+
+func ClearChannelRouteStickyChannel(group string, modelName string, requestPath string) {
+	if group == "" || modelName == "" {
+		return
+	}
+	if common.RedisEnabled && common.RDB != nil {
+		if err := common.RedisDel(channelRouteStickyKey(group, modelName, requestPath)); err != nil {
+			common.SysLog("failed to delete channel route sticky in redis: " + err.Error())
+		}
+	}
+	channelRouteStickyChannels.Delete(channelRouteStickyScope(group, modelName, requestPath))
 }
 
 func isChannelRouteFrozenInMemory(group string, channelID int, now int64) bool {
@@ -76,10 +143,9 @@ func FreezeChannelRoute(group string, channelID int, cooldownSeconds int) int64 
 	until := time.Now().Add(duration).Unix()
 	if common.RedisEnabled && common.RDB != nil {
 		err := common.RedisSet(channelRouteCooldownKey(group, channelID), strconv.FormatInt(until, 10), duration)
-		if err == nil {
-			return until
+		if err != nil {
+			common.SysLog("failed to set channel route cooldown in redis: " + err.Error())
 		}
-		common.SysLog("failed to set channel route cooldown in redis: " + err.Error())
 	}
 	channelRouteCooldowns.Store(channelRouteMemoryKey(group, channelID), until)
 	return until
@@ -114,32 +180,58 @@ func ShouldFreezeChannelRoute(err *types.NewAPIError) bool {
 		operation_setting.ShouldDisableByStatusCode(err.StatusCode)
 }
 
-func setChannelRouteSelection(c *gin.Context, group string, channelID int) {
-	if c == nil || group == "" || channelID <= 0 {
+func TrackChannelRouteSelection(c *gin.Context, group string, modelName string, requestPath string, channelID int) {
+	if c == nil || group == "" || modelName == "" || channelID <= 0 {
 		return
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelRouteGroup, group)
 	common.SetContextKey(c, constant.ContextKeyChannelRouteChannelId, channelID)
 	common.SetContextKey(c, constant.ContextKeyChannelRouteCooldown, common.ChannelRouteCooldownSeconds)
+	c.Set(ginKeyChannelRouteModel, modelName)
+	c.Set(ginKeyChannelRouteRequestPath, requestPath)
 }
 
 func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.Channel, error) {
 	if param == nil {
 		return nil, fmt.Errorf("retry param is nil")
 	}
-	if !IsChannelRouteCooldownEnabled() {
-		channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, retry, param.RequestPath)
-		if err == nil && channel != nil {
-			setChannelRouteSelection(param.Ctx, group, channel.Id)
-		}
-		return channel, err
+	if !IsChannelRouteEnabled() {
+		return model.GetRandomSatisfiedChannel(group, param.ModelName, retry, param.RequestPath)
 	}
 
 	now := common.GetTimestamp()
+	if IsChannelRouteStickyEnabled() {
+		stickyChannelID := GetChannelRouteStickyChannel(group, param.ModelName, param.RequestPath)
+		if stickyChannelID > 0 {
+			if IsChannelRouteFrozen(group, stickyChannelID, now) {
+				ClearChannelRouteStickyChannel(group, param.ModelName, param.RequestPath)
+			} else {
+				channel, err := model.GetRandomSatisfiedChannelWithFilter(
+					group,
+					param.ModelName,
+					0,
+					param.RequestPath,
+					func(channel *model.Channel) bool {
+						return channel.Id == stickyChannelID
+					},
+				)
+				if err != nil {
+					return nil, err
+				}
+				if channel != nil {
+					TrackChannelRouteSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
+					logger.LogDebug(param.Ctx, "channel route selected sticky channel: group=%s channel=%d", group, channel.Id)
+					return channel, nil
+				}
+				ClearChannelRouteStickyChannel(group, param.ModelName, param.RequestPath)
+			}
+		}
+	}
+
 	channel, err := model.GetRandomSatisfiedChannelWithFilter(
 		group,
 		param.ModelName,
-		retry,
+		0,
 		param.RequestPath,
 		func(channel *model.Channel) bool {
 			frozen := IsChannelRouteFrozen(group, channel.Id, now)
@@ -150,13 +242,13 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 		},
 	)
 	if err == nil && channel != nil {
-		setChannelRouteSelection(param.Ctx, group, channel.Id)
+		TrackChannelRouteSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
 	}
 	return channel, err
 }
 
 func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
-	if !IsChannelRouteCooldownEnabled() || !ShouldFreezeChannelRoute(err) {
+	if !IsChannelRouteEnabled() || !ShouldFreezeChannelRoute(err) {
 		return false
 	}
 	group := common.GetContextKeyString(c, constant.ContextKeyChannelRouteGroup)
@@ -168,6 +260,9 @@ func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 	if group == "" || channelID <= 0 || cooldownSeconds <= 0 {
 		return false
 	}
+	if IsChannelRouteStickyEnabled() {
+		ClearChannelRouteStickyChannel(group, c.GetString(ginKeyChannelRouteModel), c.GetString(ginKeyChannelRouteRequestPath))
+	}
 	until := FreezeChannelRoute(group, channelID, cooldownSeconds)
 	logger.LogWarn(c, fmt.Sprintf("channel route frozen: group=%s channel=%d cooldown=%ds until=%d",
 		group, channelID, cooldownSeconds, until))
@@ -175,10 +270,13 @@ func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 }
 
 func MarkChannelRouteSuccess(c *gin.Context) {
-	if !IsChannelRouteCooldownEnabled() {
+	if !IsChannelRouteEnabled() {
 		return
 	}
 	group := common.GetContextKeyString(c, constant.ContextKeyChannelRouteGroup)
 	channelID := common.GetContextKeyInt(c, constant.ContextKeyChannelRouteChannelId)
 	ClearChannelRouteCooldown(group, channelID)
+	if IsChannelRouteStickyEnabled() {
+		SetChannelRouteStickyChannel(group, c.GetString(ginKeyChannelRouteModel), c.GetString(ginKeyChannelRouteRequestPath), channelID)
+	}
 }

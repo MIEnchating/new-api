@@ -668,6 +668,13 @@ func (info *RelayInfo) SetFirstResponseTime() {
 	}
 }
 
+func (info *RelayInfo) ElapsedMilliseconds() int64 {
+	if info == nil || info.StartTime.IsZero() {
+		return 0
+	}
+	return time.Since(info.StartTime).Milliseconds()
+}
+
 func (info *RelayInfo) HasSendResponse() bool {
 	return info.FirstResponseTime.After(info.StartTime)
 }

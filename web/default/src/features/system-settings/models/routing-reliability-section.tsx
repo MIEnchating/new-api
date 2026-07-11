@@ -91,6 +91,7 @@ const routingReliabilitySchema = z
       .int()
       .min(0)
       .max(31536000, 'Cooldown cannot exceed 31536000 seconds'),
+    ChannelRouteStickyEnabled: z.boolean(),
     ChannelDisableThreshold: numericString,
     AutomaticDisableChannelEnabled: z.boolean(),
     AutomaticEnableChannelEnabled: z.boolean(),
@@ -211,6 +212,7 @@ type RoutingReliabilitySectionProps = {
     RetryTimes: number
     ChannelRouteCooldownEnabled: boolean
     ChannelRouteCooldownSeconds: number
+    ChannelRouteStickyEnabled: boolean
     ChannelDisableThreshold: string
     AutomaticDisableChannelEnabled: boolean
     AutomaticEnableChannelEnabled: boolean
@@ -271,8 +273,7 @@ function parseCustomErrorResponseRules(
           typeof record.response_message === 'string'
             ? record.response_message
             : '',
-        pass_through_status_code:
-          record.pass_through_status_code === true,
+        pass_through_status_code: record.pass_through_status_code === true,
         pass_through_message: record.pass_through_message === true,
       }
     })
@@ -304,6 +305,7 @@ type NormalizedRoutingReliabilityValues = {
   RetryTimes: number
   ChannelRouteCooldownEnabled: boolean
   ChannelRouteCooldownSeconds: number
+  ChannelRouteStickyEnabled: boolean
   ChannelDisableThreshold: string
   AutomaticDisableChannelEnabled: boolean
   AutomaticEnableChannelEnabled: boolean
@@ -324,9 +326,12 @@ function normalizeChannelTestMode(value?: string): ChannelTestMode {
 const buildFormDefaults = (
   defaults: RoutingReliabilitySectionProps['defaultValues']
 ): RoutingReliabilityFormInput => ({
-  RetryTimes: defaults.RetryTimes ?? 0,
+  RetryTimes: defaults.ChannelRouteCooldownEnabled
+    ? 0
+    : (defaults.RetryTimes ?? 0),
   ChannelRouteCooldownEnabled: defaults.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: defaults.ChannelRouteCooldownSeconds ?? 60,
+  ChannelRouteStickyEnabled: defaults.ChannelRouteStickyEnabled,
   ChannelDisableThreshold: defaults.ChannelDisableThreshold ?? '',
   AutomaticDisableChannelEnabled: defaults.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: defaults.AutomaticEnableChannelEnabled,
@@ -358,6 +363,7 @@ const normalizeDefaults = (
   RetryTimes: defaults.RetryTimes ?? 0,
   ChannelRouteCooldownEnabled: defaults.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: defaults.ChannelRouteCooldownSeconds ?? 60,
+  ChannelRouteStickyEnabled: defaults.ChannelRouteStickyEnabled,
   ChannelDisableThreshold: (defaults.ChannelDisableThreshold ?? '').trim(),
   AutomaticDisableChannelEnabled: defaults.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: defaults.AutomaticEnableChannelEnabled,
@@ -377,8 +383,7 @@ const normalizeDefaults = (
   'monitor_setting.channel_test_mode': normalizeChannelTestMode(
     defaults['monitor_setting.channel_test_mode']
   ),
-  'error_response_setting.enabled':
-    defaults['error_response_setting.enabled'],
+  'error_response_setting.enabled': defaults['error_response_setting.enabled'],
   'error_response_setting.rules': normalizeCustomErrorResponseRules(
     parseCustomErrorResponseRules(defaults['error_response_setting.rules'])
   ),
@@ -387,9 +392,10 @@ const normalizeDefaults = (
 const normalizeFormValues = (
   values: RoutingReliabilityFormValues
 ): NormalizedRoutingReliabilityValues => ({
-  RetryTimes: values.RetryTimes,
+  RetryTimes: values.ChannelRouteCooldownEnabled ? 0 : values.RetryTimes,
   ChannelRouteCooldownEnabled: values.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: values.ChannelRouteCooldownSeconds,
+  ChannelRouteStickyEnabled: values.ChannelRouteStickyEnabled,
   ChannelDisableThreshold: values.ChannelDisableThreshold.trim(),
   AutomaticDisableChannelEnabled: values.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: values.AutomaticEnableChannelEnabled,
@@ -444,9 +450,7 @@ export function RoutingReliabilitySection({
 
   const autoDisableStatusCodes = form.watch('AutomaticDisableStatusCodes')
   const autoRetryStatusCodes = form.watch('AutomaticRetryStatusCodes')
-  const channelRouteCooldownEnabled = form.watch(
-    'ChannelRouteCooldownEnabled'
-  )
+  const channelRouteCooldownEnabled = form.watch('ChannelRouteCooldownEnabled')
   const channelTestMode = form.watch('monitor_setting.channel_test_mode')
   const customErrorResponsesEnabled = form.watch(
     'error_response_setting.enabled'
@@ -507,11 +511,16 @@ export function RoutingReliabilitySection({
                         type='number'
                         min='0'
                         max='10'
+                        disabled={channelRouteCooldownEnabled}
                         {...safeNumberFieldProps(field)}
                       />
                     </FormControl>
                     <FormDescription>
-                      {t('Number of times to retry failed requests (0-10)')}
+                      {channelRouteCooldownEnabled
+                        ? t(
+                            'Request retry is disabled while channel routing is enabled'
+                          )
+                        : t('Number of times to retry failed requests (0-10)')}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -523,7 +532,11 @@ export function RoutingReliabilitySection({
                 name='AutomaticRetryStatusCodes'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t('Auto-retry status codes')}</FormLabel>
+                    <FormLabel>
+                      {channelRouteCooldownEnabled
+                        ? t('Route failover status codes')
+                        : t('Auto-retry status codes')}
+                    </FormLabel>
                     <FormControl>
                       <Input
                         placeholder={t('e.g. 401, 403, 429, 500-599')}
@@ -549,23 +562,58 @@ export function RoutingReliabilitySection({
               />
             </div>
 
-            <div className='grid min-w-0 gap-6 lg:grid-cols-2'>
+            <div className='flex flex-col gap-1 pt-2'>
+              <h4 className='text-sm font-medium'>{t('Channel routing')}</h4>
+            </div>
+            <div className='grid min-w-0 gap-6 lg:grid-cols-3'>
               <FormField
                 control={form.control}
                 name='ChannelRouteCooldownEnabled'
                 render={({ field }) => (
                   <SettingsSwitchItem>
                     <SettingsSwitchContent>
-                      <FormLabel>{t('Channel route cooldown')}</FormLabel>
+                      <FormLabel>{t('Channel routing')}</FormLabel>
                       <FormDescription>
                         {t(
-                          'Soft-freeze failed channels during retries instead of immediately routing back to them'
+                          'Tries available channels in the same group from highest priority to lowest; request retry is disabled in this mode'
                         )}
                       </FormDescription>
                     </SettingsSwitchContent>
                     <FormControl>
                       <Switch
                         checked={field.value}
+                        onCheckedChange={(checked) => {
+                          field.onChange(checked)
+                          if (checked) {
+                            form.setValue('RetryTimes', 0, {
+                              shouldDirty: true,
+                              shouldValidate: true,
+                            })
+                          }
+                        }}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='ChannelRouteStickyEnabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Channel route stickiness')}</FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Keep using the last successful routed channel until it fails'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        disabled={!channelRouteCooldownEnabled}
                         onCheckedChange={field.onChange}
                       />
                     </FormControl>

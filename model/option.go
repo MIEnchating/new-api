@@ -49,6 +49,7 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["ChannelRouteCooldownEnabled"] = strconv.FormatBool(common.ChannelRouteCooldownEnabled)
 	common.OptionMap["ChannelRouteCooldownSeconds"] = strconv.Itoa(common.ChannelRouteCooldownSeconds)
+	common.OptionMap["ChannelRouteStickyEnabled"] = strconv.FormatBool(common.ChannelRouteStickyEnabled)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
@@ -311,6 +312,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.AutomaticEnableChannelEnabled = boolValue
 		case "ChannelRouteCooldownEnabled":
 			common.ChannelRouteCooldownEnabled = boolValue
+		case "ChannelRouteStickyEnabled":
+			common.ChannelRouteStickyEnabled = boolValue
 		case "LogConsumeEnabled":
 			common.LogConsumeEnabled = boolValue
 		case "DisplayInCurrencyEnabled":

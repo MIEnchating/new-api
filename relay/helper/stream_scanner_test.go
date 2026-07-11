@@ -522,7 +522,7 @@ func TestStreamScannerHandlerWithRequiredTerminal_EOFBeforeTerminal(t *testing.T
 	StreamScannerHandlerWithRequiredTerminal(c, resp, info, "response.completed", func(data string, sr *StreamResult) {})
 
 	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonScannerErr, info.StreamStatus.EndReason)
+	assert.Equal(t, relaycommon.StreamEndReasonMissingTerminal, info.StreamStatus.EndReason)
 	require.Error(t, info.StreamStatus.EndError)
 	assert.ErrorIs(t, info.StreamStatus.EndError, io.ErrUnexpectedEOF)
 	assert.Contains(t, info.StreamStatus.EndError.Error(), "response.completed")
@@ -537,7 +537,7 @@ func TestStreamScannerHandlerWithRequiredTerminal_DoneBeforeTerminal(t *testing.
 	StreamScannerHandlerWithRequiredTerminal(c, resp, info, "response.completed", func(data string, sr *StreamResult) {})
 
 	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonScannerErr, info.StreamStatus.EndReason)
+	assert.Equal(t, relaycommon.StreamEndReasonMissingTerminal, info.StreamStatus.EndReason)
 	require.Error(t, info.StreamStatus.EndError)
 	assert.ErrorIs(t, info.StreamStatus.EndError, io.ErrUnexpectedEOF)
 	assert.Contains(t, info.StreamStatus.EndError.Error(), "response.completed")
@@ -561,7 +561,7 @@ func TestStreamScannerHandlerWithRequiredTerminal_ReadErrorBeforeTerminal(t *tes
 	StreamScannerHandlerWithRequiredTerminal(c, resp, info, "response.completed", func(data string, sr *StreamResult) {})
 
 	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonScannerErr, info.StreamStatus.EndReason)
+	assert.Equal(t, relaycommon.StreamEndReasonUpstreamClosedEarly, info.StreamStatus.EndReason)
 	require.Error(t, info.StreamStatus.EndError)
 	assert.ErrorIs(t, info.StreamStatus.EndError, io.ErrUnexpectedEOF)
 }
@@ -585,7 +585,7 @@ func TestStreamScannerHandlerWithRequiredTerminal_HTTP2InternalErrorBeforeTermin
 	StreamScannerHandlerWithRequiredTerminal(c, resp, info, "response.completed", func(data string, sr *StreamResult) {})
 
 	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonScannerErr, info.StreamStatus.EndReason)
+	assert.Equal(t, relaycommon.StreamEndReasonUpstreamClosedEarly, info.StreamStatus.EndReason)
 	require.Error(t, info.StreamStatus.EndError)
 	var streamErr http2.StreamError
 	require.ErrorAs(t, info.StreamStatus.EndError, &streamErr)

@@ -30,12 +30,19 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
 	oldChannelRouteCooldownEnabled := common.ChannelRouteCooldownEnabled
 	oldChannelRouteCooldownSeconds := common.ChannelRouteCooldownSeconds
+	oldChannelRouteStickyEnabled := common.ChannelRouteStickyEnabled
+	oldRetryTimes := common.RetryTimes
+	oldDB := model.DB
+	oldLogDB := model.LOG_DB
 	common.RedisEnabled = false
 	common.MemoryCacheEnabled = true
 	common.ChannelRouteCooldownEnabled = true
 	common.ChannelRouteCooldownSeconds = 60
+	common.ChannelRouteStickyEnabled = false
+	common.RetryTimes = 0
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	channelRouteCooldowns = sync.Map{}
+	channelRouteStickyChannels = sync.Map{}
 	tokenGroupRouteCooldowns = sync.Map{}
 
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -49,8 +56,16 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
 		common.ChannelRouteCooldownEnabled = oldChannelRouteCooldownEnabled
 		common.ChannelRouteCooldownSeconds = oldChannelRouteCooldownSeconds
+		common.ChannelRouteStickyEnabled = oldChannelRouteStickyEnabled
+		common.RetryTimes = oldRetryTimes
 		channelRouteCooldowns = sync.Map{}
+		channelRouteStickyChannels = sync.Map{}
 		tokenGroupRouteCooldowns = sync.Map{}
+		model.DB = oldDB
+		model.LOG_DB = oldLogDB
+		if oldDB != nil {
+			model.InitChannelCache()
+		}
 		sqlDB, dbErr := db.DB()
 		if dbErr == nil {
 			_ = sqlDB.Close()
@@ -102,6 +117,14 @@ func newChannelRouteRetryParam(ctx *gin.Context, group string) *RetryParam {
 	}
 }
 
+func newChannelRouteFailure() *types.NewAPIError {
+	return types.NewErrorWithStatusCode(
+		errors.New("upstream unavailable"),
+		types.ErrorCodeChannelInvalidKey,
+		http.StatusInternalServerError,
+	)
+}
+
 func TestChannelRouteCooldownSkipsFailedChannelAndReturnsAfterClear(t *testing.T) {
 	db := setupChannelRouteTest(t)
 	seedChannelRouteChannel(t, db, 1, "default", 2)
@@ -115,11 +138,7 @@ func TestChannelRouteCooldownSkipsFailedChannelAndReturnsAfterClear(t *testing.T
 	assert.Equal(t, "default", group)
 	assert.Equal(t, 1, channel.Id)
 
-	routeErr := types.NewErrorWithStatusCode(
-		errors.New("upstream unavailable"),
-		types.ErrorCodeChannelInvalidKey,
-		http.StatusInternalServerError,
-	)
+	routeErr := newChannelRouteFailure()
 	assert.True(t, MarkChannelRouteFailure(ctx, routeErr))
 	assert.True(t, IsChannelRouteFrozen("default", 1, common.GetTimestamp()))
 
@@ -137,6 +156,101 @@ func TestChannelRouteCooldownSkipsFailedChannelAndReturnsAfterClear(t *testing.T
 	require.NotNil(t, channel)
 	assert.Equal(t, "default", group)
 	assert.Equal(t, 1, channel.Id)
+}
+
+func TestChannelRouteTriesEveryPriorityWithoutRetryBudget(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	seedChannelRouteChannel(t, db, 1, "default", 3)
+	seedChannelRouteChannel(t, db, 2, "default", 2)
+	seedChannelRouteChannel(t, db, 3, "default", 1)
+	model.InitChannelCache()
+
+	ctx := newChannelRouteContext()
+	param := newChannelRouteRetryParam(ctx, "default")
+	routeErr := newChannelRouteFailure()
+
+	channel, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 1, channel.Id)
+	assert.True(t, MarkChannelRouteFailure(ctx, routeErr))
+
+	param.SetRetry(1)
+	channel, _, err = CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 2, channel.Id)
+	assert.True(t, MarkChannelRouteFailure(ctx, routeErr))
+
+	param.SetRetry(2)
+	channel, _, err = CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 3, channel.Id)
+	assert.True(t, MarkChannelRouteFailure(ctx, routeErr))
+
+	param.SetRetry(3)
+	channel, _, err = CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	assert.Nil(t, channel)
+}
+
+func TestChannelRouteTriesDistinctChannelsAtSamePriority(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	seedChannelRouteChannel(t, db, 1, "default", 1)
+	seedChannelRouteChannel(t, db, 2, "default", 1)
+	model.InitChannelCache()
+
+	ctx := newChannelRouteContext()
+	param := newChannelRouteRetryParam(ctx, "default")
+	first, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.True(t, MarkChannelRouteFailure(ctx, newChannelRouteFailure()))
+
+	param.SetRetry(1)
+	second, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	assert.NotEqual(t, first.Id, second.Id)
+}
+
+func TestChannelRouteStickyKeepsLastSuccessfulFallback(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	common.ChannelRouteStickyEnabled = true
+	seedChannelRouteChannel(t, db, 1, "default", 2)
+	seedChannelRouteChannel(t, db, 2, "default", 1)
+	model.InitChannelCache()
+
+	firstCtx := newChannelRouteContext()
+	first, _, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(firstCtx, "default"))
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, 1, first.Id)
+	assert.True(t, MarkChannelRouteFailure(firstCtx, newChannelRouteFailure()))
+
+	fallbackCtx := newChannelRouteContext()
+	fallback, _, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(fallbackCtx, "default"))
+	require.NoError(t, err)
+	require.NotNil(t, fallback)
+	assert.Equal(t, 2, fallback.Id)
+	MarkChannelRouteSuccess(fallbackCtx)
+	assert.Equal(t, 2, GetChannelRouteStickyChannel("default", channelRouteTestModel, "/v1/chat/completions"))
+
+	ClearChannelRouteCooldown("default", 1)
+	stickyCtx := newChannelRouteContext()
+	sticky, _, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(stickyCtx, "default"))
+	require.NoError(t, err)
+	require.NotNil(t, sticky)
+	assert.Equal(t, 2, sticky.Id)
+	assert.True(t, MarkChannelRouteFailure(stickyCtx, newChannelRouteFailure()))
+	assert.Zero(t, GetChannelRouteStickyChannel("default", channelRouteTestModel, "/v1/chat/completions"))
+
+	recoveredCtx := newChannelRouteContext()
+	recovered, _, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(recoveredCtx, "default"))
+	require.NoError(t, err)
+	require.NotNil(t, recovered)
+	assert.Equal(t, 1, recovered.Id)
 }
 
 func TestChannelRouteCooldownKeepsTokenGroupBeforeFallingBackGroup(t *testing.T) {

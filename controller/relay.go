@@ -190,12 +190,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	for {
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
-			newAPIError = channelErr
+			if !service.IsChannelRouteEnabled() || relayInfo.LastError == nil {
+				newAPIError = channelErr
+			}
 			break
 		}
 
@@ -224,25 +226,64 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
+			if isUpstreamStreamFailure(relayInfo.StreamStatus) {
+				streamErr := relayInfo.StreamStatus.EndError
+				if streamErr == nil {
+					streamErr = fmt.Errorf("stream ended with %s", relayInfo.StreamStatus.EndReason)
+				}
+				processChannelError(
+					c,
+					*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
+					types.NewOpenAIError(streamErr, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway),
+					relayInfo,
+				)
+				return
+			}
+			if relayInfo.StreamStatus != nil && relayInfo.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
+				return
+			}
+			if c.Request.Context().Err() != nil &&
+				(relayInfo.StreamStatus == nil || relayInfo.StreamStatus.EndReason != relaycommon.StreamEndReasonDone) {
+				if relayInfo.StreamStatus == nil {
+					relayInfo.StreamStatus = relaycommon.NewStreamStatus()
+					relayInfo.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+				}
+				return
+			}
+			if !isSuccessfulStreamResult(relayInfo.StreamStatus) {
+				return
+			}
 			relayInfo.LastError = nil
 			service.MarkChannelRouteSuccess(c)
 			service.MarkTokenGroupRouteSuccess(c)
+			return
+		}
+		if c.Request.Context().Err() != nil {
+			if relayInfo.StreamStatus == nil {
+				relayInfo.StreamStatus = relaycommon.NewStreamStatus()
+				relayInfo.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
+			}
 			return
 		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
+		channelRouteFailed := processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
+		if !shouldAttemptNextChannel(c, newAPIError, common.RetryTimes-retryParam.GetRetry(), channelRouteFailed) {
 			break
 		}
+		retryParam.IncreaseRetry()
 	}
 
 	useChannel := c.GetStringSlice("use_channel")
 	if len(useChannel) > 1 {
-		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
+		mode := "重试"
+		if service.IsChannelRouteEnabled() {
+			mode = "渠道路由"
+		}
+		retryLogStr := fmt.Sprintf("%s：%s", mode, strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
 	}
 	if newAPIError != nil {
@@ -263,6 +304,25 @@ func addUsedChannel(c *gin.Context, channelId int) {
 	useChannel := c.GetStringSlice("use_channel")
 	useChannel = append(useChannel, fmt.Sprintf("%d", channelId))
 	c.Set("use_channel", useChannel)
+}
+
+func isUpstreamStreamFailure(status *relaycommon.StreamStatus) bool {
+	if status == nil {
+		return false
+	}
+	switch status.EndReason {
+	case relaycommon.StreamEndReasonUpstreamClosedEarly,
+		relaycommon.StreamEndReasonMissingTerminal,
+		relaycommon.StreamEndReasonUpstreamTerminalErr,
+		relaycommon.StreamEndReasonTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+func isSuccessfulStreamResult(status *relaycommon.StreamStatus) bool {
+	return status == nil || (status.IsNormalEnd() && !status.HasErrors())
 }
 
 func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
@@ -333,13 +393,13 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return false
 	}
+	if retryTimes <= 0 {
+		return false
+	}
 	if types.IsChannelError(openaiErr) {
 		return true
 	}
 	if types.IsSkipRetryError(openaiErr) {
-		return false
-	}
-	if retryTimes <= 0 {
 		return false
 	}
 	if _, ok := c.Get("specific_channel_id"); ok {
@@ -358,7 +418,14 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	return operation_setting.ShouldRetryByStatusCode(code)
 }
 
-func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) {
+func shouldAttemptNextChannel(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int, channelRouteFailed bool) bool {
+	if service.IsChannelRouteEnabled() {
+		return channelRouteFailed
+	}
+	return shouldRetry(c, openaiErr, retryTimes)
+}
+
+func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) bool {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	channelRouteFrozen := service.MarkChannelRouteFailure(c, err)
 	if !channelRouteFrozen {
@@ -390,6 +457,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		other["channel_id"] = channelId
 		other["channel_name"] = c.GetString("channel_name")
 		other["channel_type"] = c.GetInt("channel_type")
+		service.AppendStreamStatus(relayInfo, other)
 		adminInfo := make(map[string]interface{})
 		adminInfo["use_channel"] = c.GetStringSlice("use_channel")
 		isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
@@ -406,7 +474,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		useTimeSeconds := int(time.Since(startTime).Seconds())
 		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
-
+	return channelRouteFrozen
 }
 
 func RelayMidjourney(c *gin.Context) {
@@ -523,11 +591,13 @@ func RelayTask(c *gin.Context) {
 		Retry:       common.GetPointer(0),
 	}
 
-	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
+	lockedChannel, channelLocked := relayInfo.LockedChannel.(*model.Channel)
+	channelLocked = channelLocked && lockedChannel != nil
+	for {
 		var channel *model.Channel
 
-		if lockedCh, ok := relayInfo.LockedChannel.(*model.Channel); ok && lockedCh != nil {
-			channel = lockedCh
+		if channelLocked {
+			channel = lockedChannel
 			if retryParam.GetRetry() > 0 {
 				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
 					taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_locked_channel_failed", http.StatusInternalServerError)
@@ -539,7 +609,9 @@ func RelayTask(c *gin.Context) {
 			channel, channelErr = getChannel(c, relayInfo, retryParam)
 			if channelErr != nil {
 				logger.LogError(c, channelErr.Error())
-				taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", http.StatusInternalServerError)
+				if !service.IsChannelRouteEnabled() || taskErr == nil {
+					taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", http.StatusInternalServerError)
+				}
 				break
 			}
 		}
@@ -561,21 +633,27 @@ func RelayTask(c *gin.Context) {
 			break
 		}
 
+		channelRouteFailed := false
 		if !taskErr.LocalError {
-			processChannelError(c,
+			channelRouteFailed = processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode))
+				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode), relayInfo)
 		}
 
-		if !shouldRetryTaskRelay(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry()) {
+		if !shouldAttemptNextTaskChannel(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry(), channelRouteFailed, !channelLocked) {
 			break
 		}
+		retryParam.IncreaseRetry()
 	}
 
 	useChannel := c.GetStringSlice("use_channel")
 	if len(useChannel) > 1 {
-		retryLogStr := fmt.Sprintf("重试：%s", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
+		mode := "重试"
+		if service.IsChannelRouteEnabled() {
+			mode = "渠道路由"
+		}
+		retryLogStr := fmt.Sprintf("%s：%s", mode, strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
 	}
 
@@ -663,4 +741,11 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 		return false
 	}
 	return true
+}
+
+func shouldAttemptNextTaskChannel(c *gin.Context, channelID int, taskErr *dto.TaskError, retryTimes int, channelRouteFailed bool, channelRouteAllowed bool) bool {
+	if service.IsChannelRouteEnabled() {
+		return channelRouteAllowed && channelRouteFailed
+	}
+	return shouldRetryTaskRelay(c, channelID, taskErr, retryTimes)
 }

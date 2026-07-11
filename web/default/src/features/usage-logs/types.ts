@@ -194,6 +194,9 @@ export interface LogOtherData {
   stream_status?: {
     status?: string
     end_reason?: string
+    completion_state?: 'completed' | 'no_output' | 'partial_output'
+    upstream_event_count?: number
+    downstream_event_count?: number
     error_count?: number
     end_error?: string
     errors?: string[]

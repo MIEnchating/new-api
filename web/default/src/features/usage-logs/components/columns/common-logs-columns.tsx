@@ -50,6 +50,7 @@ import {
   getFirstResponseTimeColor,
   getResponseTimeColor,
   getTieredBillingSummary,
+  getStreamCompletionStateLabelKey,
   hasAnyCacheTokens,
   parseLogOther,
   isViolationFeeLog,
@@ -709,6 +710,16 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                             {t('Stream Status')}: {t('Error')}
                           </p>
                           <p>{other.stream_status.end_reason || 'unknown'}</p>
+                          {other.stream_status.completion_state && (
+                            <p>
+                              {t('Stream Progress')}:{' '}
+                              {t(
+                                getStreamCompletionStateLabelKey(
+                                  other.stream_status.completion_state
+                                )
+                              )}
+                            </p>
+                          )}
                           {(other.stream_status.error_count ?? 0) > 0 && (
                             <p>
                               {t('Soft Errors')}:{' '}

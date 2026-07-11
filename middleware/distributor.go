@@ -160,6 +160,9 @@ func Distribute() func(c *gin.Context) {
 						return
 					}
 				}
+				if service.IsChannelRouteEnabled() && channel != nil && selectGroup != "" {
+					service.TrackChannelRouteSelection(c, selectGroup, modelRequest.Model, c.Request.URL.Path, channel.Id)
+				}
 			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())

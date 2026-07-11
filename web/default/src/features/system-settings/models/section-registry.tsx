@@ -74,6 +74,7 @@ const MODELS_SECTIONS = [
           RetryTimes: settings.RetryTimes,
           ChannelRouteCooldownEnabled: settings.ChannelRouteCooldownEnabled,
           ChannelRouteCooldownSeconds: settings.ChannelRouteCooldownSeconds,
+          ChannelRouteStickyEnabled: settings.ChannelRouteStickyEnabled,
           ChannelDisableThreshold: settings.ChannelDisableThreshold,
           AutomaticDisableChannelEnabled:
             settings.AutomaticDisableChannelEnabled,
