@@ -16,15 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Clock, Edit, Route } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
+import { Clock, Edit, Route } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useQuery } from '@tanstack/react-query'
 
-import { GroupBadge } from '@/components/group-badge'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/design-system/button'
 import {
   Dialog,
   DialogContent,
@@ -32,10 +30,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog'
+} from '@/components/design-system/dialog'
+import { GroupBadge } from '@/components/group-badge'
+import { StatusBadge } from '@/components/status-badge'
 
-import { parseApiKeyGroupRouteConfig } from '../lib'
 import { getApiKeyRouteStatus } from '../api'
+import { parseApiKeyGroupRouteConfig } from '../lib'
 import type { RouteStatus } from '../types'
 import { useApiKeys } from './api-keys-provider'
 
@@ -106,7 +106,9 @@ export function ApiKeyRouteDetailDialog() {
             {t('Route Groups')}
           </DialogTitle>
           <DialogDescription>
-            {currentRow?.name ? `${t('Name')}: ${currentRow.name}` : t('Details')}
+            {currentRow?.name
+              ? `${t('Name')}: ${currentRow.name}`
+              : t('Details')}
           </DialogDescription>
         </DialogHeader>
 
@@ -114,52 +116,45 @@ export function ApiKeyRouteDetailDialog() {
           <div className='space-y-2'>
             {routes.map((route, index) => {
               const routeStatus = routeStatusMap.get(route.group)
-              const cooldownRemaining = getRouteCooldownRemaining(routeStatus, now)
+              const cooldownRemaining = getRouteCooldownRemaining(
+                routeStatus,
+                now
+              )
               const cooling = cooldownRemaining > 0
               return (
-              <div
-                key={route.group}
-                className='border-border/70 bg-muted/20 grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border px-3 py-2.5'
-              >
-                <span className='bg-background text-muted-foreground flex size-7 items-center justify-center rounded-md border text-xs font-medium tabular-nums'>
-                  {index + 1}
-                </span>
+                <div
+                  key={route.group}
+                  className='border-border/70 bg-muted/20 grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border px-3 py-2.5'
+                >
+                  <span className='bg-background text-muted-foreground flex size-7 items-center justify-center rounded-md border text-xs font-medium tabular-nums'>
+                    {index + 1}
+                  </span>
 
-                <div className='min-w-0 space-y-1'>
-                  <div className='flex min-w-0 flex-wrap items-center gap-2'>
-                    <GroupBadge group={route.group} />
-                    <Badge
-                      variant='outline'
-                      className='bg-background text-muted-foreground rounded-md'
-                    >
-                      {t('Priority')} {route.priority}
-                    </Badge>
-                    <Badge
-                      variant='outline'
-                      className={
-                        cooling
-                          ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300'
-                          : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300'
-                      }
-                    >
-                      {cooling ? t('Cooling') : t('Normal')}
-                    </Badge>
+                  <div className='min-w-0 space-y-1'>
+                    <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                      <GroupBadge group={route.group} />
+                      <StatusBadge variant='neutral' appearance='outline'>
+                        {t('Priority')} {route.priority}
+                      </StatusBadge>
+                      <StatusBadge variant={cooling ? 'warning' : 'success'}>
+                        {cooling ? t('Cooling') : t('Normal')}
+                      </StatusBadge>
+                    </div>
+                  </div>
+
+                  <div className='text-right'>
+                    <div className='flex items-center justify-end gap-1.5 text-sm font-medium tabular-nums'>
+                      <Clock className='text-muted-foreground size-3.5' />
+                      {formatCooldown(
+                        cooling ? cooldownRemaining : route.cooldown_seconds,
+                        t
+                      )}
+                    </div>
+                    <div className='text-muted-foreground text-xs'>
+                      {cooling ? t('Remaining') : t('Cooldown')}
+                    </div>
                   </div>
                 </div>
-
-                <div className='text-right'>
-                  <div className='flex items-center justify-end gap-1.5 text-sm font-medium tabular-nums'>
-                    <Clock className='text-muted-foreground size-3.5' />
-                    {formatCooldown(
-                      cooling ? cooldownRemaining : route.cooldown_seconds,
-                      t
-                    )}
-                  </div>
-                  <div className='text-muted-foreground text-[11px]'>
-                    {cooling ? t('Remaining') : t('Cooldown')}
-                  </div>
-                </div>
-              </div>
               )
             })}
           </div>
@@ -170,11 +165,7 @@ export function ApiKeyRouteDetailDialog() {
         )}
 
         <DialogFooter>
-          <Button
-            type='button'
-            variant='outline'
-            onClick={() => setOpen(null)}
-          >
+          <Button type='button' variant='outline' onClick={() => setOpen(null)}>
             {t('Close')}
           </Button>
           <Button type='button' onClick={() => setOpen('update')}>

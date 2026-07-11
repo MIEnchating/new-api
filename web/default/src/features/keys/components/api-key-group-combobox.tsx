@@ -17,11 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Check, ChevronsUpDown } from 'lucide-react'
-import { useMemo, useState, type PointerEvent } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button } from '@/components/design-system/button'
 import {
   Command,
   CommandEmpty,
@@ -29,7 +28,8 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from '@/components/ui/command'
+} from '@/components/design-system/command'
+import { Badge } from '@/components/ui/badge'
 import {
   Popover,
   PopoverContent,
@@ -63,19 +63,19 @@ function formatGroupRatio(
 
 function getRatioBadgeClassName(ratio: ApiKeyGroupOption['ratio']) {
   if (typeof ratio !== 'number') {
-    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300'
+    return 'border-success/25 bg-success/10 text-success'
   }
 
   if (ratio > 5) {
-    return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300'
+    return 'border-destructive/25 bg-destructive/10 text-destructive'
   }
   if (ratio > 3) {
-    return 'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-900/60 dark:bg-orange-950/40 dark:text-orange-300'
+    return 'border-warning/30 bg-warning/10 text-warning'
   }
   if (ratio > 1) {
-    return 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/60 dark:bg-blue-950/40 dark:text-blue-300'
+    return 'border-info/25 bg-info/10 text-info'
   }
-  return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300'
+  return 'border-success/25 bg-success/10 text-success'
 }
 
 function GroupRatioBadge({ ratio }: { ratio: ApiKeyGroupOption['ratio'] }) {
@@ -88,7 +88,7 @@ function GroupRatioBadge({ ratio }: { ratio: ApiKeyGroupOption['ratio'] }) {
     <Badge
       variant='outline'
       className={cn(
-        'max-w-24 shrink-0 truncate text-[10px] sm:max-w-none sm:text-xs',
+        'max-w-24 shrink-0 truncate text-xs sm:max-w-none sm:text-xs',
         getRatioBadgeClassName(ratio)
       )}
     >
@@ -131,16 +131,6 @@ export function ApiKeyGroupCombobox({
     setSearchValue('')
   }
 
-  const handleTriggerPointerDown = (
-    event: PointerEvent<HTMLButtonElement>
-  ) => {
-    if (!open) return
-
-    event.preventDefault()
-    event.stopPropagation()
-    setOpen(false)
-  }
-
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -148,14 +138,14 @@ export function ApiKeyGroupCombobox({
           <Button
             type='button'
             variant='outline'
+            size={compact ? 'sm' : 'default'}
             role='combobox'
             aria-expanded={open}
             disabled={disabled}
-            onPointerDown={handleTriggerPointerDown}
             className={cn(
               'border-input bg-muted/40 hover:bg-muted/55 hover:text-foreground active:bg-background data-popup-open:border-ring data-popup-open:bg-background data-popup-open:ring-ring/20 h-auto w-full justify-between gap-2 text-start shadow-none transition-[background-color,border-color,box-shadow] duration-150 data-popup-open:ring-[3px]',
               compact
-                ? 'h-8 min-h-8 rounded-lg px-2.5 py-1'
+                ? 'rounded-lg px-2.5 py-1'
                 : 'min-h-14 rounded-lg px-3 py-2 sm:min-h-20 sm:gap-3 sm:px-4 sm:py-3'
             )}
           />
@@ -167,7 +157,7 @@ export function ApiKeyGroupCombobox({
               {selectedOption?.label || placeholder || t('Select a group')}
             </span>
             {!compact && selectedOption?.desc && (
-              <span className='text-muted-foreground block truncate text-[11px] sm:text-xs'>
+              <span className='text-muted-foreground block truncate text-xs'>
                 {selectedOption.desc}
               </span>
             )}

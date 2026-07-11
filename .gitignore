@@ -40,6 +40,7 @@ skills-lock.json
 dev-logs/
 web/default/.playwright-cli/
 web/default/output/
+/output/playwright/
 
 # Local-only live probes and scratch test workspaces.
 .local-tests/

@@ -50,7 +50,10 @@ export function getApiKeyFormSchema(t: TFunction) {
         .array(
           z.object({
             group: z.string().min(1, t('Please select a group')),
-            priority: z.number().int().min(0, t('Priority must be zero or greater')),
+            priority: z
+              .number()
+              .int()
+              .min(0, t('Priority must be zero or greater')),
             cooldown_seconds: z
               .number()
               .int()
@@ -215,10 +218,13 @@ export function transformApiKeyToFormDefaults(
       ? apiKey.model_limits.split(',').filter(Boolean)
       : [],
     allow_ips: apiKey.allow_ips || '',
-    group: groupRoutes.length > 0 ? DEFAULT_GROUP : apiKey.group || DEFAULT_GROUP,
-    cross_group_retry: groupRoutes.length > 0 ? false : !!apiKey.cross_group_retry,
+    group:
+      groupRoutes.length > 0 ? DEFAULT_GROUP : apiKey.group || DEFAULT_GROUP,
+    cross_group_retry:
+      groupRoutes.length > 0 ? false : !!apiKey.cross_group_retry,
     group_route_enabled: groupRoutes.length > 0,
-    group_route_sticky: groupRoutes.length > 0 ? !!apiKey.group_route_sticky : false,
+    group_route_sticky:
+      groupRoutes.length > 0 ? !!apiKey.group_route_sticky : false,
     group_routes:
       groupRoutes.length > 0
         ? groupRoutes

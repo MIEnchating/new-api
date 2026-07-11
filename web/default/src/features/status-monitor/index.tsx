@@ -29,10 +29,11 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Button } from '@/components/design-system/button'
+import { Tabs, TabsList, TabsTrigger } from '@/components/design-system/tabs'
 import { SectionPageLayout } from '@/components/layout'
-import { Button } from '@/components/ui/button'
+import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getUptimeStatus } from '@/features/dashboard/api'
 import type {
   UptimeHeartbeat,
@@ -46,33 +47,33 @@ type MonitorStatusMeta = {
   label: string
   icon: LucideIcon
   dotClassName: string
-  badgeClassName: string
+  variant: StatusVariant
 }
 
 const STATUS_META: Record<number, MonitorStatusMeta> = {
   1: {
     label: 'Operational',
     icon: CheckCircle2,
-    dotClassName: 'bg-emerald-500',
-    badgeClassName: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+    dotClassName: 'bg-success',
+    variant: 'success',
   },
   0: {
     label: 'Down',
     icon: AlertTriangle,
-    dotClassName: 'bg-red-500',
-    badgeClassName: 'bg-red-500/10 text-red-700 dark:text-red-300',
+    dotClassName: 'bg-destructive',
+    variant: 'destructive',
   },
   2: {
     label: 'Pending',
     icon: CircleDashed,
-    dotClassName: 'bg-amber-500',
-    badgeClassName: 'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    dotClassName: 'bg-warning',
+    variant: 'warning',
   },
   3: {
     label: 'Maintenance',
     icon: Wrench,
-    dotClassName: 'bg-blue-500',
-    badgeClassName: 'bg-blue-500/10 text-blue-700 dark:text-blue-300',
+    dotClassName: 'bg-info',
+    variant: 'info',
   },
 }
 
@@ -80,7 +81,7 @@ const UNKNOWN_STATUS_META: MonitorStatusMeta = {
   label: 'Unknown',
   icon: CircleDashed,
   dotClassName: 'bg-muted-foreground/40',
-  badgeClassName: 'bg-muted text-muted-foreground',
+  variant: 'neutral',
 }
 
 const AUTO_REFRESH_SECONDS = 60
@@ -177,10 +178,8 @@ function SummaryTile(props: {
         <span
           className={cn(
             'flex size-8 shrink-0 items-center justify-center rounded-md',
-            props.tone === 'success' &&
-              'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
-            props.tone === 'warning' &&
-              'bg-amber-500/10 text-amber-700 dark:text-amber-300',
+            props.tone === 'success' && 'bg-success/10 text-status-success',
+            props.tone === 'warning' && 'bg-warning/10 text-status-warning',
             (!props.tone || props.tone === 'default') &&
               'bg-muted text-muted-foreground'
           )}
@@ -195,21 +194,16 @@ function SummaryTile(props: {
   )
 }
 
-function StatusBadge(props: { status: number }) {
+function MonitorStatusBadge(props: { status: number }) {
   const { t } = useTranslation()
   const meta = getStatusMeta(props.status)
   const Icon = meta.icon
 
   return (
-    <span
-      className={cn(
-        'inline-flex min-w-24 items-center justify-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium',
-        meta.badgeClassName
-      )}
-    >
-      <Icon className='size-3.5' />
+    <StatusBadge variant={meta.variant} className='min-w-24'>
+      <Icon data-icon='inline-start' />
       {t(meta.label)}
-    </span>
+    </StatusBadge>
   )
 }
 
@@ -250,7 +244,7 @@ function HeartbeatTimeline(props: { heartbeats?: UptimeHeartbeat[] }) {
             key={`${heartbeat.time ?? 'heartbeat'}-${heartbeat.status}-${heartbeat.ping ?? 'na'}-${heartbeat.msg ?? ''}`}
             title={titleParts.join(' · ')}
             className={cn(
-              'block min-h-4 rounded-[2px]',
+              'block min-h-4 rounded-sm',
               heartbeat.status === 1 ? 'h-12' : 'h-8',
               meta.dotClassName
             )}
@@ -267,7 +261,7 @@ function MetricItem(props: { label: string; value: string }) {
       <div className='text-muted-foreground truncate text-xs'>
         {props.label}
       </div>
-      <div className='mt-1 truncate font-mono text-sm font-semibold tabular-nums'>
+      <div className='mt-1 truncate text-sm font-semibold tabular-nums'>
         {props.value}
       </div>
     </div>
@@ -279,7 +273,7 @@ function MonitorRow(props: { monitor: UptimeMonitor }) {
   const meta = getStatusMeta(props.monitor.status)
 
   return (
-    <article className='bg-background/80 rounded-lg border p-3 shadow-xs sm:p-4'>
+    <article className='bg-background/80 rounded-lg border p-3 sm:p-4'>
       <div className='flex min-w-0 flex-wrap items-start justify-between gap-3'>
         <div className='flex min-w-0 items-center gap-3'>
           <span
@@ -298,7 +292,7 @@ function MonitorRow(props: { monitor: UptimeMonitor }) {
             ) : null}
           </div>
         </div>
-        <StatusBadge status={props.monitor.status} />
+        <MonitorStatusBadge status={props.monitor.status} />
       </div>
 
       <div className='mt-4 grid min-w-0 gap-2 sm:grid-cols-2'>
@@ -559,7 +553,7 @@ export function StatusMonitor() {
             setActiveGroupKey(value || ALL_GROUP_KEY)
           }}
         >
-          <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto'>
+          <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto sm:group-data-horizontal/tabs:h-auto'>
             <TabsTrigger value={ALL_GROUP_KEY} className='gap-1.5'>
               <span>{t('All')}</span>
               <span className='text-muted-foreground text-xs tabular-nums'>
@@ -614,7 +608,6 @@ export function StatusMonitor() {
           <Button
             type='button'
             variant='outline'
-            size='sm'
             onClick={handleManualRefresh}
             disabled={loading || refreshing || !uptimeEnabled}
             className='gap-2'

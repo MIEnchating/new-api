@@ -123,22 +123,18 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
     <StatusBadge
       variant='warning'
       size='sm'
-      copyable={false}
-      icon={Timer}
       aria-label={`${t('Cooling')} ${formatCountdown(remaining)}`}
     >
+      <Timer data-icon='inline-start' />
       <span>{t('Cooling')}</span>
       <span className='font-mono tabular-nums'>
         {formatCountdown(remaining)}
       </span>
     </StatusBadge>
   ) : (
-    <StatusBadge
-      label={t('Normal')}
-      variant='success'
-      size='sm'
-      copyable={false}
-    />
+    <StatusBadge variant='success' size='sm'>
+      {t('Normal')}
+    </StatusBadge>
   )
 
   if (!isCooling) {
