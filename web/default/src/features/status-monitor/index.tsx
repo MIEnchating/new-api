@@ -40,7 +40,6 @@ import type {
   UptimeGroupResult,
   UptimeMonitor,
 } from '@/features/dashboard/types'
-import { useStatus } from '@/hooks/use-status'
 import { cn } from '@/lib/utils'
 
 type MonitorStatusMeta = {
@@ -362,8 +361,6 @@ function EmptyState(props: { title: string; description?: string }) {
 
 export function StatusMonitor() {
   const { t } = useTranslation()
-  const { status } = useStatus()
-  const uptimeEnabled = status?.uptime_kuma_enabled !== false
   const [groups, setGroups] = useState<UptimeGroupResult[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -372,47 +369,35 @@ export function StatusMonitor() {
   const [refreshCountdown, setRefreshCountdown] = useState(AUTO_REFRESH_SECONDS)
   const [activeGroupKey, setActiveGroupKey] = useState(ALL_GROUP_KEY)
 
-  const fetchStatus = useCallback(
-    (mode: 'initial' | 'refresh') => {
-      if (!uptimeEnabled) {
+  const fetchStatus = useCallback((mode: 'initial' | 'refresh') => {
+    if (mode === 'initial') {
+      setLoading(true)
+    } else {
+      setRefreshing(true)
+    }
+    setFailed(false)
+    setRefreshCountdown(AUTO_REFRESH_SECONDS)
+
+    return getUptimeStatus()
+      .then((response) => {
+        setGroups(response?.data ?? [])
+        setLastUpdated(new Date())
+      })
+      .catch(() => {
         setGroups([])
+        setFailed(true)
+      })
+      .finally(() => {
         setLoading(false)
         setRefreshing(false)
-        return
-      }
-
-      if (mode === 'initial') {
-        setLoading(true)
-      } else {
-        setRefreshing(true)
-      }
-      setFailed(false)
-      setRefreshCountdown(AUTO_REFRESH_SECONDS)
-
-      return getUptimeStatus()
-        .then((response) => {
-          setGroups(response?.data ?? [])
-          setLastUpdated(new Date())
-        })
-        .catch(() => {
-          setGroups([])
-          setFailed(true)
-        })
-        .finally(() => {
-          setLoading(false)
-          setRefreshing(false)
-        })
-    },
-    [uptimeEnabled]
-  )
+      })
+  }, [])
 
   useEffect(() => {
     fetchStatus('initial')
   }, [fetchStatus])
 
   useEffect(() => {
-    if (!uptimeEnabled) return
-
     const timer = window.setInterval(() => {
       setRefreshCountdown((current) => {
         if (current <= 1) {
@@ -427,7 +412,7 @@ export function StatusMonitor() {
     return () => {
       window.clearInterval(timer)
     }
-  }, [fetchStatus, uptimeEnabled])
+  }, [fetchStatus])
 
   const monitors = useMemo(() => flattenMonitors(groups), [groups])
   const monitorItems = useMemo(
@@ -528,13 +513,6 @@ export function StatusMonitor() {
   let content = null
   if (loading) {
     content = <LoadingState />
-  } else if (!uptimeEnabled) {
-    content = (
-      <EmptyState
-        title={t('Status monitoring is disabled')}
-        description={t('Enable Uptime Kuma in console content settings.')}
-      />
-    )
   } else if (failed) {
     content = (
       <EmptyState
@@ -609,12 +587,12 @@ export function StatusMonitor() {
             type='button'
             variant='outline'
             onClick={handleManualRefresh}
-            disabled={loading || refreshing || !uptimeEnabled}
+            disabled={loading || refreshing}
             className='gap-2'
           >
             <RotateCw className={cn('size-4', refreshing && 'animate-spin')} />
             {t('Refresh')}
-            {!loading && uptimeEnabled ? (
+            {!loading ? (
               <span className='border-border min-w-8 border-l pl-2 text-right tabular-nums'>
                 {refreshCountdown}s
               </span>
