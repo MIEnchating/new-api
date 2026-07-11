@@ -34,15 +34,6 @@ func (r *StreamResult) Stop(err error) {
 	r.stopped = true
 }
 
-// UpstreamError marks an explicit upstream failure terminal event.
-func (r *StreamResult) UpstreamError(err error) {
-	if err != nil {
-		r.status.RecordError(err.Error())
-	}
-	r.status.SetEndReason(relaycommon.StreamEndReasonUpstreamTerminalErr, err)
-	r.stopped = true
-}
-
 // Done signals that the handler has finished processing normally
 // (e.g., Dify "message_end"). The stream stops after this chunk.
 func (r *StreamResult) Done() {
@@ -50,7 +41,7 @@ func (r *StreamResult) Done() {
 	r.stopped = true
 }
 
-// IsStopped returns whether this chunk requested stream termination.
+// IsStopped returns whether Stop() or Done() was called during this chunk.
 func (r *StreamResult) IsStopped() bool {
 	return r.stopped
 }

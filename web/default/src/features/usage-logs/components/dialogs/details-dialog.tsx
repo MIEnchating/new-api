@@ -55,7 +55,6 @@ import {
   isViolationFeeLog,
   getFirstResponseTimeColor,
   getResponseTimeColor,
-  getStreamCompletionStateLabelKey,
   renderAuditContent,
 } from '../../lib/format'
 import {
@@ -1057,82 +1056,47 @@ export function DetailsDialog(props: DetailsDialogProps) {
           )}
 
         {/* Stream status details (admin only) */}
-        {props.isAdmin && other?.stream_status && (
-          <DetailSection label={t('Stream Status')}>
-            <DetailRow
-              label={t('Status')}
-              value={
-                <StatusBadge
-                  label={
-                    other.stream_status.status === 'ok'
-                      ? t('Normal')
-                      : t('Error')
-                  }
-                  variant={
-                    other.stream_status.status === 'ok' ? 'success' : 'red'
-                  }
-                  size='sm'
-                  copyable={false}
-                />
-              }
-            />
-            {other.stream_status.end_reason && (
+        {props.isAdmin &&
+          other?.stream_status &&
+          other.stream_status.status !== 'ok' && (
+            <DetailSection label={t('Stream Status')}>
               <DetailRow
-                label={t('End Reason')}
-                value={other.stream_status.end_reason}
+                label={t('Status')}
+                value={
+                  <StatusBadge
+                    label={other.stream_status.status || t('Error')}
+                    variant='red'
+                    size='sm'
+                    copyable={false}
+                  />
+                }
               />
-            )}
-            {other.stream_status.completion_state && (
-              <DetailRow
-                label={t('Stream Progress')}
-                value={t(
-                  getStreamCompletionStateLabelKey(
-                    other.stream_status.completion_state
-                  )
-                )}
-              />
-            )}
-            {typeof other.stream_status.upstream_event_count === 'number' && (
-              <DetailRow
-                label={t('Upstream Events')}
-                value={String(other.stream_status.upstream_event_count)}
-              />
-            )}
-            {typeof other.stream_status.downstream_event_count === 'number' && (
-              <DetailRow
-                label={t('Downstream Events')}
-                value={String(other.stream_status.downstream_event_count)}
-              />
-            )}
-            {other.stream_status.completion_state === 'partial_output' &&
-              other.admin_info?.local_count_tokens && (
+              {other.stream_status.end_reason && (
                 <DetailRow
-                  label={t('Billing Note')}
-                  value={t(
-                    'Locally estimated tokens do not indicate stream completion'
-                  )}
+                  label={t('End Reason')}
+                  value={other.stream_status.end_reason}
                 />
               )}
-            {(other.stream_status.error_count ?? 0) > 0 && (
-              <DetailRow
-                label={t('Soft Errors')}
-                value={String(other.stream_status.error_count)}
-              />
-            )}
-            {other.stream_status.end_error && (
-              <DetailRow
-                label={t('End Error')}
-                value={other.stream_status.end_error}
-              />
-            )}
-            {Array.isArray(other.stream_status.errors) &&
-              other.stream_status.errors.length > 0 && (
-                <pre className='bg-background/60 mt-1 max-h-32 overflow-y-auto rounded border p-2 font-mono text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap'>
-                  {other.stream_status.errors.join('\n')}
-                </pre>
+              {(other.stream_status.error_count ?? 0) > 0 && (
+                <DetailRow
+                  label={t('Soft Errors')}
+                  value={String(other.stream_status.error_count)}
+                />
               )}
-          </DetailSection>
-        )}
+              {other.stream_status.end_error && (
+                <DetailRow
+                  label={t('End Error')}
+                  value={other.stream_status.end_error}
+                />
+              )}
+              {Array.isArray(other.stream_status.errors) &&
+                other.stream_status.errors.length > 0 && (
+                  <pre className='bg-background/60 mt-1 max-h-32 overflow-y-auto rounded border p-2 font-mono text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap'>
+                    {other.stream_status.errors.join('\n')}
+                  </pre>
+                )}
+            </DetailSection>
+          )}
 
         {/* Subscription billing details */}
         {isSubscription && other && (

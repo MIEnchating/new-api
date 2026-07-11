@@ -158,6 +158,22 @@ func TestChannelRouteCooldownSkipsFailedChannelAndReturnsAfterClear(t *testing.T
 	assert.Equal(t, 1, channel.Id)
 }
 
+func TestChannelRouteDoesNotFreezeOnlyAvailableChannel(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	seedChannelRouteChannel(t, db, 1, "default", 1)
+	model.InitChannelCache()
+
+	ctx := newChannelRouteContext()
+	channel, group, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(ctx, "default"))
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, "default", group)
+	assert.Equal(t, 1, channel.Id)
+
+	assert.False(t, MarkChannelRouteFailure(ctx, newChannelRouteFailure()))
+	assert.False(t, IsChannelRouteFrozen("default", 1, common.GetTimestamp()))
+}
+
 func TestChannelRouteTriesEveryPriorityWithoutRetryBudget(t *testing.T) {
 	db := setupChannelRouteTest(t)
 	seedChannelRouteChannel(t, db, 1, "default", 3)
@@ -187,12 +203,14 @@ func TestChannelRouteTriesEveryPriorityWithoutRetryBudget(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, channel)
 	assert.Equal(t, 3, channel.Id)
-	assert.True(t, MarkChannelRouteFailure(ctx, routeErr))
+	assert.False(t, MarkChannelRouteFailure(ctx, routeErr))
+	assert.False(t, IsChannelRouteFrozen("default", 3, common.GetTimestamp()))
 
 	param.SetRetry(3)
 	channel, _, err = CacheGetRandomSatisfiedChannel(param)
 	require.NoError(t, err)
-	assert.Nil(t, channel)
+	require.NotNil(t, channel)
+	assert.Equal(t, 3, channel.Id)
 }
 
 func TestChannelRouteTriesDistinctChannelsAtSamePriority(t *testing.T) {

@@ -34,6 +34,16 @@ import {
 // ============================================================================
 
 export function getApiKeyFormSchema(t: TFunction) {
+  const enabledGroupRouteSchema = apiKeyGroupRouteSchema.extend({
+    group: z.string().min(1, t('Please select a group')),
+    priority: z.number().int().min(0, t('Priority must be zero or greater')),
+    cooldown_seconds: z
+      .number()
+      .int()
+      .min(1, t('Cooldown must be greater than 0 seconds'))
+      .max(31536000, t('Cooldown cannot exceed 31536000 seconds')),
+  })
+
   return z
     .object({
       name: z.string().min(1, t('Please enter a name')),
@@ -46,22 +56,7 @@ export function getApiKeyFormSchema(t: TFunction) {
       cross_group_retry: z.boolean().optional(),
       group_route_enabled: z.boolean().optional(),
       group_route_sticky: z.boolean().optional(),
-      group_routes: z
-        .array(
-          z.object({
-            group: z.string().min(1, t('Please select a group')),
-            priority: z
-              .number()
-              .int()
-              .min(0, t('Priority must be zero or greater')),
-            cooldown_seconds: z
-              .number()
-              .int()
-              .min(1, t('Cooldown must be greater than 0 seconds'))
-              .max(31536000, t('Cooldown cannot exceed 31536000 seconds')),
-          })
-        )
-        .optional(),
+      group_routes: z.array(apiKeyGroupRouteSchema).optional(),
       tokenCount: z.number().min(1).optional(),
     })
     .superRefine((data, ctx) => {
@@ -92,6 +87,16 @@ export function getApiKeyFormSchema(t: TFunction) {
 
       const groups = new Set<string>()
       data.group_routes.forEach((route, index) => {
+        const result = enabledGroupRouteSchema.safeParse(route)
+        if (!result.success) {
+          result.error.issues.forEach((issue) => {
+            ctx.addIssue({
+              ...issue,
+              path: ['group_routes', index, ...issue.path],
+            })
+          })
+        }
+
         if (groups.has(route.group)) {
           ctx.addIssue({
             code: 'custom',

@@ -191,6 +191,21 @@ func TrackChannelRouteSelection(c *gin.Context, group string, modelName string, 
 	c.Set(ginKeyChannelRouteRequestPath, requestPath)
 }
 
+func hasAvailableChannelRouteAlternative(group string, modelName string, requestPath string, channelID int, now int64) (bool, error) {
+	channel, err := model.GetRandomSatisfiedChannelWithFilter(
+		group,
+		modelName,
+		0,
+		requestPath,
+		func(candidate *model.Channel) bool {
+			return candidate.Id != channelID &&
+				candidate.Status == common.ChannelStatusEnabled &&
+				!IsChannelRouteFrozen(group, candidate.Id, now)
+		},
+	)
+	return channel != nil, err
+}
+
 func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.Channel, error) {
 	if param == nil {
 		return nil, fmt.Errorf("retry param is nil")
@@ -260,8 +275,26 @@ func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 	if group == "" || channelID <= 0 || cooldownSeconds <= 0 {
 		return false
 	}
+	modelName := c.GetString(ginKeyChannelRouteModel)
+	requestPath := c.GetString(ginKeyChannelRouteRequestPath)
 	if IsChannelRouteStickyEnabled() {
-		ClearChannelRouteStickyChannel(group, c.GetString(ginKeyChannelRouteModel), c.GetString(ginKeyChannelRouteRequestPath))
+		ClearChannelRouteStickyChannel(group, modelName, requestPath)
+	}
+	if modelName != "" {
+		hasAlternative, lookupErr := hasAvailableChannelRouteAlternative(
+			group,
+			modelName,
+			requestPath,
+			channelID,
+			common.GetTimestamp(),
+		)
+		if lookupErr != nil {
+			logger.LogWarn(c, fmt.Sprintf("failed to check channel route alternatives, keeping cooldown behavior: group=%s channel=%d error=%s",
+				group, channelID, lookupErr.Error()))
+		} else if !hasAlternative {
+			logger.LogDebug(c, "channel route cooldown skipped because no alternative channel is available: group=%s channel=%d", group, channelID)
+			return false
+		}
 	}
 	until := FreezeChannelRoute(group, channelID, cooldownSeconds)
 	logger.LogWarn(c, fmt.Sprintf("channel route frozen: group=%s channel=%d cooldown=%ds until=%d",

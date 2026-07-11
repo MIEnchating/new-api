@@ -29,19 +29,6 @@ import type { LogOtherData } from '../types'
 
 export { normalizeTierLabel }
 
-export function getStreamCompletionStateLabelKey(
-  state: NonNullable<LogOtherData['stream_status']>['completion_state']
-): string {
-  switch (state) {
-    case 'completed':
-      return 'Completed'
-    case 'partial_output':
-      return 'Partial Output'
-    default:
-      return 'No Output'
-  }
-}
-
 const PARAM_OVERRIDE_ACTION_MAP: Record<string, string> = {
   set: 'Set',
   delete: 'Delete',

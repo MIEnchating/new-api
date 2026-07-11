@@ -62,14 +62,11 @@ func TestShouldAttemptNextTaskChannelDoesNotRouteLockedChannel(t *testing.T) {
 	assert.False(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 10, false, true))
 }
 
-func TestIsUpstreamStreamFailure(t *testing.T) {
+func TestIsStreamTimeoutFailure(t *testing.T) {
 	tests := []struct {
 		reason relaycommon.StreamEndReason
 		want   bool
 	}{
-		{relaycommon.StreamEndReasonMissingTerminal, true},
-		{relaycommon.StreamEndReasonUpstreamClosedEarly, true},
-		{relaycommon.StreamEndReasonUpstreamTerminalErr, true},
 		{relaycommon.StreamEndReasonTimeout, true},
 		{relaycommon.StreamEndReasonHandlerStop, false},
 		{relaycommon.StreamEndReasonClientGone, false},
@@ -79,7 +76,7 @@ func TestIsUpstreamStreamFailure(t *testing.T) {
 		t.Run(string(test.reason), func(t *testing.T) {
 			status := relaycommon.NewStreamStatus()
 			status.SetEndReason(test.reason, nil)
-			assert.Equal(t, test.want, isUpstreamStreamFailure(status))
+			assert.Equal(t, test.want, isStreamTimeoutFailure(status))
 		})
 	}
 }

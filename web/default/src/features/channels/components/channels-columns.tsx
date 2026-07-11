@@ -46,12 +46,12 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { toIntlLocale } from '@/i18n/languages'
 import {
   formatCurrencyFromUSD,
   formatQuotaWithCurrency,
   getCurrencyLabel,
 } from '@/lib/currency'
-import { toIntlLocale } from '@/i18n/languages'
 import { formatTimestampToDate } from '@/lib/format'
 import { truncateText } from '@/lib/utils'
 
@@ -834,7 +834,10 @@ export function useChannelsColumns(
           isTagAggregateRow(row.original) ? (
             <span className='text-muted-foreground'>-</span>
           ) : (
-            <ChannelRouteStatusBadge routeStatus={row.original.route_status} />
+            <ChannelRouteStatusBadge
+              channelStatus={row.original.status}
+              routeStatus={row.original.route_status}
+            />
           ),
         size: 150,
         enableSorting: false,

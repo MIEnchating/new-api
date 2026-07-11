@@ -19,7 +19,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"golang.org/x/net/http2"
 )
 
 func init() {
@@ -284,53 +283,6 @@ func TestStreamScannerHandler_ClientCancelAbortsUpstreamAndReturns(t *testing.T)
 	assert.NotContains(t, body, "second")
 }
 
-func TestStreamScannerHandlerWithRequiredTerminal_ClientCancelBeforeTerminal(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	pr, pw := io.Pipe()
-	t.Cleanup(func() {
-		_ = pr.Close()
-		_ = pw.Close()
-	})
-
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil).WithContext(ctx)
-	resp := &http.Response{Body: pr}
-	info := &relaycommon.RelayInfo{
-		DisablePing: true,
-		ChannelMeta: &relaycommon.ChannelMeta{},
-	}
-
-	chunkHandled := make(chan struct{})
-	handlerDone := make(chan struct{})
-	go func() {
-		StreamScannerHandlerWithRequiredTerminal(c, resp, info, "response.completed", func(data string, sr *StreamResult) {
-			close(chunkHandled)
-		})
-		close(handlerDone)
-	}()
-
-	_, err := fmt.Fprint(pw, "data: delta\n")
-	require.NoError(t, err)
-	select {
-	case <-chunkHandled:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for pre-terminal chunk")
-	}
-
-	cancel()
-	select {
-	case <-handlerDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handler did not return after client disconnect")
-	}
-
-	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonClientGone, info.StreamStatus.EndReason)
-}
-
 // ---------- Ping tests ----------
 
 func TestStreamScannerHandler_PingSentDuringSlowUpstream(t *testing.T) {
@@ -497,99 +449,6 @@ func TestStreamScannerHandler_StreamStatus_HandlerDone(t *testing.T) {
 	require.NotNil(t, info.StreamStatus)
 	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
 	assert.False(t, info.StreamStatus.HasErrors())
-}
-
-func TestStreamScannerHandlerWithRequiredTerminal_WaitsForHandlerAtEOF(t *testing.T) {
-	t.Parallel()
-
-	c, resp, info := setupStreamTest(t, strings.NewReader("data: response.completed\n"))
-
-	StreamScannerHandlerWithRequiredTerminal(c, resp, info, "response.completed", func(data string, sr *StreamResult) {
-		time.Sleep(20 * time.Millisecond)
-		sr.Done()
-	})
-
-	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonDone, info.StreamStatus.EndReason)
-	assert.NoError(t, info.StreamStatus.EndError)
-}
-
-func TestStreamScannerHandlerWithRequiredTerminal_EOFBeforeTerminal(t *testing.T) {
-	t.Parallel()
-
-	c, resp, info := setupStreamTest(t, strings.NewReader("data: delta\n"))
-
-	StreamScannerHandlerWithRequiredTerminal(c, resp, info, "response.completed", func(data string, sr *StreamResult) {})
-
-	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonMissingTerminal, info.StreamStatus.EndReason)
-	require.Error(t, info.StreamStatus.EndError)
-	assert.ErrorIs(t, info.StreamStatus.EndError, io.ErrUnexpectedEOF)
-	assert.Contains(t, info.StreamStatus.EndError.Error(), "response.completed")
-}
-
-func TestStreamScannerHandlerWithRequiredTerminal_DoneBeforeTerminal(t *testing.T) {
-	t.Parallel()
-
-	body := "data: delta\ndata: [DONE]\n"
-	c, resp, info := setupStreamTest(t, strings.NewReader(body))
-
-	StreamScannerHandlerWithRequiredTerminal(c, resp, info, "response.completed", func(data string, sr *StreamResult) {})
-
-	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonMissingTerminal, info.StreamStatus.EndReason)
-	require.Error(t, info.StreamStatus.EndError)
-	assert.ErrorIs(t, info.StreamStatus.EndError, io.ErrUnexpectedEOF)
-	assert.Contains(t, info.StreamStatus.EndError.Error(), "response.completed")
-}
-
-func TestStreamScannerHandlerWithRequiredTerminal_ReadErrorBeforeTerminal(t *testing.T) {
-	t.Parallel()
-
-	pr, pw := io.Pipe()
-	t.Cleanup(func() {
-		_ = pr.Close()
-		_ = pw.Close()
-	})
-	c, resp, info := setupStreamTest(t, pr)
-
-	go func() {
-		_, _ = fmt.Fprint(pw, "data: delta\n")
-		_ = pw.CloseWithError(io.ErrUnexpectedEOF)
-	}()
-
-	StreamScannerHandlerWithRequiredTerminal(c, resp, info, "response.completed", func(data string, sr *StreamResult) {})
-
-	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonUpstreamClosedEarly, info.StreamStatus.EndReason)
-	require.Error(t, info.StreamStatus.EndError)
-	assert.ErrorIs(t, info.StreamStatus.EndError, io.ErrUnexpectedEOF)
-}
-
-func TestStreamScannerHandlerWithRequiredTerminal_HTTP2InternalErrorBeforeTerminal(t *testing.T) {
-	t.Parallel()
-
-	pr, pw := io.Pipe()
-	t.Cleanup(func() {
-		_ = pr.Close()
-		_ = pw.Close()
-	})
-	c, resp, info := setupStreamTest(t, pr)
-	upstreamErr := http2.StreamError{StreamID: 77, Code: http2.ErrCodeInternal}
-
-	go func() {
-		_, _ = fmt.Fprint(pw, "data: delta\n")
-		_ = pw.CloseWithError(upstreamErr)
-	}()
-
-	StreamScannerHandlerWithRequiredTerminal(c, resp, info, "response.completed", func(data string, sr *StreamResult) {})
-
-	require.NotNil(t, info.StreamStatus)
-	assert.Equal(t, relaycommon.StreamEndReasonUpstreamClosedEarly, info.StreamStatus.EndReason)
-	require.Error(t, info.StreamStatus.EndError)
-	var streamErr http2.StreamError
-	require.ErrorAs(t, info.StreamStatus.EndError, &streamErr)
-	assert.Equal(t, http2.ErrCodeInternal, streamErr.Code)
 }
 
 func TestStreamScannerHandler_StreamStatus_Timeout(t *testing.T) {

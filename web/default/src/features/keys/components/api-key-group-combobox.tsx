@@ -169,7 +169,8 @@ export function ApiKeyGroupCombobox({
         <ChevronsUpDown className='h-4 w-4 shrink-0 opacity-50' />
       </PopoverTrigger>
       <PopoverContent
-        className='data-closed:zoom-out-100 data-open:zoom-in-100 data-[side=bottom]:slide-in-from-top-0 data-[side=left]:slide-in-from-right-0 data-[side=right]:slide-in-from-left-0 data-[side=top]:slide-in-from-bottom-0 w-[var(--anchor-width)] overflow-hidden rounded-xl p-0 shadow-lg data-closed:duration-75 data-open:duration-100'
+        align='start'
+        className='data-closed:zoom-out-100 data-open:zoom-in-100 data-[side=bottom]:slide-in-from-top-0 data-[side=left]:slide-in-from-right-0 data-[side=right]:slide-in-from-left-0 data-[side=top]:slide-in-from-bottom-0 w-[max(var(--anchor-width),22rem)] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0 shadow-lg data-closed:duration-75 data-open:duration-100'
         onWheel={(event) => event.stopPropagation()}
         onTouchMove={(event) => event.stopPropagation()}
         onPointerDown={(event) => event.stopPropagation()}
@@ -197,11 +198,11 @@ export function ApiKeyGroupCombobox({
                     )}
                   />
                   <span className='min-w-0 flex-1'>
-                    <span className='block truncate font-medium'>
+                    <span className='block font-medium [overflow-wrap:anywhere]'>
                       {option.label}
                     </span>
                     {option.desc && (
-                      <span className='text-muted-foreground block truncate text-xs'>
+                      <span className='text-muted-foreground block text-xs [overflow-wrap:anywhere]'>
                         {option.desc}
                       </span>
                     )}

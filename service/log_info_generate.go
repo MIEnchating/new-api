@@ -133,18 +133,9 @@ func AppendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]inter
 	if !ss.IsNormalEnd() || ss.HasErrors() {
 		status = "error"
 	}
-	completionState := "no_output"
-	if ss.EndReason == relaycommon.StreamEndReasonDone && !ss.HasErrors() {
-		completionState = "completed"
-	} else if relayInfo.SendResponseCount > 0 {
-		completionState = "partial_output"
-	}
 	streamInfo := map[string]interface{}{
-		"status":                 status,
-		"end_reason":             string(ss.EndReason),
-		"completion_state":       completionState,
-		"upstream_event_count":   relayInfo.ReceivedResponseCount,
-		"downstream_event_count": relayInfo.SendResponseCount,
+		"status":     status,
+		"end_reason": string(ss.EndReason),
 	}
 	if ss.EndError != nil {
 		streamInfo["end_error"] = ss.EndError.Error()

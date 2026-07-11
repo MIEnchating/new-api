@@ -226,7 +226,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
-			if isUpstreamStreamFailure(relayInfo.StreamStatus) {
+			if isStreamTimeoutFailure(relayInfo.StreamStatus) {
 				streamErr := relayInfo.StreamStatus.EndError
 				if streamErr == nil {
 					streamErr = fmt.Errorf("stream ended with %s", relayInfo.StreamStatus.EndReason)
@@ -306,19 +306,8 @@ func addUsedChannel(c *gin.Context, channelId int) {
 	c.Set("use_channel", useChannel)
 }
 
-func isUpstreamStreamFailure(status *relaycommon.StreamStatus) bool {
-	if status == nil {
-		return false
-	}
-	switch status.EndReason {
-	case relaycommon.StreamEndReasonUpstreamClosedEarly,
-		relaycommon.StreamEndReasonMissingTerminal,
-		relaycommon.StreamEndReasonUpstreamTerminalErr,
-		relaycommon.StreamEndReasonTimeout:
-		return true
-	default:
-		return false
-	}
+func isStreamTimeoutFailure(status *relaycommon.StreamStatus) bool {
+	return status != nil && status.EndReason == relaycommon.StreamEndReasonTimeout
 }
 
 func isSuccessfulStreamResult(status *relaycommon.StreamStatus) bool {

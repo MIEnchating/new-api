@@ -14,7 +14,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/bytedance/gopkg/util/gopool"
@@ -46,24 +45,6 @@ func NewStreamScanner(reader io.Reader) *bufio.Scanner {
 	return scanner
 }
 
-func copyCodexSSEHeaders(c *gin.Context, resp *http.Response) {
-	if c == nil || c.Writer == nil || resp == nil {
-		return
-	}
-	// codex
-	for _, name := range []string{"X-Reasoning-Included", "X-Codex-Turn-State"} {
-		values := resp.Header.Values(name)
-		if !service.ShouldCopyUpstreamHeader(c, name, values) {
-			continue
-		}
-		for _, value := range values {
-			if value != "" {
-				c.Writer.Header().Add(name, value)
-			}
-		}
-	}
-}
-
 // ExtendWriteDeadline pushes the connection write deadline forward before each
 // stream write. Best-effort: writers that don't support deadlines (e.g.
 // httptest recorders) are silently ignored.
@@ -75,16 +56,6 @@ func ExtendWriteDeadline(c *gin.Context) {
 }
 
 func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, dataHandler func(data string, sr *StreamResult)) {
-	streamScannerHandler(c, resp, info, "", dataHandler)
-}
-
-// StreamScannerHandlerWithRequiredTerminal treats a stream that ends before
-// its handler calls StreamResult.Done as a truncated upstream response.
-func StreamScannerHandlerWithRequiredTerminal(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, terminalEvent string, dataHandler func(data string, sr *StreamResult)) {
-	streamScannerHandler(c, resp, info, terminalEvent, dataHandler)
-}
-
-func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo, terminalEvent string, dataHandler func(data string, sr *StreamResult)) {
 
 	if resp == nil || dataHandler == nil {
 		return
@@ -151,7 +122,6 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	defer cleanup()
 
 	scanner.Split(bufio.ScanLines)
-	copyCodexSSEHeaders(c, resp)
 	SetEventStreamHeaders(c)
 
 	ctx = context.WithValue(ctx, "stop_chan", stopChan)
@@ -207,27 +177,15 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	}
 
 	dataChan := make(chan string, 10)
-	handlerStoppedChan := make(chan bool, 1)
-	var closeDataOnce sync.Once
-	closeData := func() {
-		closeDataOnce.Do(func() {
-			close(dataChan)
-		})
-	}
 
 	wg.Add(1)
 	gopool.Go(func() {
-		handlerStopped := false
 		defer func() {
 			if r := recover(); r != nil {
 				logger.LogError(c, fmt.Sprintf("data handler goroutine panic: %v", r))
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("handler panic: %v", r))
-				handlerStopped = true
 			}
-			handlerStoppedChan <- handlerStopped
-			if handlerStopped {
-				stop()
-			}
+			stop()
 			wg.Done()
 		}()
 		sr := newStreamResult(info.StreamStatus)
@@ -240,7 +198,6 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				dataHandler(data, sr)
 			}()
 			if sr.IsStopped() {
-				handlerStopped = true
 				return
 			}
 		}
@@ -250,7 +207,7 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	wg.Add(1)
 	common.RelayCtxGo(ctx, func() {
 		defer func() {
-			closeData()
+			close(dataChan)
 			if r := recover(); r != nil {
 				logger.LogError(c, fmt.Sprintf("scanner goroutine panic: %v", r))
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonPanic, fmt.Errorf("scanner panic: %v", r))
@@ -259,10 +216,6 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			logger.LogDebug(c, "scanner goroutine exited")
 			wg.Done()
 		}()
-
-		var endReason relaycommon.StreamEndReason
-		var endErr error
-		firstUpstreamSSE := true
 
 		for scanner.Scan() {
 			// 检查是否需要停止
@@ -290,13 +243,6 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				continue
 			}
 			if !strings.HasPrefix(data, "[DONE]") {
-				if terminalEvent != "" && firstUpstreamSSE {
-					firstUpstreamSSE = false
-					logger.LogInfo(c, fmt.Sprintf(
-						"stream trace: stage=first_upstream_sse elapsed_ms=%d bytes=%d",
-						info.ElapsedMilliseconds(), len(data),
-					))
-				}
 				info.SetFirstResponseTime()
 				info.ReceivedResponseCount++
 
@@ -308,50 +254,19 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 					return
 				}
 			} else {
-				if terminalEvent == "" {
-					endReason = relaycommon.StreamEndReasonDone
-				} else {
-					endReason = relaycommon.StreamEndReasonMissingTerminal
-					endErr = fmt.Errorf("%w: received [DONE] before required terminal event %q", io.ErrUnexpectedEOF, terminalEvent)
-				}
-				logger.LogDebug(c, "received [DONE], finishing scanner")
-				break
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+				logger.LogDebug(c, "received [DONE], stopping scanner")
+				return
 			}
 		}
 
-		if endReason == relaycommon.StreamEndReasonNone {
-			if err := scanner.Err(); err != nil {
-				endReason = relaycommon.StreamEndReasonScannerErr
-				if terminalEvent != "" {
-					endReason = relaycommon.StreamEndReasonUpstreamClosedEarly
-				}
-				endErr = err
-			} else if terminalEvent != "" {
-				endReason = relaycommon.StreamEndReasonMissingTerminal
-				endErr = fmt.Errorf("%w: required terminal event %q was not received", io.ErrUnexpectedEOF, terminalEvent)
-			} else {
-				endReason = relaycommon.StreamEndReasonEOF
+		if err := scanner.Err(); err != nil {
+			if err != io.EOF {
+				logger.LogError(c, "scanner error: "+err.Error())
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, err)
 			}
 		}
-
-		// 先排空已扫描事件，避免 EOF 抢先覆盖最后一个终态事件的处理结果。
-		closeData()
-		if <-handlerStoppedChan {
-			return
-		}
-		select {
-		case <-stopChan:
-			return
-		default:
-		}
-
-		if endErr != nil {
-			logger.LogError(c, fmt.Sprintf(
-				"stream trace: stage=scanner_error elapsed_ms=%d classification=%s error=%q",
-				info.ElapsedMilliseconds(), endReason, endErr.Error(),
-			))
-		}
-		info.StreamStatus.SetEndReason(endReason, endErr)
+		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonEOF, nil)
 	})
 
 	// 主循环等待完成或超时
@@ -363,10 +278,6 @@ func streamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	case <-c.Request.Context().Done():
 		// 客户端断开：立即 cleanup 关闭上游 resp.Body，解除 scanner 阻塞并让上游停止生成，
 		// 避免为已放弃的请求继续消费上游 token。
-		logger.LogError(c, fmt.Sprintf(
-			"stream trace: stage=request_context_cancel elapsed_ms=%d error=%q",
-			info.ElapsedMilliseconds(), c.Request.Context().Err(),
-		))
 		info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
 	}
 

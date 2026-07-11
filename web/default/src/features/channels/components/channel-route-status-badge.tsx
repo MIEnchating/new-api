@@ -20,7 +20,7 @@ import { Timer } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { StatusBadge } from '@/components/status-badge'
+import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import {
   Tooltip,
   TooltipContent,
@@ -28,9 +28,11 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
+import { CHANNEL_STATUS } from '../constants'
 import type { Channel } from '../types'
 
 type ChannelRouteStatusBadgeProps = {
+  channelStatus: Channel['status']
   routeStatus?: Channel['route_status']
 }
 
@@ -44,6 +46,26 @@ type CooldownEntry = {
   key: string
   group?: string
   until: number
+}
+
+type StaticChannelState = {
+  label: string
+  variant: StatusVariant
+}
+
+function resolveStaticChannelState(
+  channelStatus: Channel['status']
+): StaticChannelState | null {
+  switch (channelStatus) {
+    case CHANNEL_STATUS.ENABLED:
+      return null
+    case CHANNEL_STATUS.MANUAL_DISABLED:
+      return { label: 'Disabled', variant: 'neutral' }
+    case CHANNEL_STATUS.AUTO_DISABLED:
+      return { label: 'Error', variant: 'danger' }
+    default:
+      return { label: 'Unknown', variant: 'neutral' }
+  }
 }
 
 function resolveCooldownUntil(status: CooldownStatus, receivedAt: number) {
@@ -74,7 +96,7 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
   const { t } = useTranslation()
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const cooldownEntries = useMemo<CooldownEntry[]>(() => {
-    if (!props.routeStatus) {
+    if (props.channelStatus !== CHANNEL_STATUS.ENABLED || !props.routeStatus) {
       return []
     }
 
@@ -93,7 +115,7 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
 
     const until = resolveCooldownUntil(props.routeStatus, receivedAt)
     return until > 0 ? [{ key: 'channel', until }] : []
-  }, [props.routeStatus])
+  }, [props.channelStatus, props.routeStatus])
   const activeCooldowns = cooldownEntries
     .map((entry) => ({ ...entry, remaining: Math.max(0, entry.until - now) }))
     .filter((entry) => entry.remaining > 0)
@@ -113,10 +135,15 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
       setNow(Math.floor(Date.now() / 1000))
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [isCooling, props.routeStatus])
+  }, [isCooling, props.channelStatus, props.routeStatus])
 
-  if (!props.routeStatus) {
-    return <span className='text-muted-foreground'>-</span>
+  const staticState = resolveStaticChannelState(props.channelStatus)
+  if (staticState) {
+    return (
+      <StatusBadge variant={staticState.variant} size='sm'>
+        {t(staticState.label)}
+      </StatusBadge>
+    )
   }
 
   const badge = isCooling ? (

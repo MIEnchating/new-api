@@ -55,26 +55,10 @@ import {
 } from '@/lib/passkey'
 import { cn } from '@/lib/utils'
 
-const emptyLoginDefaults = {
+const loginDefaults = {
   username: '',
   password: '',
 } satisfies z.infer<typeof loginFormSchema>
-
-const localLoginDefaults = {
-  username: 'xiaoge',
-  password: '123456789',
-} satisfies z.infer<typeof loginFormSchema>
-
-function getLoginFormDefaults() {
-  if (typeof window === 'undefined') {
-    return emptyLoginDefaults
-  }
-
-  const { hostname } = window.location
-  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1'
-
-  return isLocalhost ? localLoginDefaults : emptyLoginDefaults
-}
 
 export function UserAuthForm({
   className,
@@ -144,7 +128,7 @@ export function UserAuthForm({
 
   const form = useForm<z.infer<typeof loginFormSchema>>({
     resolver: zodResolver(loginFormSchema),
-    defaultValues: getLoginFormDefaults(),
+    defaultValues: loginDefaults,
   })
 
   const wechatQrCodeUrl = useMemo(() => {

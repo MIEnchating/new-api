@@ -78,30 +78,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
-	firstDownstreamFlush := true
-	applyTerminalUsage := func(response *dto.OpenAIResponsesResponse) {
-		if response == nil || response.Usage == nil {
-			return
-		}
-		if response.Usage.InputTokens != 0 {
-			usage.PromptTokens = response.Usage.InputTokens
-		}
-		if response.Usage.OutputTokens != 0 {
-			usage.CompletionTokens = response.Usage.OutputTokens
-		}
-		if response.Usage.TotalTokens != 0 {
-			usage.TotalTokens = response.Usage.TotalTokens
-		}
-		if response.Usage.InputTokensDetails != nil {
-			usage.PromptTokensDetails.CachedTokens = response.Usage.InputTokensDetails.CachedTokens
-		}
-		logger.LogInfo(c, fmt.Sprintf(
-			"stream trace: stage=usage elapsed_ms=%d input_tokens=%d output_tokens=%d total_tokens=%d cached_tokens=%d",
-			info.ElapsedMilliseconds(), usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.PromptTokensDetails.CachedTokens,
-		))
-	}
 
-	helper.StreamScannerHandlerWithRequiredTerminal(c, resp, info, "valid Responses terminal event", func(data string, sr *helper.StreamResult) {
+	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
 		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
@@ -110,47 +88,30 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
-		if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
-			logger.LogError(c, fmt.Sprintf(
-				"stream trace: stage=downstream_flush_error elapsed_ms=%d error=%q",
-				info.ElapsedMilliseconds(), err.Error(),
-			))
-			if c.Request == nil || c.Request.Context().Err() == nil {
-				sr.Stop(err)
-			}
-			return
-		}
-		info.SendResponseCount++
-		if firstDownstreamFlush {
-			firstDownstreamFlush = false
-			logger.LogInfo(c, fmt.Sprintf(
-				"stream trace: stage=first_downstream_flush elapsed_ms=%d event=%q",
-				info.ElapsedMilliseconds(), streamResponse.Type,
-			))
-		}
+		sendResponsesStreamData(c, streamResponse, data)
 		switch streamResponse.Type {
-		case "response.completed", "response.incomplete":
-			logger.LogInfo(c, fmt.Sprintf(
-				"stream trace: stage=terminal_event elapsed_ms=%d event=%q",
-				info.ElapsedMilliseconds(), streamResponse.Type,
-			))
-			applyTerminalUsage(streamResponse.Response)
+		case "response.completed":
 			if streamResponse.Response != nil {
+				if streamResponse.Response.Usage != nil {
+					if streamResponse.Response.Usage.InputTokens != 0 {
+						usage.PromptTokens = streamResponse.Response.Usage.InputTokens
+					}
+					if streamResponse.Response.Usage.OutputTokens != 0 {
+						usage.CompletionTokens = streamResponse.Response.Usage.OutputTokens
+					}
+					if streamResponse.Response.Usage.TotalTokens != 0 {
+						usage.TotalTokens = streamResponse.Response.Usage.TotalTokens
+					}
+					if streamResponse.Response.Usage.InputTokensDetails != nil {
+						usage.PromptTokensDetails.CachedTokens = streamResponse.Response.Usage.InputTokensDetails.CachedTokens
+					}
+				}
 				if streamResponse.Response.HasImageGenerationCall() {
 					c.Set("image_generation_call", true)
 					c.Set("image_generation_call_quality", streamResponse.Response.GetQuality())
 					c.Set("image_generation_call_size", streamResponse.Response.GetSize())
 				}
 			}
-			sr.Done()
-		case "response.failed", "response.error":
-			applyTerminalUsage(streamResponse.Response)
-			err := fmt.Errorf("responses stream ended with terminal event %q", streamResponse.Type)
-			logger.LogError(c, fmt.Sprintf(
-				"stream trace: stage=terminal_event elapsed_ms=%d event=%q error=%q",
-				info.ElapsedMilliseconds(), streamResponse.Type, err.Error(),
-			))
-			sr.UpstreamError(err)
 		case "response.output_text.delta":
 			// 处理输出文本
 			responseTextBuilder.WriteString(streamResponse.Delta)
@@ -169,17 +130,6 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		}
 	})
 
-	if info.StreamStatus != nil &&
-		(info.StreamStatus.EndReason == relaycommon.StreamEndReasonUpstreamClosedEarly ||
-			info.StreamStatus.EndReason == relaycommon.StreamEndReasonMissingTerminal) &&
-		!responsesStreamHasDownstreamOutput(c, info) {
-		return usage, types.NewOpenAIError(
-			info.StreamStatus.EndError,
-			types.ErrorCodeReadResponseBodyFailed,
-			http.StatusBadGateway,
-		)
-	}
-
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量
 		tempStr := responseTextBuilder.String()
@@ -197,11 +147,4 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 
 	return usage, nil
-}
-
-func responsesStreamHasDownstreamOutput(c *gin.Context, info *relaycommon.RelayInfo) bool {
-	if info != nil && info.SendResponseCount > 0 {
-		return true
-	}
-	return c != nil && c.Writer != nil && c.Writer.Written()
 }
