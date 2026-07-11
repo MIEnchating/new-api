@@ -29,11 +29,11 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/design-system/button'
-import { Tabs, TabsList, TabsTrigger } from '@/components/design-system/tabs'
 import { SectionPageLayout } from '@/components/layout'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getUptimeStatus } from '@/features/dashboard/api'
 import type {
   UptimeHeartbeat,
@@ -61,7 +61,7 @@ const STATUS_META: Record<number, MonitorStatusMeta> = {
     label: 'Down',
     icon: AlertTriangle,
     dotClassName: 'bg-destructive',
-    variant: 'destructive',
+    variant: 'danger',
   },
   2: {
     label: 'Pending',

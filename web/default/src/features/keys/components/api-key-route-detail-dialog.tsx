@@ -22,7 +22,9 @@ import { Clock, Edit, Route } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Button } from '@/components/design-system/button'
+import { GroupBadge } from '@/components/group-badge'
+import { StatusBadge } from '@/components/status-badge'
+import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
@@ -30,9 +32,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/design-system/dialog'
-import { GroupBadge } from '@/components/group-badge'
-import { StatusBadge } from '@/components/status-badge'
+} from '@/components/ui/dialog'
 
 import { getApiKeyRouteStatus } from '../api'
 import { parseApiKeyGroupRouteConfig } from '../lib'
@@ -133,12 +133,16 @@ export function ApiKeyRouteDetailDialog() {
                   <div className='min-w-0 space-y-1'>
                     <div className='flex min-w-0 flex-wrap items-center gap-2'>
                       <GroupBadge group={route.group} />
-                      <StatusBadge variant='neutral' appearance='outline'>
-                        {t('Priority')} {route.priority}
-                      </StatusBadge>
-                      <StatusBadge variant={cooling ? 'warning' : 'success'}>
-                        {cooling ? t('Cooling') : t('Normal')}
-                      </StatusBadge>
+                      <StatusBadge
+                        label={`${t('Priority')} ${route.priority}`}
+                        variant='neutral'
+                        copyable={false}
+                      />
+                      <StatusBadge
+                        label={cooling ? t('Cooling') : t('Normal')}
+                        variant={cooling ? 'warning' : 'success'}
+                        copyable={false}
+                      />
                     </div>
                   </div>
 
