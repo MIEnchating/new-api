@@ -320,6 +320,16 @@ func GetAllUsers(pageInfo *common.PageInfo) (users []*User, total int64, err err
 	return users, total, nil
 }
 
+func GetUserGroupNames() ([]string, error) {
+	groups := make([]string, 0)
+	err := DB.Unscoped().Model(&User{}).
+		Where(commonGroupCol+" <> ''").
+		Distinct("group").
+		Order(commonGroupCol+" ASC").
+		Pluck("group", &groups).Error
+	return groups, err
+}
+
 func SearchUsers(keyword string, group string, role *int, status *int, startIdx int, num int) ([]*User, int64, error) {
 	var users []*User
 	var total int64

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -30,7 +31,7 @@ import {
 import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 
-import { getUsers, searchUsers } from '../api'
+import { getUserGroupNames, getUsers, searchUsers } from '../api'
 import {
   USER_STATUS,
   getUserStatusOptions,
@@ -84,6 +85,19 @@ export function UsersTable() {
   const groupFilter =
     (columnFilters.find((filter) => filter.id === 'group')?.value as string) ??
     ''
+
+  const { data: groupsData } = useQuery({
+    queryKey: ['user-group-names'],
+    queryFn: getUserGroupNames,
+  })
+  const groupOptions = useMemo(
+    () =>
+      (groupsData?.data ?? []).map((group) => ({
+        label: group,
+        value: group,
+      })),
+    [groupsData]
+  )
 
   // Fetch data with React Query
   const { data, isLoading, isFetching } = useQuery({
@@ -188,6 +202,12 @@ export function UsersTable() {
             columnId: 'role',
             title: t('Role'),
             options: getUserRoleOptions(t),
+            singleSelect: true,
+          },
+          {
+            columnId: 'group',
+            title: t('Group'),
+            options: groupOptions,
             singleSelect: true,
           },
         ],

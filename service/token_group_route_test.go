@@ -21,6 +21,7 @@ import (
 )
 
 const tokenRouteTestModel = "gpt-route-test"
+const tokenRouteTestPath = "/v1/chat/completions"
 
 func setupTokenGroupRouteTest(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -59,6 +60,10 @@ func syncMapForTokenRouteTest() sync.Map {
 }
 
 func seedTokenRouteChannel(t *testing.T, db *gorm.DB, id int, group string) {
+	seedTokenRouteChannelForModel(t, db, id, group, tokenRouteTestModel)
+}
+
+func seedTokenRouteChannelForModel(t *testing.T, db *gorm.DB, id int, group string, modelName string) {
 	t.Helper()
 
 	priority := int64(0)
@@ -70,14 +75,14 @@ func seedTokenRouteChannel(t *testing.T, db *gorm.DB, id int, group string) {
 		Status:   common.ChannelStatusEnabled,
 		Name:     group,
 		Group:    group,
-		Models:   tokenRouteTestModel,
+		Models:   modelName,
 		Priority: &priority,
 		Weight:   &weight,
 	}
 	require.NoError(t, db.Create(&channel).Error)
 	require.NoError(t, db.Create(&model.Ability{
 		Group:     group,
-		Model:     tokenRouteTestModel,
+		Model:     modelName,
 		ChannelId: id,
 		Enabled:   true,
 		Priority:  &priority,
@@ -100,13 +105,102 @@ func newStickyTokenRouteContext(routes []model.TokenGroupRoute) *gin.Context {
 }
 
 func newTokenRouteRetryParam(ctx *gin.Context) *RetryParam {
+	return newTokenRouteRetryParamForModel(ctx, tokenRouteTestModel)
+}
+
+func newTokenRouteRetryParamForModel(ctx *gin.Context, modelName string) *RetryParam {
 	return &RetryParam{
 		Ctx:         ctx,
 		TokenGroup:  "default",
-		ModelName:   tokenRouteTestModel,
-		RequestPath: "/v1/chat/completions",
+		ModelName:   modelName,
+		RequestPath: tokenRouteTestPath,
 		Retry:       common.GetPointer(0),
 	}
+}
+
+func TestTokenGroupRouteScopesCooldownAndStickyByModel(t *testing.T) {
+	db := setupTokenGroupRouteTest(t)
+	const modelA = "model-a"
+	const modelB = "model-b"
+	seedTokenRouteChannelForModel(t, db, 1, "premium", modelA)
+	seedTokenRouteChannelForModel(t, db, 2, "premium", modelB)
+	seedTokenRouteChannelForModel(t, db, 3, "fallback", modelA)
+	seedTokenRouteChannelForModel(t, db, 4, "fallback", modelB)
+	model.InitChannelCache()
+
+	routes := []model.TokenGroupRoute{
+		{Group: "premium", Priority: 2, CooldownSeconds: 60},
+		{Group: "fallback", Priority: 1, CooldownSeconds: 60},
+	}
+
+	modelACtx := newStickyTokenRouteContext(routes)
+	channel, group, err := CacheGetRandomSatisfiedChannel(newTokenRouteRetryParamForModel(modelACtx, modelA))
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, "premium", group)
+
+	routeErr := types.NewErrorWithStatusCode(
+		errors.New("upstream unavailable"),
+		types.ErrorCodeChannelInvalidKey,
+		http.StatusInternalServerError,
+	)
+	MarkTokenGroupRouteFailure(modelACtx, routeErr)
+	assert.True(t, IsTokenGroupRouteFrozen(11, "premium", modelA, tokenRouteTestPath, common.GetTimestamp()))
+	assert.False(t, IsTokenGroupRouteFrozen(11, "premium", modelB, tokenRouteTestPath, common.GetTimestamp()))
+	assert.False(t, IsTokenGroupRouteFrozen(11, "premium", modelA, "/v1/responses", common.GetTimestamp()))
+
+	modelBCtx := newStickyTokenRouteContext(routes)
+	channel, group, err = CacheGetRandomSatisfiedChannel(newTokenRouteRetryParamForModel(modelBCtx, modelB))
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, "premium", group)
+	assert.Equal(t, 2, channel.Id)
+	MarkTokenGroupRouteSuccess(modelBCtx)
+
+	modelAFallbackCtx := newStickyTokenRouteContext(routes)
+	channel, group, err = CacheGetRandomSatisfiedChannel(newTokenRouteRetryParamForModel(modelAFallbackCtx, modelA))
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, "fallback", group)
+	assert.Equal(t, 3, channel.Id)
+	MarkTokenGroupRouteSuccess(modelAFallbackCtx)
+
+	assert.Equal(t, "fallback", GetTokenGroupRouteStickyGroup(11, modelA, tokenRouteTestPath))
+	assert.Equal(t, "premium", GetTokenGroupRouteStickyGroup(11, modelB, tokenRouteTestPath))
+
+	statuses := ListTokenGroupRouteCooldowns(11, common.GetTimestamp())
+	require.Len(t, statuses, 1)
+	assert.Equal(t, "premium", statuses[0].Group)
+	assert.Equal(t, modelA, statuses[0].ModelName)
+	FreezeTokenGroupRoute(12, "premium", modelB, tokenRouteTestPath, 60)
+	assert.Len(t, ListTokenGroupRouteCooldowns(11, common.GetTimestamp()), 1)
+
+	ClearTokenGroupRouteState(11)
+	assert.Empty(t, GetTokenGroupRouteStickyGroup(11, modelA, tokenRouteTestPath))
+	assert.Empty(t, GetTokenGroupRouteStickyGroup(11, modelB, tokenRouteTestPath))
+	assert.Empty(t, ListTokenGroupRouteCooldowns(11, common.GetTimestamp()))
+}
+
+func TestTokenGroupRouteRoutesDisjointModelsWithoutCoolingUnsupportedGroup(t *testing.T) {
+	db := setupTokenGroupRouteTest(t)
+	const modelA = "model-a"
+	const modelB = "model-b"
+	seedTokenRouteChannelForModel(t, db, 1, "group-a", modelA)
+	seedTokenRouteChannelForModel(t, db, 2, "group-b", modelB)
+	model.InitChannelCache()
+
+	routes := []model.TokenGroupRoute{
+		{Group: "group-a", Priority: 2, CooldownSeconds: 60},
+		{Group: "group-b", Priority: 1, CooldownSeconds: 60},
+	}
+	ctx := newTokenRouteContext(routes)
+	channel, group, err := CacheGetRandomSatisfiedChannel(newTokenRouteRetryParamForModel(ctx, modelB))
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, "group-b", group)
+	assert.Equal(t, 2, channel.Id)
+	assert.False(t, IsTokenGroupRouteFrozen(11, "group-a", modelB, tokenRouteTestPath, common.GetTimestamp()))
+	assert.Empty(t, ListTokenGroupRouteCooldowns(11, common.GetTimestamp()))
 }
 
 func TestTokenGroupRouteSelectsHighestPriorityAvailableGroup(t *testing.T) {
@@ -138,7 +232,7 @@ func TestTokenGroupRouteSkipsFrozenGroupAndReturnsAfterCooldownCleared(t *testin
 		{Group: "premium", Priority: 2, CooldownSeconds: 60},
 		{Group: "fallback", Priority: 1, CooldownSeconds: 60},
 	}
-	FreezeTokenGroupRoute(11, "premium", 60)
+	FreezeTokenGroupRoute(11, "premium", tokenRouteTestModel, tokenRouteTestPath, 60)
 
 	ctx := newTokenRouteContext(routes)
 	channel, group, err := CacheGetRandomSatisfiedChannel(newTokenRouteRetryParam(ctx))
@@ -147,7 +241,7 @@ func TestTokenGroupRouteSkipsFrozenGroupAndReturnsAfterCooldownCleared(t *testin
 	assert.Equal(t, "fallback", group)
 	assert.Equal(t, 1, channel.Id)
 
-	ClearTokenGroupRouteCooldown(11, "premium")
+	ClearTokenGroupRouteCooldown(11, "premium", tokenRouteTestModel, tokenRouteTestPath)
 	nextCtx := newTokenRouteContext(routes)
 	channel, group, err = CacheGetRandomSatisfiedChannel(newTokenRouteRetryParam(nextCtx))
 	require.NoError(t, err)
@@ -156,7 +250,7 @@ func TestTokenGroupRouteSkipsFrozenGroupAndReturnsAfterCooldownCleared(t *testin
 	assert.Equal(t, 2, channel.Id)
 }
 
-func TestTokenGroupRouteFreezesGroupWithoutAvailableChannel(t *testing.T) {
+func TestTokenGroupRouteSkipsGroupWithoutAvailableChannelWithoutCooldown(t *testing.T) {
 	db := setupTokenGroupRouteTest(t)
 	seedTokenRouteChannel(t, db, 1, "fallback")
 	model.InitChannelCache()
@@ -171,7 +265,7 @@ func TestTokenGroupRouteFreezesGroupWithoutAvailableChannel(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, channel)
 	assert.Equal(t, "fallback", group)
-	assert.True(t, IsTokenGroupRouteFrozen(11, "premium", common.GetTimestamp()))
+	assert.False(t, IsTokenGroupRouteFrozen(11, "premium", tokenRouteTestModel, tokenRouteTestPath, common.GetTimestamp()))
 }
 
 func TestTokenGroupRouteFailureFreezesCurrentGroupAndAdvancesRetry(t *testing.T) {
@@ -198,7 +292,7 @@ func TestTokenGroupRouteFailureFreezesCurrentGroupAndAdvancesRetry(t *testing.T)
 	)
 	MarkTokenGroupRouteFailure(ctx, routeErr)
 
-	assert.True(t, IsTokenGroupRouteFrozen(11, "premium", common.GetTimestamp()))
+	assert.True(t, IsTokenGroupRouteFrozen(11, "premium", tokenRouteTestModel, tokenRouteTestPath, common.GetTimestamp()))
 	channel, group, err = CacheGetRandomSatisfiedChannel(newTokenRouteRetryParam(ctx))
 	require.NoError(t, err)
 	require.NotNil(t, channel)
@@ -216,7 +310,7 @@ func TestTokenGroupRouteStickyRecordsSuccessfulFallback(t *testing.T) {
 		{Group: "premium", Priority: 2, CooldownSeconds: 60},
 		{Group: "fallback", Priority: 1, CooldownSeconds: 60},
 	}
-	FreezeTokenGroupRoute(11, "premium", 60)
+	FreezeTokenGroupRoute(11, "premium", tokenRouteTestModel, tokenRouteTestPath, 60)
 
 	ctx := newStickyTokenRouteContext(routes)
 	channel, group, err := CacheGetRandomSatisfiedChannel(newTokenRouteRetryParam(ctx))
@@ -225,9 +319,9 @@ func TestTokenGroupRouteStickyRecordsSuccessfulFallback(t *testing.T) {
 	require.Equal(t, "fallback", group)
 
 	MarkTokenGroupRouteSuccess(ctx)
-	assert.Equal(t, "fallback", GetTokenGroupRouteStickyGroup(11))
+	assert.Equal(t, "fallback", GetTokenGroupRouteStickyGroup(11, tokenRouteTestModel, tokenRouteTestPath))
 
-	ClearTokenGroupRouteCooldown(11, "premium")
+	ClearTokenGroupRouteCooldown(11, "premium", tokenRouteTestModel, tokenRouteTestPath)
 	nextCtx := newStickyTokenRouteContext(routes)
 	channel, group, err = CacheGetRandomSatisfiedChannel(newTokenRouteRetryParam(nextCtx))
 	require.NoError(t, err)
@@ -246,7 +340,7 @@ func TestTokenGroupRouteStickyClearsOnFailure(t *testing.T) {
 		{Group: "premium", Priority: 2, CooldownSeconds: 60},
 		{Group: "fallback", Priority: 1, CooldownSeconds: 60},
 	}
-	SetTokenGroupRouteStickyGroup(11, "fallback")
+	SetTokenGroupRouteStickyGroup(11, tokenRouteTestModel, tokenRouteTestPath, "fallback")
 
 	ctx := newStickyTokenRouteContext(routes)
 	channel, group, err := CacheGetRandomSatisfiedChannel(newTokenRouteRetryParam(ctx))
@@ -261,8 +355,8 @@ func TestTokenGroupRouteStickyClearsOnFailure(t *testing.T) {
 	)
 	MarkTokenGroupRouteFailure(ctx, routeErr)
 
-	assert.Empty(t, GetTokenGroupRouteStickyGroup(11))
-	assert.True(t, IsTokenGroupRouteFrozen(11, "fallback", common.GetTimestamp()))
+	assert.Empty(t, GetTokenGroupRouteStickyGroup(11, tokenRouteTestModel, tokenRouteTestPath))
+	assert.True(t, IsTokenGroupRouteFrozen(11, "fallback", tokenRouteTestModel, tokenRouteTestPath, common.GetTimestamp()))
 
 	channel, group, err = CacheGetRandomSatisfiedChannel(newTokenRouteRetryParam(ctx))
 	require.NoError(t, err)

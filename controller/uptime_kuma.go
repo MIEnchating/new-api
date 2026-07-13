@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -45,6 +46,34 @@ type Heartbeat struct {
 type UptimeGroupResult struct {
 	CategoryName string    `json:"categoryName"`
 	Monitors     []Monitor `json:"monitors"`
+}
+
+func normalizeUptimeHeartbeatTime(value string) string {
+	if value == "" {
+		return ""
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed.Format(time.RFC3339Nano)
+	}
+	for _, layout := range []string{"2006-01-02 15:04:05.999999999", "2006-01-02 15:04:05"} {
+		if parsed, err := time.ParseInLocation(layout, value, time.UTC); err == nil {
+			return parsed.Format(time.RFC3339Nano)
+		}
+	}
+	return value
+}
+
+func normalizeMonitorHeartbeats(monitor *Monitor) {
+	if monitor == nil || len(monitor.Heartbeats) == 0 {
+		return
+	}
+	sort.SliceStable(monitor.Heartbeats, func(i, j int) bool {
+		return monitor.Heartbeats[i].Time < monitor.Heartbeats[j].Time
+	})
+	latest := monitor.Heartbeats[len(monitor.Heartbeats)-1]
+	monitor.Status = latest.Status
+	monitor.LastChecked = latest.Time
+	monitor.Ping = latest.Ping
 }
 
 func getAndDecode(ctx context.Context, client *http.Client, url string, dest interface{}) error {
@@ -137,18 +166,16 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 			}
 
 			if heartbeats, exists := heartbeatData.HeartbeatList[monitorID]; exists && len(heartbeats) > 0 {
-				monitor.Status = heartbeats[0].Status
-				monitor.LastChecked = heartbeats[0].Time
-				monitor.Ping = heartbeats[0].Ping
 				monitor.Heartbeats = make([]Heartbeat, 0, len(heartbeats))
 				for _, heartbeat := range heartbeats {
 					monitor.Heartbeats = append(monitor.Heartbeats, Heartbeat{
 						Status: heartbeat.Status,
-						Time:   heartbeat.Time,
+						Time:   normalizeUptimeHeartbeatTime(heartbeat.Time),
 						Ping:   heartbeat.Ping,
 						Msg:    heartbeat.Msg,
 					})
 				}
+				normalizeMonitorHeartbeats(&monitor)
 			}
 
 			result.Monitors = append(result.Monitors, monitor)

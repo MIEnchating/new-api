@@ -78,13 +78,16 @@ export function ApiKeyRouteDetailDialog() {
     queryFn: () => getApiKeyRouteStatus(currentRow?.id ?? 0),
     enabled: open === 'route-detail' && !!currentRow?.id,
   })
-  const routeStatusMap = useMemo(
-    () =>
-      new Map(
-        (routeStatusData?.data ?? []).map((status) => [status.group, status])
-      ),
-    [routeStatusData?.data]
-  )
+  const routeStatusMap = useMemo(() => {
+    const statusesByGroup = new Map<string, RouteStatus[]>()
+    for (const status of routeStatusData?.data ?? []) {
+      if (!status.group) continue
+      const statuses = statusesByGroup.get(status.group) ?? []
+      statuses.push(status)
+      statusesByGroup.set(status.group, statuses)
+    }
+    return statusesByGroup
+  }, [routeStatusData?.data])
 
   useEffect(() => {
     if (open !== 'route-detail') {
@@ -115,12 +118,13 @@ export function ApiKeyRouteDetailDialog() {
         {routes.length > 0 ? (
           <div className='space-y-2'>
             {routes.map((route, index) => {
-              const routeStatus = routeStatusMap.get(route.group)
-              const cooldownRemaining = getRouteCooldownRemaining(
-                routeStatus,
-                now
-              )
-              const cooling = cooldownRemaining > 0
+              const coolingStatuses = (routeStatusMap.get(route.group) ?? [])
+                .map((status) => ({
+                  status,
+                  remaining: getRouteCooldownRemaining(status, now),
+                }))
+                .filter(({ remaining }) => remaining > 0)
+              const cooling = coolingStatuses.length > 0
               return (
                 <div
                   key={route.group}
@@ -149,15 +153,41 @@ export function ApiKeyRouteDetailDialog() {
                   <div className='text-right'>
                     <div className='flex items-center justify-end gap-1.5 text-sm font-medium tabular-nums'>
                       <Clock className='text-muted-foreground size-3.5' />
-                      {formatCooldown(
-                        cooling ? cooldownRemaining : route.cooldown_seconds,
-                        t
-                      )}
+                      {cooling
+                        ? coolingStatuses.length
+                        : formatCooldown(route.cooldown_seconds, t)}
                     </div>
                     <div className='text-muted-foreground text-xs'>
-                      {cooling ? t('Remaining') : t('Cooldown')}
+                      {cooling ? t('Cooling') : t('Cooldown')}
                     </div>
                   </div>
+
+                  {cooling && (
+                    <div className='col-span-2 col-start-2 space-y-1.5 border-t pt-2'>
+                      {coolingStatuses.map(({ status, remaining }) => (
+                        <div
+                          key={`${status.model}:${status.request_path}`}
+                          className='flex min-w-0 items-center justify-between gap-3 text-xs'
+                        >
+                          <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+                            <StatusBadge
+                              label={status.model || '-'}
+                              variant='neutral'
+                              copyable={false}
+                            />
+                            {status.request_path && (
+                              <span className='text-muted-foreground truncate font-mono'>
+                                {status.request_path}
+                              </span>
+                            )}
+                          </div>
+                          <span className='shrink-0 font-medium tabular-nums'>
+                            {formatCooldown(remaining, t)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )
             })}

@@ -32,6 +32,8 @@ export type ApiKeyGroupRoute = z.infer<typeof apiKeyGroupRouteSchema>
 
 export const routeStatusSchema = z.object({
   group: z.string().optional(),
+  model: z.string().optional(),
+  request_path: z.string().optional(),
   status: z.enum(['normal', 'cooling']).default('normal'),
   cooling: z.boolean().default(false),
   cooldown_until: z.number().optional(),

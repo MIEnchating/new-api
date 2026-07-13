@@ -46,6 +46,13 @@ export async function getUsers(
 }
 
 /**
+ * Get distinct groups currently assigned to users
+ */
+export function getUserGroupNames(): Promise<ApiResponse<string[]>> {
+  return api.get('/api/user/group_names').then((res) => res.data)
+}
+
+/**
  * Search users by keyword or group
  */
 export async function searchUsers(

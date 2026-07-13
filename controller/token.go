@@ -109,6 +109,8 @@ func GetToken(c *gin.Context) {
 
 type tokenGroupRouteStatus struct {
 	Group                    string `json:"group"`
+	Model                    string `json:"model,omitempty"`
+	RequestPath              string `json:"request_path,omitempty"`
 	Status                   string `json:"status"`
 	Cooling                  bool   `json:"cooling"`
 	CooldownUntil            int64  `json:"cooldown_until,omitempty"`
@@ -134,21 +136,29 @@ func GetTokenRouteStatus(c *gin.Context) {
 	}
 
 	now := common.GetTimestamp()
-	statuses := make([]tokenGroupRouteStatus, 0, len(routes))
+	cooldowns := service.ListTokenGroupRouteCooldowns(token.Id, now)
+	cooldownsByGroup := make(map[string][]service.TokenGroupRouteCooldownStatus, len(routes))
+	for _, cooldown := range cooldowns {
+		cooldownsByGroup[cooldown.Group] = append(cooldownsByGroup[cooldown.Group], cooldown)
+	}
+	statuses := make([]tokenGroupRouteStatus, 0, len(routes)+len(cooldowns))
 	for _, route := range routes {
-		status := tokenGroupRouteStatus{
-			Group:   route.Group,
-			Status:  "normal",
-			Cooling: false,
+		groupCooldowns := cooldownsByGroup[route.Group]
+		if len(groupCooldowns) == 0 {
+			statuses = append(statuses, tokenGroupRouteStatus{Group: route.Group, Status: "normal"})
+			continue
 		}
-		until := service.GetTokenGroupRouteCooldownUntil(token.Id, route.Group, now)
-		if until > now {
-			status.Status = "cooling"
-			status.Cooling = true
-			status.CooldownUntil = until
-			status.CooldownRemainingSeconds = until - now
+		for _, cooldown := range groupCooldowns {
+			statuses = append(statuses, tokenGroupRouteStatus{
+				Group:                    route.Group,
+				Model:                    cooldown.ModelName,
+				RequestPath:              cooldown.RequestPath,
+				Status:                   "cooling",
+				Cooling:                  true,
+				CooldownUntil:            cooldown.Until,
+				CooldownRemainingSeconds: cooldown.Until - now,
+			})
 		}
-		statuses = append(statuses, status)
 	}
 	common.ApiSuccess(c, statuses)
 }
@@ -330,7 +340,7 @@ func DeleteToken(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	service.ClearTokenGroupRouteSticky(id)
+	service.ClearTokenGroupRouteState(id)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -409,7 +419,7 @@ func UpdateToken(c *gin.Context) {
 		return
 	}
 	if statusOnly == "" {
-		service.ClearTokenGroupRouteSticky(cleanToken.Id)
+		service.ClearTokenGroupRouteState(cleanToken.Id)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -435,7 +445,7 @@ func DeleteTokenBatch(c *gin.Context) {
 		return
 	}
 	for _, id := range tokenBatch.Ids {
-		service.ClearTokenGroupRouteSticky(id)
+		service.ClearTokenGroupRouteState(id)
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,

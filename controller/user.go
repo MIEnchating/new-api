@@ -315,6 +315,16 @@ func GetAllUsers(c *gin.Context) {
 	return
 }
 
+func GetUserGroupNames(c *gin.Context) {
+	groups, err := model.GetUserGroupNames()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, groups)
+}
+
 func SearchUsers(c *gin.Context) {
 	keyword := c.Query("keyword")
 	group := c.Query("group")

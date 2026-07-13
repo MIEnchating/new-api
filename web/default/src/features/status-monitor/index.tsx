@@ -20,13 +20,14 @@ import {
   Activity,
   AlertTriangle,
   CheckCircle2,
+  ChevronRight,
   CircleDashed,
   Clock3,
   RotateCw,
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
@@ -34,6 +35,12 @@ import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { getUptimeStatus } from '@/features/dashboard/api'
 import type {
   UptimeHeartbeat,
@@ -41,6 +48,11 @@ import type {
   UptimeMonitor,
 } from '@/features/dashboard/types'
 import { cn } from '@/lib/utils'
+
+import {
+  getOrderedHeartbeats,
+  MonitorDetailsDrawer,
+} from './monitor-details-drawer'
 
 type MonitorStatusMeta = {
   label: string
@@ -110,7 +122,20 @@ function formatDateTime(value: string | null | undefined) {
   if (!value) return '--'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
+  return date.toLocaleString(undefined, { hourCycle: 'h23' })
+}
+
+function formatTimelineBoundary(value: string | null | undefined) {
+  if (!value) return '--'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
 }
 
 function getRelativeTime(
@@ -163,6 +188,75 @@ function getMonitorKey(sourceKey: string, monitor: UptimeMonitor) {
     .join('-')
 }
 
+function RefreshControl(props: {
+  loading: boolean
+  refreshing: boolean
+  lastUpdated: Date | null
+  onRefresh: () => void
+}) {
+  const { t } = useTranslation()
+  const [countdown, setCountdown] = useState(AUTO_REFRESH_SECONDS)
+
+  useEffect(() => {
+    if (props.loading || props.refreshing) {
+      setCountdown(AUTO_REFRESH_SECONDS)
+      return
+    }
+
+    const timer = window.setInterval(() => {
+      setCountdown((current) => Math.max(current - 1, 0))
+    }, 1000)
+
+    return () => window.clearInterval(timer)
+  }, [props.loading, props.refreshing])
+
+  useEffect(() => {
+    if (countdown !== 0 || props.loading || props.refreshing) return
+
+    setCountdown(AUTO_REFRESH_SECONDS)
+    props.onRefresh()
+  }, [countdown, props.loading, props.onRefresh, props.refreshing])
+
+  const lastUpdatedText = props.lastUpdated
+    ? t('Updated {{time}}', {
+        time: props.lastUpdated.toLocaleTimeString(undefined, {
+          hourCycle: 'h23',
+        }),
+      })
+    : ''
+
+  return (
+    <div className='flex w-full min-w-0 items-center justify-between gap-2 sm:w-auto sm:justify-start'>
+      {lastUpdatedText ? (
+        <div className='text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs'>
+          <Clock3 className='size-3.5 shrink-0' />
+          <span className='truncate whitespace-nowrap'>{lastUpdatedText}</span>
+        </div>
+      ) : null}
+      <Button
+        type='button'
+        variant='outline'
+        onClick={() => {
+          setCountdown(AUTO_REFRESH_SECONDS)
+          props.onRefresh()
+        }}
+        disabled={props.loading || props.refreshing}
+        className='gap-2'
+      >
+        <RotateCw
+          className={cn('size-4', props.refreshing && 'animate-spin')}
+        />
+        {t('Refresh')}
+        {!props.loading ? (
+          <span className='border-border min-w-8 border-l pl-2 text-right tabular-nums'>
+            {countdown}s
+          </span>
+        ) : null}
+      </Button>
+    </div>
+  )
+}
+
 function SummaryTile(props: {
   label: string
   value: string
@@ -186,7 +280,7 @@ function SummaryTile(props: {
           <Icon className='size-4' />
         </span>
       </div>
-      <div className='mt-2 text-2xl font-semibold tabular-nums'>
+      <div className='mt-2 text-xl font-semibold tabular-nums sm:text-2xl'>
         {props.value}
       </div>
     </div>
@@ -199,17 +293,23 @@ function MonitorStatusBadge(props: { status: number }) {
   const Icon = meta.icon
 
   return (
-    <StatusBadge variant={meta.variant} className='min-w-24'>
+    <StatusBadge
+      variant={meta.variant}
+      className='sm:min-w-24'
+      copyable={false}
+    >
       <Icon data-icon='inline-start' />
       {t(meta.label)}
     </StatusBadge>
   )
 }
 
-function HeartbeatTimeline(props: { heartbeats?: UptimeHeartbeat[] }) {
+const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
+  heartbeats?: UptimeHeartbeat[]
+}) {
   const { t } = useTranslation()
   const heartbeats = useMemo(
-    () => [...(props.heartbeats ?? [])].reverse().slice(-72),
+    () => getOrderedHeartbeats(props.heartbeats).slice(-48),
     [props.heartbeats]
   )
 
@@ -222,37 +322,64 @@ function HeartbeatTimeline(props: { heartbeats?: UptimeHeartbeat[] }) {
   }
 
   return (
-    <div
-      className='grid h-12 min-w-0 items-end gap-1'
-      style={{
-        gridTemplateColumns: `repeat(${heartbeats.length}, minmax(3px, 1fr))`,
-      }}
-      aria-label={t('Heartbeat timeline')}
-    >
-      {heartbeats.map((heartbeat) => {
-        const meta = getStatusMeta(heartbeat.status)
-        const titleParts = [
-          t(meta.label),
-          formatDateTime(heartbeat.time),
-          formatPing(heartbeat.ping),
-          heartbeat.msg,
-        ].filter(Boolean)
+    <TooltipProvider delay={80}>
+      <div
+        className='grid h-10 min-w-0 items-end gap-px sm:h-12 sm:gap-1'
+        style={{
+          gridTemplateColumns: `repeat(${heartbeats.length}, minmax(4px, 1fr))`,
+        }}
+        aria-label={t('Heartbeat timeline')}
+      >
+        {heartbeats.map((heartbeat) => {
+          const meta = getStatusMeta(heartbeat.status)
+          const label = [
+            t(meta.label),
+            formatDateTime(heartbeat.time),
+            formatPing(heartbeat.ping),
+          ].join(' · ')
 
-        return (
-          <span
-            key={`${heartbeat.time ?? 'heartbeat'}-${heartbeat.status}-${heartbeat.ping ?? 'na'}-${heartbeat.msg ?? ''}`}
-            title={titleParts.join(' · ')}
-            className={cn(
-              'block min-h-4 rounded-sm',
-              heartbeat.status === 1 ? 'h-12' : 'h-8',
-              meta.dotClassName
-            )}
-          />
-        )
-      })}
-    </div>
+          return (
+            <Tooltip
+              key={`${heartbeat.time ?? 'heartbeat'}-${heartbeat.status}-${heartbeat.ping ?? 'na'}-${heartbeat.msg ?? ''}`}
+            >
+              <TooltipTrigger
+                render={
+                  <span
+                    tabIndex={0}
+                    aria-label={label}
+                    onClick={(event) => event.stopPropagation()}
+                    className={cn(
+                      'block min-h-3 cursor-default rounded-[2px] outline-none focus-visible:ring-2',
+                      heartbeat.status === 1 ? 'h-10 sm:h-12' : 'h-7 sm:h-8',
+                      meta.dotClassName
+                    )}
+                  />
+                }
+              />
+              <TooltipContent className='flex-col items-start gap-0.5'>
+                <span className='font-medium'>
+                  {formatPing(heartbeat.ping)}
+                </span>
+                <span className='opacity-75'>
+                  {formatDateTime(heartbeat.time)}
+                </span>
+                {heartbeat.msg ? <span>{heartbeat.msg}</span> : null}
+              </TooltipContent>
+            </Tooltip>
+          )
+        })}
+      </div>
+      <div className='text-muted-foreground mt-1.5 flex items-center justify-between gap-3 text-[11px] tabular-nums'>
+        <span className='truncate'>
+          {formatTimelineBoundary(heartbeats[0]?.time)}
+        </span>
+        <span className='truncate text-right'>
+          {formatTimelineBoundary(heartbeats.at(-1)?.time)}
+        </span>
+      </div>
+    </TooltipProvider>
   )
-}
+})
 
 function MetricItem(props: { label: string; value: string }) {
   return (
@@ -267,12 +394,26 @@ function MetricItem(props: { label: string; value: string }) {
   )
 }
 
-function MonitorRow(props: { monitor: UptimeMonitor }) {
+const MonitorRow = memo(function MonitorRow(props: {
+  monitor: UptimeMonitor
+  onSelect: (monitor: UptimeMonitor) => void
+}) {
   const { t } = useTranslation()
   const meta = getStatusMeta(props.monitor.status)
 
   return (
-    <article className='bg-background/80 rounded-lg border p-3 sm:p-4'>
+    <article
+      role='button'
+      tabIndex={0}
+      onClick={() => props.onSelect(props.monitor)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          props.onSelect(props.monitor)
+        }
+      }}
+      className='bg-background/80 hover:bg-muted/20 focus-visible:ring-ring cursor-pointer rounded-lg border p-3 transition-colors outline-none focus-visible:ring-2 sm:p-4'
+    >
       <div className='flex min-w-0 flex-wrap items-start justify-between gap-3'>
         <div className='flex min-w-0 items-center gap-3'>
           <span
@@ -291,10 +432,13 @@ function MonitorRow(props: { monitor: UptimeMonitor }) {
             ) : null}
           </div>
         </div>
-        <MonitorStatusBadge status={props.monitor.status} />
+        <div className='flex shrink-0 items-center gap-1'>
+          <MonitorStatusBadge status={props.monitor.status} />
+          <ChevronRight className='text-muted-foreground size-4' />
+        </div>
       </div>
 
-      <div className='mt-4 grid min-w-0 gap-2 sm:grid-cols-2'>
+      <div className='mt-3 grid min-w-0 grid-cols-2 gap-2 sm:mt-4'>
         <MetricItem
           label={t('24-hour uptime')}
           value={formatUptime(props.monitor.uptime24 ?? props.monitor.uptime)}
@@ -322,7 +466,7 @@ function MonitorRow(props: { monitor: UptimeMonitor }) {
       </div>
     </article>
   )
-}
+})
 
 function LoadingState() {
   return (
@@ -366,8 +510,10 @@ export function StatusMonitor() {
   const [refreshing, setRefreshing] = useState(false)
   const [failed, setFailed] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-  const [refreshCountdown, setRefreshCountdown] = useState(AUTO_REFRESH_SECONDS)
   const [activeGroupKey, setActiveGroupKey] = useState(ALL_GROUP_KEY)
+  const [selectedMonitor, setSelectedMonitor] = useState<UptimeMonitor | null>(
+    null
+  )
 
   const fetchStatus = useCallback((mode: 'initial' | 'refresh') => {
     if (mode === 'initial') {
@@ -376,8 +522,6 @@ export function StatusMonitor() {
       setRefreshing(true)
     }
     setFailed(false)
-    setRefreshCountdown(AUTO_REFRESH_SECONDS)
-
     return getUptimeStatus()
       .then((response) => {
         setGroups(response?.data ?? [])
@@ -395,23 +539,6 @@ export function StatusMonitor() {
 
   useEffect(() => {
     fetchStatus('initial')
-  }, [fetchStatus])
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      setRefreshCountdown((current) => {
-        if (current <= 1) {
-          void fetchStatus('refresh')
-          return AUTO_REFRESH_SECONDS
-        }
-
-        return current - 1
-      })
-    }, 1000)
-
-    return () => {
-      window.clearInterval(timer)
-    }
   }, [fetchStatus])
 
   const monitors = useMemo(() => flattenMonitors(groups), [groups])
@@ -504,12 +631,6 @@ export function StatusMonitor() {
     fetchStatus('refresh')
   }, [fetchStatus])
 
-  const lastUpdatedText = lastUpdated
-    ? t('Updated {{time}}', {
-        time: lastUpdated.toLocaleTimeString(),
-      })
-    : ''
-
   let content = null
   if (loading) {
     content = <LoadingState />
@@ -531,7 +652,7 @@ export function StatusMonitor() {
             setActiveGroupKey(value || ALL_GROUP_KEY)
           }}
         >
-          <TabsList className='max-w-full flex-wrap justify-start group-data-horizontal/tabs:h-auto sm:group-data-horizontal/tabs:h-auto'>
+          <TabsList className='max-w-full [scrollbar-width:none] flex-nowrap justify-start overflow-x-auto group-data-horizontal/tabs:h-auto sm:overflow-visible [&::-webkit-scrollbar]:hidden'>
             <TabsTrigger value={ALL_GROUP_KEY} className='gap-1.5'>
               <span>{t('All')}</span>
               <span className='text-muted-foreground text-xs tabular-nums'>
@@ -556,9 +677,13 @@ export function StatusMonitor() {
         </Tabs>
 
         {visibleMonitors.length > 0 ? (
-          <div className='grid min-w-0 gap-3 md:grid-cols-2'>
+          <div className='grid min-w-0 gap-3 lg:grid-cols-2'>
             {visibleMonitorItems.map((item) => (
-              <MonitorRow key={item.key} monitor={item.monitor} />
+              <MonitorRow
+                key={item.key}
+                monitor={item.monitor}
+                onSelect={setSelectedMonitor}
+              />
             ))}
           </div>
         ) : (
@@ -571,65 +696,54 @@ export function StatusMonitor() {
   }
 
   return (
-    <SectionPageLayout>
-      <SectionPageLayout.Title>{t('Status Monitor')}</SectionPageLayout.Title>
-      <SectionPageLayout.Actions>
-        <div className='flex min-w-0 items-center gap-2 max-[360px]:w-[calc(100vw-1.5rem)] max-[360px]:justify-between'>
-          {lastUpdatedText ? (
-            <div className='text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs'>
-              <Clock3 className='size-3.5 shrink-0' />
-              <span className='truncate whitespace-nowrap'>
-                {lastUpdatedText}
-              </span>
+    <>
+      <SectionPageLayout>
+        <SectionPageLayout.Title>{t('Status Monitor')}</SectionPageLayout.Title>
+        <SectionPageLayout.Actions>
+          <RefreshControl
+            loading={loading}
+            refreshing={refreshing}
+            lastUpdated={lastUpdated}
+            onRefresh={handleManualRefresh}
+          />
+        </SectionPageLayout.Actions>
+        <SectionPageLayout.Content>
+          <div className='flex min-w-0 flex-col gap-4'>
+            <div className='grid min-w-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4'>
+              <SummaryTile
+                label={t('Total monitors')}
+                value={String(summary.total)}
+                icon={Activity}
+              />
+              <SummaryTile
+                label={t('Operational')}
+                value={String(summary.operational)}
+                icon={CheckCircle2}
+                tone='success'
+              />
+              <SummaryTile
+                label={t('Affected monitors')}
+                value={String(summary.affected)}
+                icon={AlertTriangle}
+                tone={summary.affected > 0 ? 'warning' : 'default'}
+              />
+              <SummaryTile
+                label={t('Average uptime')}
+                value={formatUptime(summary.average)}
+                icon={CircleDashed}
+              />
             </div>
-          ) : null}
-          <Button
-            type='button'
-            variant='outline'
-            onClick={handleManualRefresh}
-            disabled={loading || refreshing}
-            className='gap-2'
-          >
-            <RotateCw className={cn('size-4', refreshing && 'animate-spin')} />
-            {t('Refresh')}
-            {!loading ? (
-              <span className='border-border min-w-8 border-l pl-2 text-right tabular-nums'>
-                {refreshCountdown}s
-              </span>
-            ) : null}
-          </Button>
-        </div>
-      </SectionPageLayout.Actions>
-      <SectionPageLayout.Content>
-        <div className='flex min-w-0 flex-col gap-4'>
-          <div className='grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-4'>
-            <SummaryTile
-              label={t('Total monitors')}
-              value={String(summary.total)}
-              icon={Activity}
-            />
-            <SummaryTile
-              label={t('Operational')}
-              value={String(summary.operational)}
-              icon={CheckCircle2}
-              tone='success'
-            />
-            <SummaryTile
-              label={t('Affected monitors')}
-              value={String(summary.affected)}
-              icon={AlertTriangle}
-              tone={summary.affected > 0 ? 'warning' : 'default'}
-            />
-            <SummaryTile
-              label={t('Average uptime')}
-              value={formatUptime(summary.average)}
-              icon={CircleDashed}
-            />
-          </div>
 
-          {content}
-        </div>
-      </SectionPageLayout.Content>
-    </SectionPageLayout>
+            {content}
+          </div>
+        </SectionPageLayout.Content>
+      </SectionPageLayout>
+      <MonitorDetailsDrawer
+        monitor={selectedMonitor}
+        onOpenChange={(open) => {
+          if (!open) setSelectedMonitor(null)
+        }}
+      />
+    </>
   )
 }
