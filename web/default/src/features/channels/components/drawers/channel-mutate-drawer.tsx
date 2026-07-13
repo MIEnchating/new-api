@@ -42,6 +42,7 @@ import {
   Settings,
   SlidersHorizontal,
   Wand2,
+  X,
 } from 'lucide-react'
 import {
   type ReactNode,
@@ -1831,7 +1832,10 @@ export function ChannelMutateDrawer({
   return (
     <>
       <Sheet open={open} onOpenChange={handleOpenChange}>
-        <SheetContent className={sideDrawerContentClassName('sm:max-w-5xl')}>
+        <SheetContent
+          className={sideDrawerContentClassName('sm:max-w-5xl')}
+          showCloseButton={false}
+        >
           <SheetHeader className={sideDrawerHeaderClassName()}>
             <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
               <div className='min-w-0'>
@@ -1856,18 +1860,27 @@ export function ChannelMutateDrawer({
                       )}
                 </SheetDescription>
               </div>
-              {!isEditing && (
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  className='shrink-0'
-                  onClick={pasteConnectionInfoFromClipboard}
+              <div className='flex shrink-0 items-center gap-2 self-end sm:self-auto'>
+                {!isEditing && (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={pasteConnectionInfoFromClipboard}
+                  >
+                    <ClipboardPaste className='size-4' />
+                    <span>{t('Paste Connection Info')}</span>
+                  </Button>
+                )}
+                <SheetClose
+                  render={
+                    <Button type='button' variant='ghost' size='icon-sm' />
+                  }
                 >
-                  <ClipboardPaste className='size-4' />
-                  <span>{t('Paste Connection Info')}</span>
-                </Button>
-              )}
+                  <X className='size-4' />
+                  <span className='sr-only'>{t('Close')}</span>
+                </SheetClose>
+              </div>
             </div>
           </SheetHeader>
 
