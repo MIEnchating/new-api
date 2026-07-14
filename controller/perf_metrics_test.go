@@ -34,3 +34,24 @@ func TestUpdateCacheHitRateBaselineRequiresValue(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"success":false`)
 	require.Contains(t, recorder.Body.String(), "无效的参数")
 }
+
+func TestResolveCacheMonitorGroups(t *testing.T) {
+	available := []string{"auto", "default", "vip"}
+	require.Equal(t, available, resolveCacheMonitorGroups(available, nil))
+	require.Equal(t, []string{"default", "vip"}, resolveCacheMonitorGroups(available, []string{"vip", "missing", "default", "vip"}))
+}
+
+func TestNormalizeCacheMonitorGroups(t *testing.T) {
+	available := []string{"auto", "default", "vip"}
+
+	groups, err := normalizeCacheMonitorGroups(updateCacheMonitorGroupsRequest{AllGroups: true}, available)
+	require.NoError(t, err)
+	require.Empty(t, groups)
+
+	groups, err = normalizeCacheMonitorGroups(updateCacheMonitorGroupsRequest{Groups: []string{"vip", "default"}}, available)
+	require.NoError(t, err)
+	require.Equal(t, []string{"default", "vip"}, groups)
+
+	_, err = normalizeCacheMonitorGroups(updateCacheMonitorGroupsRequest{Groups: []string{"missing"}}, available)
+	require.Error(t, err)
+}

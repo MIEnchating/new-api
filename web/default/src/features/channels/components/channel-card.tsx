@@ -21,7 +21,6 @@ import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
-import { cn } from '@/lib/utils'
 
 import { CHANNEL_STATUS } from '../constants'
 import { isTagAggregateRow, parseGroupsList } from '../lib'
@@ -60,7 +59,7 @@ function ChannelCardComponent({
   }
 
   const fieldLabels: Record<string, string> = {
-    balance: t('Used / Remaining'),
+    balance: t('Used'),
     response_time: t('Response'),
     test_time: t('Last Tested'),
   }
@@ -113,51 +112,31 @@ function ChannelCardComponent({
           </div>
         </div>
 
-        {/* Body: left column (id/name + balance) paired with a right-aligned
-          column (priority/weight + response/test time). */}
-        <div className='flex items-start justify-between gap-3'>
-          {/* Left column */}
-          <div className='flex min-w-0 flex-1 flex-col gap-3 overflow-hidden'>
-            <div className='min-w-0 text-sm'>
-              {!isTagRow && (
-                <div className={labelClass}>
-                  #{sensitiveVisible ? row.original.id : SENSITIVE_MASK}
-                </div>
-              )}
-              {nameCell}
-            </div>
-            <div className='min-w-0'>
-              <div className={cn('mb-1', labelClass)}>
-                {fieldLabels.balance}
+        {/* Shared rows keep the balance and timing fields vertically aligned. */}
+        <div className='grid min-w-0 grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-3 gap-y-1'>
+          <div className='row-span-2 min-w-0 self-start overflow-hidden text-sm'>
+            {!isTagRow && (
+              <div className={labelClass}>
+                #{sensitiveVisible ? row.original.id : SENSITIVE_MASK}
               </div>
-              <div className='min-w-0 overflow-hidden text-sm'>
-                {balanceCell ?? (
-                  <span className='text-muted-foreground'>-</span>
-                )}
-              </div>
-            </div>
+            )}
+            {nameCell}
           </div>
-
-          {/* Right column (sits on the right, content left-aligned). A single
-            grid with content-sized columns keeps Priority/Weight and
-            Response/Last Tested aligned without wasting horizontal space. */}
-          <div className='grid shrink-0 grid-cols-[auto_auto] items-center gap-x-3 gap-y-1'>
-            <span className={labelClass}>{t('Priority')}</span>
-            <span className={labelClass}>{t('Weight')}</span>
-            <div className='flex justify-start'>{priorityCell}</div>
-            <div className='flex justify-start'>{weightCell}</div>
-            <span className={cn('mt-2', labelClass)}>
-              {fieldLabels.response_time}
-            </span>
-            <span className={cn('mt-2', labelClass)}>
-              {fieldLabels.test_time}
-            </span>
-            <div className='overflow-hidden text-sm'>
-              {responseCell ?? <span className='text-muted-foreground'>-</span>}
-            </div>
-            <div className='overflow-hidden text-sm'>
-              {testCell ?? <span className='text-muted-foreground'>-</span>}
-            </div>
+          <span className={labelClass}>{t('Priority')}</span>
+          <span className={labelClass}>{t('Weight')}</span>
+          <div className='flex justify-start'>{priorityCell}</div>
+          <div className='flex justify-start'>{weightCell}</div>
+          <span className={labelClass}>{fieldLabels.balance}</span>
+          <span className={labelClass}>{fieldLabels.response_time}</span>
+          <span className={labelClass}>{fieldLabels.test_time}</span>
+          <div className='min-w-0 overflow-hidden text-sm'>
+            {balanceCell ?? <span className='text-muted-foreground'>-</span>}
+          </div>
+          <div className='overflow-hidden text-sm'>
+            {responseCell ?? <span className='text-muted-foreground'>-</span>}
+          </div>
+          <div className='overflow-hidden text-sm'>
+            {testCell ?? <span className='text-muted-foreground'>-</span>}
           </div>
         </div>
 

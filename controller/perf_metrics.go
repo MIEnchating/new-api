@@ -1,9 +1,12 @@
 package controller
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -47,8 +50,10 @@ func GetCacheMetrics(c *gin.Context) {
 		}
 	}
 
-	activeGroups := append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto")
-	result, err := perfmetrics.QueryCache(hours, activeGroups)
+	availableGroups := getAvailableCacheGroups()
+	configuredGroups := perf_metrics_setting.GetCacheMonitorGroups()
+	displayGroups := resolveCacheMonitorGroups(availableGroups, configuredGroups)
+	result, err := perfmetrics.QueryCache(hours, displayGroups)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -60,11 +65,47 @@ func GetCacheMetrics(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"total":    result.Total,
-			"groups":   result.Groups,
-			"baseline": perf_metrics_setting.GetCacheHitRateBaseline(),
+			"total":            result.Total,
+			"groups":           result.Groups,
+			"baseline":         perf_metrics_setting.GetCacheHitRateBaseline(),
+			"bucket_seconds":   perf_metrics_setting.GetBucketSeconds(),
+			"available_groups": availableGroups,
+			"display_groups":   displayGroups,
+			"all_groups":       len(configuredGroups) == 0,
 		},
 	})
+}
+
+func getAvailableCacheGroups() []string {
+	groups := append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto")
+	groups = lo.Uniq(groups)
+	sort.Strings(groups)
+	return groups
+}
+
+func resolveCacheMonitorGroups(availableGroups []string, configuredGroups []string) []string {
+	if len(configuredGroups) == 0 {
+		return append([]string(nil), availableGroups...)
+	}
+
+	allowed := lo.SliceToMap(availableGroups, func(group string) (string, struct{}) {
+		return group, struct{}{}
+	})
+	resolved := make([]string, 0, len(configuredGroups))
+	seen := make(map[string]struct{}, len(configuredGroups))
+	for _, rawGroup := range configuredGroups {
+		group := strings.TrimSpace(rawGroup)
+		if _, ok := allowed[group]; !ok {
+			continue
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		resolved = append(resolved, group)
+	}
+	sort.Strings(resolved)
+	return resolved
 }
 
 type updateCacheHitRateBaselineRequest struct {
@@ -107,6 +148,63 @@ func UpdateCacheHitRateBaseline(c *gin.Context) {
 		"success": true,
 		"data": gin.H{
 			"baseline": *request.Baseline,
+		},
+	})
+}
+
+type updateCacheMonitorGroupsRequest struct {
+	AllGroups bool     `json:"all_groups"`
+	Groups    []string `json:"groups"`
+}
+
+func normalizeCacheMonitorGroups(request updateCacheMonitorGroupsRequest, availableGroups []string) ([]string, error) {
+	if request.AllGroups {
+		return []string{}, nil
+	}
+
+	groups := resolveCacheMonitorGroups(availableGroups, request.Groups)
+	if len(groups) == 0 {
+		return nil, fmt.Errorf("至少选择一个缓存监控分组")
+	}
+	if len(groups) != len(lo.Uniq(lo.Map(request.Groups, func(group string, _ int) string {
+		return strings.TrimSpace(group)
+	}))) {
+		return nil, fmt.Errorf("缓存监控分组包含无效选项")
+	}
+	return groups, nil
+}
+
+func UpdateCacheMonitorGroups(c *gin.Context) {
+	var request updateCacheMonitorGroupsRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+
+	groups, err := normalizeCacheMonitorGroups(request, getAvailableCacheGroups())
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	encoded, err := json.Marshal(groups)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.UpdateOption("perf_metrics_setting.cache_monitor_groups", string(encoded)); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	recordManageAudit(c, "cache_monitor_groups.update", map[string]interface{}{
+		"all_groups":  request.AllGroups,
+		"group_count": len(groups),
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"all_groups":     request.AllGroups,
+			"display_groups": resolveCacheMonitorGroups(getAvailableCacheGroups(), groups),
 		},
 	})
 }

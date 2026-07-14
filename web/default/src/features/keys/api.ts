@@ -71,6 +71,10 @@ export function getApiKeyRouteStatus(
     .then((res) => res.data)
 }
 
+export function getApiKeyModels(id: number): Promise<ApiResponse<string[]>> {
+  return api.get(`/api/token/${id}/models`).then((res) => res.data)
+}
+
 // Create a new API key
 export async function createApiKey(
   data: ApiKeyFormData

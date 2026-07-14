@@ -1,4 +1,4 @@
-import { Database, Gauge, Save, Target, Zap } from 'lucide-react'
+import { Database, Gauge, Save, Settings2, Target, Zap } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -22,13 +22,28 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from '@/components/ui/chart'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsAdmin } from '@/hooks/use-admin'
 
-import { updateCacheHitRateBaseline } from './api'
-import type { CacheMetricGroup, CacheMetricsResponse } from './types'
+import { updateCacheHitRateBaseline, updateCacheMonitorGroups } from './api'
+import type {
+  CacheMetricGroup,
+  CacheMetricPoint,
+  CacheMetricsResponse,
+} from './types'
 
 const ALL_CACHE_GROUPS = 'all'
 const DEFAULT_BASELINE = 85
@@ -51,6 +66,49 @@ function formatTime(timestamp: number) {
   })
 }
 
+type CacheChartPoint = Omit<
+  CacheMetricPoint,
+  'request_count' | 'hit_count' | 'cached_tokens' | 'cache_hit_rate'
+> & {
+  request_count: number | null
+  hit_count: number | null
+  cached_tokens: number | null
+  cache_hit_rate: number | null
+  missing: boolean
+}
+
+function buildCacheChartSeries(
+  series: CacheMetricPoint[],
+  bucketSeconds: number
+): CacheChartPoint[] {
+  if (series.length === 0) return []
+
+  const interval = Math.max(1, bucketSeconds)
+  const sorted = [...series].sort((a, b) => a.ts - b.ts)
+  const result: CacheChartPoint[] = []
+  for (const point of sorted) {
+    const previous = result.at(-1)
+    if (previous) {
+      for (
+        let missingTs = previous.ts + interval;
+        missingTs < point.ts;
+        missingTs += interval
+      ) {
+        result.push({
+          ts: missingTs,
+          request_count: null,
+          hit_count: null,
+          cached_tokens: null,
+          cache_hit_rate: null,
+          missing: true,
+        })
+      }
+    }
+    result.push({ ...point, missing: false })
+  }
+  return result
+}
+
 function CacheMetric(props: {
   icon: typeof Gauge
   label: string
@@ -70,18 +128,24 @@ function CacheMetric(props: {
   )
 }
 
-function CacheTrend(props: { group: CacheMetricGroup; baseline: number }) {
+function CacheTrend(props: {
+  group: CacheMetricGroup
+  baseline: number
+  bucketSeconds: number
+}) {
   const { t } = useTranslation()
   const data = useMemo(
     () =>
-      props.group.series.map((point) => ({
-        ...point,
-        time: formatTime(point.ts),
-        fullTime: new Date(point.ts * 1000).toLocaleString(undefined, {
-          hourCycle: 'h23',
-        }),
-      })),
-    [props.group.series]
+      buildCacheChartSeries(props.group.series, props.bucketSeconds).map(
+        (point) => ({
+          ...point,
+          time: formatTime(point.ts),
+          fullTime: new Date(point.ts * 1000).toLocaleString(undefined, {
+            hourCycle: 'h23',
+          }),
+        })
+      ),
+    [props.bucketSeconds, props.group.series]
   )
   const config = {
     cache_hit_rate: {
@@ -149,18 +213,23 @@ function CacheTrend(props: { group: CacheMetricGroup; baseline: number }) {
   )
 }
 
-function CacheRequestTrend(props: { group: CacheMetricGroup }) {
+function CacheRequestTrend(props: {
+  group: CacheMetricGroup
+  bucketSeconds: number
+}) {
   const { t } = useTranslation()
   const data = useMemo(
     () =>
-      props.group.series.map((point) => ({
-        ...point,
-        time: formatTime(point.ts),
-        fullTime: new Date(point.ts * 1000).toLocaleString(undefined, {
-          hourCycle: 'h23',
-        }),
-      })),
-    [props.group.series]
+      buildCacheChartSeries(props.group.series, props.bucketSeconds).map(
+        (point) => ({
+          ...point,
+          time: formatTime(point.ts),
+          fullTime: new Date(point.ts * 1000).toLocaleString(undefined, {
+            hourCycle: 'h23',
+          }),
+        })
+      ),
+    [props.bucketSeconds, props.group.series]
   )
   const config = {
     request_count: {
@@ -230,6 +299,7 @@ export function CacheMonitor(props: {
   response: CacheMetricsResponse | null
   loading: boolean
   failed: boolean
+  onRefresh: () => void
 }) {
   const { t } = useTranslation()
   const isAdmin = useIsAdmin()
@@ -237,10 +307,27 @@ export function CacheMonitor(props: {
   const [baseline, setBaseline] = useState(DEFAULT_BASELINE)
   const [baselineDraft, setBaselineDraft] = useState(DEFAULT_BASELINE)
   const [savingBaseline, setSavingBaseline] = useState(false)
-  const groups = useMemo(
-    () => props.response?.data.groups ?? [],
-    [props.response]
-  )
+  const [groupsOpen, setGroupsOpen] = useState(false)
+  const [allGroupsDraft, setAllGroupsDraft] = useState(true)
+  const [groupDraft, setGroupDraft] = useState<Set<string>>(new Set())
+  const [savingGroups, setSavingGroups] = useState(false)
+  const groups = useMemo(() => {
+    const responseGroups = props.response?.data.groups ?? []
+    const groupMap = new Map(
+      responseGroups.map((group) => [group.group, group])
+    )
+    return (props.response?.data.display_groups ?? []).map(
+      (groupName): CacheMetricGroup =>
+        groupMap.get(groupName) ?? {
+          group: groupName,
+          request_count: 0,
+          hit_count: 0,
+          cached_tokens: 0,
+          cache_hit_rate: 0,
+          series: [],
+        }
+    )
+  }, [props.response])
   const selectedGroup =
     activeGroup === ALL_CACHE_GROUPS
       ? props.response?.data.total
@@ -273,6 +360,34 @@ export function CacheMonitor(props: {
       .finally(() => {
         setSavingBaseline(false)
       })
+  }
+
+  const handleGroupsOpenChange = (open: boolean) => {
+    setGroupsOpen(open)
+    if (!open) return
+    setAllGroupsDraft(props.response?.data.all_groups ?? true)
+    setGroupDraft(new Set(props.response?.data.display_groups ?? []))
+  }
+
+  const handleToggleGroup = (group: string) => {
+    setGroupDraft((current) => {
+      const next = new Set(current)
+      if (next.has(group)) next.delete(group)
+      else next.add(group)
+      return next
+    })
+  }
+
+  const handleSaveGroups = () => {
+    setSavingGroups(true)
+    return updateCacheMonitorGroups(allGroupsDraft, [...groupDraft])
+      .then((response) => {
+        if (!response.success) return
+        setGroupsOpen(false)
+        toast.success(t('Setting updated successfully'))
+        props.onRefresh()
+      })
+      .finally(() => setSavingGroups(false))
   }
 
   let content
@@ -323,13 +438,20 @@ export function CacheMonitor(props: {
             <div className='mb-3 text-sm font-medium'>
               {t('Cache hit trend (last 24h)')}
             </div>
-            <CacheTrend group={selectedGroup} baseline={baseline} />
+            <CacheTrend
+              group={selectedGroup}
+              baseline={baseline}
+              bucketSeconds={props.response?.data.bucket_seconds ?? 3600}
+            />
           </div>
           <div className='min-w-0'>
             <div className='mb-3 text-sm font-medium'>
               {t('Cache request trend (last 24h)')}
             </div>
-            <CacheRequestTrend group={selectedGroup} />
+            <CacheRequestTrend
+              group={selectedGroup}
+              bucketSeconds={props.response?.data.bucket_seconds ?? 3600}
+            />
           </div>
         </div>
       </div>
@@ -343,86 +465,161 @@ export function CacheMonitor(props: {
   }
 
   return (
-    <section className='min-w-0 border-y py-4 sm:py-5'>
-      <div className='flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'>
-        <div className='flex min-w-0 items-center gap-3'>
-          <span className='bg-info/10 text-info flex size-9 shrink-0 items-center justify-center rounded-md'>
-            <Database className='size-4' />
-          </span>
-          <div className='min-w-0'>
-            <h2 className='truncate text-sm font-semibold'>
-              {t('Cache hit rate')}
-            </h2>
-            {selectedGroup && selectedGroup.request_count > 0 ? (
-              <StatusBadge
-                variant={
-                  selectedGroup.cache_hit_rate >= baseline
-                    ? 'success'
-                    : 'warning'
-                }
-                copyable={false}
-                className='mt-1'
+    <>
+      <section className='min-w-0 border-y py-4 sm:py-5'>
+        <div className='flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'>
+          <div className='flex min-w-0 items-center gap-3'>
+            <span className='bg-info/10 text-info flex size-9 shrink-0 items-center justify-center rounded-md'>
+              <Database className='size-4' />
+            </span>
+            <div className='min-w-0'>
+              <h2 className='truncate text-sm font-semibold'>
+                {t('Cache hit rate')}
+              </h2>
+              {selectedGroup && selectedGroup.request_count > 0 ? (
+                <StatusBadge
+                  variant={
+                    selectedGroup.cache_hit_rate >= baseline
+                      ? 'success'
+                      : 'warning'
+                  }
+                  copyable={false}
+                  className='mt-1'
+                >
+                  {selectedGroup.cache_hit_rate >= baseline
+                    ? t('Meets baseline')
+                    : t('Below baseline')}
+                </StatusBadge>
+              ) : null}
+            </div>
+          </div>
+
+          <div className='flex w-full items-center justify-end gap-3 sm:w-auto'>
+            {isAdmin ? (
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={() => handleGroupsOpenChange(true)}
               >
-                {selectedGroup.cache_hit_rate >= baseline
-                  ? t('Meets baseline')
-                  : t('Below baseline')}
-              </StatusBadge>
+                <Settings2 />
+                {t('Groups')}
+              </Button>
+            ) : null}
+            <span className='text-muted-foreground shrink-0 text-xs'>
+              {t('Baseline')}
+            </span>
+            {isAdmin ? (
+              <Slider
+                aria-label={t('Baseline')}
+                className='min-w-28 flex-1 sm:w-40'
+                min={0}
+                max={100}
+                step={1}
+                value={[baselineDraft]}
+                onValueChange={(value) => {
+                  const next = Array.isArray(value) ? value[0] : value
+                  setBaselineDraft(Number(next))
+                }}
+              />
+            ) : null}
+            <span className='w-10 shrink-0 text-right text-xs font-medium tabular-nums'>
+              {isAdmin ? baselineDraft : baseline}%
+            </span>
+            {isAdmin ? (
+              <Button
+                size='sm'
+                disabled={savingBaseline || baselineDraft === baseline}
+                onClick={handleSaveBaseline}
+              >
+                <Save />
+                {t('Save')}
+              </Button>
             ) : null}
           </div>
         </div>
 
-        <div className='flex w-full items-center justify-end gap-3 sm:w-auto'>
-          <span className='text-muted-foreground shrink-0 text-xs'>
-            {t('Baseline')}
-          </span>
-          {isAdmin ? (
-            <Slider
-              aria-label={t('Baseline')}
-              className='min-w-28 flex-1 sm:w-40'
-              min={0}
-              max={100}
-              step={1}
-              value={[baselineDraft]}
-              onValueChange={(value) => {
-                const next = Array.isArray(value) ? value[0] : value
-                setBaselineDraft(Number(next))
-              }}
-            />
-          ) : null}
-          <span className='w-10 shrink-0 text-right text-xs font-medium tabular-nums'>
-            {isAdmin ? baselineDraft : baseline}%
-          </span>
-          {isAdmin ? (
-            <Button
-              size='sm'
-              disabled={savingBaseline || baselineDraft === baseline}
-              onClick={handleSaveBaseline}
-            >
-              <Save />
-              {t('Save')}
-            </Button>
-          ) : null}
-        </div>
-      </div>
+        {groups.length > 0 ? (
+          <Tabs
+            value={activeGroup}
+            onValueChange={setActiveGroup}
+            className='mt-4'
+          >
+            <TabsList className='h-auto max-w-full flex-wrap justify-start'>
+              <TabsTrigger value={ALL_CACHE_GROUPS}>{t('All')}</TabsTrigger>
+              {groups.map((group) => (
+                <TabsTrigger key={group.group} value={group.group}>
+                  <span className='max-w-full [overflow-wrap:anywhere] break-words whitespace-normal'>
+                    {group.group}
+                  </span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        ) : null}
 
-      {groups.length > 0 ? (
-        <Tabs
-          value={activeGroup}
-          onValueChange={setActiveGroup}
-          className='mt-4'
-        >
-          <TabsList className='max-w-full [scrollbar-width:none] flex-nowrap justify-start overflow-x-auto group-data-horizontal/tabs:h-auto [&::-webkit-scrollbar]:hidden'>
-            <TabsTrigger value={ALL_CACHE_GROUPS}>{t('All')}</TabsTrigger>
-            {groups.map((group) => (
-              <TabsTrigger key={group.group} value={group.group}>
-                <span className='max-w-32 truncate'>{group.group}</span>
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
+        {content}
+      </section>
+
+      {isAdmin ? (
+        <Dialog open={groupsOpen} onOpenChange={handleGroupsOpenChange}>
+          <DialogContent className='sm:max-w-md'>
+            <DialogHeader>
+              <DialogTitle>{t('Configure cache groups')}</DialogTitle>
+              <DialogDescription>
+                {t('Choose which groups are visible in cache analytics.')}
+              </DialogDescription>
+            </DialogHeader>
+
+            <label className='hover:bg-accent flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2.5'>
+              <Checkbox
+                checked={allGroupsDraft}
+                onCheckedChange={(checked) =>
+                  setAllGroupsDraft(checked === true)
+                }
+              />
+              <span className='min-w-0 text-sm font-medium'>
+                {t('Automatically show all groups')}
+              </span>
+            </label>
+
+            <ScrollArea className='max-h-72 rounded-md border p-2'>
+              <div className='space-y-1'>
+                {(props.response?.data.available_groups ?? []).map((group) => (
+                  <label
+                    key={group}
+                    className='hover:bg-accent flex cursor-pointer items-start gap-3 rounded px-2 py-2'
+                  >
+                    <Checkbox
+                      checked={allGroupsDraft || groupDraft.has(group)}
+                      disabled={allGroupsDraft}
+                      onCheckedChange={() => handleToggleGroup(group)}
+                    />
+                    <span className='min-w-0 text-sm [overflow-wrap:anywhere] break-words'>
+                      {group}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </ScrollArea>
+
+            <DialogFooter>
+              <DialogClose render={<Button variant='outline' />}>
+                {t('Cancel')}
+              </DialogClose>
+              <Button
+                onClick={handleSaveGroups}
+                disabled={
+                  savingGroups || (!allGroupsDraft && groupDraft.size === 0)
+                }
+              >
+                <Save />
+                {savingGroups ? t('Saving...') : t('Save')}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       ) : null}
-
-      {content}
-    </section>
+    </>
   )
 }

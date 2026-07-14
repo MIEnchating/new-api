@@ -5191,6 +5191,19 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Minor outage": "Sự cố nhẹ",
+    "Major outage": "Sự cố nghiêm trọng",
+    "Critical outage": "Sự cố đặc biệt nghiêm trọng",
+    "Official status unavailable": "Không thể truy cập trạng thái chính thức",
+    "Subscribe to official updates": "Đăng ký thông báo chính thức",
+    "View incident": "Xem sự cố",
+    "No active incidents": "Không có sự cố đang diễn ra",
+    "Official provider status": "Trạng thái chính thức của nhà cung cấp",
+    "Official status": "Trạng thái chính thức",
+    "Live incident messages from official status pages": "Thông báo sự cố trực tiếp từ trang trạng thái chính thức",
+    "Configure cache groups": "Cấu hình nhóm bộ nhớ đệm",
+    "Choose which groups are visible in cache analytics.": "Chọn các nhóm hiển thị trong phân tích bộ nhớ đệm.",
+    "Automatically show all groups": "Tự động hiển thị tất cả nhóm",
     "Zoom": "Zoom"
   }
 }

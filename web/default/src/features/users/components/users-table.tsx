@@ -71,7 +71,15 @@ export function UsersTable() {
     columnFilters: [
       { columnId: 'status', searchKey: 'status', type: 'array' },
       { columnId: 'role', searchKey: 'role', type: 'array' },
-      { columnId: 'group', searchKey: 'group', type: 'string' },
+      {
+        columnId: 'group',
+        searchKey: 'group',
+        type: 'array',
+        serialize: (value) =>
+          Array.isArray(value) ? (value[0] as string | undefined) : undefined,
+        deserialize: (value) =>
+          typeof value === 'string' && value ? [value] : [],
+      },
     ],
   })
   const statusFilter =
@@ -83,8 +91,11 @@ export function UsersTable() {
       | string[]
       | undefined) ?? []
   const groupFilter =
-    (columnFilters.find((filter) => filter.id === 'group')?.value as string) ??
-    ''
+    (
+      columnFilters.find((filter) => filter.id === 'group')?.value as
+        | string[]
+        | undefined
+    )?.[0] ?? ''
 
   const { data: groupsData } = useQuery({
     queryKey: ['user-group-names'],

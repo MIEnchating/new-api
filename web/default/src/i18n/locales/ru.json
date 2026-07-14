@@ -5191,6 +5191,19 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Minor outage": "Незначительный сбой",
+    "Major outage": "Серьёзный сбой",
+    "Critical outage": "Критический сбой",
+    "Official status unavailable": "Официальный статус недоступен",
+    "Subscribe to official updates": "Подписаться на официальные обновления",
+    "View incident": "Посмотреть инцидент",
+    "No active incidents": "Активных инцидентов нет",
+    "Official provider status": "Официальный статус провайдеров",
+    "Official status": "Официальный статус",
+    "Live incident messages from official status pages": "Актуальные сообщения об инцидентах с официальных страниц статуса",
+    "Configure cache groups": "Настроить группы кэша",
+    "Choose which groups are visible in cache analytics.": "Выберите группы, отображаемые в аналитике кэша.",
+    "Automatically show all groups": "Автоматически показывать все группы",
     "Zoom": "Zoom"
   }
 }

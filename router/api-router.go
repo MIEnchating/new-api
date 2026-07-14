@@ -25,6 +25,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/uptime/status", controller.GetUptimeKumaStatus)
 		apiRouter.GET("/status-monitor/cache", middleware.UserAuth(), controller.GetCacheMetrics)
 		apiRouter.PUT("/status-monitor/cache/baseline", middleware.AdminAuth(), controller.UpdateCacheHitRateBaseline)
+		apiRouter.PUT("/status-monitor/cache/groups", middleware.AdminAuth(), controller.UpdateCacheMonitorGroups)
+		apiRouter.GET("/status-monitor/providers", middleware.UserAuth(), controller.GetOfficialProviderStatuses)
 		apiRouter.GET("/models", middleware.UserAuth(), controller.DashboardListModels)
 		apiRouter.GET("/status/test", middleware.AdminAuth(), controller.TestStatus)
 		apiRouter.GET("/notice", controller.GetNotice)
@@ -237,6 +239,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			tokenRoute.GET("/", controller.GetAllTokens)
 			tokenRoute.GET("/search", middleware.SearchRateLimit(), controller.SearchTokens)
+			tokenRoute.GET("/:id/models", controller.GetTokenModels)
 			tokenRoute.GET("/:id/route/status", controller.GetTokenRouteStatus)
 			tokenRoute.GET("/:id", controller.GetToken)
 			tokenRoute.POST("/:id/key", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.GetTokenKey)

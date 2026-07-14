@@ -5275,6 +5275,19 @@
     "Cached tokens": "缓存 Token",
     "Meets baseline": "达到基线",
     "Site status": "站点状态",
+    "Minor outage": "轻微故障",
+    "Major outage": "严重故障",
+    "Critical outage": "重大故障",
+    "Official status unavailable": "官方状态暂不可用",
+    "Subscribe to official updates": "订阅官方通知",
+    "View incident": "查看事故详情",
+    "No active incidents": "当前无活跃事故",
+    "Official provider status": "官方服务状态",
+    "Official status": "官方状态",
+    "Live incident messages from official status pages": "来自官方状态页的实时事故消息",
+    "Configure cache groups": "配置缓存分组",
+    "Choose which groups are visible in cache analytics.": "选择缓存分析中显示的分组。",
+    "Automatically show all groups": "自动显示全部分组",
     "Zoom": "缩放"
   }
 }

@@ -42,6 +42,19 @@ type tokenKeyResponse struct {
 	Key string `json:"key"`
 }
 
+func decodeTokenModelsResponse(t *testing.T, recorder *httptest.ResponseRecorder) []string {
+	t.Helper()
+	response := decodeAPIResponse(t, recorder)
+	if !response.Success {
+		t.Fatalf("expected token models request to succeed, got message: %s", response.Message)
+	}
+	var models []string
+	if err := common.Unmarshal(response.Data, &models); err != nil {
+		t.Fatalf("failed to decode token models response: %v", err)
+	}
+	return models
+}
+
 type sqliteColumnInfo struct {
 	Name string `gorm:"column:name"`
 	Type string `gorm:"column:type"`
@@ -109,6 +122,16 @@ func setupTokenControllerTestDB(t *testing.T) *gorm.DB {
 
 	db := openTokenControllerTestDB(t)
 	migrateTokenControllerTestDB(t, db)
+	return db
+}
+
+func setupTokenModelsControllerTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	initModelListColumnNames(t)
+	db := setupTokenControllerTestDB(t)
+	if err := db.AutoMigrate(&model.Ability{}); err != nil {
+		t.Fatalf("failed to migrate ability table: %v", err)
+	}
 	return db
 }
 
@@ -466,6 +489,59 @@ func TestGetTokenMasksKeyInResponse(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("detail response leaked raw token key: %s", recorder.Body.String())
+	}
+}
+
+func TestGetTokenModelsUsesFixedGroup(t *testing.T) {
+	db := setupTokenModelsControllerTestDB(t)
+	token := seedToken(t, db, 1, "vip-token", "vip1234token5678")
+	if err := db.Model(token).Update("group", "vip").Error; err != nil {
+		t.Fatalf("failed to update token group: %v", err)
+	}
+	if err := db.Create(&[]model.Ability{
+		{Group: "default", Model: "default-only", ChannelId: 1, Enabled: true},
+		{Group: "vip", Model: "vip-only", ChannelId: 2, Enabled: true},
+		{Group: "vip", Model: "vip-disabled", ChannelId: 3, Enabled: false},
+	}).Error; err != nil {
+		t.Fatalf("failed to seed abilities: %v", err)
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/"+strconv.Itoa(token.Id)+"/models", nil, 1)
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
+	GetTokenModels(ctx)
+
+	models := decodeTokenModelsResponse(t, recorder)
+	if len(models) != 1 || models[0] != "vip-only" {
+		t.Fatalf("expected only vip group model, got %v", models)
+	}
+}
+
+func TestGetTokenModelsUsesRouteGroupsAndModelLimits(t *testing.T) {
+	db := setupTokenModelsControllerTestDB(t)
+	token := seedToken(t, db, 1, "route-token", "route1234token5678")
+	updates := map[string]any{
+		"group_route_config":   `[{"group":"group-a","priority":2,"cooldown_seconds":60},{"group":"group-b","priority":1,"cooldown_seconds":60}]`,
+		"model_limits_enabled": true,
+		"model_limits":         "model-b,missing-model",
+	}
+	if err := db.Model(token).Updates(updates).Error; err != nil {
+		t.Fatalf("failed to update token routing settings: %v", err)
+	}
+	if err := db.Create(&[]model.Ability{
+		{Group: "group-a", Model: "model-a", ChannelId: 1, Enabled: true},
+		{Group: "group-b", Model: "model-b", ChannelId: 2, Enabled: true},
+		{Group: "unrelated", Model: "missing-model", ChannelId: 3, Enabled: true},
+	}).Error; err != nil {
+		t.Fatalf("failed to seed abilities: %v", err)
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/"+strconv.Itoa(token.Id)+"/models", nil, 1)
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
+	GetTokenModels(ctx)
+
+	models := decodeTokenModelsResponse(t, recorder)
+	if len(models) != 1 || models[0] != "model-b" {
+		t.Fatalf("expected route-group/model-limit intersection, got %v", models)
 	}
 }
 

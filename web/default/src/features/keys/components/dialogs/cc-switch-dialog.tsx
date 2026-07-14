@@ -26,7 +26,8 @@ import { Button } from '@/components/ui/button'
 import { ComboboxInput } from '@/components/ui/combobox-input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
-import { getUserModels } from '@/lib/api'
+
+import { getApiKeyModels } from '../../api'
 
 const APP_CONFIGS = {
   claude: {
@@ -91,6 +92,7 @@ function buildCCSwitchURL(
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
+  tokenId: number
   tokenKey: string
 }
 
@@ -100,17 +102,17 @@ export function CCSwitchDialog(props: Props) {
   const [name, setName] = useState<string>(APP_CONFIGS.claude.defaultName)
   const [models, setModels] = useState<Record<string, string>>({})
 
-  const { data: modelsData } = useQuery({
-    queryKey: ['user-models-ccswitch'],
-    queryFn: getUserModels,
-    enabled: props.open,
-    staleTime: 5 * 60 * 1000,
+  const { data: modelsData, isFetching: modelsFetching } = useQuery({
+    queryKey: ['api-key-models-ccswitch', props.tokenId],
+    queryFn: () => getApiKeyModels(props.tokenId),
+    enabled: props.open && props.tokenId > 0,
   })
 
   const modelOptions = useMemo(() => {
+    if (modelsFetching) return []
     const items = modelsData?.data ?? []
     return items.map((m) => ({ value: m, label: m }))
-  }, [modelsData?.data])
+  }, [modelsData?.data, modelsFetching])
 
   useEffect(() => {
     if (props.open) {

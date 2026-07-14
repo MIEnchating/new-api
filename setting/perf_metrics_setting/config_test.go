@@ -8,4 +8,5 @@ import (
 
 func TestDefaultCacheHitRateBaseline(t *testing.T) {
 	require.Equal(t, 85, GetCacheHitRateBaseline())
+	require.Empty(t, GetCacheMonitorGroups())
 }

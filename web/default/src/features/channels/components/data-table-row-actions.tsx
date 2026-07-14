@@ -33,6 +33,7 @@ import {
   Trash2,
   RefreshCw,
   Loader2,
+  LoaderCircle,
 } from 'lucide-react'
 import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -197,11 +198,14 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             />
           }
         >
-          {isTesting ? (
-            <Loader2 className='size-4 animate-spin' />
-          ) : (
-            <Gauge className='size-4' />
-          )}
+          <span className='relative block size-4 shrink-0'>
+            <Gauge
+              className={`absolute inset-0 size-4 transition-opacity ${isTesting ? 'opacity-0' : 'opacity-100'}`}
+            />
+            <LoaderCircle
+              className={`absolute inset-0 size-4 animate-spin transition-opacity ${isTesting ? 'opacity-100' : 'opacity-0'}`}
+            />
+          </span>
         </TooltipTrigger>
         <TooltipContent>{t('Test Connection')}</TooltipContent>
       </Tooltip>

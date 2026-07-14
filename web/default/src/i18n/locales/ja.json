@@ -5191,6 +5191,19 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
+    "Minor outage": "軽微な障害",
+    "Major outage": "重大な障害",
+    "Critical outage": "深刻な障害",
+    "Official status unavailable": "公式ステータスを取得できません",
+    "Subscribe to official updates": "公式通知を購読",
+    "View incident": "障害の詳細を見る",
+    "No active incidents": "進行中の障害はありません",
+    "Official provider status": "公式プロバイダーステータス",
+    "Official status": "公式ステータス",
+    "Live incident messages from official status pages": "公式ステータスページからのリアルタイム障害情報",
+    "Configure cache groups": "キャッシュグループを設定",
+    "Choose which groups are visible in cache analytics.": "キャッシュ分析に表示するグループを選択します。",
+    "Automatically show all groups": "すべてのグループを自動表示",
     "Zoom": "ズーム"
   }
 }

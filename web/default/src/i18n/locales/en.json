@@ -5275,6 +5275,19 @@
     "Cached tokens": "Cached tokens",
     "Meets baseline": "Meets baseline",
     "Site status": "Site status",
+    "Minor outage": "Minor outage",
+    "Major outage": "Major outage",
+    "Critical outage": "Critical outage",
+    "Official status unavailable": "Official status unavailable",
+    "Subscribe to official updates": "Subscribe to official updates",
+    "View incident": "View incident",
+    "No active incidents": "No active incidents",
+    "Official provider status": "Official provider status",
+    "Official status": "Official status",
+    "Live incident messages from official status pages": "Live incident messages from official status pages",
+    "Configure cache groups": "Configure cache groups",
+    "Choose which groups are visible in cache analytics.": "Choose which groups are visible in cache analytics.",
+    "Automatically show all groups": "Automatically show all groups",
     "Zoom": "Zoom"
   }
 }

@@ -5191,6 +5191,19 @@
     "Zero retention": "Aucune rétention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
+    "Minor outage": "Incident mineur",
+    "Major outage": "Incident majeur",
+    "Critical outage": "Incident critique",
+    "Official status unavailable": "Statut officiel indisponible",
+    "Subscribe to official updates": "S'abonner aux mises à jour officielles",
+    "View incident": "Voir l'incident",
+    "No active incidents": "Aucun incident en cours",
+    "Official provider status": "Statut officiel des fournisseurs",
+    "Official status": "Statut officiel",
+    "Live incident messages from official status pages": "Messages d'incident en direct des pages de statut officielles",
+    "Configure cache groups": "Configurer les groupes de cache",
+    "Choose which groups are visible in cache analytics.": "Choisissez les groupes visibles dans l'analyse du cache.",
+    "Automatically show all groups": "Afficher automatiquement tous les groupes",
     "Zoom": "Zoom"
   }
 }

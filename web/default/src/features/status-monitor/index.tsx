@@ -24,11 +24,12 @@ import {
   CircleDashed,
   Clock3,
   Database,
+  Radio,
   RotateCw,
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
@@ -36,12 +37,6 @@ import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 import { getUptimeStatus } from '@/features/dashboard/api'
 import type {
   UptimeHeartbeat,
@@ -50,13 +45,17 @@ import type {
 } from '@/features/dashboard/types'
 import { cn } from '@/lib/utils'
 
-import { getCacheMetrics } from './api'
+import { getCacheMetrics, getOfficialProviderStatuses } from './api'
 import { CacheMonitor } from './cache-monitor'
 import {
   getOrderedHeartbeats,
   MonitorDetailsDrawer,
 } from './monitor-details-drawer'
-import type { CacheMetricsResponse } from './types'
+import { OfficialProviderStatuses } from './official-provider-status'
+import type {
+  CacheMetricsResponse,
+  OfficialProviderStatusResponse,
+} from './types'
 
 type MonitorStatusMeta = {
   label: string
@@ -312,10 +311,62 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
   heartbeats?: UptimeHeartbeat[]
 }) {
   const { t } = useTranslation()
+  const [activeHeartbeatIndex, setActiveHeartbeatIndex] = useState<
+    number | null
+  >(null)
+  const hoverTimerRef = useRef<number | null>(null)
+  const pendingHeartbeatIndexRef = useRef<number | null>(null)
   const heartbeats = useMemo(
     () => getOrderedHeartbeats(props.heartbeats).slice(-48),
     [props.heartbeats]
   )
+  const activeHeartbeat =
+    activeHeartbeatIndex === null
+      ? null
+      : (heartbeats[activeHeartbeatIndex] ?? null)
+  const activeHeartbeatLeft =
+    activeHeartbeatIndex === null
+      ? 50
+      : Math.min(
+          90,
+          Math.max(10, ((activeHeartbeatIndex + 0.5) / heartbeats.length) * 100)
+        )
+
+  useEffect(
+    () => () => {
+      if (hoverTimerRef.current !== null) {
+        window.clearTimeout(hoverTimerRef.current)
+      }
+    },
+    []
+  )
+
+  const cancelScheduledHeartbeat = () => {
+    if (hoverTimerRef.current === null) return
+    window.clearTimeout(hoverTimerRef.current)
+    hoverTimerRef.current = null
+    pendingHeartbeatIndexRef.current = null
+  }
+
+  const showHeartbeat = (index: number, delayed: boolean) => {
+    if (
+      index === activeHeartbeatIndex ||
+      index === pendingHeartbeatIndexRef.current
+    ) {
+      return
+    }
+    cancelScheduledHeartbeat()
+    if (!delayed) {
+      setActiveHeartbeatIndex(index)
+      return
+    }
+    pendingHeartbeatIndexRef.current = index
+    hoverTimerRef.current = window.setTimeout(() => {
+      setActiveHeartbeatIndex(index)
+      hoverTimerRef.current = null
+      pendingHeartbeatIndexRef.current = null
+    }, 80)
+  }
 
   if (heartbeats.length === 0) {
     return (
@@ -326,52 +377,77 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
   }
 
   return (
-    <TooltipProvider delay={80}>
-      <div
-        className='grid h-10 min-w-0 items-end gap-px sm:h-12 sm:gap-1'
-        style={{
-          gridTemplateColumns: `repeat(${heartbeats.length}, minmax(4px, 1fr))`,
-        }}
-        aria-label={t('Heartbeat timeline')}
-      >
-        {heartbeats.map((heartbeat) => {
-          const meta = getStatusMeta(heartbeat.status)
-          const label = [
-            t(meta.label),
-            formatDateTime(heartbeat.time),
-            formatPing(heartbeat.ping),
-          ].join(' · ')
+    <>
+      <div className='relative'>
+        {activeHeartbeat ? (
+          <div
+            role='tooltip'
+            className='bg-foreground text-background pointer-events-none absolute bottom-[calc(100%+4px)] z-20 flex w-max max-w-xs -translate-x-1/2 flex-col items-start gap-0.5 rounded-md px-3 py-1.5 text-xs shadow-md'
+            style={{
+              left: `${activeHeartbeatLeft}%`,
+            }}
+          >
+            <span className='font-medium'>
+              {formatPing(activeHeartbeat.ping)}
+            </span>
+            <span className='opacity-75'>
+              {formatDateTime(activeHeartbeat.time)}
+            </span>
+            {activeHeartbeat.msg ? <span>{activeHeartbeat.msg}</span> : null}
+          </div>
+        ) : null}
+        <div
+          className='grid h-10 min-w-0 items-end gap-px sm:h-12 sm:gap-1'
+          style={{
+            gridTemplateColumns: `repeat(${heartbeats.length}, minmax(4px, 1fr))`,
+          }}
+          aria-label={t('Heartbeat timeline')}
+          onClick={(event) => event.stopPropagation()}
+          onPointerMove={(event) => {
+            const target = (event.target as HTMLElement).closest<HTMLElement>(
+              '[data-heartbeat-index]'
+            )
+            if (!target) return
+            const index = Number(target.dataset.heartbeatIndex)
+            if (index === activeHeartbeatIndex) return
+            showHeartbeat(index, true)
+          }}
+          onPointerLeave={() => {
+            cancelScheduledHeartbeat()
+            setActiveHeartbeatIndex(null)
+          }}
+          onFocus={(event) => {
+            const target = (event.target as HTMLElement).closest<HTMLElement>(
+              '[data-heartbeat-index]'
+            )
+            if (target)
+              showHeartbeat(Number(target.dataset.heartbeatIndex), false)
+          }}
+          onBlur={() => setActiveHeartbeatIndex(null)}
+        >
+          {heartbeats.map((heartbeat, index) => {
+            const meta = getStatusMeta(heartbeat.status)
+            const label = [
+              t(meta.label),
+              formatDateTime(heartbeat.time),
+              formatPing(heartbeat.ping),
+            ].join(' · ')
 
-          return (
-            <Tooltip
-              key={`${heartbeat.time ?? 'heartbeat'}-${heartbeat.status}-${heartbeat.ping ?? 'na'}-${heartbeat.msg ?? ''}`}
-            >
-              <TooltipTrigger
-                render={
-                  <span
-                    tabIndex={0}
-                    aria-label={label}
-                    onClick={(event) => event.stopPropagation()}
-                    className={cn(
-                      'block min-h-3 cursor-default rounded-[2px] outline-none focus-visible:ring-2',
-                      heartbeat.status === 1 ? 'h-10 sm:h-12' : 'h-7 sm:h-8',
-                      meta.dotClassName
-                    )}
-                  />
-                }
+            return (
+              <span
+                key={`${heartbeat.time ?? 'heartbeat'}-${heartbeat.status}-${heartbeat.ping ?? 'na'}-${heartbeat.msg ?? ''}`}
+                data-heartbeat-index={index}
+                tabIndex={0}
+                aria-label={label}
+                className={cn(
+                  'block min-h-3 cursor-default rounded-[2px] outline-none focus-visible:ring-2',
+                  heartbeat.status === 1 ? 'h-10 sm:h-12' : 'h-7 sm:h-8',
+                  meta.dotClassName
+                )}
               />
-              <TooltipContent className='flex-col items-start gap-0.5'>
-                <span className='font-medium'>
-                  {formatPing(heartbeat.ping)}
-                </span>
-                <span className='opacity-75'>
-                  {formatDateTime(heartbeat.time)}
-                </span>
-                {heartbeat.msg ? <span>{heartbeat.msg}</span> : null}
-              </TooltipContent>
-            </Tooltip>
-          )
-        })}
+            )
+          })}
+        </div>
       </div>
       <div className='text-muted-foreground mt-1.5 flex items-center justify-between gap-3 text-[11px] tabular-nums'>
         <span className='truncate'>
@@ -381,7 +457,7 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
           {formatTimelineBoundary(heartbeats.at(-1)?.time)}
         </span>
       </div>
-    </TooltipProvider>
+    </>
   )
 })
 
@@ -514,9 +590,12 @@ export function StatusMonitor() {
   const [refreshing, setRefreshing] = useState(false)
   const [failed, setFailed] = useState(false)
   const [cacheFailed, setCacheFailed] = useState(false)
+  const [providerStatusFailed, setProviderStatusFailed] = useState(false)
   const [cacheMetrics, setCacheMetrics] = useState<CacheMetricsResponse | null>(
     null
   )
+  const [providerStatuses, setProviderStatuses] =
+    useState<OfficialProviderStatusResponse | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [activeGroupKey, setActiveGroupKey] = useState(ALL_GROUP_KEY)
   const [selectedMonitor, setSelectedMonitor] = useState<UptimeMonitor | null>(
@@ -531,8 +610,13 @@ export function StatusMonitor() {
     }
     setFailed(false)
     setCacheFailed(false)
-    return Promise.allSettled([getUptimeStatus(), getCacheMetrics()])
-      .then(([uptimeResult, cacheResult]) => {
+    setProviderStatusFailed(false)
+    return Promise.allSettled([
+      getUptimeStatus(),
+      getCacheMetrics(),
+      getOfficialProviderStatuses(),
+    ])
+      .then(([uptimeResult, cacheResult, providerStatusResult]) => {
         if (uptimeResult.status === 'fulfilled') {
           setGroups(uptimeResult.value?.data ?? [])
         } else {
@@ -545,6 +629,16 @@ export function StatusMonitor() {
         } else {
           setCacheMetrics(null)
           setCacheFailed(true)
+        }
+
+        if (
+          providerStatusResult.status === 'fulfilled' &&
+          providerStatusResult.value.success
+        ) {
+          setProviderStatuses(providerStatusResult.value)
+        } else {
+          setProviderStatuses(null)
+          setProviderStatusFailed(true)
         }
         setLastUpdated(new Date())
       })
@@ -726,7 +820,7 @@ export function StatusMonitor() {
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <Tabs defaultValue='site-status' className='min-w-0 gap-4'>
-            <TabsList className='grid w-full max-w-sm grid-cols-2'>
+            <TabsList className='grid w-full max-w-lg grid-cols-3'>
               <TabsTrigger value='site-status'>
                 <Activity />
                 {t('Site status')}
@@ -735,9 +829,17 @@ export function StatusMonitor() {
                 <Database />
                 {t('Cache analytics')}
               </TabsTrigger>
+              <TabsTrigger value='official-status'>
+                <Radio />
+                {t('Official status')}
+              </TabsTrigger>
             </TabsList>
 
-            <TabsContent value='site-status' className='min-w-0 space-y-4'>
+            <TabsContent
+              value='site-status'
+              keepMounted
+              className='min-w-0 space-y-4'
+            >
               <div className='grid min-w-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4'>
                 <SummaryTile
                   label={t('Total monitors')}
@@ -771,6 +873,15 @@ export function StatusMonitor() {
                 response={cacheMetrics}
                 loading={loading}
                 failed={cacheFailed}
+                onRefresh={handleManualRefresh}
+              />
+            </TabsContent>
+
+            <TabsContent value='official-status' className='min-w-0'>
+              <OfficialProviderStatuses
+                response={providerStatuses}
+                loading={loading}
+                failed={providerStatusFailed}
               />
             </TabsContent>
           </Tabs>

@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -105,6 +106,93 @@ func GetToken(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, buildMaskedTokenResponse(token))
+}
+
+func getTokenModelGroups(token *model.Token) ([]string, error) {
+	_, routes, err := model.NormalizeTokenGroupRouteConfig(token.GroupRouteConfig)
+	if err != nil {
+		return nil, err
+	}
+	if len(routes) > 0 {
+		groups := make([]string, 0, len(routes))
+		for _, route := range routes {
+			groups = append(groups, route.Group)
+		}
+		return groups, nil
+	}
+
+	if token.Group != "" && token.Group != "auto" {
+		return []string{token.Group}, nil
+	}
+
+	userGroup, err := model.GetUserGroup(token.UserId, false)
+	if err != nil {
+		return nil, err
+	}
+	if token.Group == "auto" {
+		return service.GetUserAutoGroup(userGroup), nil
+	}
+	return []string{userGroup}, nil
+}
+
+func getTokenModels(token *model.Token) ([]string, error) {
+	groups, err := getTokenModelGroups(token)
+	if err != nil {
+		return nil, err
+	}
+
+	modelLimits := make(map[string]struct{})
+	if token.ModelLimitsEnabled {
+		for _, modelName := range token.GetModelLimits() {
+			modelName = strings.TrimSpace(modelName)
+			if modelName != "" {
+				modelLimits[modelName] = struct{}{}
+			}
+		}
+	}
+
+	seen := make(map[string]struct{})
+	models := make([]string, 0)
+	for _, group := range groups {
+		for _, modelName := range model.GetGroupEnabledModels(group) {
+			modelName = strings.TrimSpace(modelName)
+			if modelName == "" {
+				continue
+			}
+			if token.ModelLimitsEnabled {
+				if _, ok := modelLimits[modelName]; !ok {
+					continue
+				}
+			}
+			if _, ok := seen[modelName]; ok {
+				continue
+			}
+			seen[modelName] = struct{}{}
+			models = append(models, modelName)
+		}
+	}
+	sort.Strings(models)
+	return models, nil
+}
+
+func GetTokenModels(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	userId := c.GetInt("id")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	token, err := model.GetTokenByIds(id, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	models, err := getTokenModels(token)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, models)
 }
 
 type tokenGroupRouteStatus struct {

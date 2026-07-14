@@ -5275,6 +5275,19 @@
     "Cached tokens": "快取 Token",
     "Meets baseline": "達到基線",
     "Site status": "站點狀態",
+    "Minor outage": "輕微故障",
+    "Major outage": "嚴重故障",
+    "Critical outage": "重大故障",
+    "Official status unavailable": "官方狀態暫不可用",
+    "Subscribe to official updates": "訂閱官方通知",
+    "View incident": "查看事故詳情",
+    "No active incidents": "目前無進行中的事故",
+    "Official provider status": "官方服務狀態",
+    "Official status": "官方狀態",
+    "Live incident messages from official status pages": "來自官方狀態頁的即時事故訊息",
+    "Configure cache groups": "設定快取分組",
+    "Choose which groups are visible in cache analytics.": "選擇快取分析中顯示的分組。",
+    "Automatically show all groups": "自動顯示全部分組",
     "Zoom": "縮放"
   }
 }
