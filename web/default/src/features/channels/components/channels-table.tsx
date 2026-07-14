@@ -37,6 +37,8 @@ import {
 } from '@/components/data-table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import {
   Tooltip,
   TooltipContent,
@@ -46,7 +48,7 @@ import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { getLobeIcon } from '@/lib/lobe-icon'
 
-import { getChannels, searchChannels, getGroups } from '../api'
+import { getChannels, searchChannels, getChannelFilterGroups } from '../api'
 import {
   DEFAULT_PAGE_SIZE,
   CHANNEL_STATUS,
@@ -70,6 +72,7 @@ const CHANNELS_COLUMN_VISIBILITY_STORAGE_KEY = 'channels:column-visibility'
 const CHANNELS_COLUMN_SIZING_STORAGE_KEY = 'channels:column-sizing'
 const CHANNELS_VIEW_MODE_STORAGE_KEY = 'channels:view-mode'
 const CHANNELS_STATUS_FILTER_STORAGE_KEY = 'channel-status-filter'
+const CHANNELS_SHOW_USER_GROUPS_STORAGE_KEY = 'channels:show-user-groups'
 
 const CHANNEL_SORTABLE_COLUMNS = new Set<ChannelSortBy>([
   'id',
@@ -99,6 +102,11 @@ export function ChannelsTable() {
 
   // Table state
   const [sorting, setSorting] = useState<SortingState>([])
+  const [showUserGroups, setShowUserGroups] = useState(
+    () =>
+      typeof window !== 'undefined' &&
+      localStorage.getItem(CHANNELS_SHOW_USER_GROUPS_STORAGE_KEY) === 'true'
+  )
 
   // URL state management
   const {
@@ -150,6 +158,14 @@ export function ChannelsTable() {
       )
       return next
     })
+  }
+
+  const handleShowUserGroupsChange = (checked: boolean) => {
+    setShowUserGroups(checked)
+    localStorage.setItem(CHANNELS_SHOW_USER_GROUPS_STORAGE_KEY, String(checked))
+    handleColumnFiltersChange((previous) =>
+      previous.filter((filter) => filter.id !== 'group')
+    )
   }
 
   // Extract filters from column filters
@@ -204,8 +220,8 @@ export function ChannelsTable() {
 
   // Fetch groups for filter
   const { data: groupsData } = useQuery({
-    queryKey: ['groups'],
-    queryFn: getGroups,
+    queryKey: ['groups', 'channels', { showUserGroups }],
+    queryFn: () => getChannelFilterGroups(!showUserGroups),
   })
 
   const groupOptions = useMemo(
@@ -460,24 +476,40 @@ export function ChannelsTable() {
           },
         ],
         preActions: (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant='ghost'
-                  size='icon'
-                  onClick={() => setSensitiveVisible(!sensitiveVisible)}
-                  aria-label={sensitiveVisible ? t('Hide') : t('Show')}
-                  className='text-muted-foreground hover:text-foreground size-8'
-                />
-              }
-            >
-              {sensitiveVisible ? <Eye /> : <EyeOff />}
-            </TooltipTrigger>
-            <TooltipContent>
-              {sensitiveVisible ? t('Hide') : t('Show')}
-            </TooltipContent>
-          </Tooltip>
+          <>
+            <div className='border-input flex h-8 items-center gap-2 rounded-md border px-2'>
+              <Label
+                htmlFor='channels-show-user-groups'
+                className='text-muted-foreground cursor-pointer text-xs whitespace-nowrap'
+              >
+                {t('Show user groups')}
+              </Label>
+              <Switch
+                id='channels-show-user-groups'
+                size='sm'
+                checked={showUserGroups}
+                onCheckedChange={handleShowUserGroupsChange}
+              />
+            </div>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant='ghost'
+                    size='icon'
+                    onClick={() => setSensitiveVisible(!sensitiveVisible)}
+                    aria-label={sensitiveVisible ? t('Hide') : t('Show')}
+                    className='text-muted-foreground hover:text-foreground size-8'
+                  />
+                }
+              >
+                {sensitiveVisible ? <Eye /> : <EyeOff />}
+              </TooltipTrigger>
+              <TooltipContent>
+                {sensitiveVisible ? t('Hide') : t('Show')}
+              </TooltipContent>
+            </Tooltip>
+          </>
         ),
       }}
       getRowClassName={(row, { isMobile }) => {

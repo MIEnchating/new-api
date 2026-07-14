@@ -33,6 +33,7 @@ describe('API key form schema', () => {
     const result = schema.safeParse({
       ...API_KEY_FORM_DEFAULT_VALUES,
       name: 'test-key',
+      group: 'default',
       group_route_enabled: false,
       group_routes: [
         { group: '', priority: -1, cooldown_seconds: 0 },
@@ -41,6 +42,22 @@ describe('API key form schema', () => {
     })
 
     assert.equal(result.success, true)
+  })
+
+  test('requires a group when group routing is disabled', () => {
+    const result = schema.safeParse({
+      ...API_KEY_FORM_DEFAULT_VALUES,
+      name: 'test-key',
+      group: '',
+      group_route_enabled: false,
+    })
+
+    assert.equal(result.success, false)
+    if (result.success) return
+    assert.equal(
+      result.error.issues.some((issue) => issue.path.join('.') === 'group'),
+      true
+    )
   })
 
   test('validates route constraints when group routing is enabled', () => {

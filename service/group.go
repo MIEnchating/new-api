@@ -1,11 +1,47 @@
 package service
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
+
+func OrderGroupNames(groupNames []string) []string {
+	available := make(map[string]struct{}, len(groupNames))
+	for _, group := range groupNames {
+		group = strings.TrimSpace(group)
+		if group != "" {
+			available[group] = struct{}{}
+		}
+	}
+
+	ordered := make([]string, 0, len(available))
+	for _, group := range setting.GetGroupOrder() {
+		if _, exists := available[group]; !exists {
+			continue
+		}
+		ordered = append(ordered, group)
+		delete(available, group)
+	}
+
+	remaining := make([]string, 0, len(available))
+	for group := range available {
+		remaining = append(remaining, group)
+	}
+	sort.Strings(remaining)
+	return append(ordered, remaining...)
+}
+
+func GetOrderedGroupNames() []string {
+	groupRatios := ratio_setting.GetGroupRatioCopy()
+	groupNames := make([]string, 0, len(groupRatios))
+	for group := range groupRatios {
+		groupNames = append(groupNames, group)
+	}
+	return OrderGroupNames(groupNames)
+}
 
 func GetUserUsableGroups(userGroup string) map[string]string {
 	groupsCopy := setting.GetUserUsableGroupsCopy()

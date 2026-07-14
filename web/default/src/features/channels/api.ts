@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { getGroups as getUserGroups } from '@/features/users/api'
 import { api, type ApiRequestConfig } from '@/lib/api'
 
 import type {
@@ -150,6 +149,18 @@ export async function updateChannelStatus(
     `/api/channel/${id}/status`,
     { status },
     channelActionConfig()
+  )
+  return res.data
+}
+
+export async function clearChannelRouteCooldown(
+  id: number,
+  group?: string
+): Promise<{ success: boolean; message?: string }> {
+  const res = await api.post(
+    `/api/channel/${id}/route/cooldown/clear`,
+    undefined,
+    channelActionConfig({ params: group ? { group } : undefined })
   )
   return res.data
 }
@@ -620,9 +631,25 @@ export async function getOllamaVersion(
 // ============================================================================
 
 /**
- * Get all available groups (re-exported from users API for convenience)
+ * Get groups available to the channel filter.
  */
-export const getGroups = getUserGroups
+export async function getGroups(): Promise<{
+  success: boolean
+  message?: string
+  data?: string[]
+}> {
+  const res = await api.get('/api/group/')
+  return res.data
+}
+
+export async function getChannelFilterGroups(
+  channelOnly = true
+): Promise<{ success: boolean; message?: string; data?: string[] }> {
+  const res = await api.get('/api/group/', {
+    params: channelOnly ? { channel_only: true } : undefined,
+  })
+  return res.data
+}
 
 // ============================================================================
 // Prefill Groups (Model Groups)

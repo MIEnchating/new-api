@@ -5288,6 +5288,19 @@
     "Configure cache groups": "Configure cache groups",
     "Choose which groups are visible in cache analytics.": "Choose which groups are visible in cache analytics.",
     "Automatically show all groups": "Automatically show all groups",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Group display order": "Group display order",
+    "JSON array controlling the order shown when users create API keys.": "JSON array controlling the order shown when users create API keys.",
+    "Drag rows to control the order shown when users create API keys. A user always keeps access to their own account group, even when it is hidden here.": "Drag rows to control the order shown when users create API keys. A user always keeps access to their own account group, even when it is hidden here.",
+    "Order": "Order",
+    "Drag to reorder": "Drag to reorder",
+    "Show when creating keys": "Show when creating keys",
+    "Move up": "Move up",
+    "Move down": "Move down",
+    "Show user groups": "Show user groups",
+    "Restore channel": "Restore channel",
+    "Channel restored": "Channel restored",
+    "Failed to restore channel": "Failed to restore channel",
+    "Groups marked as visible appear when users create keys. Users always retain their own account group; administrators can still assign hidden groups.": "Groups marked as visible appear when users create keys. Users always retain their own account group; administrators can still assign hidden groups."
   }
 }

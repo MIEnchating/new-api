@@ -73,6 +73,13 @@ export function getApiKeyFormSchema(t: TFunction) {
       }
 
       if (!data.group_route_enabled) {
+        if (!data.group?.trim()) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['group'],
+            message: t('Please select a group'),
+          })
+        }
         return
       }
 

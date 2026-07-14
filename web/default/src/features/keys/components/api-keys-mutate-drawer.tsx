@@ -142,12 +142,20 @@ export function ApiKeysMutateDrawer({
   const groupsRaw = groupsData?.data
   const groups = useMemo<ApiKeyGroupOption[]>(
     () =>
-      Object.entries(groupsRaw ?? {}).map(([key, info]) => ({
-        value: key,
-        label: key,
-        desc: info.desc || key,
-        ratio: info.ratio,
-      })),
+      Object.entries(groupsRaw ?? {})
+        .map(([key, info]) => ({
+          value: key,
+          label: key,
+          desc: info.desc || key,
+          ratio: info.ratio,
+          order: info.order,
+        }))
+        .sort(
+          (a, b) =>
+            (a.order ?? Number.MAX_SAFE_INTEGER) -
+              (b.order ?? Number.MAX_SAFE_INTEGER) ||
+            a.label.localeCompare(b.label)
+        ),
     [groupsRaw]
   )
   const routableGroups = useMemo(
@@ -185,13 +193,13 @@ export function ApiKeysMutateDrawer({
 
   // Correct group after groups load: if the form value is not in available groups, fall back
   useEffect(() => {
-    if (groups.length === 0) return
+    if (!open || groups.length === 0) return
     const fallbackRouteGroup =
       routableGroups.find((g) => g.value === 'default')?.value ??
       routableGroups[0]?.value ??
       ''
     const currentGroup = form.getValues('group')
-    if (currentGroup && !groups.some((g) => g.value === currentGroup)) {
+    if (!currentGroup || !groups.some((g) => g.value === currentGroup)) {
       const fallback =
         groups.find((g) => g.value === 'default')?.value ??
         groups[0]?.value ??
@@ -205,13 +213,13 @@ export function ApiKeysMutateDrawer({
     const currentRoutes = form.getValues('group_routes') || []
     currentRoutes.forEach((route, index) => {
       if (
-        route.group &&
+        !route.group ||
         !routableGroups.some((group) => group.value === route.group)
       ) {
         form.setValue(`group_routes.${index}.group`, fallbackRouteGroup)
       }
     })
-  }, [groups, routableGroups, form])
+  }, [open, groups, routableGroups, form])
 
   const onSubmit = async (data: ApiKeyFormValues) => {
     setIsSubmitting(true)

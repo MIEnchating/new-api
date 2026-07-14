@@ -5288,6 +5288,19 @@
     "Configure cache groups": "配置缓存分组",
     "Choose which groups are visible in cache analytics.": "选择缓存分析中显示的分组。",
     "Automatically show all groups": "自动显示全部分组",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "Group display order": "分组显示顺序",
+    "JSON array controlling the order shown when users create API keys.": "JSON 数组，控制用户创建密钥时的分组显示顺序。",
+    "Drag rows to control the order shown when users create API keys. A user always keeps access to their own account group, even when it is hidden here.": "拖动行可调整用户创建密钥时的分组顺序。即使此处隐藏，用户仍可使用自己的账号分组。",
+    "Order": "顺序",
+    "Drag to reorder": "拖动调整顺序",
+    "Show when creating keys": "创建密钥时显示",
+    "Move up": "上移",
+    "Move down": "下移",
+    "Show user groups": "显示用户分组",
+    "Restore channel": "恢复渠道",
+    "Channel restored": "渠道已恢复",
+    "Failed to restore channel": "恢复渠道失败",
+    "Groups marked as visible appear when users create keys. Users always retain their own account group; administrators can still assign hidden groups.": "标记为显示的分组会出现在密钥创建页面。用户始终保留自己的账号分组，管理员仍可分配已隐藏的分组。"
   }
 }

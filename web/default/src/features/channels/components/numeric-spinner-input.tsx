@@ -54,6 +54,13 @@ export function NumericSpinnerInput({
     }
   }, [value, editing])
 
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+  }, [editing])
+
   const clamp = (v: number) => {
     let result = v
     if (min !== undefined) result = Math.max(min, result)
@@ -80,7 +87,6 @@ export function NumericSpinnerInput({
   const handleStartEdit = () => {
     if (disabled) return
     setEditing(true)
-    requestAnimationFrame(() => inputRef.current?.select())
   }
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -96,7 +102,7 @@ export function NumericSpinnerInput({
   const commitValue = () => {
     setEditing(false)
     const num = Number(localValue)
-    if (isNaN(num) || localValue === '' || localValue === '-') {
+    if (Number.isNaN(num) || localValue === '' || localValue === '-') {
       setLocalValue(String(value ?? 0))
       return
     }

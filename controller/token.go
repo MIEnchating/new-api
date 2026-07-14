@@ -62,6 +62,25 @@ func normalizeTokenGroupRouteConfigForUser(userID int, config string) (string, e
 	return normalized, nil
 }
 
+func normalizeTokenGroupForUser(userID int, group string) (string, error) {
+	group = strings.TrimSpace(group)
+	if group == "" {
+		return "", fmt.Errorf("请选择分组")
+	}
+
+	userGroup, err := model.GetUserGroup(userID, false)
+	if err != nil {
+		return "", err
+	}
+	if _, ok := service.GetUserUsableGroups(userGroup)[group]; !ok {
+		return "", fmt.Errorf("无权访问 %s 分组", group)
+	}
+	if group != "auto" && !ratio_setting.ContainsGroupRatio(group) {
+		return "", fmt.Errorf("分组 %s 已被弃用", group)
+	}
+	return group, nil
+}
+
 func GetAllTokens(c *gin.Context) {
 	userId := c.GetInt("id")
 	pageInfo := common.GetPageQuery(c)
@@ -370,6 +389,11 @@ func AddToken(c *gin.Context) {
 		token.Group = ""
 		token.CrossGroupRetry = false
 	} else {
+		token.Group, err = normalizeTokenGroupForUser(c.GetInt("id"), token.Group)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		token.GroupRouteSticky = false
 	}
 	// 检查用户令牌数量是否已达上限
@@ -486,6 +510,11 @@ func UpdateToken(c *gin.Context) {
 			token.Group = ""
 			token.CrossGroupRetry = false
 		} else {
+			token.Group, err = normalizeTokenGroupForUser(userId, token.Group)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
 			token.GroupRouteSticky = false
 		}
 		// If you add more fields, please also update token.Update()

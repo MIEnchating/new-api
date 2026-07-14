@@ -321,6 +321,29 @@ func (channel *Channel) GetGroups() []string {
 	return groups
 }
 
+func GetChannelGroupNames() ([]string, error) {
+	groupValues := make([]string, 0)
+	if err := DB.Model(&Channel{}).Distinct().Pluck("group", &groupValues).Error; err != nil {
+		return nil, err
+	}
+
+	groups := make(map[string]struct{})
+	for _, value := range groupValues {
+		for _, group := range strings.Split(strings.Trim(value, ","), ",") {
+			group = strings.TrimSpace(group)
+			if group != "" {
+				groups[group] = struct{}{}
+			}
+		}
+	}
+
+	result := make([]string, 0, len(groups))
+	for group := range groups {
+		result = append(result, group)
+	}
+	return result, nil
+}
+
 func (channel *Channel) GetOtherInfo() map[string]interface{} {
 	otherInfo := make(map[string]interface{})
 	if channel.OtherInfo != "" {

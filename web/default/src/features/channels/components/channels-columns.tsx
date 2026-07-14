@@ -851,6 +851,7 @@ export function useChannelsColumns(
             <span className='text-muted-foreground'>-</span>
           ) : (
             <ChannelRouteStatusBadge
+              channelId={row.original.id}
               channelStatus={row.original.status}
               routeStatus={row.original.route_status}
             />

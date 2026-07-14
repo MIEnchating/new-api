@@ -5288,6 +5288,19 @@
     "Configure cache groups": "設定快取分組",
     "Choose which groups are visible in cache analytics.": "選擇快取分析中顯示的分組。",
     "Automatically show all groups": "自動顯示全部分組",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "Group display order": "分組顯示順序",
+    "JSON array controlling the order shown when users create API keys.": "JSON 陣列，控制使用者建立金鑰時的分組顯示順序。",
+    "Drag rows to control the order shown when users create API keys. A user always keeps access to their own account group, even when it is hidden here.": "拖曳資料列可調整使用者建立金鑰時的分組順序。即使此處隱藏，使用者仍可使用自己的帳號分組。",
+    "Order": "順序",
+    "Drag to reorder": "拖曳調整順序",
+    "Show when creating keys": "建立金鑰時顯示",
+    "Move up": "上移",
+    "Move down": "下移",
+    "Show user groups": "顯示使用者分組",
+    "Restore channel": "恢復渠道",
+    "Channel restored": "渠道已恢復",
+    "Failed to restore channel": "恢復渠道失敗",
+    "Groups marked as visible appear when users create keys. Users always retain their own account group; administrators can still assign hidden groups.": "標記為顯示的分組會出現在金鑰建立頁面。使用者始終保留自己的帳號分組，管理員仍可分配已隱藏的分組。"
   }
 }

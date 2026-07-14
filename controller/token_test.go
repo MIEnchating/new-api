@@ -547,6 +547,17 @@ func TestGetTokenModelsUsesRouteGroupsAndModelLimits(t *testing.T) {
 
 func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("failed to migrate user table: %v", err)
+	}
+	if err := db.Create(&model.User{
+		Id:       1,
+		Username: "token-owner",
+		Password: "test-password",
+		Group:    "default",
+	}).Error; err != nil {
+		t.Fatalf("failed to seed token owner: %v", err)
+	}
 	token := seedToken(t, db, 1, "editable-token", "yzab1234cdef5678")
 
 	body := map[string]any{
@@ -578,6 +589,28 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("update response leaked raw token key: %s", recorder.Body.String())
+	}
+}
+
+func TestAddTokenRequiresGroup(t *testing.T) {
+	setupTokenControllerTestDB(t)
+	body := map[string]any{
+		"name":            "missing-group",
+		"expired_time":    -1,
+		"remain_quota":    100,
+		"unlimited_quota": true,
+		"group":           "",
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body, 1)
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	if response.Success {
+		t.Fatal("expected an empty token group to be rejected")
+	}
+	if !strings.Contains(response.Message, "请选择分组") {
+		t.Fatalf("expected group validation message, got %q", response.Message)
 	}
 }
 

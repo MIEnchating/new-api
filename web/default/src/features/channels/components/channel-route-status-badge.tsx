@@ -16,11 +16,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Timer } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { Loader2, RotateCcw, Timer } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
+import { Button } from '@/components/ui/button'
 import {
   Tooltip,
   TooltipContent,
@@ -28,10 +31,13 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
+import { clearChannelRouteCooldown } from '../api'
 import { CHANNEL_STATUS } from '../constants'
+import { channelsQueryKeys } from '../lib'
 import type { Channel } from '../types'
 
 type ChannelRouteStatusBadgeProps = {
+  channelId: number
   channelStatus: Channel['status']
   routeStatus?: Channel['route_status']
 }
@@ -94,6 +100,8 @@ function formatCountdown(seconds: number) {
 
 export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [isRestoring, setIsRestoring] = useState(false)
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const cooldownEntries = useMemo<CooldownEntry[]>(() => {
     if (props.channelStatus !== CHANNEL_STATUS.ENABLED || !props.routeStatus) {
@@ -153,7 +161,7 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
       copyable={false}
       aria-label={`${t('Cooling')} ${formatCountdown(remaining)}`}
     >
-      <Timer data-icon='inline-start' />
+      <Timer className='size-3.5 shrink-0' />
       <span>{t('Cooling')}</span>
       <span className='font-mono tabular-nums'>
         {formatCountdown(remaining)}
@@ -169,28 +177,76 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
     return badge
   }
 
+  const handleRestore = async (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation()
+    setIsRestoring(true)
+    try {
+      const result = await clearChannelRouteCooldown(props.channelId)
+      if (!result.success) {
+        toast.error(result.message || t('Failed to restore channel'))
+        return
+      }
+      toast.success(t('Channel restored'))
+      await queryClient.invalidateQueries({
+        queryKey: channelsQueryKeys.lists(),
+      })
+    } catch {
+      toast.error(t('Failed to restore channel'))
+    } finally {
+      setIsRestoring(false)
+    }
+  }
+
   return (
     <TooltipProvider delay={100}>
-      <Tooltip>
-        <TooltipTrigger render={<span />}>{badge}</TooltipTrigger>
-        <TooltipContent side='top' className='max-w-xs'>
-          <div className='space-y-1 text-xs'>
-            {activeCooldowns.map((entry) => (
-              <div
-                key={entry.key}
-                className='flex items-center justify-between gap-3'
-              >
-                <span className='truncate'>
-                  {entry.group ?? t('Remaining')}
-                </span>
-                <span className='font-mono tabular-nums'>
-                  {formatCountdown(entry.remaining)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </TooltipContent>
-      </Tooltip>
+      <span className='inline-flex h-5 items-center gap-0.5 align-middle'>
+        <Tooltip>
+          <TooltipTrigger
+            render={<span className='inline-flex h-5 items-center' />}
+          >
+            {badge}
+          </TooltipTrigger>
+          <TooltipContent side='top' className='max-w-xs'>
+            <div className='space-y-1 text-xs'>
+              {activeCooldowns.map((entry) => (
+                <div
+                  key={entry.key}
+                  className='flex items-center justify-between gap-3'
+                >
+                  <span className='truncate'>
+                    {entry.group ?? t('Remaining')}
+                  </span>
+                  <span className='font-mono tabular-nums'>
+                    {formatCountdown(entry.remaining)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type='button'
+                variant='ghost'
+                size='icon'
+                className='text-warning hover:text-warning size-5 rounded-full'
+                onClick={handleRestore}
+                disabled={isRestoring}
+                aria-label={t('Restore channel')}
+              />
+            }
+          >
+            {isRestoring ? (
+              <Loader2 className='size-3 animate-spin' />
+            ) : (
+              <RotateCcw className='size-3' />
+            )}
+          </TooltipTrigger>
+          <TooltipContent>{t('Restore channel')}</TooltipContent>
+        </Tooltip>
+      </span>
     </TooltipProvider>
   )
 }
