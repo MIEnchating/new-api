@@ -23,7 +23,14 @@ var (
 )
 
 // Redemption errors
-var ErrRedeemFailed = errors.New("redeem.failed")
+var (
+	ErrRedeemFailed          = errors.New("redeem failed")
+	ErrRedemptionNotProvided = errors.New("redemption code not provided")
+	ErrRedemptionInvalid     = errors.New("invalid redemption code")
+	ErrRedemptionUsed        = errors.New("redemption code used")
+	ErrRedemptionExpired     = errors.New("redemption code expired")
+	ErrRedemptionBatchLimit  = errors.New("redemption batch limit reached")
+)
 
 // 2FA errors
 var ErrTwoFANotEnabled = errors.New("2fa not enabled")

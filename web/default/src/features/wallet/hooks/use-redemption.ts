@@ -32,35 +32,26 @@ import { redeemTopupCode } from '../api'
 export function useRedemption() {
   const [redeeming, setRedeeming] = useState(false)
 
-  const redeemCode = useCallback(async (code: string): Promise<boolean> => {
+  const redeemCode = useCallback((code: string): Promise<boolean> => {
     if (!code || code.trim() === '') {
       toast.error(i18next.t('Please enter a redemption code'))
-      return false
+      return Promise.resolve(false)
     }
 
-    try {
-      setRedeeming(true)
-      const response = await redeemTopupCode({ key: code })
+    setRedeeming(true)
+    return redeemTopupCode({ key: code })
+      .then((response) => {
+        if (!response.success || response.data === undefined) return false
 
-      if (response.success && response.data) {
-        const quotaAdded = response.data
         toast.success(
           i18next.t('Redemption successful! Added: {{quota}}', {
-            quota: formatQuota(quotaAdded),
+            quota: formatQuota(response.data),
           })
         )
-        await getSelf()
-        return true
-      }
-
-      toast.error(response.message || i18next.t('Redemption failed'))
-      return false
-    } catch (_error) {
-      toast.error(i18next.t('Redemption failed'))
-      return false
-    } finally {
-      setRedeeming(false)
-    }
+        return getSelf().then(() => true)
+      })
+      .catch(() => false)
+      .finally(() => setRedeeming(false))
   }, [])
 
   return {

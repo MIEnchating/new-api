@@ -1321,8 +1321,7 @@ func TopUp(c *gin.Context) {
 	}
 	quota, err := model.Redeem(req.Key, id)
 	if err != nil {
-		// 不向用户暴露兑换失败的细分原因，避免攻击者根据错误类型判断兑换码状态。
-		common.ApiErrorI18n(c, i18n.MsgRedeemFailed)
+		common.ApiErrorI18n(c, redemptionErrorMessageKey(err))
 		logger.LogError(c, fmt.Sprintf("failed to redeem key %s for user %d: %s", req.Key, id, err.Error()))
 		return
 	}
@@ -1331,6 +1330,23 @@ func TopUp(c *gin.Context) {
 		"message": "",
 		"data":    quota,
 	})
+}
+
+func redemptionErrorMessageKey(err error) string {
+	switch {
+	case errors.Is(err, model.ErrRedemptionNotProvided):
+		return i18n.MsgRedemptionNotProvided
+	case errors.Is(err, model.ErrRedemptionInvalid):
+		return i18n.MsgRedemptionInvalid
+	case errors.Is(err, model.ErrRedemptionUsed):
+		return i18n.MsgRedemptionUsed
+	case errors.Is(err, model.ErrRedemptionExpired):
+		return i18n.MsgRedemptionExpired
+	case errors.Is(err, model.ErrRedemptionBatchLimit):
+		return i18n.MsgRedemptionBatchLimit
+	default:
+		return i18n.MsgRedeemFailed
+	}
 }
 
 type UpdateUserSettingRequest struct {

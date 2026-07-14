@@ -145,7 +145,7 @@ func TestRedeemCreditsQuotaExactlyOnce(t *testing.T) {
 
 	// Redeeming the same code again must fail and must not credit quota.
 	_, err = Redeem(key, userId)
-	require.Error(t, err)
+	require.ErrorIs(t, err, ErrRedemptionUsed)
 	require.NoError(t, DB.First(&user, "id = ?", userId).Error)
 	assert.Equal(t, 500, user.Quota)
 }
@@ -231,7 +231,7 @@ func TestRedeemBatchLimit(t *testing.T) {
 	_, err := Redeem(limitedBatch[0].Key, users[0].Id)
 	require.NoError(t, err)
 	_, err = Redeem(limitedBatch[1].Key, users[0].Id)
-	require.Error(t, err, "same user must not redeem a second code from the same limited batch")
+	require.ErrorIs(t, err, ErrRedemptionBatchLimit, "same user must not redeem a second code from the same limited batch")
 
 	_, err = Redeem(limitedBatch[1].Key, users[1].Id)
 	require.NoError(t, err, "another user may redeem one code from the same batch")
@@ -248,6 +248,20 @@ func TestRedeemBatchLimit(t *testing.T) {
 	var claims int64
 	require.NoError(t, DB.Model(&RedemptionBatchClaim{}).Where("user_id = ?", users[0].Id).Count(&claims).Error)
 	assert.Equal(t, int64(2), claims)
+}
+
+func TestRedeemReturnsActionableBusinessErrors(t *testing.T) {
+	userId, key := setupRedeemFixture(t, 100)
+
+	_, err := Redeem("missing-redemption-code", userId)
+	require.ErrorIs(t, err, ErrRedemptionInvalid)
+
+	require.NoError(t, DB.Model(&Redemption{}).Where("key = ?", key).Update("expired_time", common.GetTimestamp()-1).Error)
+	_, err = Redeem(key, userId)
+	require.ErrorIs(t, err, ErrRedemptionExpired)
+
+	_, err = Redeem("", userId)
+	require.ErrorIs(t, err, ErrRedemptionNotProvided)
 }
 
 func TestRedeemConcurrentDifferentCodesInLimitedBatch(t *testing.T) {

@@ -147,7 +147,7 @@ func GetRedemptionById(id int) (*Redemption, error) {
 
 func Redeem(key string, userId int) (quota int, err error) {
 	if key == "" {
-		return 0, errors.New("未提供兑换码")
+		return 0, ErrRedemptionNotProvided
 	}
 	if userId == 0 {
 		return 0, errors.New("无效的 user id")
@@ -162,13 +162,16 @@ func Redeem(key string, userId int) (quota int, err error) {
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		err := lockForUpdate(tx).Where(keyCol+" = ?", key).First(redemption).Error
 		if err != nil {
-			return errors.New("无效的兑换码")
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrRedemptionInvalid
+			}
+			return err
 		}
 		if redemption.Status != common.RedemptionCodeStatusEnabled {
-			return errors.New("该兑换码已被使用")
+			return ErrRedemptionUsed
 		}
 		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
-			return errors.New("该兑换码已过期")
+			return ErrRedemptionExpired
 		}
 		if redemption.LimitOnePerUser {
 			if redemption.BatchId == "" {
@@ -185,7 +188,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 				return result.Error
 			}
 			if result.RowsAffected == 0 {
-				return errors.New("该批次每位用户只能兑换一次")
+				return ErrRedemptionBatchLimit
 			}
 		}
 		// Compare-and-swap on status: only the transaction that flips
@@ -202,12 +205,18 @@ func Redeem(key string, userId int) (quota int, err error) {
 			return result.Error
 		}
 		if result.RowsAffected == 0 {
-			return errors.New("该兑换码已被使用")
+			return ErrRedemptionUsed
 		}
 		return tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())
+		if errors.Is(err, ErrRedemptionInvalid) ||
+			errors.Is(err, ErrRedemptionUsed) ||
+			errors.Is(err, ErrRedemptionExpired) ||
+			errors.Is(err, ErrRedemptionBatchLimit) {
+			return 0, err
+		}
 		return 0, ErrRedeemFailed
 	}
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
