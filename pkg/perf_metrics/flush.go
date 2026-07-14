@@ -49,6 +49,9 @@ func flushCompletedBuckets() {
 			TtftCount:      drained.ttftCount,
 			OutputTokens:   drained.outputTokens,
 			GenerationMs:   drained.generationMs,
+			CacheRequests:  drained.cacheRequests,
+			CacheHits:      drained.cacheHits,
+			CachedTokens:   drained.cachedTokens,
 		})
 		if err != nil {
 			bucket.addCounters(drained)

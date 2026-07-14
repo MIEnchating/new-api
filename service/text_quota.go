@@ -344,8 +344,30 @@ func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) 
 	return "openai"
 }
 
+func isConversationCacheMetricEligible(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool {
+	if ctx == nil || relayInfo == nil || usage == nil {
+		return false
+	}
+	if common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens) ||
+		(usage.BillingUsage != nil && usage.BillingUsage.Estimated) {
+		return false
+	}
+
+	switch relayInfo.RelayFormat {
+	case types.RelayFormatOpenAI,
+		types.RelayFormatClaude,
+		types.RelayFormatGemini,
+		types.RelayFormatOpenAIResponses,
+		types.RelayFormatOpenAIResponsesCompaction:
+		return true
+	default:
+		return false
+	}
+}
+
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) {
 	originUsage := usage
+	cacheMetricEligible := isConversationCacheMetricEligible(ctx, relayInfo, originUsage)
 	billingUsage := effectiveBillingUsage(usage)
 	if usage == nil {
 		extraContent = append(extraContent, "上游无计费信息")
@@ -503,6 +525,10 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		Other:            other,
 	})
 	gopool.Go(func() {
-		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
+		if !cacheMetricEligible {
+			perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
+			return
+		}
+		perfmetrics.RecordRelayUsageSample(relayInfo, int64(summary.CompletionTokens), int64(summary.CacheTokens))
 	})
 }

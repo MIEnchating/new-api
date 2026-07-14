@@ -141,6 +141,13 @@ export const STATIC_I18N_KEYS = [
   'Expired time cannot be earlier than current time',
   'Quota must be a positive number',
   'Successfully created {{count}} redemption codes',
+  'Batch',
+  'Batch Name',
+  'Name for this redemption batch (1-20 characters)',
+  'One code per user',
+  'Each user can redeem only one code from this batch.',
+  'Redemption limit',
+  'One per user',
 
   // Home page (constants-driven labels)
   'Cost Tracking',

@@ -50,6 +50,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { formatQuota, parseQuotaFromDollars } from '@/lib/format'
 import { addTimeToDate } from '@/lib/time'
@@ -201,12 +202,16 @@ export function RedemptionsMutateDrawer({
                 name='name'
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>{t('Name')}</FormLabel>
+                    <FormLabel>
+                      {isUpdate ? t('Name') : t('Batch Name')}
+                    </FormLabel>
                     <FormControl>
                       <Input {...field} placeholder={t('Enter a name')} />
                     </FormControl>
                     <FormDescription>
-                      {t('Name for this redemption code (1-20 characters)')}
+                      {isUpdate
+                        ? t('Name for this redemption code (1-20 characters)')
+                        : t('Name for this redemption batch (1-20 characters)')}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -300,31 +305,58 @@ export function RedemptionsMutateDrawer({
               />
 
               {!isUpdate && (
-                <FormField
-                  control={form.control}
-                  name='count'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Quantity')}</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type='number'
-                          min='1'
-                          max='100'
-                          placeholder={t('Number of codes to create')}
-                          onChange={(e) =>
-                            field.onChange(parseInt(e.target.value, 10) || 1)
-                          }
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {t('Create multiple redemption codes at once (1-100)')}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <>
+                  <FormField
+                    control={form.control}
+                    name='count'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Quantity')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type='number'
+                            min='1'
+                            max='100'
+                            placeholder={t('Number of codes to create')}
+                            onChange={(e) =>
+                              field.onChange(parseInt(e.target.value, 10) || 1)
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Create multiple redemption codes at once (1-100)'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='limit_one_per_user'
+                    render={({ field }) => (
+                      <FormItem className='flex items-center justify-between gap-4 rounded-md border px-3 py-3'>
+                        <div className='space-y-0.5'>
+                          <FormLabel>{t('One code per user')}</FormLabel>
+                          <FormDescription>
+                            {t(
+                              'Each user can redeem only one code from this batch.'
+                            )}
+                          </FormDescription>
+                        </div>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                </>
               )}
             </SideDrawerSection>
           </form>

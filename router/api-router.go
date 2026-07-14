@@ -23,6 +23,8 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/setup", anonymousRequestBodyLimit, controller.PostSetup)
 		apiRouter.GET("/status", controller.GetStatus)
 		apiRouter.GET("/uptime/status", controller.GetUptimeKumaStatus)
+		apiRouter.GET("/status-monitor/cache", middleware.UserAuth(), controller.GetCacheMetrics)
+		apiRouter.PUT("/status-monitor/cache/baseline", middleware.AdminAuth(), controller.UpdateCacheHitRateBaseline)
 		apiRouter.GET("/models", middleware.UserAuth(), controller.DashboardListModels)
 		apiRouter.GET("/status/test", middleware.AdminAuth(), controller.TestStatus)
 		apiRouter.GET("/notice", controller.GetNotice)

@@ -23,6 +23,7 @@ import {
   ChevronRight,
   CircleDashed,
   Clock3,
+  Database,
   RotateCw,
   Wrench,
   type LucideIcon,
@@ -34,7 +35,7 @@ import { SectionPageLayout } from '@/components/layout'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Tooltip,
   TooltipContent,
@@ -49,10 +50,13 @@ import type {
 } from '@/features/dashboard/types'
 import { cn } from '@/lib/utils'
 
+import { getCacheMetrics } from './api'
+import { CacheMonitor } from './cache-monitor'
 import {
   getOrderedHeartbeats,
   MonitorDetailsDrawer,
 } from './monitor-details-drawer'
+import type { CacheMetricsResponse } from './types'
 
 type MonitorStatusMeta = {
   label: string
@@ -509,6 +513,10 @@ export function StatusMonitor() {
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [cacheFailed, setCacheFailed] = useState(false)
+  const [cacheMetrics, setCacheMetrics] = useState<CacheMetricsResponse | null>(
+    null
+  )
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [activeGroupKey, setActiveGroupKey] = useState(ALL_GROUP_KEY)
   const [selectedMonitor, setSelectedMonitor] = useState<UptimeMonitor | null>(
@@ -522,14 +530,23 @@ export function StatusMonitor() {
       setRefreshing(true)
     }
     setFailed(false)
-    return getUptimeStatus()
-      .then((response) => {
-        setGroups(response?.data ?? [])
+    setCacheFailed(false)
+    return Promise.allSettled([getUptimeStatus(), getCacheMetrics()])
+      .then(([uptimeResult, cacheResult]) => {
+        if (uptimeResult.status === 'fulfilled') {
+          setGroups(uptimeResult.value?.data ?? [])
+        } else {
+          setGroups([])
+          setFailed(true)
+        }
+
+        if (cacheResult.status === 'fulfilled' && cacheResult.value.success) {
+          setCacheMetrics(cacheResult.value)
+        } else {
+          setCacheMetrics(null)
+          setCacheFailed(true)
+        }
         setLastUpdated(new Date())
-      })
-      .catch(() => {
-        setGroups([])
-        setFailed(true)
       })
       .finally(() => {
         setLoading(false)
@@ -708,34 +725,55 @@ export function StatusMonitor() {
           />
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
-          <div className='flex min-w-0 flex-col gap-4'>
-            <div className='grid min-w-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4'>
-              <SummaryTile
-                label={t('Total monitors')}
-                value={String(summary.total)}
-                icon={Activity}
-              />
-              <SummaryTile
-                label={t('Operational')}
-                value={String(summary.operational)}
-                icon={CheckCircle2}
-                tone='success'
-              />
-              <SummaryTile
-                label={t('Affected monitors')}
-                value={String(summary.affected)}
-                icon={AlertTriangle}
-                tone={summary.affected > 0 ? 'warning' : 'default'}
-              />
-              <SummaryTile
-                label={t('Average uptime')}
-                value={formatUptime(summary.average)}
-                icon={CircleDashed}
-              />
-            </div>
+          <Tabs defaultValue='site-status' className='min-w-0 gap-4'>
+            <TabsList className='grid w-full max-w-sm grid-cols-2'>
+              <TabsTrigger value='site-status'>
+                <Activity />
+                {t('Site status')}
+              </TabsTrigger>
+              <TabsTrigger value='cache-analytics'>
+                <Database />
+                {t('Cache analytics')}
+              </TabsTrigger>
+            </TabsList>
 
-            {content}
-          </div>
+            <TabsContent value='site-status' className='min-w-0 space-y-4'>
+              <div className='grid min-w-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4'>
+                <SummaryTile
+                  label={t('Total monitors')}
+                  value={String(summary.total)}
+                  icon={Activity}
+                />
+                <SummaryTile
+                  label={t('Operational')}
+                  value={String(summary.operational)}
+                  icon={CheckCircle2}
+                  tone='success'
+                />
+                <SummaryTile
+                  label={t('Affected monitors')}
+                  value={String(summary.affected)}
+                  icon={AlertTriangle}
+                  tone={summary.affected > 0 ? 'warning' : 'default'}
+                />
+                <SummaryTile
+                  label={t('Average uptime')}
+                  value={formatUptime(summary.average)}
+                  icon={CircleDashed}
+                />
+              </div>
+
+              {content}
+            </TabsContent>
+
+            <TabsContent value='cache-analytics' className='min-w-0'>
+              <CacheMonitor
+                response={cacheMetrics}
+                loading={loading}
+                failed={cacheFailed}
+              />
+            </TabsContent>
+          </Tabs>
         </SectionPageLayout.Content>
       </SectionPageLayout>
       <MonitorDetailsDrawer

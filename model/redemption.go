@@ -9,21 +9,32 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Redemption struct {
-	Id           int            `json:"id"`
-	UserId       int            `json:"user_id"`
-	Key          string         `json:"key" gorm:"type:char(32);uniqueIndex"`
-	Status       int            `json:"status" gorm:"default:1"`
-	Name         string         `json:"name" gorm:"index"`
-	Quota        int            `json:"quota" gorm:"default:100"`
-	CreatedTime  int64          `json:"created_time" gorm:"bigint"`
-	RedeemedTime int64          `json:"redeemed_time" gorm:"bigint"`
-	Count        int            `json:"count" gorm:"-:all"` // only for api request
-	UsedUserId   int            `json:"used_user_id"`
-	DeletedAt    gorm.DeletedAt `gorm:"index"`
-	ExpiredTime  int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+	Id              int            `json:"id"`
+	UserId          int            `json:"user_id"`
+	Key             string         `json:"key" gorm:"type:char(32);uniqueIndex"`
+	Status          int            `json:"status" gorm:"default:1"`
+	Name            string         `json:"name" gorm:"index"`
+	Quota           int            `json:"quota" gorm:"default:100"`
+	CreatedTime     int64          `json:"created_time" gorm:"bigint"`
+	RedeemedTime    int64          `json:"redeemed_time" gorm:"bigint"`
+	Count           int            `json:"count" gorm:"-:all"` // only for api request
+	UsedUserId      int            `json:"used_user_id"`
+	DeletedAt       gorm.DeletedAt `gorm:"index"`
+	ExpiredTime     int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+	BatchId         string         `json:"batch_id" gorm:"type:varchar(32);index"`
+	LimitOnePerUser bool           `json:"limit_one_per_user" gorm:"default:false"`
+}
+
+type RedemptionBatchClaim struct {
+	Id           int    `json:"id"`
+	BatchId      string `json:"batch_id" gorm:"type:varchar(32);uniqueIndex:idx_redemption_batch_user,priority:1"`
+	UserId       int    `json:"user_id" gorm:"uniqueIndex:idx_redemption_batch_user,priority:2"`
+	RedemptionId int    `json:"redemption_id" gorm:"index"`
+	CreatedTime  int64  `json:"created_time" gorm:"bigint"`
 }
 
 func GetAllRedemptions(startIdx int, num int) (redemptions []*Redemption, total int64, err error) {
@@ -159,6 +170,24 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if redemption.ExpiredTime != 0 && redemption.ExpiredTime < common.GetTimestamp() {
 			return errors.New("该兑换码已过期")
 		}
+		if redemption.LimitOnePerUser {
+			if redemption.BatchId == "" {
+				return errors.New("兑换码批次编号为空")
+			}
+			claim := &RedemptionBatchClaim{
+				BatchId:      redemption.BatchId,
+				UserId:       userId,
+				RedemptionId: redemption.Id,
+				CreatedTime:  common.GetTimestamp(),
+			}
+			result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(claim)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return errors.New("该批次每位用户只能兑换一次")
+			}
+		}
 		// Compare-and-swap on status: only the transaction that flips
 		// enabled -> used may credit quota, so a concurrent redeem of the
 		// same code loses here even without a row lock (e.g. on SQLite).
@@ -185,10 +214,36 @@ func Redeem(key string, userId int) (quota int, err error) {
 	return redemption.Quota, nil
 }
 
-func (redemption *Redemption) Insert() error {
-	var err error
-	err = DB.Create(redemption).Error
-	return err
+func CreateRedemptions(redemption *Redemption) ([]string, error) {
+	if redemption.Count <= 0 {
+		return nil, errors.New("兑换码数量必须大于 0")
+	}
+
+	batchId := common.GetUUID()
+	createdTime := common.GetTimestamp()
+	keys := make([]string, redemption.Count)
+	redemptions := make([]Redemption, redemption.Count)
+	for i := range redemptions {
+		keys[i] = common.GetUUID()
+		redemptions[i] = Redemption{
+			UserId:          redemption.UserId,
+			Name:            redemption.Name,
+			Key:             keys[i],
+			CreatedTime:     createdTime,
+			Quota:           redemption.Quota,
+			ExpiredTime:     redemption.ExpiredTime,
+			BatchId:         batchId,
+			LimitOnePerUser: redemption.LimitOnePerUser,
+		}
+	}
+
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		return tx.Create(&redemptions).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return keys, nil
 }
 
 func (redemption *Redemption) SelectUpdate() error {

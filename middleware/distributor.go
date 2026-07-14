@@ -101,7 +101,7 @@ func Distribute() func(c *gin.Context) {
 					}
 				}
 
-				if !service.HasTokenGroupRoutes(c) {
+				if shouldUseChannelAffinity(c) {
 					if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
 						affinityUsable := false
 						preferred, err := model.CacheGetChannel(preferredChannelID)
@@ -172,6 +172,10 @@ func Distribute() func(c *gin.Context) {
 			service.RecordChannelAffinity(c, channel.Id)
 		}
 	}
+}
+
+func shouldUseChannelAffinity(c *gin.Context) bool {
+	return !service.IsChannelRouteEnabled() && !service.HasTokenGroupRoutes(c)
 }
 
 // channelSupportsRequestPath reports whether a channel can serve the request path.

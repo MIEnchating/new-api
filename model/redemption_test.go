@@ -102,9 +102,11 @@ func TestSearchRedemptionsFiltersAndPaginates(t *testing.T) {
 
 func setupRedeemFixture(t *testing.T, quota int) (userId int, key string) {
 	t.Helper()
-	require.NoError(t, DB.AutoMigrate(&Redemption{}))
+	require.NoError(t, DB.AutoMigrate(&Redemption{}, &RedemptionBatchClaim{}))
+	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&RedemptionBatchClaim{}).Error)
 	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
 	t.Cleanup(func() {
+		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&RedemptionBatchClaim{}).Error)
 		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
 		DB.Exec("DELETE FROM users")
 		DB.Exec("DELETE FROM logs")
@@ -178,4 +180,128 @@ func TestRedeemConcurrentSingleSuccess(t *testing.T) {
 	var user User
 	require.NoError(t, DB.First(&user, "id = ?", userId).Error)
 	assert.Equal(t, 300, user.Quota, "quota must be credited exactly once")
+}
+
+func setupBatchRedeemFixture(t *testing.T) (users []User) {
+	t.Helper()
+	require.NoError(t, DB.AutoMigrate(&Redemption{}, &RedemptionBatchClaim{}))
+	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&RedemptionBatchClaim{}).Error)
+	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
+	DB.Exec("DELETE FROM users")
+	DB.Exec("DELETE FROM logs")
+	t.Cleanup(func() {
+		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&RedemptionBatchClaim{}).Error)
+		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
+		DB.Exec("DELETE FROM users")
+		DB.Exec("DELETE FROM logs")
+	})
+
+	users = []User{
+		{Username: "batch-redeem-user-1", Password: "password", Status: common.UserStatusEnabled, AffCode: "batch-user-1"},
+		{Username: "batch-redeem-user-2", Password: "password", Status: common.UserStatusEnabled, AffCode: "batch-user-2"},
+	}
+	require.NoError(t, DB.Create(&users).Error)
+	return users
+}
+
+func createBatchCodes(t *testing.T, batchId string, limitOnePerUser bool, count int, quota int) []Redemption {
+	t.Helper()
+	redemptions := make([]Redemption, count)
+	for i := range redemptions {
+		redemptions[i] = Redemption{
+			Name:            "batch-" + batchId,
+			Key:             common.GetUUID(),
+			Status:          common.RedemptionCodeStatusEnabled,
+			Quota:           quota,
+			CreatedTime:     common.GetTimestamp(),
+			BatchId:         batchId,
+			LimitOnePerUser: limitOnePerUser,
+		}
+	}
+	require.NoError(t, DB.Create(&redemptions).Error)
+	return redemptions
+}
+
+func TestRedeemBatchLimit(t *testing.T) {
+	users := setupBatchRedeemFixture(t)
+	limitedBatch := createBatchCodes(t, "limited-batch", true, 3, 100)
+	otherBatch := createBatchCodes(t, "other-batch", true, 1, 100)
+	unlimitedBatch := createBatchCodes(t, "unlimited-batch", false, 2, 100)
+
+	_, err := Redeem(limitedBatch[0].Key, users[0].Id)
+	require.NoError(t, err)
+	_, err = Redeem(limitedBatch[1].Key, users[0].Id)
+	require.Error(t, err, "same user must not redeem a second code from the same limited batch")
+
+	_, err = Redeem(limitedBatch[1].Key, users[1].Id)
+	require.NoError(t, err, "another user may redeem one code from the same batch")
+	_, err = Redeem(otherBatch[0].Key, users[0].Id)
+	require.NoError(t, err, "the same user may redeem a code from another batch")
+	_, err = Redeem(unlimitedBatch[0].Key, users[0].Id)
+	require.NoError(t, err)
+	_, err = Redeem(unlimitedBatch[1].Key, users[0].Id)
+	require.NoError(t, err, "an unlimited batch may be redeemed more than once")
+
+	var firstUser User
+	require.NoError(t, DB.First(&firstUser, users[0].Id).Error)
+	assert.Equal(t, 400, firstUser.Quota)
+	var claims int64
+	require.NoError(t, DB.Model(&RedemptionBatchClaim{}).Where("user_id = ?", users[0].Id).Count(&claims).Error)
+	assert.Equal(t, int64(2), claims)
+}
+
+func TestRedeemConcurrentDifferentCodesInLimitedBatch(t *testing.T) {
+	users := setupBatchRedeemFixture(t)
+	codes := createBatchCodes(t, "concurrent-batch", true, 5, 250)
+
+	successes := make([]bool, len(codes))
+	var wg sync.WaitGroup
+	wg.Add(len(codes))
+	for i := range codes {
+		go func(idx int) {
+			defer wg.Done()
+			if _, err := Redeem(codes[idx].Key, users[0].Id); err == nil {
+				successes[idx] = true
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	successCount := 0
+	for _, success := range successes {
+		if success {
+			successCount++
+		}
+	}
+	assert.Equal(t, 1, successCount)
+
+	var user User
+	require.NoError(t, DB.First(&user, users[0].Id).Error)
+	assert.Equal(t, 250, user.Quota)
+}
+
+func TestCreateRedemptionsCreatesOneAtomicBatch(t *testing.T) {
+	setupBatchRedeemFixture(t)
+	request := &Redemption{
+		UserId:          7,
+		Name:            "summer-campaign",
+		Quota:           500,
+		Count:           3,
+		LimitOnePerUser: true,
+	}
+
+	keys, err := CreateRedemptions(request)
+	require.NoError(t, err)
+	require.Len(t, keys, 3)
+
+	var redemptions []Redemption
+	require.NoError(t, DB.Where("name = ?", request.Name).Order("id").Find(&redemptions).Error)
+	require.Len(t, redemptions, 3)
+	batchId := redemptions[0].BatchId
+	assert.NotEmpty(t, batchId)
+	for i, redemption := range redemptions {
+		assert.Equal(t, batchId, redemption.BatchId)
+		assert.True(t, redemption.LimitOnePerUser)
+		assert.Equal(t, keys[i], redemption.Key)
+	}
 }

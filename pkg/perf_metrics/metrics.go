@@ -25,6 +25,14 @@ func Init() {
 }
 
 func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64) {
+	recordRelaySample(info, success, outputTokens, false, 0)
+}
+
+func RecordRelayUsageSample(info *relaycommon.RelayInfo, outputTokens int64, cachedTokens int64) {
+	recordRelaySample(info, true, outputTokens, true, cachedTokens)
+}
+
+func recordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64, cacheEligible bool, cachedTokens int64) {
 	if info == nil {
 		return
 	}
@@ -43,14 +51,16 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 		generationMs = latencyMs
 	}
 	Record(Sample{
-		Model:        info.OriginModelName,
-		Group:        info.UsingGroup,
-		LatencyMs:    latencyMs,
-		TtftMs:       ttftMs,
-		HasTtft:      hasTtft,
-		Success:      success,
-		OutputTokens: outputTokens,
-		GenerationMs: generationMs,
+		Model:         info.OriginModelName,
+		Group:         info.UsingGroup,
+		LatencyMs:     latencyMs,
+		TtftMs:        ttftMs,
+		HasTtft:       hasTtft,
+		Success:       success,
+		OutputTokens:  outputTokens,
+		GenerationMs:  generationMs,
+		CacheEligible: cacheEligible,
+		CachedTokens:  cachedTokens,
 	})
 }
 
@@ -104,6 +114,9 @@ func Query(params QueryParams) (QueryResult, error) {
 			ttftCount:      row.TtftCount,
 			outputTokens:   row.OutputTokens,
 			generationMs:   row.GenerationMs,
+			cacheRequests:  row.CacheRequests,
+			cacheHits:      row.CacheHits,
+			cachedTokens:   row.CachedTokens,
 		})
 	}
 
@@ -198,6 +211,51 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 	return SummaryAllResult{Models: models}, nil
 }
 
+func QueryCache(hours int, groups []string) (CacheQueryResult, error) {
+	if hours <= 0 {
+		hours = 24
+	}
+	if hours > 24*30 {
+		hours = 24 * 30
+	}
+	endTs := time.Now().Unix()
+	startTs := endTs - int64(hours)*3600
+	allowedGroups := allowedGroupSet(groups)
+	groupBuckets := map[string]map[int64]counters{}
+
+	rows, err := model.GetPerfMetricCacheBucketsAll(startTs, endTs, groups)
+	if err != nil {
+		return CacheQueryResult{}, err
+	}
+	for _, row := range rows {
+		mergeCacheGroupBucket(groupBuckets, row.Group, row.BucketTs, counters{
+			cacheRequests: row.CacheRequests,
+			cacheHits:     row.CacheHits,
+			cachedTokens:  row.CachedTokens,
+		})
+	}
+
+	hotBuckets.Range(func(key, value any) bool {
+		k := key.(bucketKey)
+		if k.bucketTs < startTs || k.bucketTs > endTs {
+			return true
+		}
+		if allowedGroups != nil {
+			if _, ok := allowedGroups[k.group]; !ok {
+				return true
+			}
+		}
+		snapshot := value.(*atomicBucket).snapshot()
+		if snapshot.cacheRequests == 0 {
+			return true
+		}
+		mergeCacheGroupBucket(groupBuckets, k.group, k.bucketTs, snapshot)
+		return true
+	})
+
+	return buildCacheQueryResult(groupBuckets), nil
+}
+
 func mergeModelTotals(totals map[string]counters, modelName string, value counters) {
 	if value.requestCount == 0 {
 		return
@@ -210,6 +268,9 @@ func mergeModelTotals(totals map[string]counters, modelName string, value counte
 	current.ttftCount += value.ttftCount
 	current.outputTokens += value.outputTokens
 	current.generationMs += value.generationMs
+	current.cacheRequests += value.cacheRequests
+	current.cacheHits += value.cacheHits
+	current.cachedTokens += value.cachedTokens
 	totals[modelName] = current
 }
 
@@ -228,7 +289,24 @@ func mergeModelBucket(modelBuckets map[string]map[int64]counters, modelName stri
 	current.ttftCount += value.ttftCount
 	current.outputTokens += value.outputTokens
 	current.generationMs += value.generationMs
+	current.cacheRequests += value.cacheRequests
+	current.cacheHits += value.cacheHits
+	current.cachedTokens += value.cachedTokens
 	modelBuckets[modelName][bucketTs] = current
+}
+
+func mergeCacheGroupBucket(groupBuckets map[string]map[int64]counters, group string, bucketTs int64, value counters) {
+	if value.cacheRequests == 0 {
+		return
+	}
+	if _, ok := groupBuckets[group]; !ok {
+		groupBuckets[group] = map[int64]counters{}
+	}
+	current := groupBuckets[group][bucketTs]
+	current.cacheRequests += value.cacheRequests
+	current.cacheHits += value.cacheHits
+	current.cachedTokens += value.cachedTokens
+	groupBuckets[group][bucketTs] = current
 }
 
 func recentSuccessRates(buckets map[int64]counters, limit int) []float64 {
@@ -283,7 +361,70 @@ func mergeCounters(merged map[bucketKey]counters, key bucketKey, value counters)
 	current.ttftCount += value.ttftCount
 	current.outputTokens += value.outputTokens
 	current.generationMs += value.generationMs
+	current.cacheRequests += value.cacheRequests
+	current.cacheHits += value.cacheHits
+	current.cachedTokens += value.cachedTokens
 	merged[key] = current
+}
+
+func buildCacheQueryResult(groupBuckets map[string]map[int64]counters) CacheQueryResult {
+	groupNames := make([]string, 0, len(groupBuckets))
+	for group := range groupBuckets {
+		groupNames = append(groupNames, group)
+	}
+	sort.Strings(groupNames)
+
+	allBuckets := map[int64]counters{}
+	results := make([]CacheGroupResult, 0, len(groupNames))
+	for _, group := range groupNames {
+		result := buildCacheGroupResult(group, groupBuckets[group])
+		results = append(results, result)
+		for ts, value := range groupBuckets[group] {
+			current := allBuckets[ts]
+			current.cacheRequests += value.cacheRequests
+			current.cacheHits += value.cacheHits
+			current.cachedTokens += value.cachedTokens
+			allBuckets[ts] = current
+		}
+	}
+
+	return CacheQueryResult{
+		Total:  buildCacheGroupResult("all", allBuckets),
+		Groups: results,
+	}
+}
+
+func buildCacheGroupResult(group string, buckets map[int64]counters) CacheGroupResult {
+	timestamps := make([]int64, 0, len(buckets))
+	for ts := range buckets {
+		timestamps = append(timestamps, ts)
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
+
+	total := counters{}
+	series := make([]CacheBucketPoint, 0, len(timestamps))
+	for _, ts := range timestamps {
+		value := buckets[ts]
+		total.cacheRequests += value.cacheRequests
+		total.cacheHits += value.cacheHits
+		total.cachedTokens += value.cachedTokens
+		series = append(series, CacheBucketPoint{
+			Ts:           ts,
+			RequestCount: value.cacheRequests,
+			HitCount:     value.cacheHits,
+			CachedTokens: value.cachedTokens,
+			CacheHitRate: cacheHitRate(value),
+		})
+	}
+
+	return CacheGroupResult{
+		Group:        group,
+		RequestCount: total.cacheRequests,
+		HitCount:     total.cacheHits,
+		CachedTokens: total.cachedTokens,
+		CacheHitRate: cacheHitRate(total),
+		Series:       series,
+	}
 }
 
 func buildQueryResult(modelName string, merged map[bucketKey]counters) QueryResult {
@@ -368,6 +509,14 @@ func successRate(value counters) float64 {
 		return 0
 	}
 	return float64(value.successCount) / float64(value.requestCount) * 100
+}
+
+func cacheHitRate(value counters) float64 {
+	if value.cacheRequests <= 0 {
+		return 0
+	}
+	rate := float64(value.cacheHits) / float64(value.cacheRequests) * 100
+	return math.Round(rate*100) / 100
 }
 
 func avgTps(value counters) float64 {

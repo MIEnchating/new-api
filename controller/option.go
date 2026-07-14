@@ -304,6 +304,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "perf_metrics_setting.cache_hit_rate_baseline":
+		baseline, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
+		if parseErr != nil || validateCacheHitRateBaseline(baseline) != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "缓存命中率基线必须在 0 到 100 之间",
+			})
+			return
+		}
 	case "error_response_setting.rules":
 		err = operation_setting.ValidateCustomErrorResponseRulesJSON(option.Value.(string))
 		if err != nil {

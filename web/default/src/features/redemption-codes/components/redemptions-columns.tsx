@@ -74,12 +74,39 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
     },
     {
       accessorKey: 'name',
-      header: t('Name'),
+      header: t('Batch'),
       meta: { mobileTitle: true },
-      cell: ({ row }) => (
-        <span className='font-medium'>{row.getValue('name')}</span>
-      ),
+      cell: ({ row }) => {
+        const redemption = row.original
+        return (
+          <div className='min-w-0'>
+            <div className='truncate font-medium'>{redemption.name}</div>
+            {redemption.batch_id && (
+              <div className='text-muted-foreground font-mono text-xs'>
+                #{redemption.batch_id.slice(0, 8)}
+              </div>
+            )}
+          </div>
+        )
+      },
       size: 180,
+    },
+    {
+      accessorKey: 'limit_one_per_user',
+      header: t('Redemption limit'),
+      meta: { mobileHidden: true },
+      cell: ({ row }) => {
+        const limited = row.getValue('limit_one_per_user') as boolean
+        return (
+          <StatusBadge
+            label={limited ? t('One per user') : t('Unlimited')}
+            variant={limited ? 'info' : 'neutral'}
+            copyable={false}
+            className='-ml-1.5'
+          />
+        )
+      },
+      size: 140,
     },
     {
       accessorKey: 'status',

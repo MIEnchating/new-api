@@ -8,14 +8,16 @@ type Store interface {
 }
 
 type Sample struct {
-	Model        string
-	Group        string
-	LatencyMs    int64
-	TtftMs       int64
-	HasTtft      bool
-	Success      bool
-	OutputTokens int64
-	GenerationMs int64
+	Model         string
+	Group         string
+	LatencyMs     int64
+	TtftMs        int64
+	HasTtft       bool
+	Success       bool
+	OutputTokens  int64
+	GenerationMs  int64
+	CacheEligible bool
+	CachedTokens  int64
 }
 
 type QueryParams struct {
@@ -60,6 +62,28 @@ type SummaryAllResult struct {
 	Models []ModelSummary `json:"models"`
 }
 
+type CacheBucketPoint struct {
+	Ts           int64   `json:"ts"`
+	RequestCount int64   `json:"request_count"`
+	HitCount     int64   `json:"hit_count"`
+	CachedTokens int64   `json:"cached_tokens"`
+	CacheHitRate float64 `json:"cache_hit_rate"`
+}
+
+type CacheGroupResult struct {
+	Group        string             `json:"group"`
+	RequestCount int64              `json:"request_count"`
+	HitCount     int64              `json:"hit_count"`
+	CachedTokens int64              `json:"cached_tokens"`
+	CacheHitRate float64            `json:"cache_hit_rate"`
+	Series       []CacheBucketPoint `json:"series"`
+}
+
+type CacheQueryResult struct {
+	Total  CacheGroupResult   `json:"total"`
+	Groups []CacheGroupResult `json:"groups"`
+}
+
 type bucketKey struct {
 	model    string
 	group    string
@@ -74,6 +98,9 @@ type counters struct {
 	ttftCount      int64
 	outputTokens   int64
 	generationMs   int64
+	cacheRequests  int64
+	cacheHits      int64
+	cachedTokens   int64
 }
 
 type atomicBucket struct {
@@ -84,6 +111,9 @@ type atomicBucket struct {
 	ttftCount      atomic.Int64
 	outputTokens   atomic.Int64
 	generationMs   atomic.Int64
+	cacheRequests  atomic.Int64
+	cacheHits      atomic.Int64
+	cachedTokens   atomic.Int64
 }
 
 func (b *atomicBucket) add(sample Sample) {
@@ -102,6 +132,13 @@ func (b *atomicBucket) add(sample Sample) {
 		b.outputTokens.Add(sample.OutputTokens)
 		b.generationMs.Add(sample.GenerationMs)
 	}
+	if sample.CacheEligible {
+		b.cacheRequests.Add(1)
+		if sample.CachedTokens > 0 {
+			b.cacheHits.Add(1)
+			b.cachedTokens.Add(sample.CachedTokens)
+		}
+	}
 }
 
 func (b *atomicBucket) snapshot() counters {
@@ -113,6 +150,9 @@ func (b *atomicBucket) snapshot() counters {
 		ttftCount:      b.ttftCount.Load(),
 		outputTokens:   b.outputTokens.Load(),
 		generationMs:   b.generationMs.Load(),
+		cacheRequests:  b.cacheRequests.Load(),
+		cacheHits:      b.cacheHits.Load(),
+		cachedTokens:   b.cachedTokens.Load(),
 	}
 }
 
@@ -125,6 +165,9 @@ func (b *atomicBucket) drain() counters {
 		ttftCount:      b.ttftCount.Swap(0),
 		outputTokens:   b.outputTokens.Swap(0),
 		generationMs:   b.generationMs.Swap(0),
+		cacheRequests:  b.cacheRequests.Swap(0),
+		cacheHits:      b.cacheHits.Swap(0),
+		cachedTokens:   b.cachedTokens.Swap(0),
 	}
 }
 
@@ -149,5 +192,14 @@ func (b *atomicBucket) addCounters(c counters) {
 	}
 	if c.generationMs != 0 {
 		b.generationMs.Add(c.generationMs)
+	}
+	if c.cacheRequests != 0 {
+		b.cacheRequests.Add(c.cacheRequests)
+	}
+	if c.cacheHits != 0 {
+		b.cacheHits.Add(c.cacheHits)
+	}
+	if c.cachedTokens != 0 {
+		b.cachedTokens.Add(c.cachedTokens)
 	}
 }

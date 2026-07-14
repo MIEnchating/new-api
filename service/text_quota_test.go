@@ -740,3 +740,37 @@ func TestCalculateTextQuotaSummaryFixedPriceAppliesImageCountOnceAndAllowsOverri
 	summary = calculateTextQuotaSummary(ctx, relayInfo, usage)
 	require.Equal(t, 120000, summary.Quota)
 }
+
+func TestIsConversationCacheMetricEligible(t *testing.T) {
+	tests := []struct {
+		name     string
+		format   types.RelayFormat
+		usage    *dto.Usage
+		local    bool
+		eligible bool
+	}{
+		{name: "chat usage", format: types.RelayFormatOpenAI, usage: &dto.Usage{}, eligible: true},
+		{name: "responses usage", format: types.RelayFormatOpenAIResponses, usage: &dto.Usage{}, eligible: true},
+		{name: "responses compaction usage", format: types.RelayFormatOpenAIResponsesCompaction, usage: &dto.Usage{}, eligible: true},
+		{name: "claude usage", format: types.RelayFormatClaude, usage: &dto.Usage{}, eligible: true},
+		{name: "gemini usage", format: types.RelayFormatGemini, usage: &dto.Usage{}, eligible: true},
+		{name: "local estimate", format: types.RelayFormatOpenAI, usage: &dto.Usage{}, local: true},
+		{name: "billing estimate", format: types.RelayFormatGemini, usage: &dto.Usage{BillingUsage: &dto.BillingUsage{Estimated: true}}},
+		{name: "missing usage", format: types.RelayFormatOpenAI},
+		{name: "embedding usage", format: types.RelayFormatEmbedding, usage: &dto.Usage{}},
+		{name: "image usage", format: types.RelayFormatOpenAIImage, usage: &dto.Usage{}},
+		{name: "audio usage", format: types.RelayFormatOpenAIAudio, usage: &dto.Usage{}},
+		{name: "rerank usage", format: types.RelayFormatRerank, usage: &dto.Usage{}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			if test.local {
+				common.SetContextKey(ctx, constant.ContextKeyLocalCountTokens, true)
+			}
+			info := &relaycommon.RelayInfo{RelayFormat: test.format}
+			require.Equal(t, test.eligible, isConversationCacheMetricEligible(ctx, info, test.usage))
+		})
+	}
+}

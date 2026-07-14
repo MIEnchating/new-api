@@ -20,6 +20,9 @@ type PerfMetric struct {
 	TtftCount      int64  `json:"-" gorm:"default:0"`
 	OutputTokens   int64  `json:"-" gorm:"default:0"`
 	GenerationMs   int64  `json:"-" gorm:"default:0"`
+	CacheRequests  int64  `json:"-" gorm:"default:0"`
+	CacheHits      int64  `json:"-" gorm:"default:0"`
+	CachedTokens   int64  `json:"-" gorm:"default:0"`
 }
 
 func (PerfMetric) TableName() string {
@@ -44,8 +47,38 @@ func UpsertPerfMetric(metric *PerfMetric) error {
 			"ttft_count":       gorm.Expr("perf_metrics.ttft_count + ?", metric.TtftCount),
 			"output_tokens":    gorm.Expr("perf_metrics.output_tokens + ?", metric.OutputTokens),
 			"generation_ms":    gorm.Expr("perf_metrics.generation_ms + ?", metric.GenerationMs),
+			"cache_requests":   gorm.Expr("perf_metrics.cache_requests + ?", metric.CacheRequests),
+			"cache_hits":       gorm.Expr("perf_metrics.cache_hits + ?", metric.CacheHits),
+			"cached_tokens":    gorm.Expr("perf_metrics.cached_tokens + ?", metric.CachedTokens),
 		}),
 	}).Create(metric).Error
+}
+
+type PerfMetricCacheBucket struct {
+	Group         string `json:"group" gorm:"column:group_name"`
+	BucketTs      int64  `json:"bucket_ts"`
+	CacheRequests int64  `json:"cache_requests"`
+	CacheHits     int64  `json:"cache_hits"`
+	CachedTokens  int64  `json:"cached_tokens"`
+}
+
+func GetPerfMetricCacheBucketsAll(startTs int64, endTs int64, groups []string) ([]PerfMetricCacheBucket, error) {
+	var buckets []PerfMetricCacheBucket
+	query := DB.Model(&PerfMetric{}).
+		Select(commonGroupCol+" as group_name, bucket_ts, SUM(cache_requests) as cache_requests, SUM(cache_hits) as cache_hits, SUM(cached_tokens) as cached_tokens").
+		Where("bucket_ts >= ? AND bucket_ts <= ?", startTs, endTs)
+	if groups != nil {
+		if len(groups) == 0 {
+			return buckets, nil
+		}
+		query = query.Where(commonGroupCol+" IN ?", groups)
+	}
+	err := query.
+		Group(commonGroupCol + ", bucket_ts").
+		Having("SUM(cache_requests) > 0").
+		Order("bucket_ts ASC").
+		Find(&buckets).Error
+	return buckets, err
 }
 
 func GetPerfMetrics(modelName string, group string, startTs int64, endTs int64) ([]PerfMetric, error) {

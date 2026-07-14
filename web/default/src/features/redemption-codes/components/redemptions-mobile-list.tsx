@@ -128,7 +128,9 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
                   {redemption.name}
                 </div>
                 <div className='text-muted-foreground text-[11px]'>
-                  {t('Redemption Code')}
+                  {redemption.batch_id
+                    ? `#${redemption.batch_id.slice(0, 8)}`
+                    : t('Redemption Code')}
                 </div>
               </div>
               {expired ? (
@@ -165,6 +167,17 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
               <span className='text-muted-foreground'>{t('Quota')}</span>
               <span className='font-medium tabular-nums'>
                 {formatQuota(redemption.quota)}
+              </span>
+            </div>
+
+            <div className='flex items-center justify-between gap-2 text-xs'>
+              <span className='text-muted-foreground'>
+                {t('Redemption limit')}
+              </span>
+              <span className='font-medium'>
+                {redemption.limit_one_per_user
+                  ? t('One per user')
+                  : t('Unlimited')}
               </span>
             </div>
           </div>

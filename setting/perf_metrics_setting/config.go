@@ -3,17 +3,19 @@ package perf_metrics_setting
 import "github.com/QuantumNous/new-api/setting/config"
 
 type PerfMetricsSetting struct {
-	Enabled       bool   `json:"enabled"`
-	FlushInterval int    `json:"flush_interval"`
-	BucketTime    string `json:"bucket_time"`
-	RetentionDays int    `json:"retention_days"`
+	Enabled              bool   `json:"enabled"`
+	FlushInterval        int    `json:"flush_interval"`
+	BucketTime           string `json:"bucket_time"`
+	RetentionDays        int    `json:"retention_days"`
+	CacheHitRateBaseline int    `json:"cache_hit_rate_baseline"`
 }
 
 var perfMetricsSetting = PerfMetricsSetting{
-	Enabled:       true,
-	FlushInterval: 5,
-	BucketTime:    "hour",
-	RetentionDays: 0,
+	Enabled:              true,
+	FlushInterval:        5,
+	BucketTime:           "hour",
+	RetentionDays:        0,
+	CacheHitRateBaseline: 85,
 }
 
 func init() {
@@ -42,4 +44,8 @@ func GetFlushIntervalMinutes() int {
 		return 1
 	}
 	return perfMetricsSetting.FlushInterval
+}
+
+func GetCacheHitRateBaseline() int {
+	return perfMetricsSetting.CacheHitRateBaseline
 }
