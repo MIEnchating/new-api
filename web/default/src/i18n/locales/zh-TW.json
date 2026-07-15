@@ -5301,6 +5301,16 @@
     "Restore channel": "恢復渠道",
     "Channel restored": "渠道已恢復",
     "Failed to restore channel": "恢復渠道失敗",
-    "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group.": "標記為顯示的分組會出現在金鑰建立頁面。特殊可用分組規則可以隱藏任意分組，包括使用者自身的帳號分組。"
+    "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group.": "標記為顯示的分組會出現在金鑰建立頁面。特殊可用分組規則可以隱藏任意分組，包括使用者自身的帳號分組。",
+    "Top-up Stats": "充值統計",
+    "Successful orders": "成功訂單",
+    "Total payment": "支付總額",
+    "Average order": "平均訂單金額",
+    "Paying users": "充值使用者",
+    "Last top-up": "最後充值時間",
+    "No top-up data found": "暫無充值資料",
+    "Failed to load top-up stats": "載入充值統計失敗",
+    "Search by username or user ID...": "按使用者名稱或使用者 ID 搜尋...",
+    "No successful top-ups were completed in this time range.": "此時間範圍內沒有已完成的成功充值。"
   }
 }

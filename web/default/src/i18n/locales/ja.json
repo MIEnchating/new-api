@@ -5204,6 +5204,16 @@
     "Configure cache groups": "キャッシュグループを設定",
     "Choose which groups are visible in cache analytics.": "キャッシュ分析に表示するグループを選択します。",
     "Automatically show all groups": "すべてのグループを自動表示",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "Top-up Stats": "ユーザー入金統計",
+    "Successful orders": "成功した注文",
+    "Total payment": "支払い総額",
+    "Average order": "平均注文額",
+    "Paying users": "入金ユーザー",
+    "Last top-up": "最終入金日時",
+    "No top-up data found": "入金データがありません",
+    "Failed to load top-up stats": "入金統計の読み込みに失敗しました",
+    "Search by username or user ID...": "ユーザー名またはユーザー ID で検索...",
+    "No successful top-ups were completed in this time range.": "この期間に完了した入金はありません。"
   }
 }

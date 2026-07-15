@@ -5301,6 +5301,16 @@
     "Restore channel": "Restore channel",
     "Channel restored": "Channel restored",
     "Failed to restore channel": "Failed to restore channel",
-    "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group.": "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group."
+    "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group.": "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group.",
+    "Top-up Stats": "Top-up Stats",
+    "Successful orders": "Successful orders",
+    "Total payment": "Total payment",
+    "Average order": "Average order",
+    "Paying users": "Paying users",
+    "Last top-up": "Last top-up",
+    "No top-up data found": "No top-up data found",
+    "Failed to load top-up stats": "Failed to load top-up stats",
+    "Search by username or user ID...": "Search by username or user ID...",
+    "No successful top-ups were completed in this time range.": "No successful top-ups were completed in this time range."
   }
 }

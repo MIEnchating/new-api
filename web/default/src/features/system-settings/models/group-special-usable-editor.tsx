@@ -221,7 +221,10 @@ function GroupSection(props: GroupSectionProps) {
               variant='ghost'
               size='sm'
               className='h-7 w-7 p-0'
-              onClick={() => props.onAdd(props.groupName)}
+              onClick={() => {
+                setOpen(true)
+                props.onAdd(props.groupName)
+              }}
             >
               <Plus className='h-4 w-4' />
             </Button>

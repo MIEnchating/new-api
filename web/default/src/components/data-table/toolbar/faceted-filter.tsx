@@ -121,7 +121,17 @@ function DataTableFacetedFilterInner<TData, TValue>({
         )}
       </PopoverTrigger>
       <PopoverContent className='max-w-[360px] min-w-[200px] p-0' align='start'>
-        <Command>
+        <Command
+          filter={(value, search, keywords) => {
+            const query = search.trim().toLowerCase()
+            if (!query) return 1
+
+            const searchableText = [value, ...(keywords ?? [])]
+              .join(' ')
+              .toLowerCase()
+            return searchableText.includes(query) ? 1 : 0
+          }}
+        >
           <CommandInput placeholder={title} />
           <CommandList>
             <CommandEmpty>{t('No results found.')}</CommandEmpty>
@@ -131,6 +141,7 @@ function DataTableFacetedFilterInner<TData, TValue>({
                 return (
                   <CommandItem
                     key={option.value}
+                    keywords={[t(option.label)]}
                     onSelect={() => handleOptionSelect(option.value)}
                   >
                     <div

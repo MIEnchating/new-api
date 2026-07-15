@@ -459,6 +459,55 @@ func GetAllTopUps(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
+// GetTopUpStats returns successful top-up aggregates for administrators.
+func GetTopUpStats(c *gin.Context) {
+	now := time.Now()
+	defaultStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	defaultEnd := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location()).Unix() - 1
+
+	startTime := defaultStart
+	endTime := defaultEnd
+	var err error
+	if raw := c.Query("start_time"); raw != "" {
+		startTime, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			common.ApiErrorMsg(c, "开始时间无效")
+			return
+		}
+	}
+	if raw := c.Query("end_time"); raw != "" {
+		endTime, err = strconv.ParseInt(raw, 10, 64)
+		if err != nil {
+			common.ApiErrorMsg(c, "结束时间无效")
+			return
+		}
+	}
+	if startTime < 0 || endTime < startTime {
+		common.ApiErrorMsg(c, "时间范围无效")
+		return
+	}
+
+	pageInfo := common.GetPageQuery(c)
+	summary, items, total, err := model.GetUserTopUpStats(
+		startTime,
+		endTime,
+		c.Query("keyword"),
+		pageInfo,
+	)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	common.ApiSuccess(c, gin.H{
+		"summary":   summary,
+		"items":     items,
+		"total":     total,
+		"page":      pageInfo.GetPage(),
+		"page_size": pageInfo.GetPageSize(),
+	})
+}
+
 type AdminCompleteTopupRequest struct {
 	TradeNo string `json:"trade_no"`
 }

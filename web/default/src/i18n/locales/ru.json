@@ -5204,6 +5204,16 @@
     "Configure cache groups": "Настроить группы кэша",
     "Choose which groups are visible in cache analytics.": "Выберите группы, отображаемые в аналитике кэша.",
     "Automatically show all groups": "Автоматически показывать все группы",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Top-up Stats": "Статистика пополнений",
+    "Successful orders": "Успешные заказы",
+    "Total payment": "Общая сумма платежей",
+    "Average order": "Средний платёж",
+    "Paying users": "Платящие пользователи",
+    "Last top-up": "Последнее пополнение",
+    "No top-up data found": "Данные о пополнениях отсутствуют",
+    "Failed to load top-up stats": "Не удалось загрузить статистику пополнений",
+    "Search by username or user ID...": "Поиск по имени или ID пользователя...",
+    "No successful top-ups were completed in this time range.": "За этот период нет завершённых успешных пополнений."
   }
 }

@@ -5301,6 +5301,16 @@
     "Restore channel": "恢复渠道",
     "Channel restored": "渠道已恢复",
     "Failed to restore channel": "恢复渠道失败",
-    "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group.": "标记为显示的分组会出现在密钥创建页面。特殊可用分组规则可以隐藏任意分组，包括用户自身的账号分组。"
+    "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group.": "标记为显示的分组会出现在密钥创建页面。特殊可用分组规则可以隐藏任意分组，包括用户自身的账号分组。",
+    "Top-up Stats": "充值统计",
+    "Successful orders": "成功订单",
+    "Total payment": "支付总额",
+    "Average order": "平均订单金额",
+    "Paying users": "充值用户",
+    "Last top-up": "最后充值时间",
+    "No top-up data found": "暂无充值数据",
+    "Failed to load top-up stats": "加载充值统计失败",
+    "Search by username or user ID...": "按用户名或用户 ID 搜索...",
+    "No successful top-ups were completed in this time range.": "该时间范围内没有已完成的成功充值。"
   }
 }

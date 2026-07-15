@@ -5204,6 +5204,16 @@
     "Configure cache groups": "Configurer les groupes de cache",
     "Choose which groups are visible in cache analytics.": "Choisissez les groupes visibles dans l'analyse du cache.",
     "Automatically show all groups": "Afficher automatiquement tous les groupes",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Top-up Stats": "Statistiques des recharges",
+    "Successful orders": "Commandes réussies",
+    "Total payment": "Paiement total",
+    "Average order": "Commande moyenne",
+    "Paying users": "Utilisateurs payants",
+    "Last top-up": "Dernière recharge",
+    "No top-up data found": "Aucune donnée de recharge",
+    "Failed to load top-up stats": "Échec du chargement des statistiques de recharge",
+    "Search by username or user ID...": "Rechercher par nom d’utilisateur ou ID...",
+    "No successful top-ups were completed in this time range.": "Aucune recharge réussie n’a été effectuée pendant cette période."
   }
 }

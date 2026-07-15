@@ -5204,6 +5204,16 @@
     "Configure cache groups": "Cấu hình nhóm bộ nhớ đệm",
     "Choose which groups are visible in cache analytics.": "Chọn các nhóm hiển thị trong phân tích bộ nhớ đệm.",
     "Automatically show all groups": "Tự động hiển thị tất cả nhóm",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Top-up Stats": "Thống kê nạp tiền",
+    "Successful orders": "Đơn hàng thành công",
+    "Total payment": "Tổng thanh toán",
+    "Average order": "Giá trị đơn trung bình",
+    "Paying users": "Người dùng nạp tiền",
+    "Last top-up": "Lần nạp gần nhất",
+    "No top-up data found": "Không có dữ liệu nạp tiền",
+    "Failed to load top-up stats": "Không thể tải thống kê nạp tiền",
+    "Search by username or user ID...": "Tìm theo tên người dùng hoặc ID...",
+    "No successful top-ups were completed in this time range.": "Không có giao dịch nạp tiền thành công trong khoảng thời gian này."
   }
 }
