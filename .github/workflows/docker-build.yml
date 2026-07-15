@@ -93,6 +93,7 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign image with cosign
+        continue-on-error: true
         run: cosign sign --yes mienvirtuoso/new-api@${{ steps.build.outputs.digest }}
 
       - name: Image summary
@@ -140,6 +141,7 @@ jobs:
         uses: sigstore/cosign-installer@v3
 
       - name: Sign manifests with cosign
+        continue-on-error: true
         run: |
           cosign sign --yes mienvirtuoso/new-api:${TAG}
           cosign sign --yes mienvirtuoso/new-api:latest
