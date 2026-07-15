@@ -3,14 +3,14 @@
 本项目基于 [QuantumNous/new-api](https://github.com/QuantumNous/new-api) 进行二次开发，保留 New API 的网关、用户、计费、渠道和模型管理能力，并维护本项目自己的功能改动与生产镜像。
 
 - 项目仓库：[MIEnchating/new-api](https://github.com/MIEnchating/new-api)
-- 生产镜像标签：`xiao99116/new-api:latest`
+- 生产镜像标签：`mienvirtuoso/new-api:latest`
 - 构建方式：Bun 构建前端，Go 编译后端
 - 默认端口：`3000`
 - 数据库：PostgreSQL
 - 缓存：Redis
 - 反向代理网络：外部 Docker 网络 `nginx`
 
-> 本项目从当前源码构建，并将产物标记为 `xiao99116/new-api:latest`。下方保留的上游镜像、部署方式和项目资料仅用于许可证合规、来源说明及上游参考。
+> 本项目从当前源码构建，并将产物标记为 `mienvirtuoso/new-api:latest`。下方保留的上游镜像、部署方式和项目资料仅用于许可证合规、来源说明及上游参考。
 
 ## 本地开发模式
 
@@ -178,7 +178,7 @@ curl http://127.0.0.1:3000/api/status
 
 预期结果：
 
-- 容器镜像为 `xiao99116/new-api:latest`
+- 容器镜像为 `mienvirtuoso/new-api:latest`
 - 容器状态为 `healthy`
 - `/api/status` 返回 HTTP `200`
 - 响应中的 `success` 为 `true`
@@ -283,7 +283,7 @@ docker compose -f docker-compose.current.yml ps
 ## 📝 Project Description
 
 > [!NOTE]
-> This repository is a derivative of [QuantumNous/new-api](https://github.com/QuantumNous/new-api). Production deployments of this fork use only `xiao99116/new-api:latest`; do not run the upstream image as this fork's production service.
+> This repository is a derivative of [QuantumNous/new-api](https://github.com/QuantumNous/new-api). Production deployments of this fork use only `mienvirtuoso/new-api:latest`; do not run the upstream image as this fork's production service.
 >
 > The production deployment entry point for this fork is `docker-compose.current.yml`:
 >

@@ -1,7 +1,7 @@
 # New-API Docker Compose Configuration
 #
 # Upstream reference configuration only. This fork's production deployment uses
-# docker-compose.current.yml and the xiao99116/new-api:latest image. Do not use
+# docker-compose.current.yml and the mienvirtuoso/new-api:latest image. Do not use
 # this file to deploy the fork.
 # 
 # Quick Start:
