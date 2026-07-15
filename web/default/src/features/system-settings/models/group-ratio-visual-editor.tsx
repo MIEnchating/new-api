@@ -17,6 +17,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  restrictToParentElement,
+  restrictToVerticalAxis,
+} from '@dnd-kit/modifiers'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
@@ -26,17 +45,13 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react'
-import {
-  useState,
-  useMemo,
-  useEffect,
-  useCallback,
-  memo,
-  type DragEvent,
-} from 'react'
+import { useState, useMemo, useEffect, useCallback, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { StaticDataTable } from '@/components/data-table/static/static-data-table'
+import {
+  StaticDataTable,
+  StaticDataTableDragHandle,
+} from '@/components/data-table/static/static-data-table'
 import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
 import { Dialog } from '@/components/dialog'
 import {
@@ -79,6 +94,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import { safeJsonParse } from '../utils/json-parser'
+import { GroupSpecialUsableRulesEditor } from './group-special-usable-editor'
 
 type GroupRatioVisualEditorProps = {
   groupRatio: string
@@ -108,6 +124,7 @@ type RegistryEntry = {
 const sectionCardClassName =
   'relative shadow-sm ring-0 before:pointer-events-none before:absolute before:inset-0 before:rounded-xl before:border before:border-border/90'
 const sectionHeaderClassName = 'border-b bg-muted/20'
+const verticalDragModifiers = [restrictToVerticalAxis, restrictToParentElement]
 
 let groupPricingIdCounter = 0
 function createGroupPricingId() {
@@ -390,6 +407,12 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         onChange={onChange}
       />
 
+      <GroupSpecialUsableRulesEditor
+        value={groupSpecialUsableGroup}
+        groupOptions={registryNames}
+        onChange={(value) => onChange('GroupSpecialUsableGroup', value)}
+      />
+
       {/* Auto Groups */}
       <Card className={sectionCardClassName}>
         <CardHeader className={sectionHeaderClassName}>
@@ -493,11 +516,14 @@ function GroupPricingTable({
       groupOrder
     )
   )
-  const [draggedRowId, setDraggedRowId] = useState('')
-  const [dragOverRow, setDragOverRow] = useState<{
-    id: string
-    position: 'before' | 'after'
-  } | null>(null)
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
 
   useEffect(() => {
     const incomingSignature = sourceGroupPricingSignature(
@@ -596,55 +622,17 @@ function GroupPricingTable({
     [emitRows, rows]
   )
 
-  const resetDragState = useCallback(() => {
-    setDraggedRowId('')
-    setDragOverRow(null)
-  }, [])
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      if (!event.over || event.active.id === event.over.id) return
 
-  const handleDragStart = useCallback(
-    (event: DragEvent<HTMLButtonElement>, id: string) => {
-      setDraggedRowId(id)
-      event.dataTransfer.effectAllowed = 'move'
-      event.dataTransfer.setData('text/plain', id)
+      const sourceIndex = rows.findIndex((row) => row._id === event.active.id)
+      const targetIndex = rows.findIndex((row) => row._id === event.over?.id)
+      if (sourceIndex < 0 || targetIndex < 0) return
+
+      emitRows(arrayMove(rows, sourceIndex, targetIndex))
     },
-    []
-  )
-
-  const handleDragOver = useCallback(
-    (event: DragEvent<HTMLTableRowElement>, id: string) => {
-      event.preventDefault()
-      if (!draggedRowId || draggedRowId === id) return
-      const rect = event.currentTarget.getBoundingClientRect()
-      setDragOverRow({
-        id,
-        position:
-          event.clientY - rect.top > rect.height / 2 ? 'after' : 'before',
-      })
-      event.dataTransfer.dropEffect = 'move'
-    },
-    [draggedRowId]
-  )
-
-  const handleDrop = useCallback(
-    (event: DragEvent<HTMLTableRowElement>, targetId: string) => {
-      event.preventDefault()
-      const sourceId = draggedRowId || event.dataTransfer.getData('text/plain')
-      const sourceIndex = rows.findIndex((row) => row._id === sourceId)
-      const targetIndex = rows.findIndex((row) => row._id === targetId)
-      if (sourceIndex >= 0 && targetIndex >= 0 && sourceIndex !== targetIndex) {
-        const position =
-          dragOverRow?.id === targetId ? dragOverRow.position : 'before'
-        let insertionIndex = targetIndex + (position === 'after' ? 1 : 0)
-        if (sourceIndex < insertionIndex) insertionIndex -= 1
-
-        const nextRows = [...rows]
-        const [moved] = nextRows.splice(sourceIndex, 1)
-        nextRows.splice(insertionIndex, 0, moved)
-        emitRows(nextRows)
-      }
-      resetDragState()
-    },
-    [dragOverRow, draggedRowId, emitRows, resetDragState, rows]
+    [emitRows, rows]
   )
 
   const duplicateNames = useMemo(() => {
@@ -667,7 +655,7 @@ function GroupPricingTable({
             <CardTitle>{t('Pricing groups')}</CardTitle>
             <CardDescription>
               {t(
-                'Drag rows to control the order shown when users create API keys. A user always keeps access to their own account group, even when it is hidden here.'
+                'Drag rows to control the order shown when users create API keys. Special usable group rules can hide any group for specific users.'
               )}
             </CardDescription>
           </div>
@@ -679,191 +667,189 @@ function GroupPricingTable({
       </CardHeader>
       <CardContent>
         <div className='space-y-3'>
-          <StaticDataTable
-            data={rows}
-            getRowKey={(row) => row._id}
-            getRowClassName={(row) =>
-              cn(
-                'transition-colors',
-                row._id === draggedRowId && 'opacity-50',
-                dragOverRow?.id === row._id &&
-                  dragOverRow.position === 'before' &&
-                  'border-t-primary border-t-2',
-                dragOverRow?.id === row._id &&
-                  dragOverRow.position === 'after' &&
-                  'border-b-primary border-b-2'
-              )
-            }
-            getRowProps={(row) => ({
-              onDragOver: (event) => handleDragOver(event, row._id),
-              onDrop: (event) => handleDrop(event, row._id),
-            })}
-            emptyClassName='text-muted-foreground h-20 text-sm'
-            emptyContent={t('No groups yet. Add a group to get started.')}
-            columns={[
-              {
-                id: 'order',
-                header: <span className='sr-only'>{t('Order')}</span>,
-                className: 'w-10',
-                cellClassName: 'w-10',
-                cell: (row) => (
-                  <button
-                    type='button'
-                    draggable={rows.length > 1}
-                    onDragStart={(event) => handleDragStart(event, row._id)}
-                    onDragEnd={resetDragState}
-                    className={cn(
-                      'text-muted-foreground hover:text-foreground flex size-8 items-center justify-center rounded-md',
-                      rows.length > 1
-                        ? 'cursor-grab active:cursor-grabbing'
-                        : 'cursor-default'
-                    )}
-                    aria-label={t('Drag to reorder')}
-                  >
-                    <GripVertical className='size-4' />
-                  </button>
-                ),
-              },
-              {
-                id: 'group',
-                header: t('Group name'),
-                className: 'min-w-40',
-                cell: (row) => (
-                  <Input
-                    value={row.name}
-                    onChange={(event) =>
-                      updateRow(row._id, 'name', event.target.value)
-                    }
-                    aria-invalid={duplicateNames.includes(row.name.trim())}
-                  />
-                ),
-              },
-              {
-                id: 'ratio',
-                header: t('Ratio'),
-                className: 'w-28',
-                cell: (row) => (
-                  <Input
-                    type='number'
-                    min={0}
-                    step={0.1}
-                    value={row.ratio}
-                    onChange={(event) =>
-                      updateRow(row._id, 'ratio', event.target.value)
-                    }
-                    onFocus={(event) => event.currentTarget.select()}
-                    onBlur={(event) => {
-                      const value = Number(event.currentTarget.value)
-                      updateRow(
-                        row._id,
-                        'ratio',
-                        Number.isFinite(value)
-                          ? String(Math.max(0, value))
-                          : '0'
-                      )
-                    }}
-                  />
-                ),
-              },
-              {
-                id: 'topup-ratio',
-                header: t('Top-up ratio'),
-                className: 'w-28',
-                cell: (row) => (
-                  <Input
-                    type='number'
-                    min={0}
-                    step={0.1}
-                    value={row.topupRatio}
-                    placeholder={t('Not set')}
-                    onChange={(event) =>
-                      updateRow(row._id, 'topupRatio', event.target.value)
-                    }
-                  />
-                ),
-              },
-              {
-                id: 'selectable',
-                header: t('Show when creating keys'),
-                className: 'w-28 text-center',
-                cell: (row) => (
-                  <div className='flex justify-center'>
-                    <Checkbox
-                      checked={row.selectable}
-                      onCheckedChange={(checked) =>
-                        updateRow(row._id, 'selectable', checked === true)
-                      }
-                      aria-label={t('Show when creating keys')}
-                    />
-                  </div>
-                ),
-              },
-              {
-                id: 'description',
-                header: t('Description'),
-                className: 'min-w-56',
-                cell: (row) =>
-                  row.selectable ? (
-                    <Input
-                      value={row.description}
-                      placeholder={t('Group description')}
-                      onChange={(event) =>
-                        updateRow(row._id, 'description', event.target.value)
-                      }
-                    />
-                  ) : (
-                    <span className='text-muted-foreground px-3 text-sm'>
-                      -
-                    </span>
-                  ),
-              },
-              {
-                id: 'actions',
-                header: t('Actions'),
-                className: 'text-right',
-                cellClassName: 'text-right',
-                cell: (row, index) => (
-                  <div className='flex justify-end gap-1'>
-                    <Button
-                      variant='ghost'
-                      size='icon-sm'
-                      onClick={() => moveRow(row._id, index - 1)}
-                      disabled={index === 0}
-                      aria-label={t('Move up')}
-                    >
-                      <ArrowUp className='size-4' />
-                    </Button>
-                    <Button
-                      variant='ghost'
-                      size='icon-sm'
-                      onClick={() => moveRow(row._id, index + 1)}
-                      disabled={index === rows.length - 1}
-                      aria-label={t('Move down')}
-                    >
-                      <ArrowDown className='size-4' />
-                    </Button>
-                    <Button
-                      variant='ghost'
-                      size='icon-sm'
-                      onClick={() => onShowDetail(row.name.trim())}
-                      disabled={!row.name.trim()}
-                      aria-label={t('Details')}
-                    >
-                      <Info className='h-4 w-4' />
-                    </Button>
-                    <Button
-                      variant='ghost'
-                      size='icon-sm'
-                      onClick={() => removeRow(row._id)}
-                      aria-label={t('Delete')}
-                    >
-                      <Trash2 className='h-4 w-4' />
-                    </Button>
-                  </div>
-                ),
-              },
-            ]}
-          />
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            modifiers={verticalDragModifiers}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={rows.map((row) => row._id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <StaticDataTable
+                data={rows}
+                getRowKey={(row) => row._id}
+                getSortableRowId={(row) => row._id}
+                emptyClassName='text-muted-foreground h-20 text-sm'
+                emptyContent={t('No groups yet. Add a group to get started.')}
+                columns={[
+                  {
+                    id: 'order',
+                    header: <span className='sr-only'>{t('Order')}</span>,
+                    className: 'w-10',
+                    cellClassName: 'w-10',
+                    cell: () => (
+                      <StaticDataTableDragHandle
+                        disabled={rows.length <= 1}
+                        className={cn(
+                          'text-muted-foreground hover:text-foreground flex size-8 items-center justify-center rounded-md',
+                          rows.length > 1
+                            ? 'cursor-grab active:cursor-grabbing'
+                            : 'cursor-default'
+                        )}
+                        aria-label={t('Drag to reorder')}
+                      >
+                        <GripVertical className='size-4' />
+                      </StaticDataTableDragHandle>
+                    ),
+                  },
+                  {
+                    id: 'group',
+                    header: t('Group name'),
+                    className: 'min-w-40',
+                    cell: (row) => (
+                      <Input
+                        value={row.name}
+                        onChange={(event) =>
+                          updateRow(row._id, 'name', event.target.value)
+                        }
+                        aria-invalid={duplicateNames.includes(row.name.trim())}
+                      />
+                    ),
+                  },
+                  {
+                    id: 'ratio',
+                    header: t('Ratio'),
+                    className: 'w-28',
+                    cell: (row) => (
+                      <Input
+                        type='number'
+                        min={0}
+                        step={0.1}
+                        value={row.ratio}
+                        onChange={(event) =>
+                          updateRow(row._id, 'ratio', event.target.value)
+                        }
+                        onFocus={(event) => event.currentTarget.select()}
+                        onBlur={(event) => {
+                          const value = Number(event.currentTarget.value)
+                          updateRow(
+                            row._id,
+                            'ratio',
+                            Number.isFinite(value)
+                              ? String(Math.max(0, value))
+                              : '0'
+                          )
+                        }}
+                      />
+                    ),
+                  },
+                  {
+                    id: 'topup-ratio',
+                    header: t('Top-up ratio'),
+                    className: 'w-28',
+                    cell: (row) => (
+                      <Input
+                        type='number'
+                        min={0}
+                        step={0.1}
+                        value={row.topupRatio}
+                        placeholder={t('Not set')}
+                        onChange={(event) =>
+                          updateRow(row._id, 'topupRatio', event.target.value)
+                        }
+                      />
+                    ),
+                  },
+                  {
+                    id: 'selectable',
+                    header: t('Show when creating keys'),
+                    className: 'w-28 text-center',
+                    cell: (row) => (
+                      <div className='flex justify-center'>
+                        <Checkbox
+                          checked={row.selectable}
+                          onCheckedChange={(checked) =>
+                            updateRow(row._id, 'selectable', checked === true)
+                          }
+                          aria-label={t('Show when creating keys')}
+                        />
+                      </div>
+                    ),
+                  },
+                  {
+                    id: 'description',
+                    header: t('Description'),
+                    className: 'min-w-56',
+                    cell: (row) =>
+                      row.selectable ? (
+                        <Input
+                          value={row.description}
+                          placeholder={t('Group description')}
+                          onChange={(event) =>
+                            updateRow(
+                              row._id,
+                              'description',
+                              event.target.value
+                            )
+                          }
+                        />
+                      ) : (
+                        <span className='text-muted-foreground px-3 text-sm'>
+                          -
+                        </span>
+                      ),
+                  },
+                  {
+                    id: 'actions',
+                    header: t('Actions'),
+                    className: 'text-right',
+                    cellClassName: 'text-right',
+                    cell: (row, index) => (
+                      <div className='flex justify-end gap-1'>
+                        <Button
+                          variant='ghost'
+                          size='icon-sm'
+                          onClick={() => moveRow(row._id, index - 1)}
+                          disabled={index === 0}
+                          aria-label={t('Move up')}
+                        >
+                          <ArrowUp className='size-4' />
+                        </Button>
+                        <Button
+                          variant='ghost'
+                          size='icon-sm'
+                          onClick={() => moveRow(row._id, index + 1)}
+                          disabled={index === rows.length - 1}
+                          aria-label={t('Move down')}
+                        >
+                          <ArrowDown className='size-4' />
+                        </Button>
+                        <Button
+                          variant='ghost'
+                          size='icon-sm'
+                          onClick={() => onShowDetail(row.name.trim())}
+                          disabled={!row.name.trim()}
+                          aria-label={t('Details')}
+                        >
+                          <Info className='h-4 w-4' />
+                        </Button>
+                        <Button
+                          variant='ghost'
+                          size='icon-sm'
+                          onClick={() => removeRow(row._id)}
+                          aria-label={t('Delete')}
+                        >
+                          <Trash2 className='h-4 w-4' />
+                        </Button>
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+            </SortableContext>
+          </DndContext>
 
           {duplicateNames.length > 0 && (
             <p className='text-destructive text-sm'>

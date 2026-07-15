@@ -198,10 +198,11 @@ function RefreshControl(props: {
   onRefresh: () => void
 }) {
   const { t } = useTranslation()
+  const { loading, refreshing, lastUpdated, onRefresh } = props
   const [countdown, setCountdown] = useState(AUTO_REFRESH_SECONDS)
 
   useEffect(() => {
-    if (props.loading || props.refreshing) {
+    if (loading || refreshing) {
       setCountdown(AUTO_REFRESH_SECONDS)
       return
     }
@@ -211,18 +212,18 @@ function RefreshControl(props: {
     }, 1000)
 
     return () => window.clearInterval(timer)
-  }, [props.loading, props.refreshing])
+  }, [loading, refreshing])
 
   useEffect(() => {
-    if (countdown !== 0 || props.loading || props.refreshing) return
+    if (countdown !== 0 || loading || refreshing) return
 
     setCountdown(AUTO_REFRESH_SECONDS)
-    props.onRefresh()
-  }, [countdown, props.loading, props.onRefresh, props.refreshing])
+    onRefresh()
+  }, [countdown, loading, onRefresh, refreshing])
 
-  const lastUpdatedText = props.lastUpdated
+  const lastUpdatedText = lastUpdated
     ? t('Updated {{time}}', {
-        time: props.lastUpdated.toLocaleTimeString(undefined, {
+        time: lastUpdated.toLocaleTimeString(undefined, {
           hourCycle: 'h23',
         }),
       })
@@ -241,16 +242,14 @@ function RefreshControl(props: {
         variant='outline'
         onClick={() => {
           setCountdown(AUTO_REFRESH_SECONDS)
-          props.onRefresh()
+          onRefresh()
         }}
-        disabled={props.loading || props.refreshing}
+        disabled={loading || refreshing}
         className='gap-2'
       >
-        <RotateCw
-          className={cn('size-4', props.refreshing && 'animate-spin')}
-        />
+        <RotateCw className={cn('size-4', refreshing && 'animate-spin')} />
         {t('Refresh')}
-        {!props.loading ? (
+        {!loading ? (
           <span className='border-border min-w-8 border-l pl-2 text-right tabular-nums'>
             {countdown}s
           </span>
@@ -402,7 +401,6 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
             gridTemplateColumns: `repeat(${heartbeats.length}, minmax(4px, 1fr))`,
           }}
           aria-label={t('Heartbeat timeline')}
-          onClick={(event) => event.stopPropagation()}
           onPointerMove={(event) => {
             const target = (event.target as HTMLElement).closest<HTMLElement>(
               '[data-heartbeat-index]'
@@ -416,14 +414,6 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
             cancelScheduledHeartbeat()
             setActiveHeartbeatIndex(null)
           }}
-          onFocus={(event) => {
-            const target = (event.target as HTMLElement).closest<HTMLElement>(
-              '[data-heartbeat-index]'
-            )
-            if (target)
-              showHeartbeat(Number(target.dataset.heartbeatIndex), false)
-          }}
-          onBlur={() => setActiveHeartbeatIndex(null)}
         >
           {heartbeats.map((heartbeat, index) => {
             const meta = getStatusMeta(heartbeat.status)
@@ -437,10 +427,9 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
               <span
                 key={`${heartbeat.time ?? 'heartbeat'}-${heartbeat.status}-${heartbeat.ping ?? 'na'}-${heartbeat.msg ?? ''}`}
                 data-heartbeat-index={index}
-                tabIndex={0}
                 aria-label={label}
                 className={cn(
-                  'block min-h-3 cursor-default rounded-[2px] outline-none focus-visible:ring-2',
+                  'block min-h-3 cursor-default rounded-[2px]',
                   heartbeat.status === 1 ? 'h-10 sm:h-12' : 'h-7 sm:h-8',
                   meta.dotClassName
                 )}
@@ -482,63 +471,68 @@ const MonitorRow = memo(function MonitorRow(props: {
   const meta = getStatusMeta(props.monitor.status)
 
   return (
-    <article
-      role='button'
-      tabIndex={0}
-      onClick={() => props.onSelect(props.monitor)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          props.onSelect(props.monitor)
-        }
-      }}
-      className='bg-background/80 hover:bg-muted/20 focus-visible:ring-ring cursor-pointer rounded-lg border p-3 transition-colors outline-none focus-visible:ring-2 sm:p-4'
-    >
-      <div className='flex min-w-0 flex-wrap items-start justify-between gap-3'>
-        <div className='flex min-w-0 items-center gap-3'>
-          <span
-            className={cn('size-2.5 shrink-0 rounded-full', meta.dotClassName)}
-          />
-          <div className='min-w-0'>
-            <div className='truncate text-sm font-semibold'>
-              {props.monitor.name || t('Unnamed monitor')}
-            </div>
-            {props.monitor.group ? (
-              <span className='bg-muted text-muted-foreground mt-1 inline-flex max-w-full rounded px-1.5 py-0.5 text-xs'>
-                <span className='truncate'>
-                  {t('Group')}: {props.monitor.group}
+    <article className='bg-background/80 rounded-lg border p-3 sm:p-4'>
+      <div
+        role='button'
+        tabIndex={0}
+        onClick={() => props.onSelect(props.monitor)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            props.onSelect(props.monitor)
+          }
+        }}
+        className='hover:bg-muted/20 focus-visible:ring-ring -m-2 cursor-pointer rounded-md p-2 transition-colors outline-none focus-visible:ring-2'
+      >
+        <div className='flex min-w-0 flex-wrap items-start justify-between gap-3'>
+          <div className='flex min-w-0 items-center gap-3'>
+            <span
+              className={cn(
+                'size-2.5 shrink-0 rounded-full',
+                meta.dotClassName
+              )}
+            />
+            <div className='min-w-0'>
+              <div className='truncate text-sm font-semibold'>
+                {props.monitor.name || t('Unnamed monitor')}
+              </div>
+              {props.monitor.group ? (
+                <span className='bg-muted text-muted-foreground mt-1 inline-flex max-w-full rounded px-1.5 py-0.5 text-xs'>
+                  <span className='truncate'>
+                    {t('Group')}: {props.monitor.group}
+                  </span>
                 </span>
-              </span>
-            ) : null}
+              ) : null}
+            </div>
+          </div>
+          <div className='flex shrink-0 items-center gap-1'>
+            <MonitorStatusBadge status={props.monitor.status} />
+            <ChevronRight className='text-muted-foreground size-4' />
           </div>
         </div>
-        <div className='flex shrink-0 items-center gap-1'>
-          <MonitorStatusBadge status={props.monitor.status} />
-          <ChevronRight className='text-muted-foreground size-4' />
-        </div>
-      </div>
 
-      <div className='mt-3 grid min-w-0 grid-cols-2 gap-2 sm:mt-4'>
-        <MetricItem
-          label={t('24-hour uptime')}
-          value={formatUptime(props.monitor.uptime24 ?? props.monitor.uptime)}
-        />
-        <MetricItem
-          label={t('7-day uptime')}
-          value={formatOptionalUptime(
-            props.monitor.uptime7 ??
-              props.monitor.uptime24 ??
-              props.monitor.uptime
-          )}
-        />
-        <MetricItem
-          label={t('Latency')}
-          value={formatPing(props.monitor.ping)}
-        />
-        <MetricItem
-          label={t('Last check')}
-          value={getRelativeTime(props.monitor.lastChecked, t)}
-        />
+        <div className='mt-3 grid min-w-0 grid-cols-2 gap-2 sm:mt-4'>
+          <MetricItem
+            label={t('24-hour uptime')}
+            value={formatUptime(props.monitor.uptime24 ?? props.monitor.uptime)}
+          />
+          <MetricItem
+            label={t('7-day uptime')}
+            value={formatOptionalUptime(
+              props.monitor.uptime7 ??
+                props.monitor.uptime24 ??
+                props.monitor.uptime
+            )}
+          />
+          <MetricItem
+            label={t('Latency')}
+            value={formatPing(props.monitor.ping)}
+          />
+          <MetricItem
+            label={t('Last check')}
+            value={getRelativeTime(props.monitor.lastChecked, t)}
+          />
+        </div>
       </div>
 
       <div className='mt-4'>

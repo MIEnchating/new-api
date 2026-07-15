@@ -54,6 +54,34 @@
 
 ## 📝 项目说明
 
+> [!NOTE]
+> 本仓库是基于 [QuantumNous/new-api](https://github.com/QuantumNous/new-api) 的二次开发版本。生产环境使用当前源码构建，构建过程由 Bun 生成前端静态文件、Go 编译后端，最终产物标记为 `xiao99116/new-api:latest`。不要使用上游镜像启动本仓库的生产服务。
+>
+> 本仓库的生产部署入口是 `docker-compose.current.yml`：
+>
+> ```bash
+> docker compose -f docker-compose.current.yml build --pull new-api
+> docker compose -f docker-compose.current.yml up -d --no-build
+> ```
+>
+> 下文保留的上游项目、作者和官方镜像信息仅用于遵守开源许可、保留来源说明及提供上游参考，不是本二开版本的生产部署入口。
+
+### 开发模式
+
+调试时不运行 New API Docker 应用容器。使用宿主机 Go 后端和 Bun/Rsbuild 热更新前端：
+
+```bash
+scripts/dev-local.sh start
+```
+
+- Go 后端：`http://127.0.0.1:3000`
+- Bun 前端：`http://154.36.172.108:3002`
+- 状态：`scripts/dev-local.sh status`
+- 重启后端：`scripts/dev-local.sh restart`
+- 停止：`scripts/dev-local.sh stop`
+
+前端代码修改会自动热更新，不需要重启 Go。PostgreSQL 和 Redis 继续使用 `/root/newapi` 编排中的现有服务。
+
 > [!IMPORTANT]
 > - 本项目仅面向合法授权的 AI API 网关、组织内部鉴权、多模型管理、用量统计、成本核算和私有化部署场景。
 > - 使用者必须合法取得上游 API Key、账号、模型服务或接口权限，并遵守上游服务条款及适用法律法规。

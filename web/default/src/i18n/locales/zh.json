@@ -2281,7 +2281,7 @@
     "If an upstream error contains any of these keywords (case insensitive), the channel will be disabled automatically.": "如果上游错误包含以下任何关键字（不区分大小写），渠道将自动禁用。",
     "If authorization succeeds, the generated JSON will be inserted into the key field. You still need to save the channel to persist it.": "授权成功后，生成的 JSON 将插入密钥字段。您仍需保存渠道以持久化。",
     "If connecting to upstream One API or New API relay projects, use OpenAI type instead unless you know what you are doing": "如果连接上游 One API 或 New API 中继项目，除非您知道自己在做什么，否则请使用 OpenAI 类型",
-    "If default auto group is enabled, newly created tokens start with auto instead of an empty group.": "如果启用默认 auto 分组，新建令牌会默认使用 auto，而不是空分组。",
+    "This setting only affects automatically generated initial tokens. User-created keys still require an explicit group selection.": "此设置仅影响系统自动生成的初始令牌。用户创建密钥时仍必须明确选择分组。",
     "If the affinity channel fails and retry succeeds on another channel, update affinity to the successful channel.": "如果亲和到的渠道失败，重试到其他渠道成功后，将亲和更新到成功的渠道。",
     "If this keeps happening, please report it on GitHub Issues.": "如果问题持续出现，请到 GitHub Issues 反馈。",
     "If you provide generative AI services to the public in mainland China, you will fulfill legal obligations including filing, security assessment, content safety, complaint handling, generated content labeling, log retention, and personal information protection.": "如果你在中国大陆向公众提供生成式人工智能服务，你将履行备案、安全评估、内容安全、投诉处理、生成内容标识、日志留存和个人信息保护等法律义务。",
@@ -2556,7 +2556,7 @@
     "Lowest median first-token latency": "最低首 token 延迟中位数",
     "m": "分钟",
     "Maintenance": "维护",
-    "Make extra groups visible to, or hide default groups from, users of a specific group.": "让特定分组的用户额外看到某些分组，或对其屏蔽默认可选的分组。",
+    "Make extra groups visible to, or hide groups from, users of a specific group.": "让特定分组的用户额外看到某些分组，或对其隐藏指定分组。",
     "Make it easier for teammates to pick the right group.": "让队友更容易选择正确的分组。",
     "Manage": "管理",
     "Manage account bindings for this user": "管理此用户的账户绑定",
@@ -5164,7 +5164,7 @@
     "When enabled, keep the affinity entry even if the affinity channel is disabled or no longer usable for the current group/model. Leave it off to delete the entry and select another channel.": "开启后，亲和到的渠道被禁用，或不再适用于当前分组/模型时，仍保留这条亲和；关闭时会删除并重新选择渠道。",
     "When enabled, large request bodies are temporarily stored on disk instead of memory, significantly reducing memory usage. SSD recommended.": "启用磁盘缓存后，大请求体将临时存储到磁盘而非内存，可显著降低内存占用。建议在 SSD 环境下使用。",
     "When enabled, MjProxy callbacks are accepted (reveals server IP).": "启用时，接受 MjProxy 回调 (会泄露服务器 IP)。",
-    "When enabled, newly created tokens start in the first auto group.": "启用后，新创建的令牌将从第一个自动分组开始。",
+    "When enabled, automatically generated initial tokens use the auto group.": "启用后，系统自动生成的初始令牌将使用 auto 分组。",
     "When enabled, prompts are scanned before reaching upstream models.": "启用后，提示将在到达上游模型之前被扫描。",
     "When enabled, the store field will be blocked": "开启后将阻止 store 字段透传",
     "When enabled, users can pick this group when creating tokens.": "启用后，用户创建令牌时可以选择该分组。",
@@ -5291,7 +5291,7 @@
     "Zoom": "缩放",
     "Group display order": "分组显示顺序",
     "JSON array controlling the order shown when users create API keys.": "JSON 数组，控制用户创建密钥时的分组显示顺序。",
-    "Drag rows to control the order shown when users create API keys. A user always keeps access to their own account group, even when it is hidden here.": "拖动行可调整用户创建密钥时的分组顺序。即使此处隐藏，用户仍可使用自己的账号分组。",
+    "Drag rows to control the order shown when users create API keys. Special usable group rules can hide any group for specific users.": "拖动行可调整用户创建密钥时的分组顺序。特殊可用分组规则可针对特定用户分组隐藏任意分组。",
     "Order": "顺序",
     "Drag to reorder": "拖动调整顺序",
     "Show when creating keys": "创建密钥时显示",
@@ -5301,6 +5301,6 @@
     "Restore channel": "恢复渠道",
     "Channel restored": "渠道已恢复",
     "Failed to restore channel": "恢复渠道失败",
-    "Groups marked as visible appear when users create keys. Users always retain their own account group; administrators can still assign hidden groups.": "标记为显示的分组会出现在密钥创建页面。用户始终保留自己的账号分组，管理员仍可分配已隐藏的分组。"
+    "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group.": "标记为显示的分组会出现在密钥创建页面。特殊可用分组规则可以隐藏任意分组，包括用户自身的账号分组。"
   }
 }

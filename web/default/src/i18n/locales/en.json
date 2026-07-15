@@ -2281,7 +2281,7 @@
     "If an upstream error contains any of these keywords (case insensitive), the channel will be disabled automatically.": "If an upstream error contains any of these keywords (case insensitive), the channel will be disabled automatically.",
     "If authorization succeeds, the generated JSON will be inserted into the key field. You still need to save the channel to persist it.": "If authorization succeeds, the generated JSON will be inserted into the key field. You still need to save the channel to persist it.",
     "If connecting to upstream One API or New API relay projects, use OpenAI type instead unless you know what you are doing": "If connecting to upstream One API or New API relay projects, use OpenAI type instead unless you know what you are doing",
-    "If default auto group is enabled, newly created tokens start with auto instead of an empty group.": "If default auto group is enabled, newly created tokens start with auto instead of an empty group.",
+    "This setting only affects automatically generated initial tokens. User-created keys still require an explicit group selection.": "This setting only affects automatically generated initial tokens. User-created keys still require an explicit group selection.",
     "If the affinity channel fails and retry succeeds on another channel, update affinity to the successful channel.": "If the affinity channel fails and retry succeeds on another channel, update affinity to the successful channel.",
     "If this keeps happening, please report it on GitHub Issues.": "If this keeps happening, please report it on GitHub Issues.",
     "If you provide generative AI services to the public in mainland China, you will fulfill legal obligations including filing, security assessment, content safety, complaint handling, generated content labeling, log retention, and personal information protection.": "If you provide generative AI services to the public in mainland China, you will fulfill legal obligations including filing, security assessment, content safety, complaint handling, generated content labeling, log retention, and personal information protection.",
@@ -2556,7 +2556,7 @@
     "Lowest median first-token latency": "Lowest median first-token latency",
     "m": "m",
     "Maintenance": "Maintenance",
-    "Make extra groups visible to, or hide default groups from, users of a specific group.": "Make extra groups visible to, or hide default groups from, users of a specific group.",
+    "Make extra groups visible to, or hide groups from, users of a specific group.": "Make extra groups visible to, or hide groups from, users of a specific group.",
     "Make it easier for teammates to pick the right group.": "Make it easier for teammates to pick the right group.",
     "Manage": "Manage",
     "Manage account bindings for this user": "Manage account bindings for this user",
@@ -5164,7 +5164,7 @@
     "When enabled, keep the affinity entry even if the affinity channel is disabled or no longer usable for the current group/model. Leave it off to delete the entry and select another channel.": "When enabled, keep the affinity entry even if the affinity channel is disabled or no longer usable for the current group/model. Leave it off to delete the entry and select another channel.",
     "When enabled, large request bodies are temporarily stored on disk instead of memory, significantly reducing memory usage. SSD recommended.": "When enabled, large request bodies are temporarily stored on disk instead of memory, significantly reducing memory usage. SSD recommended.",
     "When enabled, MjProxy callbacks are accepted (reveals server IP).": "When enabled, MjProxy callbacks are accepted (reveals server IP).",
-    "When enabled, newly created tokens start in the first auto group.": "When enabled, newly created tokens start in the first auto group.",
+    "When enabled, automatically generated initial tokens use the auto group.": "When enabled, automatically generated initial tokens use the auto group.",
     "When enabled, prompts are scanned before reaching upstream models.": "When enabled, prompts are scanned before reaching upstream models.",
     "When enabled, the store field will be blocked": "When enabled, the store field will be blocked",
     "When enabled, users can pick this group when creating tokens.": "When enabled, users can pick this group when creating tokens.",
@@ -5291,7 +5291,7 @@
     "Zoom": "Zoom",
     "Group display order": "Group display order",
     "JSON array controlling the order shown when users create API keys.": "JSON array controlling the order shown when users create API keys.",
-    "Drag rows to control the order shown when users create API keys. A user always keeps access to their own account group, even when it is hidden here.": "Drag rows to control the order shown when users create API keys. A user always keeps access to their own account group, even when it is hidden here.",
+    "Drag rows to control the order shown when users create API keys. Special usable group rules can hide any group for specific users.": "Drag rows to control the order shown when users create API keys. Special usable group rules can hide any group for specific users.",
     "Order": "Order",
     "Drag to reorder": "Drag to reorder",
     "Show when creating keys": "Show when creating keys",
@@ -5301,6 +5301,6 @@
     "Restore channel": "Restore channel",
     "Channel restored": "Channel restored",
     "Failed to restore channel": "Failed to restore channel",
-    "Groups marked as visible appear when users create keys. Users always retain their own account group; administrators can still assign hidden groups.": "Groups marked as visible appear when users create keys. Users always retain their own account group; administrators can still assign hidden groups."
+    "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group.": "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group."
   }
 }

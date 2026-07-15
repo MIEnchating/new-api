@@ -46,26 +46,27 @@ func GetOrderedGroupNames() []string {
 func GetUserUsableGroups(userGroup string) map[string]string {
 	groupsCopy := setting.GetUserUsableGroupsCopy()
 	if userGroup != "" {
+		explicitlyRemoved := make(map[string]struct{})
 		specialSettings, b := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(userGroup)
 		if b {
-			// 处理特殊可用分组
+			// Additions are applied first so an explicit removal always wins.
 			for specialGroup, desc := range specialSettings {
 				if strings.HasPrefix(specialGroup, "-:") {
-					// 移除分组
 					groupToRemove := strings.TrimPrefix(specialGroup, "-:")
-					delete(groupsCopy, groupToRemove)
+					explicitlyRemoved[groupToRemove] = struct{}{}
 				} else if strings.HasPrefix(specialGroup, "+:") {
-					// 添加分组
 					groupToAdd := strings.TrimPrefix(specialGroup, "+:")
 					groupsCopy[groupToAdd] = desc
 				} else {
-					// 直接添加分组
 					groupsCopy[specialGroup] = desc
 				}
 			}
+			for groupToRemove := range explicitlyRemoved {
+				delete(groupsCopy, groupToRemove)
+			}
 		}
-		// 如果userGroup不在UserUsableGroups中，返回UserUsableGroups + userGroup
-		if _, ok := groupsCopy[userGroup]; !ok {
+		_, userGroupRemoved := explicitlyRemoved[userGroup]
+		if _, ok := groupsCopy[userGroup]; !ok && !userGroupRemoved {
 			groupsCopy[userGroup] = "用户分组"
 		}
 	}

@@ -1,3 +1,231 @@
+# MIEnchating New API
+
+本项目基于 [QuantumNous/new-api](https://github.com/QuantumNous/new-api) 进行二次开发，保留 New API 的网关、用户、计费、渠道和模型管理能力，并维护本项目自己的功能改动与生产镜像。
+
+- 项目仓库：[MIEnchating/new-api](https://github.com/MIEnchating/new-api)
+- 生产镜像标签：`xiao99116/new-api:latest`
+- 构建方式：Bun 构建前端，Go 编译后端
+- 默认端口：`3000`
+- 数据库：PostgreSQL
+- 缓存：Redis
+- 反向代理网络：外部 Docker 网络 `nginx`
+
+> 本项目从当前源码构建，并将产物标记为 `xiao99116/new-api:latest`。下方保留的上游镜像、部署方式和项目资料仅用于许可证合规、来源说明及上游参考。
+
+## 本地开发模式
+
+功能调试默认使用宿主机 Go 后端和 Bun/Rsbuild 前端，不启动 New API 应用容器：
+
+```text
+Go backend:  http://127.0.0.1:3000
+Bun frontend: http://154.36.172.108:3002
+```
+
+前端开发服务器会把 `/api`、`/mj` 和 `/pg` 请求代理到 Go 后端。修改 `web/default/src` 下的前端代码后，Rsbuild 会自动热更新，不需要重新编译 Go 或重启服务。
+
+启动开发服务：
+
+```bash
+scripts/dev-local.sh start
+```
+
+管理开发服务：
+
+```bash
+scripts/dev-local.sh status
+scripts/dev-local.sh restart
+scripts/dev-local.sh stop
+```
+
+运行日志：
+
+```text
+dev-logs/backend-console.log
+dev-logs/frontend-console.log
+```
+
+开发脚本读取项目根目录 `.env`，并通过宿主机端口连接 `/root/newapi` 编排中的 PostgreSQL 和 Redis：
+
+```text
+PostgreSQL: 127.0.0.1:5432
+Redis:      127.0.0.1:6379
+```
+
+修改 Go 代码后执行 `scripts/dev-local.sh restart` 重新编译并启动后端。只修改前端代码时不需要执行任何重启命令。
+
+## 生产部署架构
+
+当前生产编排只管理 New API 应用容器。PostgreSQL、Redis 和 Nginx Proxy Manager 作为外部基础服务运行，并通过 Docker 网络 `nginx` 互通。
+
+| 服务 | 容器名或网络别名 | 端口 | 说明 |
+| --- | --- | --- | --- |
+| New API | `new-api` | `3000` | 本项目二开镜像 |
+| PostgreSQL | `postgres` | `5432` | 主数据库 |
+| Redis | `redis` | `6379` | 缓存与同步 |
+| Nginx Proxy Manager | `nginx-proxy-manager` | `80/81/443` | HTTPS 与反向代理 |
+
+生产配置位于 [`docker-compose.current.yml`](./docker-compose.current.yml)。仓库原有的 `docker-compose.yml` 是上游参考配置，不用于本项目生产部署。
+
+## 环境要求
+
+- Docker Engine
+- Docker Compose v2
+- 已创建的外部 Docker 网络 `nginx`
+- 已加入 `nginx` 网络的 PostgreSQL 和 Redis 容器
+- PostgreSQL 网络别名为 `postgres`
+- Redis 网络别名为 `redis`
+
+检查基础服务：
+
+```bash
+docker network inspect nginx
+docker ps --filter name=postgres --filter name=redis
+```
+
+如果网络尚未创建：
+
+```bash
+docker network create nginx
+```
+
+## 环境变量
+
+在项目根目录创建 `.env`，不要将真实密码提交到 Git：
+
+```dotenv
+TZ=Asia/Shanghai
+ERROR_LOG_ENABLED=true
+BATCH_UPDATE_ENABLED=true
+
+POSTGRES_USER=your_postgres_user
+POSTGRES_PASSWORD=your_postgres_password
+POSTGRES_DB=new-api
+
+REDIS_PASSWORD=your_redis_password
+REDIS_CONN_STRING=redis://:your_redis_password@redis:6379
+```
+
+应用通过以下容器内地址连接基础服务：
+
+```text
+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+redis://:password@redis:6379
+```
+
+## 数据目录
+
+生产编排沿用服务器上的持久化目录：
+
+```text
+/root/newapi/data
+/root/newapi/logs
+```
+
+首次部署时创建目录：
+
+```bash
+mkdir -p /root/newapi/data /root/newapi/logs
+```
+
+PostgreSQL 数据由外部 PostgreSQL 容器自己的 volume 管理，不会在重建 New API 应用容器时删除。
+
+## 构建与启动
+
+```bash
+docker compose -f docker-compose.current.yml build --pull new-api
+docker compose -f docker-compose.current.yml up -d --no-build
+```
+
+项目 Dockerfile 的构建流程为：
+
+1. 使用 Bun 安装依赖并构建 `web/default`。
+2. 使用 Bun 安装依赖并构建 `web/classic`。
+3. 使用 Go 编译后端，并嵌入两个前端主题的静态文件。
+4. 生成并运行 `/new-api` Go 二进制。
+
+服务启动后访问：
+
+```text
+http://服务器IP:3000
+```
+
+当前服务器访问地址：
+
+```text
+http://154.36.172.108:3000
+```
+
+## Nginx 反向代理
+
+New API 与 Nginx Proxy Manager 位于同一个 `nginx` 网络。代理目标应填写：
+
+```text
+Forward Hostname / IP: new-api
+Forward Port: 3000
+Scheme: http
+```
+
+公网生产环境建议由 Nginx Proxy Manager 终止 HTTPS，不要直接暴露数据库和 Redis 端口。
+
+## 运行验证
+
+查看容器和健康状态：
+
+```bash
+docker compose -f docker-compose.current.yml ps
+curl http://127.0.0.1:3000/api/status
+```
+
+预期结果：
+
+- 容器镜像为 `xiao99116/new-api:latest`
+- 容器状态为 `healthy`
+- `/api/status` 返回 HTTP `200`
+- 响应中的 `success` 为 `true`
+- 启动日志包含 `using PostgreSQL as database` 和 `Redis is enabled`
+
+## 日常运维
+
+```bash
+# 查看日志
+docker compose -f docker-compose.current.yml logs -f new-api
+
+# 查看状态
+docker compose -f docker-compose.current.yml ps
+
+# 重启应用
+docker compose -f docker-compose.current.yml restart new-api
+
+# 停止并移除应用容器，不删除外部数据库
+docker compose -f docker-compose.current.yml down
+```
+
+## 升级
+
+```bash
+git pull
+docker compose -f docker-compose.current.yml build --pull new-api
+docker compose -f docker-compose.current.yml up -d --force-recreate --no-build
+docker compose -f docker-compose.current.yml ps
+```
+
+升级只替换 New API 应用容器，继续使用现有 PostgreSQL、Redis、数据目录和 `nginx` 网络。升级前仍应对 PostgreSQL 和 `/root/newapi` 持久化目录进行备份。
+
+## 安全建议
+
+- `.env` 文件权限建议设置为 `600`。
+- PostgreSQL 和 Redis 只应通过 Docker 内部网络访问。
+- 使用强数据库密码和 Redis 密码。
+- 公网入口使用 HTTPS。
+- 启用安全 Cookie 时配置 `SESSION_COOKIE_SECURE=true` 和可信 HTTPS 地址。
+- 定期备份 PostgreSQL、`/root/newapi/data` 和 `/root/newapi/logs`。
+
+---
+
+# 上游 New API 项目资料
+
+以下内容完整保留上游 New API 的项目介绍、文档、许可证、署名和参考部署方式。本项目生产环境请使用上方的二开部署说明。
+
 <div align="center">
 
 ![new-api](/web/default/public/logo.png)
@@ -53,6 +281,18 @@
 </div>
 
 ## 📝 Project Description
+
+> [!NOTE]
+> This repository is a derivative of [QuantumNous/new-api](https://github.com/QuantumNous/new-api). Production deployments of this fork use only `xiao99116/new-api:latest`; do not run the upstream image as this fork's production service.
+>
+> The production deployment entry point for this fork is `docker-compose.current.yml`:
+>
+> ```bash
+> docker compose -f docker-compose.current.yml pull
+> docker compose -f docker-compose.current.yml up -d
+> ```
+>
+> Upstream project, author, and official image references below are retained for license compliance, attribution, and upstream reference. They are not the production deployment path for this fork.
 
 > [!IMPORTANT]
 > - This project is intended solely for lawful and authorized AI API gateway, organization-level authentication, multi-model management, usage analytics, cost accounting, and private deployment scenarios.

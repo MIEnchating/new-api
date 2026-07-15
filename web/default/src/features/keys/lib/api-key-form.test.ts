@@ -23,12 +23,21 @@ import { t } from 'i18next'
 
 import {
   API_KEY_FORM_DEFAULT_VALUES,
+  getApiKeyFormDefaultValues,
   getApiKeyFormSchema,
 } from './api-key-form'
 
 const schema = getApiKeyFormSchema(t)
 
 describe('API key form schema', () => {
+  test('does not preselect a group for new keys or route rows', () => {
+    const defaults = getApiKeyFormDefaultValues()
+
+    assert.equal(defaults.group, '')
+    assert.equal(defaults.cross_group_retry, false)
+    assert.equal(defaults.group_routes?.[0]?.group, '')
+  })
+
   test('ignores hidden route constraints when group routing is disabled', () => {
     const result = schema.safeParse({
       ...API_KEY_FORM_DEFAULT_VALUES,

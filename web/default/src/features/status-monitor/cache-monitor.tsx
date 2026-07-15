@@ -1,5 +1,14 @@
-import { Database, Gauge, Save, Settings2, Target, Zap } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Database,
+  Gauge,
+  Save,
+  Settings2,
+  Target,
+  Zap,
+} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Bar,
@@ -311,6 +320,9 @@ export function CacheMonitor(props: {
   const [allGroupsDraft, setAllGroupsDraft] = useState(true)
   const [groupDraft, setGroupDraft] = useState<Set<string>>(new Set())
   const [savingGroups, setSavingGroups] = useState(false)
+  const groupTabsRef = useRef<HTMLDivElement>(null)
+  const [canScrollGroupsLeft, setCanScrollGroupsLeft] = useState(false)
+  const [canScrollGroupsRight, setCanScrollGroupsRight] = useState(false)
   const groups = useMemo(() => {
     const responseGroups = props.response?.data.groups ?? []
     const groupMap = new Map(
@@ -347,6 +359,41 @@ export function CacheMonitor(props: {
       setActiveGroup(ALL_CACHE_GROUPS)
     }
   }, [activeGroup, groups])
+
+  const updateGroupScrollState = useCallback(() => {
+    const element = groupTabsRef.current
+    if (!element) return
+    const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth)
+    setCanScrollGroupsLeft(element.scrollLeft > 1)
+    setCanScrollGroupsRight(element.scrollLeft < maxScrollLeft - 1)
+  }, [])
+
+  useEffect(() => {
+    const element = groupTabsRef.current
+    if (!element) return
+
+    const resizeObserver = new ResizeObserver(updateGroupScrollState)
+    resizeObserver.observe(element)
+    element.addEventListener('scroll', updateGroupScrollState, {
+      passive: true,
+    })
+    const frame = window.requestAnimationFrame(updateGroupScrollState)
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      resizeObserver.disconnect()
+      element.removeEventListener('scroll', updateGroupScrollState)
+    }
+  }, [groups.length, updateGroupScrollState])
+
+  const scrollGroups = (direction: -1 | 1) => {
+    const element = groupTabsRef.current
+    if (!element) return
+    element.scrollBy({
+      left: direction * Math.max(160, element.clientWidth * 0.75),
+      behavior: 'smooth',
+    })
+  }
 
   const handleSaveBaseline = () => {
     setSavingBaseline(true)
@@ -540,22 +587,61 @@ export function CacheMonitor(props: {
         </div>
 
         {groups.length > 0 ? (
-          <Tabs
-            value={activeGroup}
-            onValueChange={setActiveGroup}
-            className='mt-4'
-          >
-            <TabsList className='h-auto max-w-full flex-wrap justify-start'>
-              <TabsTrigger value={ALL_CACHE_GROUPS}>{t('All')}</TabsTrigger>
-              {groups.map((group) => (
-                <TabsTrigger key={group.group} value={group.group}>
-                  <span className='max-w-full [overflow-wrap:anywhere] break-words whitespace-normal'>
-                    {group.group}
-                  </span>
+          <div className='mt-4 flex min-w-0 items-center gap-1.5'>
+            <Button
+              type='button'
+              variant='outline'
+              size='icon-sm'
+              className='shrink-0'
+              onClick={() => scrollGroups(-1)}
+              disabled={!canScrollGroupsLeft}
+              aria-label={t('Previous')}
+              title={t('Previous')}
+            >
+              <ChevronLeft />
+            </Button>
+            <Tabs
+              value={activeGroup}
+              onValueChange={setActiveGroup}
+              className='min-w-0 flex-1'
+            >
+              <TabsList
+                ref={groupTabsRef}
+                className='max-w-full [scrollbar-width:none] flex-nowrap justify-start overflow-x-auto overflow-y-hidden group-data-horizontal/tabs:h-auto [&::-webkit-scrollbar]:hidden'
+              >
+                <TabsTrigger
+                  value={ALL_CACHE_GROUPS}
+                  className='h-8 flex-none px-3'
+                >
+                  {t('All')}
                 </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
+                {groups.map((group) => (
+                  <TabsTrigger
+                    key={group.group}
+                    value={group.group}
+                    className='h-8 flex-none px-3'
+                    title={group.group}
+                  >
+                    <span className='max-w-40 truncate whitespace-nowrap'>
+                      {group.group}
+                    </span>
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+            <Button
+              type='button'
+              variant='outline'
+              size='icon-sm'
+              className='shrink-0'
+              onClick={() => scrollGroups(1)}
+              disabled={!canScrollGroupsRight}
+              aria-label={t('Next')}
+              title={t('Next')}
+            >
+              <ChevronRight />
+            </Button>
+          </div>
         ) : null}
 
         {content}

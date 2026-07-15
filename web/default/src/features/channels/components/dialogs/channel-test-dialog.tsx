@@ -984,15 +984,15 @@ function ChannelTestDialogContent({
           </span>
         }
         contentClassName='max-h-[90vh] overflow-hidden sm:max-w-4xl'
-        contentHeight='auto'
-        bodyClassName='space-y-4'
+        contentHeight='min(70vh, 44rem)'
+        bodyClassName='h-full min-h-0'
         footer={
           <Button variant='outline' onClick={handleClose}>
             {t('Close')}
           </Button>
         }
       >
-        <div className='max-h-[78vh] space-y-4 overflow-y-auto py-4 pr-1'>
+        <div className='flex h-full min-h-0 flex-col gap-4 py-4'>
           <div className='grid gap-4 md:grid-cols-2'>
             <div className='grid gap-2'>
               <Label htmlFor='endpoint-type'>{t('Endpoint Type')}</Label>
@@ -1051,7 +1051,7 @@ function ChannelTestDialogContent({
             </div>
           </div>
 
-          <div className='space-y-3 max-sm:has-[div[role="toolbar"]]:pb-16'>
+          <div className='flex min-h-0 flex-1 flex-col gap-3 max-sm:has-[div[role="toolbar"]]:pb-16'>
             <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
               <div className='min-w-0 space-y-2'>
                 <p className='text-sm font-medium'>{t('Channel models')}</p>
@@ -1117,15 +1117,15 @@ function ChannelTestDialogContent({
               </div>
             </div>
 
-            <div className='space-y-3'>
+            <div className='flex min-h-0 flex-1 flex-col gap-3'>
               <DataTableView
                 table={table}
-                containerClassName='rounded-md'
+                containerClassName='min-h-0 flex-1 rounded-md'
                 containerProps={{
                   role: 'region',
                   'aria-label': t('Channel models'),
                 }}
-                tableContainerClassName='max-h-90 overflow-auto **:data-[slot=table-container]:overflow-visible'
+                tableContainerClassName='h-full min-h-0 overflow-auto **:data-[slot=table-container]:overflow-visible'
                 tableClassName='w-max min-w-full table-auto'
                 pinnedColumns={[
                   {

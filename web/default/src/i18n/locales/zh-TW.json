@@ -2281,7 +2281,7 @@
     "If an upstream error contains any of these keywords (case insensitive), the channel will be disabled automatically.": "如果上游錯誤包含以下任何關鍵詞（不區分大小寫），渠道將自動停用。",
     "If authorization succeeds, the generated JSON will be inserted into the key field. You still need to save the channel to persist it.": "授權成功後，生成的 JSON 將插入金鑰欄位。您仍需儲存渠道以持久化。",
     "If connecting to upstream One API or New API relay projects, use OpenAI type instead unless you know what you are doing": "如果連接上游 One API 或 New API 中繼項目，除非您知道自己在做什麼，否則請使用 OpenAI 類型",
-    "If default auto group is enabled, newly created tokens start with auto instead of an empty group.": "如果啟用預設 auto 分組，新建令牌會預設使用 auto，而不是空分組。",
+    "This setting only affects automatically generated initial tokens. User-created keys still require an explicit group selection.": "此設定僅影響系統自動產生的初始令牌。使用者建立金鑰時仍必須明確選擇分組。",
     "If the affinity channel fails and retry succeeds on another channel, update affinity to the successful channel.": "如果親和到的渠道失敗，重試到其他渠道成功後，將親和更新到成功的渠道。",
     "If this keeps happening, please report it on GitHub Issues.": "如果問題持續出現，請到 GitHub Issues 反饋。",
     "If you provide generative AI services to the public in mainland China, you will fulfill legal obligations including filing, security assessment, content safety, complaint handling, generated content labeling, log retention, and personal information protection.": "如果你在中國大陸向公眾提供生成式人工智能服務，你將履行備案、安全評估、內容安全、投訴處理、生成內容標識、日誌留存和個人資訊保護等法律義務。",
@@ -2556,7 +2556,7 @@
     "Lowest median first-token latency": "最低首 token 延遲中位數",
     "m": "分鐘",
     "Maintenance": "維護",
-    "Make extra groups visible to, or hide default groups from, users of a specific group.": "讓特定分組的用戶額外看到某些分組，或對其屏蔽預設可選的分組。",
+    "Make extra groups visible to, or hide groups from, users of a specific group.": "讓特定分組的使用者額外看到某些分組，或對其隱藏指定分組。",
     "Make it easier for teammates to pick the right group.": "讓隊友更容易選擇正確的分組。",
     "Manage": "管理",
     "Manage account bindings for this user": "管理此用戶的用戶連結",
@@ -5164,7 +5164,7 @@
     "When enabled, keep the affinity entry even if the affinity channel is disabled or no longer usable for the current group/model. Leave it off to delete the entry and select another channel.": "開啟後，親和到的渠道被停用，或不再適用於目前分組/模型時，仍保留這條親和；關閉時會刪除並重新選擇渠道。",
     "When enabled, large request bodies are temporarily stored on disk instead of memory, significantly reducing memory usage. SSD recommended.": "啟用磁碟緩存後，大請求體將臨時儲存到磁碟而非記憶體，可顯著降低記憶體佔用。建議在 SSD 環境下使用。",
     "When enabled, MjProxy callbacks are accepted (reveals server IP).": "啟用時，接受 MjProxy Callback (會洩露伺服器 IP)。",
-    "When enabled, newly created tokens start in the first auto group.": "啟用後，新建立的令牌將從第一個自動分組開始。",
+    "When enabled, automatically generated initial tokens use the auto group.": "啟用後，系統自動產生的初始令牌將使用 auto 分組。",
     "When enabled, prompts are scanned before reaching upstream models.": "啟用後，提示將在到達上游模型之前被掃描。",
     "When enabled, the store field will be blocked": "開啟後將阻止 store 欄位透傳",
     "When enabled, users can pick this group when creating tokens.": "啟用後，用戶建立令牌時可以選擇該分組。",
@@ -5291,7 +5291,7 @@
     "Zoom": "縮放",
     "Group display order": "分組顯示順序",
     "JSON array controlling the order shown when users create API keys.": "JSON 陣列，控制使用者建立金鑰時的分組顯示順序。",
-    "Drag rows to control the order shown when users create API keys. A user always keeps access to their own account group, even when it is hidden here.": "拖曳資料列可調整使用者建立金鑰時的分組順序。即使此處隱藏，使用者仍可使用自己的帳號分組。",
+    "Drag rows to control the order shown when users create API keys. Special usable group rules can hide any group for specific users.": "拖曳資料列可調整使用者建立金鑰時的分組順序。特殊可用分組規則可針對特定使用者分組隱藏任意分組。",
     "Order": "順序",
     "Drag to reorder": "拖曳調整順序",
     "Show when creating keys": "建立金鑰時顯示",
@@ -5301,6 +5301,6 @@
     "Restore channel": "恢復渠道",
     "Channel restored": "渠道已恢復",
     "Failed to restore channel": "恢復渠道失敗",
-    "Groups marked as visible appear when users create keys. Users always retain their own account group; administrators can still assign hidden groups.": "標記為顯示的分組會出現在金鑰建立頁面。使用者始終保留自己的帳號分組，管理員仍可分配已隱藏的分組。"
+    "Groups marked as visible appear when users create keys. Special usable group rules can hide any group, including the user's own account group.": "標記為顯示的分組會出現在金鑰建立頁面。特殊可用分組規則可以隱藏任意分組，包括使用者自身的帳號分組。"
   }
 }

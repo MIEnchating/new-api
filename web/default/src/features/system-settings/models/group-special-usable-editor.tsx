@@ -410,7 +410,7 @@ export function GroupSpecialUsableRulesEditor(
         <CardTitle>{t('Special usable group rules')}</CardTitle>
         <CardDescription>
           {t(
-            'Make extra groups visible to, or hide default groups from, users of a specific group.'
+            'Make extra groups visible to, or hide groups from, users of a specific group.'
           )}
         </CardDescription>
       </CardHeader>

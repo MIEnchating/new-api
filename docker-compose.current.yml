@@ -1,0 +1,33 @@
+services:
+  new-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: xiao99116/new-api:latest
+    container_name: new-api
+    restart: always
+    command: --log-dir /app/logs
+    ports:
+      - "3000:3000"
+    volumes:
+      - /root/newapi/data:/data
+      - /root/newapi/logs:/app/logs
+    environment:
+      SQL_DSN: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_CONN_STRING: ${REDIS_CONN_STRING}
+      TZ: ${TZ}
+      ERROR_LOG_ENABLED: ${ERROR_LOG_ENABLED}
+      BATCH_UPDATE_ENABLED: ${BATCH_UPDATE_ENABLED}
+    networks:
+      - nginx
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3000/api/status | grep -o '\"success\":\\s*true' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  nginx:
+    external: true
+    name: nginx

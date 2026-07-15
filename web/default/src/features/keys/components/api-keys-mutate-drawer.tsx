@@ -74,7 +74,6 @@ import {
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
-import { useStatus } from '@/hooks/use-status'
 import { getUserModels, getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { cn } from '@/lib/utils'
@@ -117,10 +116,8 @@ export function ApiKeysMutateDrawer({
   const { t } = useTranslation()
   const isUpdate = !!currentRow
   const { triggerRefresh } = useApiKeys()
-  const { status } = useStatus()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const defaultUseAutoGroup = status?.default_use_auto_group === true
 
   // Fetch models
   const { data: modelsData } = useQuery({
@@ -162,12 +159,11 @@ export function ApiKeysMutateDrawer({
     () => groups.filter((group) => group.value !== 'auto'),
     [groups]
   )
-  const backendHasAuto = groups.some((g) => g.value === 'auto')
   const schema = getApiKeyFormSchema(t)
 
   const form = useForm<ApiKeyFormValues>({
     resolver: zodResolver(schema),
-    defaultValues: getApiKeyFormDefaultValues(defaultUseAutoGroup),
+    defaultValues: getApiKeyFormDefaultValues(),
   })
   const routeFields = useFieldArray({
     control: form.control,
@@ -185,26 +181,16 @@ export function ApiKeysMutateDrawer({
         })
         .catch(() => undefined)
     } else if (open && !isUpdate) {
-      form.reset(
-        getApiKeyFormDefaultValues(defaultUseAutoGroup && backendHasAuto)
-      )
+      form.reset(getApiKeyFormDefaultValues())
     }
-  }, [open, isUpdate, currentRow, form, defaultUseAutoGroup, backendHasAuto])
+  }, [open, isUpdate, currentRow, form])
 
-  // Correct group after groups load: if the form value is not in available groups, fall back
+  // Clear stale selections after group permissions change; never pick for the user.
   useEffect(() => {
     if (!open || groups.length === 0) return
-    const fallbackRouteGroup =
-      routableGroups.find((g) => g.value === 'default')?.value ??
-      routableGroups[0]?.value ??
-      ''
     const currentGroup = form.getValues('group')
-    if (!currentGroup || !groups.some((g) => g.value === currentGroup)) {
-      const fallback =
-        groups.find((g) => g.value === 'default')?.value ??
-        groups[0]?.value ??
-        ''
-      form.setValue('group', fallback)
+    if (currentGroup && !groups.some((g) => g.value === currentGroup)) {
+      form.setValue('group', '')
       if (currentGroup === 'auto') {
         form.setValue('cross_group_retry', false)
       }
@@ -213,10 +199,10 @@ export function ApiKeysMutateDrawer({
     const currentRoutes = form.getValues('group_routes') || []
     currentRoutes.forEach((route, index) => {
       if (
-        !route.group ||
+        route.group &&
         !routableGroups.some((group) => group.value === route.group)
       ) {
-        form.setValue(`group_routes.${index}.group`, fallbackRouteGroup)
+        form.setValue(`group_routes.${index}.group`, '')
       }
     })
   }, [open, groups, routableGroups, form])
@@ -304,10 +290,6 @@ export function ApiKeysMutateDrawer({
   const selectedGroup = form.watch('group')
   const unlimitedQuota = form.watch('unlimited_quota')
   const groupRouteEnabled = form.watch('group_route_enabled')
-  const fallbackRouteGroup =
-    routableGroups.find((g) => g.value === 'default')?.value ??
-    routableGroups[0]?.value ??
-    ''
   const groupRoutesMessage = getFormErrorMessage(
     form.formState.errors.group_routes
   )
@@ -392,7 +374,7 @@ export function ApiKeysMutateDrawer({
                           field.onChange(checked)
                           if (checked && routeFields.fields.length === 0) {
                             routeFields.append({
-                              group: fallbackRouteGroup,
+                              group: '',
                               priority: 1,
                               cooldown_seconds: 60,
                             })
@@ -529,7 +511,7 @@ export function ApiKeysMutateDrawer({
                       className='w-full justify-center gap-2'
                       onClick={() =>
                         routeFields.append({
-                          group: fallbackRouteGroup,
+                          group: '',
                           priority: nextRoutePriority(),
                           cooldown_seconds: 60,
                         })
