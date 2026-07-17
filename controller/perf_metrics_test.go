@@ -38,7 +38,7 @@ func TestUpdateCacheHitRateBaselineRequiresValue(t *testing.T) {
 func TestResolveCacheMonitorGroups(t *testing.T) {
 	available := []string{"auto", "default", "vip"}
 	require.Equal(t, available, resolveCacheMonitorGroups(available, nil))
-	require.Equal(t, []string{"default", "vip"}, resolveCacheMonitorGroups(available, []string{"vip", "missing", "default", "vip"}))
+	require.Equal(t, []string{"vip", "default"}, resolveCacheMonitorGroups(available, []string{"vip", "missing", "default", "vip"}))
 }
 
 func TestNormalizeCacheMonitorGroups(t *testing.T) {
@@ -50,8 +50,26 @@ func TestNormalizeCacheMonitorGroups(t *testing.T) {
 
 	groups, err = normalizeCacheMonitorGroups(updateCacheMonitorGroupsRequest{Groups: []string{"vip", "default"}}, available)
 	require.NoError(t, err)
-	require.Equal(t, []string{"default", "vip"}, groups)
+	require.Equal(t, []string{"vip", "default"}, groups)
 
 	_, err = normalizeCacheMonitorGroups(updateCacheMonitorGroupsRequest{Groups: []string{"missing"}}, available)
 	require.Error(t, err)
+}
+
+func TestBuildCacheMonitorGroupsAuditParams(t *testing.T) {
+	available := []string{"auto", "default", "vip"}
+
+	selected := buildCacheMonitorGroupsAuditParams(available, nil, []string{"vip", "default"})
+	require.Equal(t, false, selected["all_groups"])
+	require.Equal(t, []string{"vip", "default"}, selected["display_groups"])
+	require.Equal(t, 2, selected["group_count"])
+	require.Equal(t, true, selected["previous_all_groups"])
+	require.Equal(t, available, selected["previous_display_groups"])
+
+	all := buildCacheMonitorGroupsAuditParams(available, []string{"vip", "default"}, nil)
+	require.Equal(t, true, all["all_groups"])
+	require.Equal(t, available, all["display_groups"])
+	require.Equal(t, len(available), all["group_count"])
+	require.Equal(t, false, all["previous_all_groups"])
+	require.Equal(t, []string{"vip", "default"}, all["previous_display_groups"])
 }

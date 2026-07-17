@@ -18,12 +18,29 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import i18next from 'i18next'
 import { CreditCard, Landmark } from 'lucide-react'
-import { type ReactNode } from 'react'
+import type { ReactNode } from 'react'
 import { SiAlipay, SiWechat, SiStripe } from 'react-icons/si'
 
 import { ReactIconByName } from '@/components/react-icon-by-name'
 
 import { PAYMENT_TYPES, PAYMENT_ICON_COLORS } from '../constants'
+
+const PAYMENT_ICON_NAME_COLORS: Record<string, string> = {
+  SiAlipay: PAYMENT_ICON_COLORS[PAYMENT_TYPES.ALIPAY],
+  SiStripe: PAYMENT_ICON_COLORS[PAYMENT_TYPES.STRIPE],
+  SiWechat: PAYMENT_ICON_COLORS[PAYMENT_TYPES.WECHAT],
+}
+
+export function getPaymentIconColor(
+  paymentType: string | undefined,
+  iconName?: string
+): string | undefined {
+  const iconColor = iconName ? PAYMENT_ICON_NAME_COLORS[iconName] : undefined
+  if (iconColor) return iconColor
+  if (!paymentType) return undefined
+
+  return PAYMENT_ICON_COLORS[paymentType as keyof typeof PAYMENT_ICON_COLORS]
+}
 
 // ============================================================================
 // UI Helper Functions
@@ -89,6 +106,7 @@ export function getPaymentIcon(
         name={iconValue}
         className={className}
         title={altName || paymentType || iconValue}
+        style={{ color: getPaymentIconColor(paymentType, iconValue) }}
       />
     )
   }

@@ -123,6 +123,12 @@ export function AccountBindingsTab({
   useEffect(() => {
     if (typeof window === 'undefined') return
 
+    const handleBindingSuccess = (payload: { status?: string }) => {
+      if (payload.status === 'success') {
+        onUpdate()
+      }
+    }
+
     const handleStorage = (event: StorageEvent) => {
       if (event.key !== OAUTH_BIND_STORAGE_KEY || !event.newValue) return
       try {
@@ -131,9 +137,7 @@ export function AccountBindingsTab({
           provider?: string
           timestamp?: number
         }
-        if (payload?.status === 'success') {
-          onUpdate()
-        }
+        handleBindingSuccess(payload)
       } catch {
         // ignore malformed payloads
       }
@@ -144,9 +148,30 @@ export function AccountBindingsTab({
       }
     }
 
+    const handleMessage = (event: MessageEvent) => {
+      try {
+        const callbackOrigin = status?.server_address
+          ? new URL(status.server_address).origin
+          : ''
+        if (!callbackOrigin || event.origin !== callbackOrigin) return
+        const payload = event.data as {
+          type?: string
+          status?: string
+        }
+        if (payload?.type !== OAUTH_BIND_STORAGE_KEY) return
+        handleBindingSuccess(payload)
+      } catch {
+        // ignore malformed callback messages
+      }
+    }
+
     window.addEventListener('storage', handleStorage)
-    return () => window.removeEventListener('storage', handleStorage)
-  }, [onUpdate])
+    window.addEventListener('message', handleMessage)
+    return () => {
+      window.removeEventListener('storage', handleStorage)
+      window.removeEventListener('message', handleMessage)
+    }
+  }, [onUpdate, status?.server_address])
 
   // Memoize bindings to prevent unnecessary recalculations
   const bindings: BindingItem[] = useMemo(() => {
@@ -203,7 +228,7 @@ export function AccountBindingsTab({
         isEnabled: status?.discord_oauth || false,
         onBind: () => {
           if (status?.discord_client_id) {
-            handleDiscordOAuth(status.discord_client_id)
+            handleDiscordOAuth(status.discord_client_id, status.server_address)
           }
         },
       },
@@ -222,7 +247,8 @@ export function AccountBindingsTab({
           if (status?.oidc_authorization_endpoint && status?.oidc_client_id) {
             handleOIDCOAuth(
               status.oidc_authorization_endpoint,
-              status.oidc_client_id
+              status.oidc_client_id,
+              status.server_address
             )
           }
         },
@@ -253,7 +279,7 @@ export function AccountBindingsTab({
         isEnabled: status?.linuxdo_oauth || false,
         onBind: () => {
           if (status?.linuxdo_client_id) {
-            handleLinuxDOOAuth(status.linuxdo_client_id)
+            handleLinuxDOOAuth(status.linuxdo_client_id, status.server_address)
           }
         },
       },
@@ -266,46 +292,49 @@ export function AccountBindingsTab({
   return (
     <>
       <div className='grid grid-cols-1 gap-2.5 sm:grid-cols-2 sm:gap-3'>
-        {bindings.map((binding) => (
-          <div
-            key={binding.id}
-            className='flex items-center justify-between gap-2.5 rounded-lg border p-2.5 sm:gap-3 sm:p-3'
-          >
-            <div className='flex min-w-0 items-center gap-2.5 sm:gap-3'>
-              <div className='bg-muted shrink-0 rounded-md p-1.5 sm:p-2'>
-                <binding.icon className='h-4 w-4' />
-              </div>
-              <div className='min-w-0'>
-                <div className='flex items-center gap-1.5'>
-                  <p className='text-sm font-medium'>{binding.label}</p>
-                  {binding.isBound && (
-                    <StatusBadge
-                      label={t('Bound')}
-                      variant='success'
-                      copyable={false}
-                    />
-                  )}
-                </div>
-                <p className='text-muted-foreground truncate text-xs'>
-                  {binding.value || t('Not bound')}
-                </p>
-              </div>
-            </div>
-            <Button
-              variant='outline'
-              size='sm'
-              className='h-7 shrink-0 px-2.5 text-xs'
-              onClick={binding.onBind}
-              disabled={binding.isBound && binding.id !== 'email'}
+        {bindings.map((binding) => {
+          let actionLabel = t('Bind')
+          if (binding.isBound) {
+            actionLabel = binding.id === 'email' ? t('Change') : t('Bound')
+          }
+
+          return (
+            <div
+              key={binding.id}
+              className='flex items-center justify-between gap-2.5 rounded-lg border p-2.5 sm:gap-3 sm:p-3'
             >
-              {binding.isBound
-                ? binding.id === 'email'
-                  ? t('Change')
-                  : t('Bound')
-                : t('Bind')}
-            </Button>
-          </div>
-        ))}
+              <div className='flex min-w-0 items-center gap-2.5 sm:gap-3'>
+                <div className='bg-muted shrink-0 rounded-md p-1.5 sm:p-2'>
+                  <binding.icon className='h-4 w-4' />
+                </div>
+                <div className='min-w-0'>
+                  <div className='flex items-center gap-1.5'>
+                    <p className='text-sm font-medium'>{binding.label}</p>
+                    {binding.isBound && (
+                      <StatusBadge
+                        label={t('Bound')}
+                        variant='success'
+                        copyable={false}
+                      />
+                    )}
+                  </div>
+                  <p className='text-muted-foreground truncate text-xs'>
+                    {binding.value || t('Not bound')}
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant='outline'
+                size='sm'
+                className='h-7 shrink-0 px-2.5 text-xs'
+                onClick={binding.onBind}
+                disabled={binding.isBound && binding.id !== 'email'}
+              >
+                {actionLabel}
+              </Button>
+            </div>
+          )
+        })}
       </div>
 
       {/* Custom OAuth Bindings */}

@@ -13,6 +13,7 @@ RUN_DIR="${ROOT_DIR}/dev-logs"
 BUILD_DIR="${ROOT_DIR}/build"
 BACKEND_PID_FILE="${RUN_DIR}/backend.pid"
 FRONTEND_PID_FILE="${RUN_DIR}/frontend.pid"
+SESSION_SECRET_FILE="${RUN_DIR}/session-secret"
 
 is_running() {
   local pid_file="$1"
@@ -35,6 +36,23 @@ load_environment() {
   export REDIS_CONN_STRING="${REDIS_CONN_STRING/@redis/@127.0.0.1}"
   export DEBUG="${DEBUG:-true}"
   export GIN_MODE="${GIN_MODE:-debug}"
+
+  if [[ -z "${DEV_SESSION_SECRET:-}" ]]; then
+    if [[ ! -f "${SESSION_SECRET_FILE}" ]]; then
+      umask 077
+      od -An -N32 -tx1 /dev/urandom | tr -d ' \n' >"${SESSION_SECRET_FILE}"
+    fi
+    DEV_SESSION_SECRET="$(<"${SESSION_SECRET_FILE}")"
+  fi
+  export SESSION_SECRET="${DEV_SESSION_SECRET}"
+
+  # Direct development access uses plain HTTP, so production-only cookie
+  # constraints would prevent the browser from storing the 2FA session.
+  export SESSION_COOKIE_SECURE="${DEV_SESSION_COOKIE_SECURE:-false}"
+  if [[ "${SESSION_COOKIE_SECURE}" != "true" ]]; then
+    export SESSION_COOKIE_TRUSTED_URL=""
+    export SESSION_COOKIE_DOMAIN=""
+  fi
 }
 
 start_services() {
@@ -47,8 +65,8 @@ start_services() {
     exit 1
   fi
 
-  load_environment
   mkdir -p "${RUN_DIR}/backend" "${BUILD_DIR}"
+  load_environment
 
   (
     cd "${ROOT_DIR}"

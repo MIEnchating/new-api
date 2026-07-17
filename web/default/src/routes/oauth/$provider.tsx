@@ -29,6 +29,10 @@ import { toast } from 'sonner'
 
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
+import {
+  buildOAuthReturnURL,
+  normalizeOAuthRedirectTarget,
+} from '@/features/auth/lib/oauth-redirect'
 import { api, getSelf } from '@/lib/api'
 import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 
@@ -90,20 +94,35 @@ function OAuthCallback() {
       } else if (!isBindingFlow && mode !== 'login') {
         setMode('login')
       }
-      const notifyBindingResult = (status: 'success' | 'error') => {
+      const notifyBindingResult = (
+        status: 'success' | 'error',
+        returnOrigin?: string
+      ) => {
         if (typeof window === 'undefined') return
+        const payload = {
+          type: OAUTH_BIND_STORAGE_KEY,
+          provider,
+          status,
+          timestamp: Date.now(),
+        }
         try {
           window.localStorage.setItem(
             OAUTH_BIND_STORAGE_KEY,
-            JSON.stringify({
-              provider,
-              status,
-              timestamp: Date.now(),
-            })
+            JSON.stringify(payload)
           )
         } catch (_error) {
           // ignore storage write failures
           void _error
+        }
+        if (window.opener && returnOrigin) {
+          try {
+            const targetOrigin = new URL(returnOrigin).origin
+            if (targetOrigin.startsWith('https://')) {
+              window.opener.postMessage(payload, targetOrigin)
+            }
+          } catch (_error) {
+            void _error
+          }
         }
       }
 
@@ -143,8 +162,21 @@ function OAuthCallback() {
         return false
       }
 
-      const redirectAfterLogin = (target?: string) => {
-        const to = target || search?.redirect || '/dashboard'
+      const redirectAfterLogin = (target?: string, returnOrigin?: string) => {
+        const currentOrigin = window.location.origin
+        const to = normalizeOAuthRedirectTarget(
+          target || search?.redirect,
+          currentOrigin
+        )
+        const crossSiteReturnURL = buildOAuthReturnURL(
+          returnOrigin,
+          to,
+          currentOrigin
+        )
+        if (crossSiteReturnURL) {
+          window.location.replace(crossSiteReturnURL)
+          return
+        }
         safeNavigate(to)
         toast.success(i18next.t('Signed in successfully!'))
       }
@@ -171,11 +203,18 @@ function OAuthCallback() {
         const res = await api.get(`/api/oauth/${provider}`, config)
         if (res?.data?.success) {
           const { message } = res.data
-          const loginUser = (res.data?.data ?? null) as AuthUser | null
+          const loginUser = (res.data?.data ?? null) as
+            | (AuthUser & { return_origin?: string })
+            | null
           // Check if this is a bind operation
           if (message === 'bind') {
+            const bindReturnOrigin = (
+              res.data?.data as {
+                return_origin?: string
+              }
+            )?.return_origin
             toast.success(i18next.t('Binding successful!'))
-            notifyBindingResult('success')
+            notifyBindingResult('success', bindReturnOrigin)
             if (isBindingFlow) {
               // Close the callback window if we opened a new tab for binding
               closeBindingWindow()
@@ -186,15 +225,16 @@ function OAuthCallback() {
           }
           // Otherwise it's a login, use payload user if available
           if (loginUser) {
-            useAuthStore.getState().auth.setUser(loginUser)
+            const { return_origin: returnOrigin, ...user } = loginUser
+            useAuthStore.getState().auth.setUser(user)
             try {
-              if (typeof window !== 'undefined' && loginUser.id != null) {
-                window.localStorage.setItem('uid', String(loginUser.id))
+              if (typeof window !== 'undefined' && user.id != null) {
+                window.localStorage.setItem('uid', String(user.id))
               }
             } catch (_error) {
               void _error
             }
-            redirectAfterLogin()
+            redirectAfterLogin(undefined, returnOrigin)
             return
           }
           if (await finalizeLogin()) {

@@ -82,8 +82,7 @@ func Login(c *gin.Context) {
 	if twoFAEnabled {
 		// 设置pending session，等待2FA验证
 		session := sessions.Default(c)
-		session.Set("pending_username", user.Username)
-		session.Set("pending_user_id", user.Id)
+		setPending2FALogin(session, &user)
 		err := session.Save()
 		if err != nil {
 			common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
@@ -102,6 +101,8 @@ func Login(c *gin.Context) {
 
 	setupLogin(&user, c)
 }
+
+const loginSecondFactorMethodContextKey = "login_second_factor_method"
 
 // loginMethodFromContext 根据请求路径推导登录方式，用于登录审计日志。
 func loginMethodFromContext(c *gin.Context) string {
@@ -131,11 +132,17 @@ func recordLoginAudit(user *model.User, c *gin.Context) {
 	method := loginMethodFromContext(c)
 	ip := c.ClientIP()
 	extra := map[string]interface{}{
-		"login_method": method,
-		"user_agent":   c.Request.UserAgent(),
+		"login_method":   method,
+		"request_method": c.Request.Method,
+		"request_route":  c.FullPath(),
+		"request_path":   c.Request.URL.Path,
+		"user_agent":     c.Request.UserAgent(),
+	}
+	if secondFactorMethod := c.GetString(loginSecondFactorMethodContextKey); secondFactorMethod != "" {
+		extra["second_factor_method"] = secondFactorMethod
 	}
 	content := fmt.Sprintf("Logged in successfully via %s", method)
-	model.RecordLoginLog(user.Id, user.Username, content, ip, "login", map[string]interface{}{
+	model.RecordLoginLog(user.Id, user.Username, content, ip, c.GetString(common.RequestIdKey), "login", map[string]interface{}{
 		"method": method,
 	}, extra)
 }
@@ -155,17 +162,21 @@ func setupLogin(user *model.User, c *gin.Context) {
 		return
 	}
 	recordLoginAudit(user, c)
+	data := map[string]any{
+		"id":           user.Id,
+		"username":     user.Username,
+		"display_name": user.DisplayName,
+		"role":         user.Role,
+		"status":       user.Status,
+		"group":        user.Group,
+	}
+	if returnOrigin := c.GetString("oauth_return_origin"); returnOrigin != "" {
+		data["return_origin"] = returnOrigin
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"message": "",
 		"success": true,
-		"data": map[string]any{
-			"id":           user.Id,
-			"username":     user.Username,
-			"display_name": user.DisplayName,
-			"role":         user.Role,
-			"status":       user.Status,
-			"group":        user.Group,
-		},
+		"data":    data,
 	})
 }
 

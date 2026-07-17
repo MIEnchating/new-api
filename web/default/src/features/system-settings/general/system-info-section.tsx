@@ -53,12 +53,38 @@ import { SettingsSection } from '../components/settings-section'
 import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 
+const trustedSiteOriginsSchema = z.string().superRefine((value, ctx) => {
+  const origins = value.split(/[\n,]/).map((origin) => origin.trim())
+  origins.forEach((origin, index) => {
+    if (!origin) return
+    try {
+      const parsed = new URL(origin)
+      if (
+        parsed.protocol !== 'https:' ||
+        parsed.username ||
+        parsed.password ||
+        parsed.pathname !== '/' ||
+        parsed.search ||
+        parsed.hash
+      ) {
+        throw new Error('invalid origin')
+      }
+    } catch {
+      ctx.addIssue({
+        code: 'custom',
+        message: `Invalid HTTPS origin on line ${index + 1}`,
+      })
+    }
+  })
+})
+
 const _systemInfoSchema = z.object({
   theme: z.object({
     frontend: z.enum(['default', 'classic']),
   }),
   SystemName: z.string().min(1),
   ServerAddress: z.string().optional(),
+  TrustedSiteOrigins: trustedSiteOriginsSchema.optional(),
   Logo: z.string().url().optional().or(z.literal('')),
   Footer: z.string().optional(),
   About: z.string().optional(),
@@ -91,6 +117,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
     },
     SystemName: normalizeValue(defaultValues.SystemName),
     ServerAddress: normalizeValue(defaultValues.ServerAddress),
+    TrustedSiteOrigins: normalizeValue(defaultValues.TrustedSiteOrigins),
     Logo: normalizeValue(defaultValues.Logo),
     Footer: normalizeValue(defaultValues.Footer),
     About: normalizeValue(defaultValues.About),
@@ -109,6 +136,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
       error: () => t('System name is required'),
     }),
     ServerAddress: z.string().optional(),
+    TrustedSiteOrigins: trustedSiteOriginsSchema.optional(),
     Logo: z.string().url().optional().or(z.literal('')),
     Footer: z.string().optional(),
     About: z.string().optional(),
@@ -140,6 +168,13 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
           let v = normalizeValue(value)
           if (key === 'ServerAddress') {
             v = v.replace(/\/+$/, '')
+          }
+          if (key === 'TrustedSiteOrigins') {
+            v = v
+              .split(/[\n,]/)
+              .map((origin) => origin.trim().replace(/\/+$/, ''))
+              .filter(Boolean)
+              .join('\n')
           }
           const res = await updateOption.mutateAsync({
             key,
@@ -264,6 +299,31 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
                     <FormDescription>
                       {t(
                         'The public URL of your server, used for OAuth callbacks, webhooks, and other external integrations'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='TrustedSiteOrigins'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Trusted Site Addresses')}</FormLabel>
+                    <FormControl>
+                      <Textarea
+                        rows={3}
+                        placeholder={
+                          'https://example.com\nhttps://www.example.com'
+                        }
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'One address per line. OAuth and payment returns may use the current address only when it is listed here.'
                       )}
                     </FormDescription>
                     <FormMessage />

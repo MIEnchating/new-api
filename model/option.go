@@ -50,6 +50,7 @@ func InitOptionMap() {
 	common.OptionMap["ChannelRouteCooldownEnabled"] = strconv.FormatBool(common.ChannelRouteCooldownEnabled)
 	common.OptionMap["ChannelRouteCooldownSeconds"] = strconv.Itoa(common.ChannelRouteCooldownSeconds)
 	common.OptionMap["ChannelRouteStickyEnabled"] = strconv.FormatBool(common.ChannelRouteStickyEnabled)
+	common.OptionMap["ChannelRouteSameChannelRetries"] = strconv.Itoa(common.ChannelRouteSameChannelRetries)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
@@ -76,6 +77,7 @@ func InitOptionMap() {
 	common.OptionMap["SystemName"] = common.SystemName
 	common.OptionMap["Logo"] = common.Logo
 	common.OptionMap["ServerAddress"] = ""
+	common.OptionMap["TrustedSiteOrigins"] = system_setting.TrustedSiteOrigins
 	common.OptionMap["WorkerUrl"] = system_setting.WorkerUrl
 	common.OptionMap["WorkerValidKey"] = system_setting.WorkerValidKey
 	common.OptionMap["WorkerAllowHttpImageRequestEnabled"] = strconv.FormatBool(system_setting.WorkerAllowHttpImageRequestEnabled)
@@ -391,6 +393,8 @@ func updateOptionMap(key string, value string) (err error) {
 		common.SMTPToken = value
 	case "ServerAddress":
 		system_setting.ServerAddress = value
+	case "TrustedSiteOrigins":
+		system_setting.TrustedSiteOrigins = value
 	case "WorkerUrl":
 		system_setting.WorkerUrl = value
 	case "WorkerValidKey":
@@ -535,6 +539,8 @@ func updateOptionMap(key string, value string) (err error) {
 		common.RetryTimes, _ = strconv.Atoi(value)
 	case "ChannelRouteCooldownSeconds":
 		common.ChannelRouteCooldownSeconds, _ = strconv.Atoi(value)
+	case "ChannelRouteSameChannelRetries":
+		common.ChannelRouteSameChannelRetries, _ = strconv.Atoi(value)
 	case "DataExportInterval":
 		common.DataExportInterval, _ = strconv.Atoi(value)
 	case "DataExportDefaultTime":

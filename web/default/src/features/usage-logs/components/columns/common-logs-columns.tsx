@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { GitBranch, Sparkles, KeyRound } from 'lucide-react'
+import { GitBranch, KeyRound, Pin, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -43,7 +43,9 @@ import { cn } from '@/lib/utils'
 import { LOG_TYPE_ALL_VALUE } from '../../constants'
 import type { UsageLog } from '../../data/schema'
 import {
+  formatAuditParamValue,
   formatModelName,
+  getSecondFactorMethodLabel,
   getTieredBillingSummary,
   hasAnyCacheTokens,
   parseLogOther,
@@ -125,7 +127,28 @@ function buildTypeDetailSegments(
   // structured op descriptor instead of the raw (English-fallback) content.
   if (log.type === 3 || log.type === 7) {
     const text = renderAuditContent(other, t)
-    return text ? [{ text }] : []
+    if (!text) return []
+
+    const segments: DetailSegment[] = [{ text }]
+    const action = other?.op?.action
+    const params = other?.op?.params
+    if (
+      action === 'option.update' &&
+      params?.from != null &&
+      params.to != null
+    ) {
+      segments.push({
+        text: `${formatAuditParamValue(action, 'from', params.from, t)} → ${formatAuditParamValue(action, 'to', params.to, t)}`,
+        muted: true,
+      })
+    }
+    if (log.type === 7 && other?.second_factor_method) {
+      segments.push({
+        text: `${t('Second-factor method')}: ${getSecondFactorMethodLabel(other.second_factor_method, t)}`,
+        muted: true,
+      })
+    }
+    return segments
   }
 
   if (log.type === 6) {
@@ -339,6 +362,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
           const other = parseLogOther(log.other)
           const affinity = other?.admin_info?.channel_affinity
+          const routeSticky = other?.admin_info?.channel_route_sticky
           const rawUseChannel = other?.admin_info?.use_channel ?? []
           const useChannel = Array.isArray(rawUseChannel)
             ? rawUseChannel.map(String).filter(Boolean)
@@ -438,6 +462,14 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                         <Sparkles className='size-3 fill-current' />
                       </button>
                     )}
+                    {routeSticky && (
+                      <span
+                        className='absolute -top-1 -right-1 leading-none text-sky-500'
+                        aria-label={t('Channel route stickiness')}
+                      >
+                        <Pin className='size-3 fill-current' />
+                      </span>
+                    )}
                   </div>
                   {log.channel_name && (
                     <span className='text-muted-foreground/70 truncate [font-family:var(--font-body)] !text-xs'>
@@ -473,6 +505,20 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                               affinity.selected_group ||
                               '-'
                             : '••••'}
+                        </p>
+                      </div>
+                    )}
+                    {routeSticky && (
+                      <div className='border-t pt-1 text-xs'>
+                        <p className='font-medium'>
+                          {t('Channel route stickiness')}
+                        </p>
+                        <p>
+                          {t('Group')}:{' '}
+                          {sensitiveVisible ? routeSticky.group || '-' : '••••'}
+                        </p>
+                        <p>
+                          {t('Model')}: {routeSticky.model || '-'}
                         </p>
                       </div>
                     )}
@@ -778,6 +824,10 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const segments = buildDetailSegments(log, other, t, isAdmin)
         const primary = segments[0]
         const hasMore = segments.length > 1
+        const fullDetailText =
+          segments.map((segment) => segment.text).join(' · ') ||
+          log.content ||
+          t('No details')
         let primaryTextClass = 'text-foreground'
         if (primary?.muted) {
           primaryTextClass = 'text-muted-foreground/60'
@@ -786,24 +836,45 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         }
         let detailPreview = <span className='text-muted-foreground/40'>—</span>
         if (primary) {
-          detailPreview = (
-            <span
-              className={cn(
-                'truncate leading-snug group-hover:underline',
-                primaryTextClass
-              )}
-            >
-              {primary.text}
-              {hasMore && (
-                <span className='text-muted-foreground/40 ml-0.5'>
-                  +{segments.length - 1}
+          const showAuditSecondary =
+            (log.type === 3 || log.type === 7) && segments[1]
+          if (showAuditSecondary) {
+            const secondary = segments[1]
+            detailPreview = (
+              <span className='min-w-0 leading-snug'>
+                <span className={cn('line-clamp-1', primaryTextClass)}>
+                  {primary.text}
                 </span>
-              )}
-            </span>
-          )
+                <span className='text-muted-foreground line-clamp-1'>
+                  {secondary.text}
+                  {segments.length > 2 && (
+                    <span className='text-muted-foreground/40 ml-0.5'>
+                      +{segments.length - 2}
+                    </span>
+                  )}
+                </span>
+              </span>
+            )
+          } else {
+            detailPreview = (
+              <span
+                className={cn(
+                  'line-clamp-2 whitespace-normal leading-snug group-hover:underline',
+                  primaryTextClass
+                )}
+              >
+                {primary.text}
+                {hasMore && (
+                  <span className='text-muted-foreground/40 ml-0.5'>
+                    +{segments.length - 1}
+                  </span>
+                )}
+              </span>
+            )
+          }
         } else if (log.content) {
           detailPreview = (
-            <span className='text-muted-foreground truncate group-hover:underline'>
+            <span className='text-muted-foreground line-clamp-2 whitespace-normal group-hover:underline'>
               {log.content}
             </span>
           )
@@ -811,14 +882,28 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         return (
           <>
-            <button
-              type='button'
-              className='group flex max-w-[200px] items-center gap-1 text-left text-xs'
-              onClick={() => setDialogOpen(true)}
-              title={t('Click to view full details')}
-            >
-              {detailPreview}
-            </button>
+            <TooltipProvider delay={300}>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <button
+                      type='button'
+                      className='group flex w-full max-w-[340px] items-center gap-1 text-left text-xs'
+                      onClick={() => setDialogOpen(true)}
+                      aria-label={`${t('Click to view full details')}: ${fullDetailText}`}
+                    />
+                  }
+                >
+                  {detailPreview}
+                </TooltipTrigger>
+                <TooltipContent
+                  side='top'
+                  className='max-w-md break-words whitespace-pre-wrap'
+                >
+                  {fullDetailText}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
             <DetailsDialog
               log={log}
               isAdmin={isAdmin}
@@ -828,8 +913,8 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           </>
         )
       },
-      size: 180,
-      maxSize: 200,
+      size: 280,
+      maxSize: 360,
     }
   )
 

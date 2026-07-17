@@ -127,6 +127,7 @@ func resetSessionCookieSettingsAfterTest(t *testing.T) {
 	t.Cleanup(func() {
 		SessionCookieSecure = false
 		SessionCookieTrustedURLs = nil
+		SessionCookieDomain = ""
 	})
 }
 
@@ -134,6 +135,7 @@ func TestInitSessionCookieSettingsDefaultsToInsecure(t *testing.T) {
 	resetSessionCookieSettingsAfterTest(t)
 	t.Setenv("SESSION_COOKIE_SECURE", "")
 	t.Setenv("SESSION_COOKIE_TRUSTED_URL", "")
+	t.Setenv("SESSION_COOKIE_DOMAIN", "")
 
 	require.NoError(t, InitSessionCookieSettings())
 	assert.False(t, SessionCookieSecure)
@@ -184,6 +186,56 @@ func TestInitSessionCookieSettingsAllowsMultipleTrustedURLs(t *testing.T) {
 	require.NoError(t, InitSessionCookieSettings())
 	assert.True(t, SessionCookieSecure)
 	assert.Equal(t, []string{"https://example.com", "https://admin.example.com"}, SessionCookieTrustedURLs)
+}
+
+func TestInitSessionCookieSettingsConfiguresSharedDomain(t *testing.T) {
+	resetSessionCookieSettingsAfterTest(t)
+	t.Setenv("SESSION_COOKIE_SECURE", "true")
+	t.Setenv("SESSION_COOKIE_TRUSTED_URL", "https://example.com,https://www.example.com")
+	t.Setenv("SESSION_COOKIE_DOMAIN", ".example.com")
+
+	require.NoError(t, InitSessionCookieSettings())
+	assert.Equal(t, "example.com", SessionCookieDomain)
+	assert.Equal(t, "example.com", SessionDomainForHost("www.example.com"))
+	assert.Equal(t, "example.com", SessionDomainForHost("example.com:443"))
+	assert.Empty(t, SessionDomainForHost("untrusted.example.com"))
+	assert.Empty(t, SessionDomainForHost("example.net"))
+}
+
+func TestInitSessionCookieSettingsRejectsInvalidSharedDomain(t *testing.T) {
+	resetSessionCookieSettingsAfterTest(t)
+	t.Setenv("SESSION_COOKIE_SECURE", "true")
+	t.Setenv("SESSION_COOKIE_TRUSTED_URL", "https://example.com")
+	t.Setenv("SESSION_COOKIE_DOMAIN", "https://example.com")
+
+	require.Error(t, InitSessionCookieSettings())
+}
+
+func TestInitSessionCookieSettingsRejectsInsecureSharedDomain(t *testing.T) {
+	resetSessionCookieSettingsAfterTest(t)
+	t.Setenv("SESSION_COOKIE_SECURE", "false")
+	t.Setenv("SESSION_COOKIE_TRUSTED_URL", "")
+	t.Setenv("SESSION_COOKIE_DOMAIN", "example.com")
+
+	require.Error(t, InitSessionCookieSettings())
+}
+
+func TestInitSessionCookieSettingsRejectsTrustedURLOutsideSharedDomain(t *testing.T) {
+	resetSessionCookieSettingsAfterTest(t)
+	t.Setenv("SESSION_COOKIE_SECURE", "true")
+	t.Setenv("SESSION_COOKIE_TRUSTED_URL", "https://example.net")
+	t.Setenv("SESSION_COOKIE_DOMAIN", "example.com")
+
+	require.Error(t, InitSessionCookieSettings())
+}
+
+func TestInitSessionCookieSettingsRejectsTrustedURLWithPath(t *testing.T) {
+	resetSessionCookieSettingsAfterTest(t)
+	t.Setenv("SESSION_COOKIE_SECURE", "true")
+	t.Setenv("SESSION_COOKIE_TRUSTED_URL", "https://example.com/login")
+	t.Setenv("SESSION_COOKIE_DOMAIN", "example.com")
+
+	require.Error(t, InitSessionCookieSettings())
 }
 
 func TestInitSessionCookieSettingsRejectsEmptyTrustedURLInList(t *testing.T) {

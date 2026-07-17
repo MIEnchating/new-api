@@ -113,9 +113,19 @@ func assignDisplayLogIds(logs []*Log, startIdx int) {
 	}
 }
 
+func sanitizeErrorLogContents(logs []*Log) {
+	for i := range logs {
+		if logs[i].Type == LogTypeError {
+			logs[i].Content = common.MessageWithoutRequestId(logs[i].Content)
+		}
+	}
+}
+
 func formatUserLogs(logs []*Log, startIdx int) {
+	sanitizeErrorLogContents(logs)
 	for i := range logs {
 		logs[i].ChannelName = ""
+		logs[i].UpstreamRequestId = ""
 		var otherMap map[string]interface{}
 		otherMap, _ = common.StrToMap(logs[i].Other)
 		if otherMap != nil {
@@ -199,8 +209,9 @@ func buildOpField(action string, params map[string]interface{}) map[string]inter
 // RecordLoginLog 记录用户登录成功的审计日志（type=LogTypeLogin）。
 // username 由调用方传入（登录流程已持有用户对象），避免额外的数据库查询。
 // content 为英文兜底文本（用于导出/经典前端）；action+params 供前端本地化渲染。
+// requestId 应传入当前 HTTP 请求 ID，以便审计记录与请求链路关联。
 // extra 可携带 login_method、user_agent 等附加信息（普通用户可见）。
-func RecordLoginLog(userId int, username string, content string, ip string, action string, params map[string]interface{}, extra map[string]interface{}) {
+func RecordLoginLog(userId int, username string, content string, ip string, requestId string, action string, params map[string]interface{}, extra map[string]interface{}) {
 	other := map[string]interface{}{}
 	for k, v := range extra {
 		other[k] = v
@@ -213,6 +224,7 @@ func RecordLoginLog(userId int, username string, content string, ip string, acti
 		Type:      LogTypeLogin,
 		Content:   content,
 		Ip:        ip,
+		RequestId: requestId,
 		Other:     common.MapToJsonStr(other),
 	}
 	if err := createLog(log); err != nil {
@@ -226,7 +238,8 @@ func RecordLoginLog(userId int, username string, content string, ip string, acti
 // action+params 写入 Other.op，供前端本地化渲染（普通用户可见，不含敏感信息）。
 // adminInfo 存放操作者身份（写入 Other.admin_info，普通用户查询时剥离）；
 // auditInfo 存放路由/方法/结果等中间件兜底信息（写入 Other.audit_info，普通用户查询时剥离）。
-func RecordOperationAuditLog(logUserId int, content string, ip string, action string, params map[string]interface{}, adminInfo map[string]interface{}, auditInfo map[string]interface{}) {
+// requestId 应传入当前 HTTP 请求 ID，以便审计记录与请求链路关联。
+func RecordOperationAuditLog(logUserId int, content string, ip string, requestId string, action string, params map[string]interface{}, adminInfo map[string]interface{}, auditInfo map[string]interface{}) {
 	username, _ := GetUsernameById(logUserId, false)
 	other := map[string]interface{}{
 		"op": buildOpField(action, params),
@@ -244,6 +257,7 @@ func RecordOperationAuditLog(logUserId int, content string, ip string, action st
 		Type:      LogTypeManage,
 		Content:   content,
 		Ip:        ip,
+		RequestId: requestId,
 		Other:     common.MapToJsonStr(other),
 	}
 	if err := createLog(log); err != nil {
@@ -512,6 +526,7 @@ func GetAllLogs(logType int, startTimestamp int64, endTimestamp int64, modelName
 	if err != nil {
 		return nil, 0, err
 	}
+	sanitizeErrorLogContents(logs)
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		assignDisplayLogIds(logs, startIdx)
 	}

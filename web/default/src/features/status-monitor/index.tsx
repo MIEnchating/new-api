@@ -29,7 +29,7 @@ import {
   Wrench,
   type LucideIcon,
 } from 'lucide-react'
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
@@ -37,6 +37,12 @@ import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { getUptimeStatus } from '@/features/dashboard/api'
 import type {
   UptimeHeartbeat,
@@ -310,62 +316,10 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
   heartbeats?: UptimeHeartbeat[]
 }) {
   const { t } = useTranslation()
-  const [activeHeartbeatIndex, setActiveHeartbeatIndex] = useState<
-    number | null
-  >(null)
-  const hoverTimerRef = useRef<number | null>(null)
-  const pendingHeartbeatIndexRef = useRef<number | null>(null)
   const heartbeats = useMemo(
     () => getOrderedHeartbeats(props.heartbeats).slice(-48),
     [props.heartbeats]
   )
-  const activeHeartbeat =
-    activeHeartbeatIndex === null
-      ? null
-      : (heartbeats[activeHeartbeatIndex] ?? null)
-  const activeHeartbeatLeft =
-    activeHeartbeatIndex === null
-      ? 50
-      : Math.min(
-          90,
-          Math.max(10, ((activeHeartbeatIndex + 0.5) / heartbeats.length) * 100)
-        )
-
-  useEffect(
-    () => () => {
-      if (hoverTimerRef.current !== null) {
-        window.clearTimeout(hoverTimerRef.current)
-      }
-    },
-    []
-  )
-
-  const cancelScheduledHeartbeat = () => {
-    if (hoverTimerRef.current === null) return
-    window.clearTimeout(hoverTimerRef.current)
-    hoverTimerRef.current = null
-    pendingHeartbeatIndexRef.current = null
-  }
-
-  const showHeartbeat = (index: number, delayed: boolean) => {
-    if (
-      index === activeHeartbeatIndex ||
-      index === pendingHeartbeatIndexRef.current
-    ) {
-      return
-    }
-    cancelScheduledHeartbeat()
-    if (!delayed) {
-      setActiveHeartbeatIndex(index)
-      return
-    }
-    pendingHeartbeatIndexRef.current = index
-    hoverTimerRef.current = window.setTimeout(() => {
-      setActiveHeartbeatIndex(index)
-      hoverTimerRef.current = null
-      pendingHeartbeatIndexRef.current = null
-    }, 80)
-  }
 
   if (heartbeats.length === 0) {
     return (
@@ -377,45 +331,15 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
 
   return (
     <>
-      <div className='relative'>
-        {activeHeartbeat ? (
-          <div
-            role='tooltip'
-            className='bg-foreground text-background pointer-events-none absolute bottom-[calc(100%+4px)] z-20 flex w-max max-w-xs -translate-x-1/2 flex-col items-start gap-0.5 rounded-md px-3 py-1.5 text-xs shadow-md'
-            style={{
-              left: `${activeHeartbeatLeft}%`,
-            }}
-          >
-            <span className='font-medium'>
-              {formatPing(activeHeartbeat.ping)}
-            </span>
-            <span className='opacity-75'>
-              {formatDateTime(activeHeartbeat.time)}
-            </span>
-            {activeHeartbeat.msg ? <span>{activeHeartbeat.msg}</span> : null}
-          </div>
-        ) : null}
+      <TooltipProvider delay={0}>
         <div
           className='grid h-10 min-w-0 items-end gap-px sm:h-12 sm:gap-1'
           style={{
             gridTemplateColumns: `repeat(${heartbeats.length}, minmax(4px, 1fr))`,
           }}
           aria-label={t('Heartbeat timeline')}
-          onPointerMove={(event) => {
-            const target = (event.target as HTMLElement).closest<HTMLElement>(
-              '[data-heartbeat-index]'
-            )
-            if (!target) return
-            const index = Number(target.dataset.heartbeatIndex)
-            if (index === activeHeartbeatIndex) return
-            showHeartbeat(index, true)
-          }}
-          onPointerLeave={() => {
-            cancelScheduledHeartbeat()
-            setActiveHeartbeatIndex(null)
-          }}
         >
-          {heartbeats.map((heartbeat, index) => {
+          {heartbeats.map((heartbeat) => {
             const meta = getStatusMeta(heartbeat.status)
             const label = [
               t(meta.label),
@@ -424,20 +348,39 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
             ].join(' · ')
 
             return (
-              <span
+              <Tooltip
                 key={`${heartbeat.time ?? 'heartbeat'}-${heartbeat.status}-${heartbeat.ping ?? 'na'}-${heartbeat.msg ?? ''}`}
-                data-heartbeat-index={index}
-                aria-label={label}
-                className={cn(
-                  'block min-h-3 cursor-default rounded-[2px]',
-                  heartbeat.status === 1 ? 'h-10 sm:h-12' : 'h-7 sm:h-8',
-                  meta.dotClassName
-                )}
-              />
+              >
+                <TooltipTrigger
+                  render={
+                    <span
+                      aria-label={label}
+                      className={cn(
+                        'block min-h-3 cursor-default rounded-[2px]',
+                        heartbeat.status === 1 ? 'h-10 sm:h-12' : 'h-7 sm:h-8',
+                        meta.dotClassName
+                      )}
+                    />
+                  }
+                />
+                <TooltipContent
+                  side='top'
+                  sideOffset={6}
+                  className='flex-col items-start gap-0.5'
+                >
+                  <span className='font-medium'>
+                    {formatPing(heartbeat.ping)}
+                  </span>
+                  <span className='opacity-75'>
+                    {formatDateTime(heartbeat.time)}
+                  </span>
+                  {heartbeat.msg ? <span>{heartbeat.msg}</span> : null}
+                </TooltipContent>
+              </Tooltip>
             )
           })}
         </div>
-      </div>
+      </TooltipProvider>
       <div className='text-muted-foreground mt-1.5 flex items-center justify-between gap-3 text-[11px] tabular-nums'>
         <span className='truncate'>
           {formatTimelineBoundary(heartbeats[0]?.time)}

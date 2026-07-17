@@ -20,22 +20,23 @@ export type TopUpStatsSummary = {
   order_count: number
   user_count: number
   total_money: number
-  average_order_money: number
 }
 
-export type UserTopUpStat = {
+export type TopUpStatsItem = {
+  id: number
+  trade_no: string
   user_id: number
   username: string
   display_name: string
-  order_count: number
-  total_money: number
-  average_order_money: number
-  last_complete_time: number
+  payment_method: string
+  payment_provider: string
+  money: number
+  complete_time: number
 }
 
 export type TopUpStatsData = {
   summary: TopUpStatsSummary
-  items: UserTopUpStat[]
+  items: TopUpStatsItem[]
   total: number
   page: number
   page_size: number

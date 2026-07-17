@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	ginKeyChannelRouteModel       = "channel_route_model"
-	ginKeyChannelRouteRequestPath = "channel_route_request_path"
+	ginKeyChannelRouteModel         = "channel_route_model"
+	ginKeyChannelRouteRequestPath   = "channel_route_request_path"
+	ginKeyChannelRouteStickyLogInfo = "channel_route_sticky_log_info"
 )
 
 var channelRouteCooldowns sync.Map
@@ -180,6 +181,12 @@ func ShouldFreezeChannelRoute(err *types.NewAPIError) bool {
 		operation_setting.ShouldDisableByStatusCode(err.StatusCode)
 }
 
+func ShouldRetrySameChannelRoute(err *types.NewAPIError, retriesUsed int) bool {
+	return IsChannelRouteEnabled() &&
+		common.ChannelRouteSameChannelRetries > retriesUsed &&
+		ShouldFreezeChannelRoute(err)
+}
+
 func TrackChannelRouteSelection(c *gin.Context, group string, modelName string, requestPath string, channelID int) {
 	if c == nil || group == "" || modelName == "" || channelID <= 0 {
 		return
@@ -189,6 +196,37 @@ func TrackChannelRouteSelection(c *gin.Context, group string, modelName string, 
 	common.SetContextKey(c, constant.ContextKeyChannelRouteCooldown, common.ChannelRouteCooldownSeconds)
 	c.Set(ginKeyChannelRouteModel, modelName)
 	c.Set(ginKeyChannelRouteRequestPath, requestPath)
+}
+
+func markChannelRouteStickyHit(c *gin.Context, group string, modelName string, requestPath string, channelID int) {
+	if c == nil || group == "" || modelName == "" || channelID <= 0 {
+		return
+	}
+	c.Set(ginKeyChannelRouteStickyLogInfo, map[string]interface{}{
+		"group":        group,
+		"model":        modelName,
+		"request_path": requestPath,
+		"channel_id":   channelID,
+	})
+}
+
+func AppendChannelRouteStickyAdminInfo(c *gin.Context, adminInfo map[string]interface{}) {
+	if c == nil || adminInfo == nil {
+		return
+	}
+	value, ok := c.Get(ginKeyChannelRouteStickyLogInfo)
+	if !ok || value == nil {
+		return
+	}
+	info, ok := value.(map[string]interface{})
+	if !ok {
+		return
+	}
+	channelID, ok := info["channel_id"].(int)
+	if !ok || channelID != common.GetContextKeyInt(c, constant.ContextKeyChannelRouteChannelId) {
+		return
+	}
+	adminInfo["channel_route_sticky"] = info
 }
 
 func hasAvailableChannelRouteAlternative(group string, modelName string, requestPath string, channelID int, now int64) (bool, error) {
@@ -235,6 +273,7 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 				}
 				if channel != nil {
 					TrackChannelRouteSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
+					markChannelRouteStickyHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
 					logger.LogDebug(param.Ctx, "channel route selected sticky channel: group=%s channel=%d", group, channel.Id)
 					return channel, nil
 				}

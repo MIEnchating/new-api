@@ -13,6 +13,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const providerRequestIdHeader = "X-Request-Id"
+
+// CaptureUpstreamRequestId records the best available upstream correlation ID.
+// Native new-api IDs take precedence; X-Request-Id supports providers such as
+// sub2api and is used only as a fallback.
+func CaptureUpstreamRequestId(c *gin.Context, header http.Header) string {
+	if c == nil {
+		return ""
+	}
+	if requestId := strings.TrimSpace(header.Get(common.RequestIdKey)); requestId != "" {
+		c.Set(common.UpstreamRequestIdKey, requestId)
+		return requestId
+	}
+	requestId := strings.TrimSpace(header.Get(providerRequestIdHeader))
+	if requestId != "" {
+		c.Set(common.UpstreamRequestIdKey, requestId)
+	}
+	return requestId
+}
+
 func CloseResponseBodyGracefully(httpResponse *http.Response) {
 	if httpResponse == nil || httpResponse.Body == nil {
 		return
@@ -26,17 +46,22 @@ func CloseResponseBodyGracefully(httpResponse *http.Response) {
 // ShouldCopyUpstreamHeader checks whether a given upstream response header
 // should be copied to the client response. It returns false for Content-Length
 // (managed separately) and X-Oneapi-Request-Id (to preserve the local instance
-// ID). When the upstream header is X-Oneapi-Request-Id, the value is captured
-// into the Gin context for later logging.
+// ID). X-Oneapi-Request-Id and the X-Request-Id fallback are captured into the
+// Gin context for later logging.
 func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {
 	if strings.EqualFold(k, "Content-Length") {
 		return false
 	}
 	if strings.EqualFold(k, common.RequestIdKey) {
-		if c != nil && len(v) > 0 {
-			c.Set(common.UpstreamRequestIdKey, v[0])
+		if len(v) > 0 {
+			CaptureUpstreamRequestId(c, http.Header{common.RequestIdKey: v})
 		}
 		return false
+	}
+	if strings.EqualFold(k, providerRequestIdHeader) && len(v) > 0 {
+		if c != nil && strings.TrimSpace(c.GetString(common.UpstreamRequestIdKey)) == "" {
+			CaptureUpstreamRequestId(c, http.Header{providerRequestIdHeader: v})
+		}
 	}
 	return true
 }

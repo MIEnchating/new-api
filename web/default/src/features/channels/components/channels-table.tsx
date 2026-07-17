@@ -94,6 +94,7 @@ export function ChannelsTable() {
   const {
     enableTagMode,
     idSort,
+    prioritySort,
     batchMode,
     sensitiveVisible,
     setSensitiveVisible,
@@ -199,14 +200,16 @@ export function ChannelsTable() {
       !activeSort ||
       !CHANNEL_SORTABLE_COLUMNS.has(activeSort.id as ChannelSortBy)
     ) {
-      return {}
+      return prioritySort
+        ? ({ sort_by: 'priority', sort_order: 'desc' } as const)
+        : {}
     }
 
     return {
       sort_by: activeSort.id as ChannelSortBy,
       sort_order: activeSort.desc ? 'desc' : 'asc',
     } as const
-  }, [sorting])
+  }, [prioritySort, sorting])
 
   const handleSortingChange: OnChangeFn<SortingState> = (updater) => {
     setSorting((previous) => {
@@ -442,6 +445,8 @@ export function ChannelsTable() {
       toolbarProps={{
         searchPlaceholder: t('Filter by name, ID, or key...'),
         searchDebounceMs: 500,
+        mobileCollapsibleFilters: true,
+        hasAdditionalFilters: Boolean(modelFilter.trim()),
         onReset: () => {
           resetModelFilterInput()
         },

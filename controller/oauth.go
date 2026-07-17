@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -24,11 +25,13 @@ func providerParams(name string) map[string]any {
 func GenerateOAuthCode(c *gin.Context) {
 	session := sessions.Default(c)
 	state := common.GetRandomString(12)
+	returnOrigin := service.ResolveRequestSiteOrigin(c)
 	affCode := c.Query("aff")
 	if affCode != "" {
 		session.Set("aff", affCode)
 	}
 	session.Set("oauth_state", state)
+	session.Set("oauth_return_origin", returnOrigin)
 	err := session.Save()
 	if err != nil {
 		common.ApiError(c, err)
@@ -62,6 +65,15 @@ func HandleOAuth(c *gin.Context) {
 			"success": false,
 			"message": i18n.T(c, i18n.MsgOAuthStateInvalid),
 		})
+		return
+	}
+	if returnOrigin, ok := session.Get("oauth_return_origin").(string); ok && service.IsTrustedSiteOrigin(returnOrigin) {
+		c.Set("oauth_return_origin", returnOrigin)
+	}
+	session.Delete("oauth_state")
+	session.Delete("oauth_return_origin")
+	if err := session.Save(); err != nil {
+		common.ApiError(c, err)
 		return
 	}
 
@@ -197,9 +209,13 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 		}
 	}
 
-	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, gin.H{
+	data := gin.H{
 		"action": "bind",
-	})
+	}
+	if returnOrigin := c.GetString("oauth_return_origin"); returnOrigin != "" {
+		data["return_origin"] = returnOrigin
+	}
+	common.ApiSuccessI18n(c, i18n.MsgOAuthBindSuccess, data)
 }
 
 // findOrCreateOAuthUser finds existing user or creates new user

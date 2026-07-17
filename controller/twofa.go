@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -20,6 +21,39 @@ type Setup2FARequest struct {
 // Verify2FARequest 验证2FA请求结构
 type Verify2FARequest struct {
 	Code string `json:"code" binding:"required"`
+}
+
+const pending2FALoginTTL = 5 * time.Minute
+
+func setPending2FALogin(session sessions.Session, user *model.User) {
+	session.Set("pending_username", user.Username)
+	session.Set("pending_user_id", user.Id)
+	session.Set("pending_2fa_expires_at", time.Now().Add(pending2FALoginTTL).Unix())
+}
+
+func pending2FALoginUserID(session sessions.Session, now time.Time) (int, bool) {
+	userID, ok := session.Get("pending_user_id").(int)
+	if !ok || userID <= 0 {
+		return 0, false
+	}
+	expiresAt, ok := session.Get("pending_2fa_expires_at").(int64)
+	if !ok || expiresAt <= now.Unix() {
+		return 0, false
+	}
+	return userID, true
+}
+
+// Get2FALoginStatus reports whether the current browser has completed the
+// password step and may proceed to the second-factor page.
+func Get2FALoginStatus(c *gin.Context) {
+	_, pending := pending2FALoginUserID(sessions.Default(c), time.Now())
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data": gin.H{
+			"pending": pending,
+		},
+	})
 }
 
 // Setup2FAResponse 设置2FA响应结构
@@ -394,6 +428,16 @@ func RegenerateBackupCodes(c *gin.Context) {
 	})
 }
 
+func resolveLoginSecondFactorMethod(isValidTOTP bool, isValidBackup bool) string {
+	if isValidTOTP {
+		return "totp"
+	}
+	if isValidBackup {
+		return "backup_code"
+	}
+	return ""
+}
+
 // Verify2FALogin 登录时验证2FA
 func Verify2FALogin(c *gin.Context) {
 	var req Verify2FARequest
@@ -407,19 +451,11 @@ func Verify2FALogin(c *gin.Context) {
 
 	// 从会话中获取pending用户信息
 	session := sessions.Default(c)
-	pendingUserId := session.Get("pending_user_id")
-	if pendingUserId == nil {
+	userId, pending := pending2FALoginUserID(session, time.Now())
+	if !pending {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": "会话已过期，请重新登录",
-		})
-		return
-	}
-	userId, ok := pendingUserId.(int)
-	if !ok {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "会话数据无效，请重新登录",
 		})
 		return
 	}
@@ -476,10 +512,12 @@ func Verify2FALogin(c *gin.Context) {
 		})
 		return
 	}
+	c.Set(loginSecondFactorMethodContextKey, resolveLoginSecondFactorMethod(isValidTOTP, isValidBackup))
 
 	// 2FA验证成功，清理pending会话信息并完成登录
 	session.Delete("pending_username")
 	session.Delete("pending_user_id")
+	session.Delete("pending_2fa_expires_at")
 	session.Save()
 
 	setupLogin(user, c)

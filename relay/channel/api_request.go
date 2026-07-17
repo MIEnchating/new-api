@@ -421,9 +421,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		return nil, errors.New("resp is nil")
 	}
 
-	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
-		c.Set(common2.UpstreamRequestIdKey, upID)
-	}
+	service.CaptureUpstreamRequestId(c, resp.Header)
 	if info.IsStream && info.RelayMode == constant.RelayModeResponses {
 		logger.LogInfo(c, fmt.Sprintf(
 			"stream trace: stage=upstream_headers elapsed_ms=%d status=%d proto=%q content_type=%q content_length=%d transfer_encoding=%q content_encoding=%q server=%q via=%q cf_ray=%q upstream_request_id=%q provider_request_id=%q",

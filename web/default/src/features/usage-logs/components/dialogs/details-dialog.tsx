@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { TFunction } from 'i18next'
 import {
   Copy,
   Check,
@@ -31,7 +32,6 @@ import {
   Info,
   LogIn,
 } from 'lucide-react'
-import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
@@ -42,7 +42,13 @@ import { Label } from '@/components/ui/label'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
-import { formatLogQuota, formatTokens, formatUseTime } from '@/lib/format'
+import {
+  formatLogQuota,
+  formatTimestampToDate,
+  formatTokens,
+  formatUseTime,
+} from '@/lib/format'
+import { getRoleLabelKey } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 
 import type { UsageLog } from '../../data/schema'
@@ -57,6 +63,10 @@ import {
   getFirstResponseTimeColor,
   getResponseTimeColor,
   renderAuditContent,
+  getAuditAuthMethodLabel,
+  getAuditParamEntries,
+  getLoginMethodLabel,
+  getSecondFactorMethodLabel,
 } from '../../lib/format'
 import {
   getLogTypeConfig,
@@ -64,17 +74,6 @@ import {
   isTimingLogType,
 } from '../../lib/utils'
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
-
-// Maps a channel-update changed-field token (as recorded by the backend audit)
-// to its i18n label key for display in the audit details.
-const CHANNEL_FIELD_LABELS: Record<string, string> = {
-  status: 'Status',
-  models: 'Models',
-  group: 'Group',
-  type: 'Type',
-  base_url: 'Base URL',
-  key: 'Key',
-}
 
 function timingTextColorClass(
   variant: 'success' | 'warning' | 'danger'
@@ -179,7 +178,9 @@ function getUsageBillingPathLabel(
   }
 }
 
-function isUsageBillingPathLocal(adminInfo: LogOtherData['admin_info']): boolean {
+function isUsageBillingPathLocal(
+  adminInfo: LogOtherData['admin_info']
+): boolean {
   if (adminInfo?.usage_billing_path) {
     return adminInfo.usage_billing_path === USAGE_BILLING_PATH.LOCAL
   }
@@ -468,6 +469,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const isConsume = props.log.type === 2
   const isTopup = props.log.type === 1
   const isManage = props.log.type === 3
+  const isLogin = props.log.type === 7
   const isSubscription = other?.billing_source === 'subscription'
   const isTieredBilling =
     isConsume &&
@@ -477,8 +479,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const hasAudioTokens = other?.ws || other?.audio
   const showTiming = isTimingLogType(props.log.type)
   const showAdminIp =
-    !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
+    !!props.log.ip && (showTiming || isManage || (props.isAdmin && isTopup))
   const adminInfo = other?.admin_info
+  const hasUsageBillingPath =
+    adminInfo?.usage_billing_path != null ||
+    adminInfo?.local_count_tokens != null
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
       ? ([
@@ -514,7 +519,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
     props.isAdmin &&
     (topupAuditFields.length > 0 || showLegacyTopupWarning)
   const manageOperator = (() => {
-    if (!isManage || !props.isAdmin || !adminInfo) return null
+    if (!isManage || !adminInfo) return null
     const username = adminInfo.admin_username
     const id = adminInfo.admin_id
     const hasUsername = username != null && String(username).trim() !== ''
@@ -524,49 +529,103 @@ export function DetailsDialog(props: DetailsDialogProps) {
     if (hasUsername) return String(username)
     return `ID: ${id}`
   })()
-  const authMethodLabel = (() => {
-    if (!isManage || !props.isAdmin || !adminInfo?.auth_method) return ''
-    if (adminInfo.auth_method === 'access_token') return t('Access Token')
-    if (adminInfo.auth_method === 'session') return t('Session')
-    return String(adminInfo.auth_method)
-  })()
+  const adminRoleLabel =
+    isManage && adminInfo?.admin_role != null
+      ? `${t(getRoleLabelKey(adminInfo.admin_role))} (${adminInfo.admin_role})`
+      : ''
+  const authMethodLabel = isManage
+    ? getAuditAuthMethodLabel(adminInfo?.auth_method, t)
+    : ''
 
   // Localized operation text rendered from the language-independent op
   // descriptor (shared by audit type=3 and login type=7).
   const operationText = renderAuditContent(other, t)
-  const auditRoute = isManage && props.isAdmin ? other?.audit_info : undefined
-  // Channel update records which fields changed (stable field tokens); render
-  // them with their localized labels for admins.
-  const changedFieldTokens =
-    isManage &&
-    props.isAdmin &&
-    Array.isArray(other?.op?.params?.changed_fields)
-      ? (other.op.params.changed_fields as string[])
-      : []
-  const changedFieldsText = changedFieldTokens
-    .map((field) => t(CHANNEL_FIELD_LABELS[field] ?? field))
+  const contentText =
+    (isManage || isLogin) && operationText ? operationText : details
+  const operationIdentifier = other?.op?.action ?? ''
+  const auditParamEntries =
+    isManage || isLogin ? getAuditParamEntries(other, t) : []
+  const auditRoute = isManage ? other?.audit_info : undefined
+  const routeParams = Object.entries(auditRoute?.params ?? {})
+  const routeParamsText = routeParams
+    .map(([key, value]) => `${key}=${value}`)
     .join(', ')
+  const auditSuccess =
+    auditRoute?.success ??
+    (auditRoute?.status != null ? auditRoute.status < 400 : undefined)
+  const auditResultText =
+    auditSuccess == null
+      ? ''
+      : `${auditSuccess ? t('Success') : t('Failed')}${
+          auditRoute?.status != null ? ` (${auditRoute.status})` : ''
+        }`
   const showManageAuditSection =
-    isManage && props.isAdmin && (operationText != null || auditRoute != null)
+    isManage &&
+    Boolean(
+      operationText ||
+      operationIdentifier ||
+      manageOperator ||
+      adminRoleLabel ||
+      authMethodLabel ||
+      auditParamEntries.length > 0 ||
+      auditRoute
+    )
 
   // Login audit (type=7); visible to the log owner, not admin-only.
-  const isLogin = props.log.type === 7
   const loginAuditFields = isLogin
     ? ([
         other?.login_method && {
           label: t('Login Method'),
-          value: String(other.login_method),
+          value: getLoginMethodLabel(other.login_method, t),
+        },
+        other?.second_factor_method && {
+          label: t('Second-factor method'),
+          value: getSecondFactorMethodLabel(other.second_factor_method, t),
+        },
+        (other?.request_route || other?.request_path) && {
+          label: t('Request'),
+          value: [
+            other.request_method,
+            other.request_route || other.request_path,
+          ]
+            .filter(Boolean)
+            .join(' '),
+          mono: true,
+        },
+        other?.request_path &&
+          other.request_route &&
+          other.request_path !== other.request_route && {
+            label: t('Path'),
+            value: other.request_path,
+            mono: true,
+          },
+        {
+          label: t('Result'),
+          value: t('Success'),
         },
         props.log.ip && {
           label: t('IP Address'),
           value: props.log.ip,
+          mono: true,
         },
         other?.user_agent && {
           label: t('User Agent'),
           value: String(other.user_agent),
         },
-      ].filter(Boolean) as Array<{ label: string; value: string }>)
+      ].filter(Boolean) as Array<{
+        label: string
+        value: string
+        mono?: boolean
+      }>)
     : []
+  const showLoginAuditSection =
+    isLogin &&
+    Boolean(
+      operationText ||
+      operationIdentifier ||
+      auditParamEntries.length > 0 ||
+      loginAuditFields.length > 0
+    )
 
   const conversionChain =
     other && Array.isArray(other.request_conversion)
@@ -578,6 +637,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
       : conversionChain.join(' -> ')
   const showConversion =
     props.isAdmin &&
+    isDisplayableType(props.log.type) &&
     props.log.type !== 6 &&
     (other?.request_path || conversionChain.length > 0)
 
@@ -589,6 +649,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
     reasoningEffortVariant = 'orange'
   } else if (other?.reasoning_effort === 'medium') {
     reasoningEffortVariant = 'yellow'
+  }
+
+  let dialogWidthClass = 'sm:max-w-lg'
+  if (isTieredBilling) {
+    dialogWidthClass = 'sm:max-w-4xl lg:max-w-5xl'
   }
 
   return (
@@ -610,7 +675,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
       contentClassName={cn(
         'min-w-0 overflow-hidden',
         'max-sm:max-h-[calc(100dvh-1.5rem)] max-sm:w-[calc(100vw-1.5rem)] max-sm:max-w-[calc(100vw-1.5rem)] max-sm:p-4',
-        isTieredBilling ? 'sm:max-w-4xl lg:max-w-5xl' : 'sm:max-w-lg'
+        dialogWidthClass
       )}
       headerClassName='max-sm:gap-1'
       titleClassName='flex items-center gap-2 text-base'
@@ -621,6 +686,26 @@ export function DetailsDialog(props: DetailsDialogProps) {
       <div className='w-full max-w-full min-w-0 space-y-2.5 overflow-x-hidden py-1 sm:space-y-3'>
         {/* Overview section - key identifiers */}
         <div className='min-w-0 space-y-1'>
+          <DetailRow
+            label={t('Time')}
+            value={formatTimestampToDate(props.log.created_at)}
+            mono
+          />
+          {(!isManage || !manageOperator) &&
+            (props.log.username || props.log.user_id > 0) && (
+              <DetailRow
+                label={t('User')}
+                value={
+                  props.log.username
+                    ? `${props.log.username}${
+                        props.log.user_id > 0
+                          ? ` (ID: ${props.log.user_id})`
+                          : ''
+                      }`
+                    : `ID: ${props.log.user_id}`
+                }
+              />
+            )}
           {props.log.request_id && (
             <DetailRow
               label={t('Request ID')}
@@ -628,10 +713,25 @@ export function DetailsDialog(props: DetailsDialogProps) {
               mono
             />
           )}
-          {props.log.upstream_request_id && (
+          {props.isAdmin && props.log.upstream_request_id && (
             <DetailRow
               label={t('Upstream Request ID')}
               value={props.log.upstream_request_id}
+              mono
+            />
+          )}
+          {manageOperator && (
+            <DetailRow
+              label={
+                <span className='flex items-center gap-1.5'>
+                  <UserCog
+                    className='text-muted-foreground size-3.5'
+                    aria-hidden='true'
+                  />
+                  {t('Operator Admin')}
+                </span>
+              }
+              value={manageOperator}
               mono
             />
           )}
@@ -874,24 +974,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
-        {/* Manage operator (type=3, admin only) */}
-        {manageOperator && (
-          <DetailRow
-            label={
-              <span className='flex items-center gap-1.5'>
-                <UserCog
-                  className='text-muted-foreground size-3.5'
-                  aria-hidden='true'
-                />
-                {t('Operator Admin')}
-              </span>
-            }
-            value={manageOperator}
-            mono
-          />
-        )}
-
-        {/* Operation audit info (type=3, admin only) */}
+        {/* Operation audit info (type=3) */}
         {showManageAuditSection && (
           <DetailSection
             icon={<ShieldCheck className='size-3.5' aria-hidden='true' />}
@@ -901,41 +984,55 @@ export function DetailsDialog(props: DetailsDialogProps) {
             {operationText != null && (
               <DetailRow label={t('Operation')} value={operationText} />
             )}
+            {operationIdentifier && (
+              <DetailRow
+                label={t('Operation ID')}
+                value={operationIdentifier}
+                mono
+              />
+            )}
+            {adminRoleLabel && (
+              <DetailRow label={t('Admin Role')} value={adminRoleLabel} />
+            )}
             {authMethodLabel !== '' && (
               <DetailRow
                 label={t('Authentication Method')}
                 value={authMethodLabel}
               />
             )}
-            {changedFieldsText !== '' && (
+            {auditParamEntries.map((entry) => (
               <DetailRow
-                label={t('Changed Fields')}
-                value={changedFieldsText}
+                key={entry.key}
+                label={entry.label}
+                value={entry.value}
+                mono={entry.key.endsWith('_id') || entry.key === 'id'}
               />
-            )}
-            {auditRoute?.method && auditRoute?.route && (
+            ))}
+            {auditRoute?.method && (auditRoute.route || auditRoute.path) && (
               <DetailRow
                 label={t('Request')}
-                value={`${auditRoute.method} ${auditRoute.route}`}
+                value={`${auditRoute.method} ${auditRoute.route || auditRoute.path}`}
                 mono
               />
             )}
-            {auditRoute?.status != null && (
+            {auditRoute?.path && auditRoute.path !== auditRoute.route && (
+              <DetailRow label={t('Path')} value={auditRoute.path} mono />
+            )}
+            {routeParamsText && (
               <DetailRow
-                label={t('Result')}
-                value={
-                  auditRoute.success
-                    ? `${t('Success')} (${auditRoute.status})`
-                    : `${t('Failed')} (${auditRoute.status})`
-                }
+                label={t('Route Parameters')}
+                value={routeParamsText}
                 mono
               />
+            )}
+            {auditResultText && (
+              <DetailRow label={t('Result')} value={auditResultText} mono />
             )}
           </DetailSection>
         )}
 
         {/* Login audit info (type=7) */}
-        {isLogin && loginAuditFields.length > 0 && (
+        {showLoginAuditSection && (
           <DetailSection
             icon={<LogIn className='size-3.5' aria-hidden='true' />}
             iconTone='info'
@@ -944,14 +1041,31 @@ export function DetailsDialog(props: DetailsDialogProps) {
             {operationText != null && (
               <DetailRow label={t('Operation')} value={operationText} />
             )}
+            {operationIdentifier && (
+              <DetailRow
+                label={t('Operation ID')}
+                value={operationIdentifier}
+                mono
+              />
+            )}
             {loginAuditFields.map((field) => (
               <DetailRow
                 key={field.label}
                 label={field.label}
                 value={field.value}
-                mono
+                mono={field.mono}
               />
             ))}
+            {auditParamEntries
+              .filter((entry) => entry.key !== 'method')
+              .map((entry) => (
+                <DetailRow
+                  key={entry.key}
+                  label={entry.label}
+                  value={entry.value}
+                  mono={entry.key.endsWith('_id')}
+                />
+              ))}
           </DetailSection>
         )}
 
@@ -1069,7 +1183,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
         {props.isAdmin &&
           !isConsume &&
           props.log.type !== 6 &&
-          other?.admin_info && (
+          other?.admin_info &&
+          hasUsageBillingPath && (
             <DetailRow
               label={t('Billing Path')}
               value={
@@ -1209,7 +1324,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
         )}
 
         {/* Content */}
-        {details && (
+        {contentText && (
           <div className='space-y-1.5'>
             <Label className='text-xs font-semibold'>{t('Content')}</Label>
             <div className='bg-muted/30 relative min-w-0 overflow-hidden rounded-md border p-2.5'>
@@ -1217,18 +1332,18 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 variant='ghost'
                 size='sm'
                 className='absolute top-1.5 right-1.5 h-5 w-5 p-0'
-                onClick={() => copyToClipboard(details)}
+                onClick={() => copyToClipboard(contentText)}
                 title={t('Copy to clipboard')}
                 aria-label={t('Copy to clipboard')}
               >
-                {copiedText === details ? (
+                {copiedText === contentText ? (
                   <Check className='size-3 text-green-600' />
                 ) : (
                   <Copy className='size-3' />
                 )}
               </Button>
               <p className='min-w-0 pr-6 text-xs leading-relaxed break-all whitespace-pre-wrap sm:wrap-break-word'>
-                {details}
+                {contentText}
               </p>
             </div>
           </div>

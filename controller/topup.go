@@ -216,7 +216,7 @@ func RequestEpay(c *gin.Context) {
 	}
 
 	callBackAddress := service.GetCallbackAddress()
-	returnUrl, _ := url.Parse(paymentReturnPath("/console/log"))
+	returnUrl, _ := url.Parse(paymentReturnPath(c, "/console/log"))
 	notifyUrl, _ := url.Parse(callBackAddress + "/api/user/epay/notify")
 	tradeNo := fmt.Sprintf("%s%d", common.GetRandomString(6), time.Now().Unix())
 	tradeNo = fmt.Sprintf("USR%dNO%s", id, tradeNo)
@@ -459,7 +459,8 @@ func GetAllTopUps(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
-// GetTopUpStats returns successful top-up aggregates for administrators.
+// GetTopUpStats returns successful top-up summaries and paginated order details
+// for administrators.
 func GetTopUpStats(c *gin.Context) {
 	now := time.Now()
 	defaultStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()

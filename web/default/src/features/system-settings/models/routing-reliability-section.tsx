@@ -92,6 +92,7 @@ const routingReliabilitySchema = z
       .min(0)
       .max(31536000, 'Cooldown cannot exceed 31536000 seconds'),
     ChannelRouteStickyEnabled: z.boolean(),
+    ChannelRouteSameChannelRetries: z.coerce.number().int().min(0).max(10),
     ChannelDisableThreshold: numericString,
     AutomaticDisableChannelEnabled: z.boolean(),
     AutomaticEnableChannelEnabled: z.boolean(),
@@ -208,11 +209,13 @@ type CustomErrorResponseRuleFormValues = z.output<
 >
 
 type RoutingReliabilitySectionProps = {
+  view?: 'routing' | 'custom-errors'
   defaultValues: {
     RetryTimes: number
     ChannelRouteCooldownEnabled: boolean
     ChannelRouteCooldownSeconds: number
     ChannelRouteStickyEnabled: boolean
+    ChannelRouteSameChannelRetries: number
     ChannelDisableThreshold: string
     AutomaticDisableChannelEnabled: boolean
     AutomaticEnableChannelEnabled: boolean
@@ -306,6 +309,7 @@ type NormalizedRoutingReliabilityValues = {
   ChannelRouteCooldownEnabled: boolean
   ChannelRouteCooldownSeconds: number
   ChannelRouteStickyEnabled: boolean
+  ChannelRouteSameChannelRetries: number
   ChannelDisableThreshold: string
   AutomaticDisableChannelEnabled: boolean
   AutomaticEnableChannelEnabled: boolean
@@ -332,6 +336,7 @@ const buildFormDefaults = (
   ChannelRouteCooldownEnabled: defaults.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: defaults.ChannelRouteCooldownSeconds ?? 60,
   ChannelRouteStickyEnabled: defaults.ChannelRouteStickyEnabled,
+  ChannelRouteSameChannelRetries: defaults.ChannelRouteSameChannelRetries ?? 0,
   ChannelDisableThreshold: defaults.ChannelDisableThreshold ?? '',
   AutomaticDisableChannelEnabled: defaults.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: defaults.AutomaticEnableChannelEnabled,
@@ -364,6 +369,7 @@ const normalizeDefaults = (
   ChannelRouteCooldownEnabled: defaults.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: defaults.ChannelRouteCooldownSeconds ?? 60,
   ChannelRouteStickyEnabled: defaults.ChannelRouteStickyEnabled,
+  ChannelRouteSameChannelRetries: defaults.ChannelRouteSameChannelRetries ?? 0,
   ChannelDisableThreshold: (defaults.ChannelDisableThreshold ?? '').trim(),
   AutomaticDisableChannelEnabled: defaults.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: defaults.AutomaticEnableChannelEnabled,
@@ -396,6 +402,7 @@ const normalizeFormValues = (
   ChannelRouteCooldownEnabled: values.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: values.ChannelRouteCooldownSeconds,
   ChannelRouteStickyEnabled: values.ChannelRouteStickyEnabled,
+  ChannelRouteSameChannelRetries: values.ChannelRouteSameChannelRetries,
   ChannelDisableThreshold: values.ChannelDisableThreshold.trim(),
   AutomaticDisableChannelEnabled: values.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: values.AutomaticEnableChannelEnabled,
@@ -421,6 +428,7 @@ const normalizeFormValues = (
 
 export function RoutingReliabilitySection({
   defaultValues,
+  view = 'routing',
 }: RoutingReliabilitySectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -487,7 +495,13 @@ export function RoutingReliabilitySection({
   }
 
   return (
-    <SettingsSection title={t('Routing Reliability')}>
+    <SettingsSection
+      title={t(
+        view === 'custom-errors'
+          ? 'Custom error responses'
+          : 'Routing Reliability'
+      )}
+    >
       <Form {...form}>
         <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
           <SettingsPageFormActions
@@ -495,722 +509,779 @@ export function RoutingReliabilitySection({
             isSaving={updateOption.isPending}
           />
 
-          <div className='flex min-w-0 flex-col gap-4'>
-            <div className='flex flex-col gap-1'>
-              <h4 className='text-sm font-medium'>{t('Request retry')}</h4>
-            </div>
-            <div className='grid min-w-0 gap-6 xl:grid-cols-[minmax(12rem,24rem)_minmax(0,1fr)]'>
-              <FormField
-                control={form.control}
-                name='RetryTimes'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Retry Times')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        min='0'
-                        max='10'
-                        disabled={channelRouteCooldownEnabled}
-                        {...safeNumberFieldProps(field)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {channelRouteCooldownEnabled
-                        ? t(
-                            'Request retry is disabled while channel routing is enabled'
-                          )
-                        : t('Number of times to retry failed requests (0-10)')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='AutomaticRetryStatusCodes'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>
-                      {channelRouteCooldownEnabled
-                        ? t('Route failover status codes')
-                        : t('Auto-retry status codes')}
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder={t('e.g. 401, 403, 429, 500-599')}
-                        value={field.value}
-                        onChange={(event) => field.onChange(event.target.value)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t(
-                        'Accepts comma-separated status codes and inclusive ranges.'
-                      )}{' '}
-                      {autoRetryParsed.ok &&
-                        autoRetryParsed.normalized &&
-                        autoRetryParsed.normalized !== field.value.trim() && (
-                          <span className='text-muted-foreground'>
-                            {t('Normalized:')} {autoRetryParsed.normalized}
-                          </span>
-                        )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-
-            <div className='flex flex-col gap-1 pt-2'>
-              <h4 className='text-sm font-medium'>{t('Channel routing')}</h4>
-            </div>
-            <div className='grid min-w-0 gap-6 lg:grid-cols-3'>
-              <FormField
-                control={form.control}
-                name='ChannelRouteCooldownEnabled'
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>{t('Channel routing')}</FormLabel>
-                      <FormDescription>
-                        {t(
-                          'Tries available channels in the same group from highest priority to lowest; request retry is disabled in this mode'
-                        )}
-                      </FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={(checked) => {
-                          field.onChange(checked)
-                          if (checked) {
-                            form.setValue('RetryTimes', 0, {
-                              shouldDirty: true,
-                              shouldValidate: true,
-                            })
-                          }
-                        }}
-                      />
-                    </FormControl>
-                  </SettingsSwitchItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='ChannelRouteStickyEnabled'
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>{t('Channel route stickiness')}</FormLabel>
-                      <FormDescription>
-                        {t(
-                          'Keep using the last successful routed channel until it fails'
-                        )}
-                      </FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        disabled={!channelRouteCooldownEnabled}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </SettingsSwitchItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='ChannelRouteCooldownSeconds'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Cooldown time (seconds)')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        min={0}
-                        max={31536000}
-                        step={1}
-                        disabled={!channelRouteCooldownEnabled}
-                        {...safeNumberFieldProps(field)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t(
-                        'How long a failed routed channel stays out of selection before it is tried again'
-                      )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className='flex min-w-0 flex-col gap-4'>
-            <div className='flex flex-col gap-1'>
-              <h4 className='text-sm font-medium'>
-                {t('Channel health checks')}
-              </h4>
-            </div>
-            <div className='grid min-w-0 gap-6 lg:grid-cols-3'>
-              <FormField
-                control={form.control}
-                name='monitor_setting.auto_test_channel_enabled'
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>{t('Scheduled channel tests')}</FormLabel>
-                      <FormDescription>
-                        {t(
-                          'Automatically probe all channels in the background'
-                        )}
-                      </FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </SettingsSwitchItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='monitor_setting.channel_test_mode'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Channel test mode')}</FormLabel>
-                    <Select
-                      items={[
-                        {
-                          value: 'scheduled_all',
-                          label: t('Scheduled full test'),
-                        },
-                        {
-                          value: 'passive_recovery',
-                          label: t('Passive recovery only'),
-                        },
-                      ]}
-                      value={field.value}
-                      onValueChange={field.onChange}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent alignItemWithTrigger={false}>
-                        <SelectGroup>
-                          <SelectItem value='scheduled_all'>
-                            {t('Scheduled full test')}
-                          </SelectItem>
-                          <SelectItem value='passive_recovery'>
-                            {t('Passive recovery only')}
-                          </SelectItem>
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                    <FormDescription>
-                      {t(
-                        'Scheduled full test probes non-manually-disabled channels; passive recovery only checks auto-disabled channels after real request failures.'
-                      )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='monitor_setting.auto_test_channel_minutes'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Test interval (minutes)')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        min={1}
-                        step={1}
-                        {...safeNumberFieldProps(field)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {channelTestMode === 'passive_recovery'
-                        ? t(
-                            'How frequently the system checks auto-disabled channels for recovery'
-                          )
-                        : t('How frequently the system tests all channels')}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='AutomaticEnableChannelEnabled'
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>{t('Re-enable on success')}</FormLabel>
-                      <FormDescription>
-                        {t(
-                          'Bring channels back online after successful checks'
-                        )}
-                      </FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </SettingsSwitchItem>
-                )}
-              />
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className='flex min-w-0 flex-col gap-4'>
-            <div className='flex flex-col gap-1'>
-              <h4 className='text-sm font-medium'>{t('Auto-disable rules')}</h4>
-            </div>
-            <div className='grid min-w-0 gap-6 lg:grid-cols-2'>
-              <FormField
-                control={form.control}
-                name='AutomaticDisableChannelEnabled'
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>{t('Disable on failure')}</FormLabel>
-                      <FormDescription>
-                        {t('Automatically disable channels when tests fail')}
-                      </FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </SettingsSwitchItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='ChannelDisableThreshold'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Disable threshold (seconds)')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        min={0}
-                        step={1}
-                        value={field.value}
-                        onChange={(event) => field.onChange(event.target.value)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t(
-                        'Automatically disable channels exceeding this response time'
-                      )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='AutomaticDisableStatusCodes'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Auto-disable status codes')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder={t('e.g. 401, 403, 429, 500-599')}
-                        value={field.value}
-                        onChange={(event) => field.onChange(event.target.value)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t(
-                        'Accepts comma-separated status codes and inclusive ranges.'
-                      )}{' '}
-                      {autoDisableParsed.ok &&
-                        autoDisableParsed.normalized &&
-                        autoDisableParsed.normalized !== field.value.trim() && (
-                          <span className='text-muted-foreground'>
-                            {t('Normalized:')} {autoDisableParsed.normalized}
-                          </span>
-                        )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='AutomaticDisableKeywords'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Failure keywords')}</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        rows={6}
-                        placeholder={t('one keyword per line')}
-                        {...field}
-                        onChange={(event) => field.onChange(event.target.value)}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t(
-                        'If an upstream error contains any of these keywords (case insensitive), the channel will be disabled automatically.'
-                      )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className='flex min-w-0 flex-col gap-4'>
-            <div className='flex flex-col gap-1'>
-              <h4 className='text-sm font-medium'>
-                {t('Custom error responses')}
-              </h4>
-            </div>
-
-            <FormField
-              control={form.control}
-              name='error_response_setting.enabled'
-              render={({ field }) => (
-                <SettingsSwitchItem>
-                  <SettingsSwitchContent>
-                    <FormLabel>{t('Enable custom error responses')}</FormLabel>
-                    <FormDescription>
-                      {t(
-                        'Rewrite matched relay errors before returning them to users'
-                      )}
-                    </FormDescription>
-                  </SettingsSwitchContent>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </SettingsSwitchItem>
-              )}
-            />
-
-            {customErrorResponsesEnabled ? (
-              <div className='flex min-w-0 flex-col gap-3'>
-                {errorRuleFields.fields.length === 0 ? (
-                  <div className='border-border/70 text-muted-foreground rounded-md border border-dashed p-4 text-sm'>
-                    {t('No custom error response rules')}
-                  </div>
-                ) : (
-                  errorRuleFields.fields.map((ruleField, index) => {
-                    const passThroughStatus = form.watch(
-                      `error_response_setting.rules.${index}.pass_through_status_code`
-                    )
-                    const passThroughMessage = form.watch(
-                      `error_response_setting.rules.${index}.pass_through_message`
-                    )
-
-                    return (
-                      <div
-                        key={ruleField.id}
-                        className='border-border/70 grid min-w-0 gap-4 rounded-md border p-3'
-                      >
-                        <div className='flex min-w-0 items-center justify-between gap-3'>
-                          <FormField
-                            control={form.control}
-                            name={
-                              `error_response_setting.rules.${index}.enabled` as const
-                            }
-                            render={({ field }) => (
-                              <SettingsSwitchItem className='flex-1 py-0'>
-                                <SettingsSwitchContent>
-                                  <FormLabel>
-                                    {t('Rule {{number}}', {
-                                      number: index + 1,
-                                    })}
-                                  </FormLabel>
-                                  <FormDescription>
-                                    {t(
-                                      'First matched enabled rule takes effect'
-                                    )}
-                                  </FormDescription>
-                                </SettingsSwitchContent>
-                                <FormControl>
-                                  <Switch
-                                    checked={field.value}
-                                    onCheckedChange={field.onChange}
-                                  />
-                                </FormControl>
-                              </SettingsSwitchItem>
-                            )}
+          {view === 'routing' ? (
+            <>
+              <div className='flex min-w-0 flex-col gap-4'>
+                <div className='flex flex-col gap-1'>
+                  <h4 className='text-sm font-medium'>{t('Request retry')}</h4>
+                </div>
+                <div className='grid min-w-0 gap-6 xl:grid-cols-[minmax(12rem,24rem)_minmax(0,1fr)]'>
+                  <FormField
+                    control={form.control}
+                    name='RetryTimes'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Retry Times')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min='0'
+                            max='10'
+                            disabled={channelRouteCooldownEnabled}
+                            {...safeNumberFieldProps(field)}
                           />
+                        </FormControl>
+                        <FormDescription>
+                          {channelRouteCooldownEnabled
+                            ? t(
+                                'Request retry is disabled while channel routing is enabled'
+                              )
+                            : t(
+                                'Number of times to retry failed requests (0-10)'
+                              )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-                          <Button
-                            type='button'
-                            variant='outline'
-                            size='icon'
-                            aria-label={t('Remove custom error response rule')}
-                            onClick={() => errorRuleFields.remove(index)}
-                          >
-                            <Trash2 className='size-4' />
-                          </Button>
-                        </div>
-
-                        <div className='grid min-w-0 gap-3 lg:grid-cols-2 xl:grid-cols-4'>
-                          <FormField
-                            control={form.control}
-                            name={
-                              `error_response_setting.rules.${index}.match_mode` as const
+                  <FormField
+                    control={form.control}
+                    name='AutomaticRetryStatusCodes'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {channelRouteCooldownEnabled
+                            ? t('Route failover status codes')
+                            : t('Auto-retry status codes')}
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder={t('e.g. 401, 403, 429, 500-599')}
+                            value={field.value}
+                            onChange={(event) =>
+                              field.onChange(event.target.value)
                             }
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>{t('Match mode')}</FormLabel>
-                                <Select
-                                  items={[
-                                    {
-                                      value: 'any',
-                                      label: t('Any condition'),
-                                    },
-                                    {
-                                      value: 'all',
-                                      label: t('All conditions'),
-                                    },
-                                  ]}
-                                  value={field.value}
-                                  onValueChange={(value) =>
-                                    field.onChange(
-                                      normalizeErrorResponseMatchMode(value)
-                                    )
-                                  }
-                                >
-                                  <FormControl>
-                                    <SelectTrigger>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                  </FormControl>
-                                  <SelectContent alignItemWithTrigger={false}>
-                                    <SelectGroup>
-                                      <SelectItem value='any'>
-                                        {t('Any condition')}
-                                      </SelectItem>
-                                      <SelectItem value='all'>
-                                        {t('All conditions')}
-                                      </SelectItem>
-                                    </SelectGroup>
-                                  </SelectContent>
-                                </Select>
-                                <FormMessage />
-                              </FormItem>
-                            )}
                           />
-
-                          <FormField
-                            control={form.control}
-                            name={
-                              `error_response_setting.rules.${index}.status_codes` as const
-                            }
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>{t('Match status codes')}</FormLabel>
-                                <FormControl>
-                                  <Input
-                                    placeholder={t('e.g. 429, 500-599')}
-                                    value={field.value}
-                                    onChange={(event) =>
-                                      field.onChange(event.target.value)
-                                    }
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Accepts comma-separated status codes and inclusive ranges.'
+                          )}{' '}
+                          {autoRetryParsed.ok &&
+                            autoRetryParsed.normalized &&
+                            autoRetryParsed.normalized !==
+                              field.value.trim() && (
+                              <span className='text-muted-foreground'>
+                                {t('Normalized:')} {autoRetryParsed.normalized}
+                              </span>
                             )}
-                          />
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
 
-                          <FormField
-                            control={form.control}
-                            name={
-                              `error_response_setting.rules.${index}.message_contains` as const
-                            }
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>
-                                  {t('Match error message')}
-                                </FormLabel>
-                                <FormControl>
-                                  <Input
-                                    placeholder={t('e.g. rate limit')}
-                                    value={field.value}
-                                    onChange={(event) =>
-                                      field.onChange(event.target.value)
-                                    }
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
+                <div className='flex flex-col gap-1 pt-2'>
+                  <h4 className='text-sm font-medium'>
+                    {t('Channel routing')}
+                  </h4>
+                </div>
+                <div className='grid min-w-0 gap-6 lg:grid-cols-2 2xl:grid-cols-4'>
+                  <FormField
+                    control={form.control}
+                    name='ChannelRouteCooldownEnabled'
+                    render={({ field }) => (
+                      <SettingsSwitchItem>
+                        <SettingsSwitchContent>
+                          <FormLabel>{t('Channel routing')}</FormLabel>
+                          <FormDescription>
+                            {t(
+                              'Tries available channels in the same group from highest priority to lowest; standard request retries are disabled, while same-channel retries are configured separately'
                             )}
+                          </FormDescription>
+                        </SettingsSwitchContent>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={(checked) => {
+                              field.onChange(checked)
+                              if (checked) {
+                                form.setValue('RetryTimes', 0, {
+                                  shouldDirty: true,
+                                  shouldValidate: true,
+                                })
+                              }
+                            }}
                           />
+                        </FormControl>
+                      </SettingsSwitchItem>
+                    )}
+                  />
 
-                          <FormField
-                            control={form.control}
-                            name={
-                              `error_response_setting.rules.${index}.response_status_code` as const
-                            }
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>
-                                  {t('Response status code')}
-                                </FormLabel>
-                                <FormControl>
-                                  <Input
-                                    type='number'
-                                    min={100}
-                                    max={599}
-                                    step={1}
-                                    disabled={passThroughStatus}
-                                    {...safeNumberFieldProps(field)}
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
+                  <FormField
+                    control={form.control}
+                    name='ChannelRouteSameChannelRetries'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Same-channel retries')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min={0}
+                            max={10}
+                            step={1}
+                            disabled={!channelRouteCooldownEnabled}
+                            {...safeNumberFieldProps(field)}
                           />
-                        </div>
-
-                        <div className='grid min-w-0 gap-3 lg:grid-cols-2'>
-                          <FormField
-                            control={form.control}
-                            name={
-                              `error_response_setting.rules.${index}.pass_through_status_code` as const
-                            }
-                            render={({ field }) => (
-                              <SettingsSwitchItem>
-                                <SettingsSwitchContent>
-                                  <FormLabel>
-                                    {t('Pass through upstream status')}
-                                  </FormLabel>
-                                  <FormDescription>
-                                    {t(
-                                      'Return the original upstream HTTP status code'
-                                    )}
-                                  </FormDescription>
-                                </SettingsSwitchContent>
-                                <FormControl>
-                                  <Switch
-                                    checked={field.value}
-                                    onCheckedChange={field.onChange}
-                                  />
-                                </FormControl>
-                              </SettingsSwitchItem>
-                            )}
-                          />
-
-                          <FormField
-                            control={form.control}
-                            name={
-                              `error_response_setting.rules.${index}.pass_through_message` as const
-                            }
-                            render={({ field }) => (
-                              <SettingsSwitchItem>
-                                <SettingsSwitchContent>
-                                  <FormLabel>
-                                    {t('Pass through upstream message')}
-                                  </FormLabel>
-                                  <FormDescription>
-                                    {t(
-                                      'Return the original upstream error message'
-                                    )}
-                                  </FormDescription>
-                                </SettingsSwitchContent>
-                                <FormControl>
-                                  <Switch
-                                    checked={field.value}
-                                    onCheckedChange={field.onChange}
-                                  />
-                                </FormControl>
-                              </SettingsSwitchItem>
-                            )}
-                          />
-                        </div>
-
-                        <FormField
-                          control={form.control}
-                          name={
-                            `error_response_setting.rules.${index}.response_message` as const
-                          }
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>{t('Response message')}</FormLabel>
-                              <FormControl>
-                                <Textarea
-                                  rows={3}
-                                  disabled={passThroughMessage}
-                                  placeholder={t(
-                                    'Upstream request failed. Please try again later.'
-                                  )}
-                                  {...field}
-                                  onChange={(event) =>
-                                    field.onChange(event.target.value)
-                                  }
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Number of retries on the current channel before switching channels (0 disables)'
                           )}
-                        />
-                      </div>
-                    )
-                  })
-                )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-                <Button
-                  type='button'
-                  variant='outline'
-                  className='w-full justify-center gap-2'
-                  onClick={() =>
-                    errorRuleFields.append({
-                      enabled: true,
-                      match_mode: 'any',
-                      status_codes: '429,500-599',
-                      message_contains: '',
-                      response_status_code: 429,
-                      response_message: t(
-                        'Upstream request failed. Please try again later.'
-                      ),
-                      pass_through_status_code: false,
-                      pass_through_message: false,
-                    })
-                  }
-                >
-                  <Plus className='size-4' />
-                  {t('Add custom error response rule')}
-                </Button>
+                  <FormField
+                    control={form.control}
+                    name='ChannelRouteStickyEnabled'
+                    render={({ field }) => (
+                      <SettingsSwitchItem>
+                        <SettingsSwitchContent>
+                          <FormLabel>{t('Channel route stickiness')}</FormLabel>
+                          <FormDescription>
+                            {t(
+                              'Keep using the last successful routed channel until it fails'
+                            )}
+                          </FormDescription>
+                        </SettingsSwitchContent>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            disabled={!channelRouteCooldownEnabled}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </SettingsSwitchItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='ChannelRouteCooldownSeconds'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Cooldown time (seconds)')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min={0}
+                            max={31536000}
+                            step={1}
+                            disabled={!channelRouteCooldownEnabled}
+                            {...safeNumberFieldProps(field)}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'How long a failed routed channel stays out of selection before it is tried again'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
               </div>
-            ) : null}
-          </div>
+
+              <Separator />
+
+              <div className='flex min-w-0 flex-col gap-4'>
+                <div className='flex flex-col gap-1'>
+                  <h4 className='text-sm font-medium'>
+                    {t('Channel health checks')}
+                  </h4>
+                </div>
+                <div className='grid min-w-0 gap-6 lg:grid-cols-3'>
+                  <FormField
+                    control={form.control}
+                    name='monitor_setting.auto_test_channel_enabled'
+                    render={({ field }) => (
+                      <SettingsSwitchItem>
+                        <SettingsSwitchContent>
+                          <FormLabel>{t('Scheduled channel tests')}</FormLabel>
+                          <FormDescription>
+                            {t(
+                              'Automatically probe all channels in the background'
+                            )}
+                          </FormDescription>
+                        </SettingsSwitchContent>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </SettingsSwitchItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='monitor_setting.channel_test_mode'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Channel test mode')}</FormLabel>
+                        <Select
+                          items={[
+                            {
+                              value: 'scheduled_all',
+                              label: t('Scheduled full test'),
+                            },
+                            {
+                              value: 'passive_recovery',
+                              label: t('Passive recovery only'),
+                            },
+                          ]}
+                          value={field.value}
+                          onValueChange={field.onChange}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent alignItemWithTrigger={false}>
+                            <SelectGroup>
+                              <SelectItem value='scheduled_all'>
+                                {t('Scheduled full test')}
+                              </SelectItem>
+                              <SelectItem value='passive_recovery'>
+                                {t('Passive recovery only')}
+                              </SelectItem>
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        <FormDescription>
+                          {t(
+                            'Scheduled full test probes non-manually-disabled channels; passive recovery only checks auto-disabled channels after real request failures.'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='monitor_setting.auto_test_channel_minutes'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Test interval (minutes)')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min={1}
+                            step={1}
+                            {...safeNumberFieldProps(field)}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {channelTestMode === 'passive_recovery'
+                            ? t(
+                                'How frequently the system checks auto-disabled channels for recovery'
+                              )
+                            : t('How frequently the system tests all channels')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='AutomaticEnableChannelEnabled'
+                    render={({ field }) => (
+                      <SettingsSwitchItem>
+                        <SettingsSwitchContent>
+                          <FormLabel>{t('Re-enable on success')}</FormLabel>
+                          <FormDescription>
+                            {t(
+                              'Bring channels back online after successful checks'
+                            )}
+                          </FormDescription>
+                        </SettingsSwitchContent>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </SettingsSwitchItem>
+                    )}
+                  />
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className='flex min-w-0 flex-col gap-4'>
+                <div className='flex flex-col gap-1'>
+                  <h4 className='text-sm font-medium'>
+                    {t('Auto-disable rules')}
+                  </h4>
+                </div>
+                <div className='grid min-w-0 gap-6 lg:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='AutomaticDisableChannelEnabled'
+                    render={({ field }) => (
+                      <SettingsSwitchItem>
+                        <SettingsSwitchContent>
+                          <FormLabel>{t('Disable on failure')}</FormLabel>
+                          <FormDescription>
+                            {t(
+                              'Automatically disable channels when tests fail'
+                            )}
+                          </FormDescription>
+                        </SettingsSwitchContent>
+                        <FormControl>
+                          <Switch
+                            checked={field.value}
+                            onCheckedChange={field.onChange}
+                          />
+                        </FormControl>
+                      </SettingsSwitchItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='ChannelDisableThreshold'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>
+                          {t('Disable threshold (seconds)')}
+                        </FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min={0}
+                            step={1}
+                            value={field.value}
+                            onChange={(event) =>
+                              field.onChange(event.target.value)
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Automatically disable channels exceeding this response time'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='AutomaticDisableStatusCodes'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Auto-disable status codes')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder={t('e.g. 401, 403, 429, 500-599')}
+                            value={field.value}
+                            onChange={(event) =>
+                              field.onChange(event.target.value)
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Accepts comma-separated status codes and inclusive ranges.'
+                          )}{' '}
+                          {autoDisableParsed.ok &&
+                            autoDisableParsed.normalized &&
+                            autoDisableParsed.normalized !==
+                              field.value.trim() && (
+                              <span className='text-muted-foreground'>
+                                {t('Normalized:')}{' '}
+                                {autoDisableParsed.normalized}
+                              </span>
+                            )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name='AutomaticDisableKeywords'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Failure keywords')}</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            rows={6}
+                            placeholder={t('one keyword per line')}
+                            {...field}
+                            onChange={(event) =>
+                              field.onChange(event.target.value)
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'If an upstream error contains any of these keywords (case insensitive), the channel will be disabled automatically.'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {view === 'custom-errors' ? (
+            <div className='flex min-w-0 flex-col gap-4'>
+              <div className='flex flex-col gap-1'>
+                <h4 className='text-sm font-medium'>
+                  {t('Custom error responses')}
+                </h4>
+              </div>
+
+              <FormField
+                control={form.control}
+                name='error_response_setting.enabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>
+                        {t('Enable custom error responses')}
+                      </FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Rewrite matched relay errors before returning them to users'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+
+              {customErrorResponsesEnabled ? (
+                <div className='flex min-w-0 flex-col gap-3'>
+                  {errorRuleFields.fields.length === 0 ? (
+                    <div className='border-border/70 text-muted-foreground rounded-md border border-dashed p-4 text-sm'>
+                      {t('No custom error response rules')}
+                    </div>
+                  ) : (
+                    errorRuleFields.fields.map((ruleField, index) => {
+                      const passThroughStatus = form.watch(
+                        `error_response_setting.rules.${index}.pass_through_status_code`
+                      )
+                      const passThroughMessage = form.watch(
+                        `error_response_setting.rules.${index}.pass_through_message`
+                      )
+
+                      return (
+                        <div
+                          key={ruleField.id}
+                          className='border-border/70 grid min-w-0 gap-4 rounded-md border p-3'
+                        >
+                          <div className='flex min-w-0 items-center justify-between gap-3'>
+                            <FormField
+                              control={form.control}
+                              name={
+                                `error_response_setting.rules.${index}.enabled` as const
+                              }
+                              render={({ field }) => (
+                                <SettingsSwitchItem className='flex-1 py-0'>
+                                  <SettingsSwitchContent>
+                                    <FormLabel>
+                                      {t('Rule {{number}}', {
+                                        number: index + 1,
+                                      })}
+                                    </FormLabel>
+                                    <FormDescription>
+                                      {t(
+                                        'First matched enabled rule takes effect'
+                                      )}
+                                    </FormDescription>
+                                  </SettingsSwitchContent>
+                                  <FormControl>
+                                    <Switch
+                                      checked={field.value}
+                                      onCheckedChange={field.onChange}
+                                    />
+                                  </FormControl>
+                                </SettingsSwitchItem>
+                              )}
+                            />
+
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='icon'
+                              aria-label={t(
+                                'Remove custom error response rule'
+                              )}
+                              onClick={() => errorRuleFields.remove(index)}
+                            >
+                              <Trash2 className='size-4' />
+                            </Button>
+                          </div>
+
+                          <div className='grid min-w-0 gap-3 lg:grid-cols-2 xl:grid-cols-4'>
+                            <FormField
+                              control={form.control}
+                              name={
+                                `error_response_setting.rules.${index}.match_mode` as const
+                              }
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>{t('Match mode')}</FormLabel>
+                                  <Select
+                                    items={[
+                                      {
+                                        value: 'any',
+                                        label: t('Any condition'),
+                                      },
+                                      {
+                                        value: 'all',
+                                        label: t('All conditions'),
+                                      },
+                                    ]}
+                                    value={field.value}
+                                    onValueChange={(value) =>
+                                      field.onChange(
+                                        normalizeErrorResponseMatchMode(value)
+                                      )
+                                    }
+                                  >
+                                    <FormControl>
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent alignItemWithTrigger={false}>
+                                      <SelectGroup>
+                                        <SelectItem value='any'>
+                                          {t('Any condition')}
+                                        </SelectItem>
+                                        <SelectItem value='all'>
+                                          {t('All conditions')}
+                                        </SelectItem>
+                                      </SelectGroup>
+                                    </SelectContent>
+                                  </Select>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name={
+                                `error_response_setting.rules.${index}.status_codes` as const
+                              }
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>
+                                    {t('Match status codes')}
+                                  </FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      placeholder={t('e.g. 429, 500-599')}
+                                      value={field.value}
+                                      onChange={(event) =>
+                                        field.onChange(event.target.value)
+                                      }
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name={
+                                `error_response_setting.rules.${index}.message_contains` as const
+                              }
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>
+                                    {t('Match error message')}
+                                  </FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      placeholder={t('e.g. rate limit')}
+                                      value={field.value}
+                                      onChange={(event) =>
+                                        field.onChange(event.target.value)
+                                      }
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name={
+                                `error_response_setting.rules.${index}.response_status_code` as const
+                              }
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>
+                                    {t('Response status code')}
+                                  </FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      type='number'
+                                      min={100}
+                                      max={599}
+                                      step={1}
+                                      disabled={passThroughStatus}
+                                      {...safeNumberFieldProps(field)}
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          </div>
+
+                          <div className='grid min-w-0 gap-3 lg:grid-cols-2'>
+                            <FormField
+                              control={form.control}
+                              name={
+                                `error_response_setting.rules.${index}.pass_through_status_code` as const
+                              }
+                              render={({ field }) => (
+                                <SettingsSwitchItem>
+                                  <SettingsSwitchContent>
+                                    <FormLabel>
+                                      {t('Pass through upstream status')}
+                                    </FormLabel>
+                                    <FormDescription>
+                                      {t(
+                                        'Return the original upstream HTTP status code'
+                                      )}
+                                    </FormDescription>
+                                  </SettingsSwitchContent>
+                                  <FormControl>
+                                    <Switch
+                                      checked={field.value}
+                                      onCheckedChange={field.onChange}
+                                    />
+                                  </FormControl>
+                                </SettingsSwitchItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name={
+                                `error_response_setting.rules.${index}.pass_through_message` as const
+                              }
+                              render={({ field }) => (
+                                <SettingsSwitchItem>
+                                  <SettingsSwitchContent>
+                                    <FormLabel>
+                                      {t('Pass through upstream message')}
+                                    </FormLabel>
+                                    <FormDescription>
+                                      {t(
+                                        'Return the original upstream error message'
+                                      )}
+                                    </FormDescription>
+                                  </SettingsSwitchContent>
+                                  <FormControl>
+                                    <Switch
+                                      checked={field.value}
+                                      onCheckedChange={field.onChange}
+                                    />
+                                  </FormControl>
+                                </SettingsSwitchItem>
+                              )}
+                            />
+                          </div>
+
+                          <FormField
+                            control={form.control}
+                            name={
+                              `error_response_setting.rules.${index}.response_message` as const
+                            }
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Response message')}</FormLabel>
+                                <FormControl>
+                                  <Textarea
+                                    rows={3}
+                                    disabled={passThroughMessage}
+                                    placeholder={t(
+                                      'Upstream request failed. Please try again later.'
+                                    )}
+                                    {...field}
+                                    onChange={(event) =>
+                                      field.onChange(event.target.value)
+                                    }
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      )
+                    })
+                  )}
+
+                  <Button
+                    type='button'
+                    variant='outline'
+                    className='w-full justify-center gap-2'
+                    onClick={() =>
+                      errorRuleFields.append({
+                        enabled: true,
+                        match_mode: 'any',
+                        status_codes: '429,500-599',
+                        message_contains: '',
+                        response_status_code: 429,
+                        response_message: t(
+                          'Upstream request failed. Please try again later.'
+                        ),
+                        pass_through_status_code: false,
+                        pass_through_message: false,
+                      })
+                    }
+                  >
+                    <Plus className='size-4' />
+                    {t('Add custom error response rule')}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </SettingsForm>
       </Form>
     </SettingsSection>

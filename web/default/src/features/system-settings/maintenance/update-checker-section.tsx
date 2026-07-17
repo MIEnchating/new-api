@@ -27,6 +27,7 @@ import { Markdown } from '@/components/ui/markdown'
 import { formatTimestamp, formatTimestampToDate } from '@/lib/format'
 
 import { SettingsSection } from '../components/settings-section'
+import { LATEST_RELEASE_API_URL } from './update-source'
 
 type ReleaseInfo = {
   tag_name: string
@@ -56,15 +57,12 @@ export function UpdateCheckerSection({
   const handleCheckUpdates = async () => {
     setChecking(true)
     try {
-      const response = await fetch(
-        'https://api.github.com/repos/Calcium-Ion/new-api/releases/latest',
-        {
-          headers: {
-            Accept: 'application/vnd.github+json',
-            'User-Agent': 'new-api-dashboard',
-          },
-        }
-      )
+      const response = await fetch(LATEST_RELEASE_API_URL, {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'MIEnchating-new-api-dashboard',
+        },
+      })
 
       if (!response.ok) {
         throw new Error(t('Failed to contact GitHub releases API'))

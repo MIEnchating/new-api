@@ -40,7 +40,13 @@ import { cn } from '@/lib/utils'
 
 import { LOG_TYPE_ENUM } from '../constants'
 import type { UsageLog } from '../data/schema'
-import { parseLogOther } from '../lib/format'
+import {
+  getAuditAuthMethodLabel,
+  getLoginMethodLabel,
+  getSecondFactorMethodLabel,
+  humanizeAuditIdentifier,
+  parseLogOther,
+} from '../lib/format'
 import {
   getLogTypeConfig,
   isDisplayableLogType,
@@ -149,6 +155,38 @@ function SummaryField<TData>({
         primaryOnly={primaryOnly}
         className={valueClassName}
       />
+    </div>
+  )
+}
+
+function MobileTextField({
+  label,
+  value,
+  mono = false,
+  className,
+}: {
+  label: string
+  value?: string
+  mono?: boolean
+  className?: string
+}) {
+  if (!value) return null
+
+  return (
+    <div
+      className={cn('bg-muted/20 min-w-0 rounded-md px-2 py-1.5', className)}
+    >
+      <div className='text-muted-foreground mb-1 text-[11px] leading-none font-medium select-none'>
+        {label}
+      </div>
+      <div
+        className={cn(
+          'text-foreground min-w-0 text-xs leading-snug break-all',
+          mono && 'font-mono'
+        )}
+      >
+        {value}
+      </div>
     </div>
   )
 }
@@ -308,6 +346,94 @@ function MobileStreamTimingField({ log }: { log: UsageLog }) {
   )
 }
 
+function NonApiCommonLogCard<TData>({
+  cells,
+  log,
+}: {
+  cells: Map<string, Cell<TData, unknown>>
+  log: UsageLog
+}) {
+  const { t } = useTranslation()
+  const other = parseLogOther(log.other)
+  const operationId = other?.op?.action ?? ''
+  const loginMethod = getLoginMethodLabel(other?.login_method, t)
+  const secondFactorMethod = getSecondFactorMethodLabel(
+    other?.second_factor_method,
+    t
+  )
+  const authMethod = getAuditAuthMethodLabel(other?.admin_info?.auth_method, t)
+  const paymentMethod = other?.admin_info?.payment_method
+    ? humanizeAuditIdentifier(other.admin_info.payment_method)
+    : ''
+  const request = [
+    other?.request_method,
+    other?.request_route || other?.request_path,
+  ]
+    .filter(Boolean)
+    .join(' ')
+  const auditResult = (() => {
+    if (log.type === LOG_TYPE_ENUM.LOGIN) return t('Success')
+    const status = other?.audit_info?.status
+    const success =
+      other?.audit_info?.success ?? (status != null ? status < 400 : undefined)
+    if (success == null) return ''
+    return `${success ? t('Success') : t('Failed')}${status != null ? ` (${status})` : ''}`
+  })()
+
+  return (
+    <div className='space-y-2.5'>
+      <div className='flex min-w-0 items-start justify-between gap-3'>
+        <MobileLogTimeStatus createdAt={log.created_at} type={log.type} />
+        {cells.has('user') && (
+          <div className='max-w-[55%] min-w-0'>
+            <MobileUserField log={log} />
+          </div>
+        )}
+      </div>
+
+      <div className='bg-muted/20 min-w-0 rounded-md px-2 py-2'>
+        <div className='text-muted-foreground mb-1 text-[11px] leading-none font-medium select-none'>
+          {t('Details')}
+        </div>
+        <CompactCell
+          cell={cells.get('content')}
+          className='[&_button]:w-full [&_button]:max-w-none'
+        />
+      </div>
+
+      <div className='grid grid-cols-2 gap-1.5'>
+        <MobileTextField
+          label={t('Operation ID')}
+          value={operationId}
+          mono
+          className='col-span-2'
+        />
+        <MobileTextField label={t('Login Method')} value={loginMethod} />
+        <MobileTextField
+          label={t('Second-factor method')}
+          value={secondFactorMethod}
+        />
+        <MobileTextField
+          label={t('Authentication Method')}
+          value={authMethod}
+        />
+        <MobileTextField
+          label={t('Order Payment Method')}
+          value={paymentMethod}
+        />
+        <MobileTextField
+          label={t('Request')}
+          value={request}
+          mono
+          className='col-span-2'
+        />
+        <MobileTextField label={t('IP Address')} value={log.ip} mono />
+        <MobileTextField label={t('Result')} value={auditResult} />
+      </div>
+    </div>
+  )
+}
+
 function CommonLogsCard<TData>({
   cells,
 }: {
@@ -318,6 +444,10 @@ function CommonLogsCard<TData>({
   const modelCell = cells.get('model_name')
   const quotaCell = cells.get('quota')
   const rowData = cells.get('created_at')?.row.original as UsageLog | undefined
+
+  if (rowData && !isDisplayableLogType(rowData.type)) {
+    return <NonApiCommonLogCard cells={cells} log={rowData} />
+  }
 
   return (
     <div className='space-y-2.5'>

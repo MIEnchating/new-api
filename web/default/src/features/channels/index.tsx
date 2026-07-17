@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Settings2 } from 'lucide-react'
+import { Route, Settings2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
@@ -48,19 +48,76 @@ export function Channels() {
     retry: false,
     staleTime: 5 * 60 * 1000,
   })
+  const channelOps = channelOpsQuery.data?.data
+  const channelRouteEnabled = channelOps?.channel_route_enabled === true
+  const channelRouteCooldownSeconds = channelOps?.channel_route_cooldown_seconds
+  const channelRouteStickyEnabled =
+    channelOps?.channel_route_sticky_enabled === true
+  const channelRouteSameChannelRetries =
+    channelOps?.channel_route_same_channel_retries
   const retryTimes = channelOpsQuery.data?.data?.retry_times
-  const retryLabel =
-    typeof retryTimes === 'number' ? `${t('Max Retries')}: ${retryTimes}` : null
-  let retryBadge = null
-  if (retryLabel) {
-    retryBadge = isRoot ? (
+  let summaryLabel: string | null = null
+  if (channelRouteEnabled) {
+    summaryLabel = [
+      t('Channel routing'),
+      typeof channelRouteCooldownSeconds === 'number'
+        ? `${channelRouteCooldownSeconds}s`
+        : null,
+      channelRouteStickyEnabled ? t('Route stickiness') : null,
+      typeof channelRouteSameChannelRetries === 'number' &&
+      channelRouteSameChannelRetries > 0
+        ? `${t('Same-channel retries')} ${channelRouteSameChannelRetries}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(' · ')
+  } else if (typeof retryTimes === 'number') {
+    summaryLabel = `${t('Max Retries')}: ${retryTimes}`
+  }
+  const summaryAriaLabel = channelRouteEnabled
+    ? t('Channel routing')
+    : t('Retry Settings')
+  let opsBadge = null
+  if (summaryLabel) {
+    const badgeContent = (
+      <>
+        {channelRouteEnabled ? <Route data-icon='inline-start' /> : null}
+        <span>{summaryLabel}</span>
+        {isRoot ? <Settings2 data-icon='inline-end' /> : null}
+      </>
+    )
+    const tooltipContent = channelRouteEnabled ? (
+      <div className='space-y-1'>
+        <p className='font-medium'>{t('Channel routing')}</p>
+        <p>
+          {t('Channel route cooldown')}:{' '}
+          {typeof channelRouteCooldownSeconds === 'number'
+            ? `${channelRouteCooldownSeconds}s`
+            : '-'}
+        </p>
+        <p>
+          {t('Channel route stickiness')}:{' '}
+          {t(channelRouteStickyEnabled ? 'Enabled' : 'Disabled')}
+        </p>
+        <p>
+          {t('Same-channel retries')}:{' '}
+          {typeof channelRouteSameChannelRetries === 'number'
+            ? channelRouteSameChannelRetries
+            : 0}
+        </p>
+      </div>
+    ) : (
+      <p>{t('Retry Settings')}</p>
+    )
+
+    opsBadge = isRoot ? (
       <Tooltip>
         <TooltipTrigger
           render={
             <Badge
               variant='outline'
               className='shrink-0 cursor-pointer'
-              aria-label={t('Retry Settings')}
+              aria-label={summaryAriaLabel}
               render={
                 <Link
                   to='/system-settings/models/$section'
@@ -70,16 +127,13 @@ export function Channels() {
             />
           }
         >
-          <span>{retryLabel}</span>
-          <Settings2 data-icon='inline-end' />
+          {badgeContent}
         </TooltipTrigger>
-        <TooltipContent>
-          <p>{t('Retry Settings')}</p>
-        </TooltipContent>
+        <TooltipContent>{tooltipContent}</TooltipContent>
       </Tooltip>
     ) : (
       <Badge variant='outline' className='shrink-0'>
-        {retryLabel}
+        {badgeContent}
       </Badge>
     )
   }
@@ -90,7 +144,7 @@ export function Channels() {
         <SectionPageLayout.Title>
           <span className='flex min-w-0 items-center gap-2'>
             <span className='truncate'>{t('Channels')}</span>
-            {retryBadge}
+            {opsBadge}
           </span>
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>

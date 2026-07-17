@@ -120,10 +120,17 @@ func NewChannelSortOptions(sortBy string, sortOrder string, idSort bool) Channel
 
 func (options ChannelSortOptions) Apply(query *gorm.DB) *gorm.DB {
 	if columnName, ok := channelSortColumns[options.SortBy]; ok {
-		return query.Order(clause.OrderByColumn{
+		query = query.Order(clause.OrderByColumn{
 			Column: clause.Column{Name: columnName},
 			Desc:   options.SortOrder != "asc",
 		})
+		if options.IDSort && options.SortBy != "id" {
+			query = query.Order(clause.OrderByColumn{
+				Column: clause.Column{Name: "id"},
+				Desc:   true,
+			})
+		}
+		return query
 	}
 	if options.IDSort {
 		return query.Order(clause.OrderByColumn{
@@ -131,10 +138,7 @@ func (options ChannelSortOptions) Apply(query *gorm.DB) *gorm.DB {
 			Desc:   true,
 		})
 	}
-	return query.Order(clause.OrderByColumn{
-		Column: clause.Column{Name: "priority"},
-		Desc:   true,
-	})
+	return query
 }
 
 func resolveChannelSortOptions(idSort bool, sortOptions []ChannelSortOptions) ChannelSortOptions {

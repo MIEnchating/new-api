@@ -18,13 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import type { PaginationState } from '@tanstack/react-table'
-import {
-  BarChart3,
-  CircleDollarSign,
-  ReceiptText,
-  RefreshCw,
-  Users,
-} from 'lucide-react'
+import { CircleDollarSign, ReceiptText, RefreshCw, Users } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -54,7 +48,6 @@ const emptySummary: TopUpStatsSummary = {
   order_count: 0,
   user_count: 0,
   total_money: 0,
-  average_order_money: 0,
 }
 
 function getTodayRange(): StatsRange {
@@ -146,21 +139,20 @@ export function TopUpStats() {
         label: t('Total payment'),
         value: formatNumber(summary.total_money),
         icon: CircleDollarSign,
+        iconClassName:
+          'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
       },
       {
         label: t('Successful orders'),
         value: formatNumber(summary.order_count),
         icon: ReceiptText,
+        iconClassName: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
       },
       {
         label: t('Paying users'),
         value: formatNumber(summary.user_count),
         icon: Users,
-      },
-      {
-        label: t('Average order'),
-        value: formatNumber(summary.average_order_money),
-        icon: BarChart3,
+        iconClassName: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
       },
     ],
     [summary, t]
@@ -171,14 +163,16 @@ export function TopUpStats() {
       <SectionPageLayout.Title>{t('Top-up Stats')}</SectionPageLayout.Title>
       <SectionPageLayout.Content>
         <div className='flex h-full min-h-0 flex-col gap-4'>
-          <div className='grid shrink-0 overflow-hidden rounded-lg border sm:grid-cols-2 lg:grid-cols-4 lg:[&>*:not(:last-child)]:border-r lg:[&>*:nth-child(2)]:border-r sm:[&>*:nth-child(odd)]:border-r'>
+          <div className='bg-card grid shrink-0 overflow-hidden rounded-lg border sm:grid-cols-3 sm:divide-x'>
             {metrics.map((metric) => (
               <div
                 key={metric.label}
-                className='flex min-h-24 items-center gap-3 border-b px-4 py-3 last:border-b-0 lg:border-b-0 sm:[&:nth-child(3)]:border-b-0'
+                className='flex min-h-[72px] items-center gap-3 border-b px-4 py-3 last:border-b-0 sm:min-h-24 sm:border-b-0'
               >
-                <div className='bg-muted text-muted-foreground flex size-9 shrink-0 items-center justify-center rounded-md'>
-                  <metric.icon className='size-4' />
+                <div
+                  className={`flex size-9 shrink-0 items-center justify-center rounded-md ${metric.iconClassName}`}
+                >
+                  <metric.icon className='size-4' aria-hidden='true' />
                 </div>
                 <div className='min-w-0'>
                   <div className='text-muted-foreground text-xs'>
@@ -187,7 +181,10 @@ export function TopUpStats() {
                   {query.isLoading ? (
                     <Skeleton className='mt-2 h-6 w-20' />
                   ) : (
-                    <div className='mt-1 truncate text-xl font-semibold tabular-nums'>
+                    <div
+                      className='mt-1 truncate text-xl font-semibold tabular-nums'
+                      title={metric.value}
+                    >
                       {metric.value}
                     </div>
                   )}
@@ -217,7 +214,9 @@ export function TopUpStats() {
               skeletonKeyPrefix='topup-stats-skeleton'
               applyHeaderSize
               toolbarProps={{
-                searchPlaceholder: t('Search by username or user ID...'),
+                searchPlaceholder: t(
+                  'Search by username, user ID, or order number...'
+                ),
                 searchDebounceMs: 300,
                 additionalSearch: (
                   <CompactDateTimeRangePicker

@@ -75,6 +75,8 @@ export function ChannelsPrimaryButtons() {
     setEnableTagMode,
     idSort,
     setIdSort,
+    prioritySort,
+    setPrioritySort,
     batchMode,
     setBatchMode,
     upstream,
@@ -98,6 +100,11 @@ export function ChannelsPrimaryButtons() {
   const handleIdSortToggle = (checked: boolean) => {
     localStorage.setItem('channels-id-sort', String(checked))
     setIdSort(checked)
+  }
+
+  const handlePrioritySortToggle = (checked: boolean) => {
+    localStorage.setItem('channels-priority-sort', String(checked))
+    setPrioritySort(checked)
   }
 
   const handleBatchModeToggle = (checked: boolean) => {
@@ -135,16 +142,36 @@ export function ChannelsPrimaryButtons() {
           />
         </div>
 
-        <div className='hidden items-center gap-2 rounded-md border px-3 py-1.5 sm:flex'>
+        <div className='hidden h-9 items-center gap-2 rounded-md border px-2 sm:flex'>
           <SortAsc className='text-muted-foreground h-4 w-4' />
-          <Label htmlFor='id-sort' className='cursor-pointer text-sm'>
-            {t('Sort by ID')}
-          </Label>
-          <Switch
-            id='id-sort'
-            checked={idSort}
-            onCheckedChange={handleIdSortToggle}
-          />
+          <span className='text-muted-foreground text-xs'>{t('Sort')}</span>
+          <div className='flex items-center gap-1.5'>
+            <Label htmlFor='channel-id-sort' className='cursor-pointer text-xs'>
+              {t('ID')}
+            </Label>
+            <Switch
+              id='channel-id-sort'
+              size='sm'
+              checked={idSort}
+              onCheckedChange={handleIdSortToggle}
+              aria-label={t('Sort by ID')}
+            />
+          </div>
+          <div className='border-border flex items-center gap-1.5 border-l pl-2'>
+            <Label
+              htmlFor='channel-priority-sort'
+              className='cursor-pointer text-xs'
+            >
+              {t('Priority')}
+            </Label>
+            <Switch
+              id='channel-priority-sort'
+              size='sm'
+              checked={prioritySort}
+              onCheckedChange={handlePrioritySortToggle}
+              aria-label={t('Sort by priority')}
+            />
+          </div>
         </div>
 
         {/* Create Channel */}
@@ -205,6 +232,15 @@ export function ChannelsPrimaryButtons() {
               {t('Sort by ID')}
             </DropdownMenuCheckboxItem>
 
+            <DropdownMenuCheckboxItem
+              className='sm:hidden'
+              checked={prioritySort}
+              onCheckedChange={handlePrioritySortToggle}
+            >
+              <SortAsc className='mr-2 h-4 w-4' />
+              {t('Sort by priority')}
+            </DropdownMenuCheckboxItem>
+
             <DropdownMenuSeparator className='sm:hidden' />
 
             <DropdownMenuItem
@@ -253,12 +289,7 @@ export function ChannelsPrimaryButtons() {
 
             <DropdownMenuSeparator />
 
-            <DropdownMenuItem
-              onSelect={(e) => {
-                e.preventDefault()
-                setShowConsistencyDialog(true)
-              }}
-            >
+            <DropdownMenuItem onClick={() => setShowConsistencyDialog(true)}>
               {t('Repair Channel Consistency')}
               <DropdownMenuShortcut>
                 <Settings2 className='h-4 w-4' />
@@ -268,8 +299,7 @@ export function ChannelsPrimaryButtons() {
             <DropdownMenuSeparator />
 
             <DropdownMenuItem
-              onSelect={(e) => {
-                e.preventDefault()
+              onClick={() => {
                 if (!canEditSensitive) return
                 setShowDeleteDialog(true)
               }}

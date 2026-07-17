@@ -31,6 +31,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	oldChannelRouteCooldownEnabled := common.ChannelRouteCooldownEnabled
 	oldChannelRouteCooldownSeconds := common.ChannelRouteCooldownSeconds
 	oldChannelRouteStickyEnabled := common.ChannelRouteStickyEnabled
+	oldChannelRouteSameChannelRetries := common.ChannelRouteSameChannelRetries
 	oldRetryTimes := common.RetryTimes
 	oldDB := model.DB
 	oldLogDB := model.LOG_DB
@@ -39,6 +40,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	common.ChannelRouteCooldownEnabled = true
 	common.ChannelRouteCooldownSeconds = 60
 	common.ChannelRouteStickyEnabled = false
+	common.ChannelRouteSameChannelRetries = 0
 	common.RetryTimes = 0
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	channelRouteCooldowns = sync.Map{}
@@ -57,6 +59,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 		common.ChannelRouteCooldownEnabled = oldChannelRouteCooldownEnabled
 		common.ChannelRouteCooldownSeconds = oldChannelRouteCooldownSeconds
 		common.ChannelRouteStickyEnabled = oldChannelRouteStickyEnabled
+		common.ChannelRouteSameChannelRetries = oldChannelRouteSameChannelRetries
 		common.RetryTimes = oldRetryTimes
 		channelRouteCooldowns = sync.Map{}
 		channelRouteStickyChannels = sync.Map{}
@@ -73,6 +76,31 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	})
 
 	return db
+}
+
+func TestShouldRetrySameChannelRouteHonorsLimitAndDisable(t *testing.T) {
+	setupChannelRouteTest(t)
+	routeErr := newChannelRouteFailure()
+
+	common.ChannelRouteSameChannelRetries = 2
+	assert.True(t, ShouldRetrySameChannelRoute(routeErr, 0))
+	assert.True(t, ShouldRetrySameChannelRoute(routeErr, 1))
+	assert.False(t, ShouldRetrySameChannelRoute(routeErr, 2))
+
+	common.ChannelRouteSameChannelRetries = 0
+	assert.False(t, ShouldRetrySameChannelRoute(routeErr, 0))
+
+	common.ChannelRouteSameChannelRetries = 2
+	common.ChannelRouteCooldownEnabled = false
+	assert.False(t, ShouldRetrySameChannelRoute(routeErr, 0))
+
+	common.ChannelRouteCooldownEnabled = true
+	nonRouteErr := types.NewErrorWithStatusCode(
+		errors.New("invalid request"),
+		types.ErrorCodeBadResponseStatusCode,
+		http.StatusBadRequest,
+	)
+	assert.False(t, ShouldRetrySameChannelRoute(nonRouteErr, 0))
 }
 
 func seedChannelRouteChannel(t *testing.T, db *gorm.DB, id int, group string, priority int64) {
@@ -252,6 +280,9 @@ func TestChannelRouteStickyKeepsLastSuccessfulFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, fallback)
 	assert.Equal(t, 2, fallback.Id)
+	fallbackAdminInfo := map[string]interface{}{}
+	AppendChannelRouteStickyAdminInfo(fallbackCtx, fallbackAdminInfo)
+	assert.NotContains(t, fallbackAdminInfo, "channel_route_sticky")
 	MarkChannelRouteSuccess(fallbackCtx)
 	assert.Equal(t, 2, GetChannelRouteStickyChannel("default", channelRouteTestModel, "/v1/chat/completions"))
 
@@ -261,6 +292,14 @@ func TestChannelRouteStickyKeepsLastSuccessfulFallback(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, sticky)
 	assert.Equal(t, 2, sticky.Id)
+	stickyAdminInfo := map[string]interface{}{}
+	AppendChannelRouteStickyAdminInfo(stickyCtx, stickyAdminInfo)
+	require.Contains(t, stickyAdminInfo, "channel_route_sticky")
+	stickyLogInfo := stickyAdminInfo["channel_route_sticky"].(map[string]interface{})
+	assert.Equal(t, "default", stickyLogInfo["group"])
+	assert.Equal(t, channelRouteTestModel, stickyLogInfo["model"])
+	assert.Equal(t, "/v1/chat/completions", stickyLogInfo["request_path"])
+	assert.Equal(t, 2, stickyLogInfo["channel_id"])
 	assert.True(t, MarkChannelRouteFailure(stickyCtx, newChannelRouteFailure()))
 	assert.Zero(t, GetChannelRouteStickyChannel("default", channelRouteTestModel, "/v1/chat/completions"))
 

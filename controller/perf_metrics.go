@@ -104,7 +104,6 @@ func resolveCacheMonitorGroups(availableGroups []string, configuredGroups []stri
 		seen[group] = struct{}{}
 		resolved = append(resolved, group)
 	}
-	sort.Strings(resolved)
 	return resolved
 }
 
@@ -174,6 +173,22 @@ func normalizeCacheMonitorGroups(request updateCacheMonitorGroupsRequest, availa
 	return groups, nil
 }
 
+func buildCacheMonitorGroupsAuditParams(
+	availableGroups []string,
+	previousGroups []string,
+	groups []string,
+) map[string]interface{} {
+	displayGroups := resolveCacheMonitorGroups(availableGroups, groups)
+	previousDisplayGroups := resolveCacheMonitorGroups(availableGroups, previousGroups)
+	return map[string]interface{}{
+		"all_groups":              len(groups) == 0,
+		"display_groups":          displayGroups,
+		"group_count":             len(displayGroups),
+		"previous_all_groups":     len(previousGroups) == 0,
+		"previous_display_groups": previousDisplayGroups,
+	}
+}
+
 func UpdateCacheMonitorGroups(c *gin.Context) {
 	var request updateCacheMonitorGroupsRequest
 	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
@@ -181,7 +196,9 @@ func UpdateCacheMonitorGroups(c *gin.Context) {
 		return
 	}
 
-	groups, err := normalizeCacheMonitorGroups(request, getAvailableCacheGroups())
+	availableGroups := getAvailableCacheGroups()
+	previousGroups := perf_metrics_setting.GetCacheMonitorGroups()
+	groups, err := normalizeCacheMonitorGroups(request, availableGroups)
 	if err != nil {
 		common.ApiErrorMsg(c, err.Error())
 		return
@@ -196,15 +213,14 @@ func UpdateCacheMonitorGroups(c *gin.Context) {
 		return
 	}
 
-	recordManageAudit(c, "cache_monitor_groups.update", map[string]interface{}{
-		"all_groups":  request.AllGroups,
-		"group_count": len(groups),
-	})
+	displayGroups := resolveCacheMonitorGroups(availableGroups, groups)
+	auditParams := buildCacheMonitorGroupsAuditParams(availableGroups, previousGroups, groups)
+	recordManageAudit(c, "cache_monitor_groups.update", auditParams)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"all_groups":     request.AllGroups,
-			"display_groups": resolveCacheMonitorGroups(getAvailableCacheGroups(), groups),
+			"all_groups":     len(groups) == 0,
+			"display_groups": displayGroups,
 		},
 	})
 }

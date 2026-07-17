@@ -90,8 +90,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			operation_setting.ApplyCustomErrorResponse(newAPIError)
-			newAPIError.SetResponseMessage(common.MessageWithoutRequestId(newAPIError.Error()))
-			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			setRelayResponseRequestId(newAPIError, requestId)
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -189,10 +188,20 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
+	var retrySameChannel *model.Channel
+	sameChannelRetriesUsed := 0
 
 	for {
 		relayInfo.RetryIndex = retryParam.GetRetry()
-		channel, channelErr := getChannel(c, relayInfo, retryParam)
+		var channel *model.Channel
+		var channelErr *types.NewAPIError
+		if retrySameChannel != nil {
+			channel = retrySameChannel
+			retrySameChannel = nil
+			channelErr = middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName)
+		} else {
+			channel, channelErr = getChannel(c, relayInfo, retryParam)
+		}
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
 			if !service.IsChannelRouteEnabled() || relayInfo.LastError == nil {
@@ -268,8 +277,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
+		if service.ShouldRetrySameChannelRoute(newAPIError, sameChannelRetriesUsed) {
+			sameChannelRetriesUsed++
+			retrySameChannel = channel
+			logger.LogInfo(c, fmt.Sprintf("渠道路由同渠道重试：渠道 #%d（%d/%d）", channel.Id, sameChannelRetriesUsed, common.ChannelRouteSameChannelRetries))
+			continue
+		}
 
 		channelRouteFailed := processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
+		sameChannelRetriesUsed = 0
 
 		if !shouldAttemptNextChannel(c, newAPIError, common.RetryTimes-retryParam.GetRetry(), channelRouteFailed) {
 			break
@@ -455,15 +471,36 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
 		}
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
+		service.AppendChannelRouteStickyAdminInfo(c, adminInfo)
 		other["admin_info"] = adminInfo
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
 			startTime = time.Now()
 		}
 		useTimeSeconds := int(time.Since(startTime).Seconds())
-		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, err.MaskSensitiveErrorWithStatusCode(), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
+		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, formatRelayErrorLogContent(err), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 	return channelRouteFrozen
+}
+
+func setRelayResponseRequestId(err *types.NewAPIError, requestId string) {
+	if err == nil {
+		return
+	}
+	message := common.MessageWithoutRequestId(err.Error())
+	if requestId != "" {
+		message = common.MessageWithRequestId(message, requestId)
+	}
+	// SetResponseMessage updates both the wrapped error and the protocol-specific
+	// error payload used by OpenAI and Claude responses.
+	err.SetResponseMessage(message)
+}
+
+func formatRelayErrorLogContent(err *types.NewAPIError) string {
+	if err == nil {
+		return ""
+	}
+	return common.MessageWithoutRequestId(err.MaskSensitiveErrorWithStatusCode())
 }
 
 func RelayMidjourney(c *gin.Context) {
@@ -582,10 +619,19 @@ func RelayTask(c *gin.Context) {
 
 	lockedChannel, channelLocked := relayInfo.LockedChannel.(*model.Channel)
 	channelLocked = channelLocked && lockedChannel != nil
+	var retrySameChannel *model.Channel
+	sameChannelRetriesUsed := 0
 	for {
 		var channel *model.Channel
 
-		if channelLocked {
+		if retrySameChannel != nil {
+			channel = retrySameChannel
+			retrySameChannel = nil
+			if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
+				taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_same_channel_retry_failed", http.StatusInternalServerError)
+				break
+			}
+		} else if channelLocked {
 			channel = lockedChannel
 			if retryParam.GetRetry() > 0 {
 				if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
@@ -624,11 +670,19 @@ func RelayTask(c *gin.Context) {
 
 		channelRouteFailed := false
 		if !taskErr.LocalError {
+			routeError := types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
+			if !channelLocked && service.ShouldRetrySameChannelRoute(routeError, sameChannelRetriesUsed) {
+				sameChannelRetriesUsed++
+				retrySameChannel = channel
+				logger.LogInfo(c, fmt.Sprintf("渠道路由同渠道重试：渠道 #%d（%d/%d）", channel.Id, sameChannelRetriesUsed, common.ChannelRouteSameChannelRetries))
+				continue
+			}
 			channelRouteFailed = processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode), relayInfo)
+				routeError, relayInfo)
 		}
+		sameChannelRetriesUsed = 0
 
 		if !shouldAttemptNextTaskChannel(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry(), channelRouteFailed, !channelLocked) {
 			break

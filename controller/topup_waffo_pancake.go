@@ -397,6 +397,7 @@ func RequestWaffoPancakePay(c *gin.Context) {
 			TaxCategory: "saas",
 		},
 		BuyerEmail:              getWaffoPancakeBuyerEmail(user),
+		SuccessURL:              paymentReturnPath(c, "/console/topup?show_history=true"),
 		ExpiresInSeconds:        &expiresInSeconds,
 		OrderMerchantExternalID: tradeNo,
 	})

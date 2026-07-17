@@ -7,7 +7,9 @@ import (
 func Cache() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		if c.Request.RequestURI == "/" {
-			c.Header("Cache-Control", "no-cache")
+			c.Header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+			c.Header("Pragma", "no-cache")
+			c.Header("Expires", "0")
 		} else {
 			c.Header("Cache-Control", "max-age=604800") // one week
 		}

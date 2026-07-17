@@ -1,19 +1,42 @@
 import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  restrictToParentElement,
+  restrictToVerticalAxis,
+} from '@dnd-kit/modifiers'
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import {
   ChevronLeft,
   ChevronRight,
   Database,
   Gauge,
+  GripVertical,
   Save,
   Settings2,
   Target,
   Zap,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Line,
   LineChart,
   ReferenceLine,
@@ -26,8 +49,6 @@ import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import {
   ChartContainer,
-  ChartLegend,
-  ChartLegendContent,
   ChartTooltip,
   ChartTooltipContent,
 } from '@/components/ui/chart'
@@ -46,6 +67,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsAdmin } from '@/hooks/use-admin'
+import { cn } from '@/lib/utils'
 
 import { updateCacheHitRateBaseline, updateCacheMonitorGroups } from './api'
 import type {
@@ -54,8 +76,11 @@ import type {
   CacheMetricsResponse,
 } from './types'
 
-const ALL_CACHE_GROUPS = 'all'
 const DEFAULT_BASELINE = 85
+const CACHE_GROUP_DRAG_MODIFIERS = [
+  restrictToVerticalAxis,
+  restrictToParentElement,
+]
 
 function formatPercent(value: number) {
   return `${Math.max(0, Math.min(100, value)).toFixed(2)}%`
@@ -222,85 +247,194 @@ function CacheTrend(props: {
   )
 }
 
-function CacheRequestTrend(props: {
-  group: CacheMetricGroup
-  bucketSeconds: number
+function CacheGroupStats(props: {
+  groups: CacheMetricGroup[]
+  activeGroup: string
+  baseline: number
+  onSelect: (group: string) => void
 }) {
   const { t } = useTranslation()
   const data = useMemo(
     () =>
-      buildCacheChartSeries(props.group.series, props.bucketSeconds).map(
-        (point) => ({
-          ...point,
-          time: formatTime(point.ts),
-          fullTime: new Date(point.ts * 1000).toLocaleString(undefined, {
-            hourCycle: 'h23',
-          }),
-        })
-      ),
-    [props.bucketSeconds, props.group.series]
+      props.groups.map((group) => ({
+        ...group,
+        cache_hit_rate: group.request_count > 0 ? group.cache_hit_rate : 0,
+      })),
+    [props.groups]
   )
   const config = {
-    request_count: {
-      label: t('Cache requests'),
-      color: 'var(--chart-1)',
-    },
-    hit_count: {
-      label: t('Cache hits'),
+    cache_hit_rate: {
+      label: t('Hit Rate'),
       color: 'var(--chart-2)',
     },
   }
 
   if (data.length === 0) {
     return (
-      <div className='text-muted-foreground flex h-48 items-center justify-center border-y border-dashed text-sm sm:h-56'>
+      <div className='text-muted-foreground flex h-64 items-center justify-center border-y border-dashed text-sm sm:h-72'>
         {t('No data')}
       </div>
     )
   }
 
   return (
-    <ChartContainer config={config} className='aspect-auto h-48 w-full sm:h-56'>
-      <BarChart data={data} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
-        <CartesianGrid vertical={false} strokeDasharray='3 3' />
+    <ChartContainer config={config} className='aspect-auto h-64 w-full sm:h-72'>
+      <BarChart
+        accessibilityLayer
+        data={data}
+        layout='vertical'
+        margin={{ top: 8, right: 24, bottom: 0, left: 4 }}
+      >
+        <CartesianGrid horizontal={false} strokeDasharray='3 3' />
         <XAxis
-          dataKey='time'
+          type='number'
+          domain={[0, 100]}
           tickLine={false}
           axisLine={false}
-          minTickGap={32}
+          tickFormatter={(value) => `${Math.round(Number(value))}%`}
         />
         <YAxis
-          allowDecimals={false}
+          type='category'
+          dataKey='group'
+          width='auto'
           tickLine={false}
           axisLine={false}
-          width={36}
+          tickMargin={8}
+        />
+        <ReferenceLine
+          x={props.baseline}
+          stroke='var(--muted-foreground)'
+          strokeDasharray='4 4'
         />
         <ChartTooltip
+          cursor={{ fill: 'var(--muted)', opacity: 0.45 }}
           content={
             <ChartTooltipContent
+              hideIndicator
               labelFormatter={(_, payload) =>
-                payload?.[0]?.payload?.fullTime ?? '--'
+                String(payload?.[0]?.payload?.group ?? '')
               }
+              formatter={(_, __, item) => {
+                const group = item.payload as CacheMetricGroup
+                const hasData = group.request_count > 0
+                return (
+                  <div className='grid min-w-44 gap-1.5'>
+                    <div className='flex items-center justify-between gap-4'>
+                      <span className='text-muted-foreground'>
+                        {t('Hit Rate')}
+                      </span>
+                      <span className='font-mono font-medium tabular-nums'>
+                        {hasData ? formatPercent(group.cache_hit_rate) : '--'}
+                      </span>
+                    </div>
+                    <div className='flex items-center justify-between gap-4'>
+                      <span className='text-muted-foreground'>
+                        {t('Hits / Requests')}
+                      </span>
+                      <span className='font-mono font-medium tabular-nums'>
+                        {formatCount(group.hit_count)} /{' '}
+                        {formatCount(group.request_count)}
+                      </span>
+                    </div>
+                    <div className='flex items-center justify-between gap-4'>
+                      <span className='text-muted-foreground'>
+                        {t('Cached tokens')}
+                      </span>
+                      <span className='font-mono font-medium tabular-nums'>
+                        {formatCount(group.cached_tokens)}
+                      </span>
+                    </div>
+                  </div>
+                )
+              }}
             />
           }
         />
-        <ChartLegend content={<ChartLegendContent />} />
-        <Bar
-          dataKey='request_count'
-          fill='var(--color-request_count)'
-          radius={[3, 3, 0, 0]}
-          maxBarSize={24}
-          isAnimationActive={false}
-        />
-        <Bar
-          dataKey='hit_count'
-          fill='var(--color-hit_count)'
-          radius={[3, 3, 0, 0]}
-          maxBarSize={24}
-          isAnimationActive={false}
-        />
+        <Bar dataKey='cache_hit_rate' maxBarSize={24} radius={[0, 4, 4, 0]}>
+          {data.map((group) => {
+            let fill = 'var(--muted-foreground)'
+            if (group.request_count > 0) {
+              fill =
+                group.cache_hit_rate >= props.baseline
+                  ? 'var(--success)'
+                  : 'var(--warning)'
+            }
+            if (group.group === props.activeGroup) {
+              fill = 'var(--primary)'
+            }
+            return (
+              <Cell
+                key={group.group}
+                fill={fill}
+                className='cursor-pointer transition-opacity hover:opacity-80'
+                onClick={() => props.onSelect(group.group)}
+              />
+            )
+          })}
+        </Bar>
       </BarChart>
     </ChartContainer>
+  )
+}
+
+function SortableCacheGroupRow(props: {
+  group: string
+  selected: boolean
+  checkboxDisabled: boolean
+  dragDisabled: boolean
+  onToggle: () => void
+}) {
+  const { t } = useTranslation()
+  const checkboxId = useId()
+  const sortable = useSortable({
+    id: props.group,
+    disabled: props.dragDisabled,
+    transition: {
+      duration: 220,
+      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+    },
+  })
+
+  return (
+    <div
+      ref={sortable.setNodeRef}
+      style={{
+        transform: CSS.Translate.toString(sortable.transform),
+        transition: sortable.transition,
+        zIndex: sortable.isDragging ? 10 : undefined,
+      }}
+      className={cn(
+        'hover:bg-accent relative flex items-center gap-2 rounded px-2 py-1 transition-[background-color,box-shadow,opacity]',
+        sortable.isDragging && 'bg-accent z-10 opacity-70 shadow-md'
+      )}
+    >
+      <label
+        htmlFor={checkboxId}
+        className='flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-1'
+      >
+        <Checkbox
+          id={checkboxId}
+          checked={props.selected}
+          disabled={props.checkboxDisabled}
+          onCheckedChange={props.onToggle}
+        />
+        <span className='min-w-0 flex-1 text-sm [overflow-wrap:anywhere] break-words'>
+          {props.group}
+        </span>
+      </label>
+      <button
+        type='button'
+        ref={sortable.setActivatorNodeRef}
+        {...sortable.attributes}
+        {...sortable.listeners}
+        disabled={props.dragDisabled}
+        className='text-muted-foreground hover:bg-muted hover:text-foreground flex size-8 shrink-0 touch-none items-center justify-center rounded-md enabled:cursor-grab enabled:active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-30'
+        aria-label={t('Drag to reorder')}
+        title={t('Drag to reorder')}
+      >
+        <GripVertical className='size-4' />
+      </button>
+    </div>
   )
 }
 
@@ -312,17 +446,25 @@ export function CacheMonitor(props: {
 }) {
   const { t } = useTranslation()
   const isAdmin = useIsAdmin()
-  const [activeGroup, setActiveGroup] = useState(ALL_CACHE_GROUPS)
+  const [activeGroup, setActiveGroup] = useState('')
   const [baseline, setBaseline] = useState(DEFAULT_BASELINE)
   const [baselineDraft, setBaselineDraft] = useState(DEFAULT_BASELINE)
   const [savingBaseline, setSavingBaseline] = useState(false)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [allGroupsDraft, setAllGroupsDraft] = useState(true)
-  const [groupDraft, setGroupDraft] = useState<Set<string>>(new Set())
+  const [groupDraft, setGroupDraft] = useState<string[]>([])
   const [savingGroups, setSavingGroups] = useState(false)
   const groupTabsRef = useRef<HTMLDivElement>(null)
   const [canScrollGroupsLeft, setCanScrollGroupsLeft] = useState(false)
   const [canScrollGroupsRight, setCanScrollGroupsRight] = useState(false)
+  const groupDragSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
   const groups = useMemo(() => {
     const responseGroups = props.response?.data.groups ?? []
     const groupMap = new Map(
@@ -340,10 +482,7 @@ export function CacheMonitor(props: {
         }
     )
   }, [props.response])
-  const selectedGroup =
-    activeGroup === ALL_CACHE_GROUPS
-      ? props.response?.data.total
-      : groups.find((group) => group.group === activeGroup)
+  const selectedGroup = groups.find((group) => group.group === activeGroup)
 
   useEffect(() => {
     const nextBaseline = props.response?.data.baseline ?? DEFAULT_BASELINE
@@ -352,11 +491,8 @@ export function CacheMonitor(props: {
   }, [props.response?.data.baseline])
 
   useEffect(() => {
-    if (
-      activeGroup !== ALL_CACHE_GROUPS &&
-      !groups.some((group) => group.group === activeGroup)
-    ) {
-      setActiveGroup(ALL_CACHE_GROUPS)
+    if (!groups.some((group) => group.group === activeGroup)) {
+      setActiveGroup(groups[0]?.group ?? '')
     }
   }, [activeGroup, groups])
 
@@ -413,21 +549,46 @@ export function CacheMonitor(props: {
     setGroupsOpen(open)
     if (!open) return
     setAllGroupsDraft(props.response?.data.all_groups ?? true)
-    setGroupDraft(new Set(props.response?.data.display_groups ?? []))
+    setGroupDraft(props.response?.data.display_groups ?? [])
   }
 
   const handleToggleGroup = (group: string) => {
     setGroupDraft((current) => {
-      const next = new Set(current)
-      if (next.has(group)) next.delete(group)
-      else next.add(group)
-      return next
+      if (current.includes(group)) {
+        return current.filter((item) => item !== group)
+      }
+      return [...current, group]
     })
   }
 
+  const handleGroupDragEnd = (event: DragEndEvent) => {
+    if (!event.over || event.active.id === event.over.id) return
+
+    setGroupDraft((current) => {
+      const sourceIndex = current.indexOf(String(event.active.id))
+      const targetIndex = current.indexOf(String(event.over?.id))
+      if (sourceIndex < 0 || targetIndex < 0) return current
+      return arrayMove(current, sourceIndex, targetIndex)
+    })
+  }
+
+  const sortableGroups = useMemo(() => {
+    const availableSet = new Set(props.response?.data.available_groups ?? [])
+    return groupDraft.filter((group) => availableSet.has(group))
+  }, [groupDraft, props.response?.data.available_groups])
+
+  const orderedAvailableGroups = useMemo(() => {
+    const availableGroups = props.response?.data.available_groups ?? []
+    const selectedSet = new Set(sortableGroups)
+    return [
+      ...sortableGroups,
+      ...availableGroups.filter((group) => !selectedSet.has(group)),
+    ]
+  }, [props.response?.data.available_groups, sortableGroups])
+
   const handleSaveGroups = () => {
     setSavingGroups(true)
-    return updateCacheMonitorGroups(allGroupsDraft, [...groupDraft])
+    return updateCacheMonitorGroups(allGroupsDraft, groupDraft)
       .then((response) => {
         if (!response.success) return
         setGroupsOpen(false)
@@ -447,6 +608,7 @@ export function CacheMonitor(props: {
           ))}
         </div>
         <Skeleton className='h-48 w-full sm:h-56' />
+        <Skeleton className='h-64 w-full sm:h-72' />
       </div>
     )
   } else if (props.failed) {
@@ -455,7 +617,7 @@ export function CacheMonitor(props: {
         {t('Cache monitoring unavailable')}
       </div>
     )
-  } else if (selectedGroup && selectedGroup.request_count > 0) {
+  } else if (selectedGroup) {
     content = (
       <div className='mt-4'>
         <div className='grid grid-cols-2 gap-x-4 sm:grid-cols-4'>
@@ -480,7 +642,7 @@ export function CacheMonitor(props: {
             value={formatCount(selectedGroup.request_count)}
           />
         </div>
-        <div className='mt-5 grid min-w-0 gap-5 xl:grid-cols-2'>
+        <div className='mt-5 flex min-w-0 flex-col gap-5'>
           <div className='min-w-0'>
             <div className='mb-3 text-sm font-medium'>
               {t('Cache hit trend (last 24h)')}
@@ -493,11 +655,13 @@ export function CacheMonitor(props: {
           </div>
           <div className='min-w-0'>
             <div className='mb-3 text-sm font-medium'>
-              {t('Cache request trend (last 24h)')}
+              {t('Displayed group cache statistics (last 24h)')}
             </div>
-            <CacheRequestTrend
-              group={selectedGroup}
-              bucketSeconds={props.response?.data.bucket_seconds ?? 3600}
+            <CacheGroupStats
+              groups={groups}
+              activeGroup={activeGroup}
+              baseline={baseline}
+              onSelect={setActiveGroup}
             />
           </div>
         </div>
@@ -592,7 +756,7 @@ export function CacheMonitor(props: {
               type='button'
               variant='outline'
               size='icon-sm'
-              className='shrink-0'
+              className='shrink-0 disabled:cursor-not-allowed disabled:opacity-35'
               onClick={() => scrollGroups(-1)}
               disabled={!canScrollGroupsLeft}
               aria-label={t('Previous')}
@@ -609,12 +773,6 @@ export function CacheMonitor(props: {
                 ref={groupTabsRef}
                 className='max-w-full [scrollbar-width:none] flex-nowrap justify-start overflow-x-auto overflow-y-hidden group-data-horizontal/tabs:h-auto [&::-webkit-scrollbar]:hidden'
               >
-                <TabsTrigger
-                  value={ALL_CACHE_GROUPS}
-                  className='h-8 flex-none px-3'
-                >
-                  {t('All')}
-                </TabsTrigger>
                 {groups.map((group) => (
                   <TabsTrigger
                     key={group.group}
@@ -633,7 +791,7 @@ export function CacheMonitor(props: {
               type='button'
               variant='outline'
               size='icon-sm'
-              className='shrink-0'
+              className='shrink-0 disabled:cursor-not-allowed disabled:opacity-35'
               onClick={() => scrollGroups(1)}
               disabled={!canScrollGroupsRight}
               aria-label={t('Next')}
@@ -669,25 +827,40 @@ export function CacheMonitor(props: {
               </span>
             </label>
 
-            <ScrollArea className='max-h-72 rounded-md border p-2'>
-              <div className='space-y-1'>
-                {(props.response?.data.available_groups ?? []).map((group) => (
-                  <label
-                    key={group}
-                    className='hover:bg-accent flex cursor-pointer items-start gap-3 rounded px-2 py-2'
-                  >
-                    <Checkbox
-                      checked={allGroupsDraft || groupDraft.has(group)}
-                      disabled={allGroupsDraft}
-                      onCheckedChange={() => handleToggleGroup(group)}
-                    />
-                    <span className='min-w-0 text-sm [overflow-wrap:anywhere] break-words'>
-                      {group}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            </ScrollArea>
+            <DndContext
+              sensors={groupDragSensors}
+              collisionDetection={closestCenter}
+              modifiers={CACHE_GROUP_DRAG_MODIFIERS}
+              onDragEnd={handleGroupDragEnd}
+            >
+              <ScrollArea className='max-h-72 rounded-md border p-2'>
+                <SortableContext
+                  items={orderedAvailableGroups}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className='space-y-1'>
+                    {orderedAvailableGroups.map((group) => {
+                      const explicitlySelected = groupDraft.includes(group)
+                      const selected = allGroupsDraft || explicitlySelected
+                      return (
+                        <SortableCacheGroupRow
+                          key={group}
+                          group={group}
+                          selected={selected}
+                          checkboxDisabled={allGroupsDraft}
+                          dragDisabled={
+                            allGroupsDraft ||
+                            !explicitlySelected ||
+                            sortableGroups.length <= 1
+                          }
+                          onToggle={() => handleToggleGroup(group)}
+                        />
+                      )
+                    })}
+                  </div>
+                </SortableContext>
+              </ScrollArea>
+            </DndContext>
 
             <DialogFooter>
               <DialogClose render={<Button variant='outline' />}>
@@ -696,7 +869,7 @@ export function CacheMonitor(props: {
               <Button
                 onClick={handleSaveGroups}
                 disabled={
-                  savingGroups || (!allGroupsDraft && groupDraft.size === 0)
+                  savingGroups || (!allGroupsDraft && groupDraft.length === 0)
                 }
               >
                 <Save />

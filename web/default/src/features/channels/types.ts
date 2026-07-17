@@ -193,6 +193,10 @@ export interface ChannelOpsResponse {
   message?: string
   data?: {
     retry_times: number
+    channel_route_enabled: boolean
+    channel_route_cooldown_seconds: number
+    channel_route_sticky_enabled: boolean
+    channel_route_same_channel_retries: number
   }
 }
 

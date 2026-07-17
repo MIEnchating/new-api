@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -117,6 +118,28 @@ type OptionUpdateRequest struct {
 	Value any    `json:"value"`
 }
 
+// optionAuditValueKeys is deliberately allowlisted: only non-sensitive routing
+// values may be persisted in audit metadata.
+var optionAuditValueKeys = map[string]struct{}{
+	"RetryTimes":                     {},
+	"AutomaticRetryStatusCodes":      {},
+	"ChannelRouteCooldownEnabled":    {},
+	"ChannelRouteCooldownSeconds":    {},
+	"ChannelRouteStickyEnabled":      {},
+	"ChannelRouteSameChannelRetries": {},
+}
+
+func buildOptionAuditParams(key string, previousValue string, currentValue string) map[string]interface{} {
+	params := map[string]interface{}{
+		"key": key,
+	}
+	if _, ok := optionAuditValueKeys[key]; ok {
+		params["from"] = previousValue
+		params["to"] = currentValue
+	}
+	return params
+}
+
 func UpdateOption(c *gin.Context) {
 	var option OptionUpdateRequest
 	err := common.DecodeJson(c.Request.Body, &option)
@@ -136,6 +159,17 @@ func UpdateOption(c *gin.Context) {
 		option.Value = common.Interface2String(option.Value.(int))
 	default:
 		option.Value = fmt.Sprintf("%v", option.Value)
+	}
+	if option.Key == "TrustedSiteOrigins" {
+		normalized, normalizeErr := service.NormalizeTrustedSiteOrigins(option.Value.(string))
+		if normalizeErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"success": false,
+				"message": normalizeErr.Error(),
+			})
+			return
+		}
+		option.Value = normalized
 	}
 	switch option.Key {
 	case "QuotaForInviter", "QuotaForInvitee", "InviteRechargeRebateRatio":
@@ -312,6 +346,15 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "ChannelRouteSameChannelRetries":
+		retries, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
+		if parseErr != nil || retries < 0 || retries > 10 {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": "同渠道重试次数必须在 0 到 10 之间",
+			})
+			return
+		}
 	case "perf_metrics_setting.cache_hit_rate_baseline":
 		baseline, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
 		if parseErr != nil || validateCacheHitRateBaseline(baseline) != nil {
@@ -367,15 +410,20 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 	}
-	err = model.UpdateOption(option.Key, option.Value.(string))
+	previousValue := ""
+	if _, ok := optionAuditValueKeys[option.Key]; ok {
+		common.OptionMapRWMutex.RLock()
+		previousValue = common.OptionMap[option.Key]
+		common.OptionMapRWMutex.RUnlock()
+	}
+	currentValue := option.Value.(string)
+	err = model.UpdateOption(option.Key, currentValue)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	// 出于安全考虑只记录被修改的配置项名称，不记录配置值（可能含密钥等敏感信息）。
-	recordManageAudit(c, "option.update", map[string]interface{}{
-		"key": option.Key,
-	})
+	// 仅白名单中的非敏感路由配置记录前后值，其余配置只记录名称。
+	recordManageAudit(c, "option.update", buildOptionAuditParams(option.Key, previousValue, currentValue))
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

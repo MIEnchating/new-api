@@ -92,6 +92,12 @@ func (*StripeAdaptor) RequestPay(c *gin.Context, req *StripePayRequest) {
 	reference := fmt.Sprintf("new-api-ref-%d-%d-%s", user.Id, time.Now().UnixMilli(), randstr.String(4))
 	referenceId := "ref_" + common.Sha1([]byte(reference))
 
+	if req.SuccessURL == "" {
+		req.SuccessURL = paymentReturnPath(c, "/console/log")
+	}
+	if req.CancelURL == "" {
+		req.CancelURL = paymentReturnPath(c, "/console/topup")
+	}
 	payLink, err := genStripeLink(referenceId, user.StripeCustomer, user.Email, req.Amount, req.SuccessURL, req.CancelURL)
 	if err != nil {
 		logger.LogError(c.Request.Context(), fmt.Sprintf("Stripe 创建 Checkout Session 失败 user_id=%d trade_no=%s amount=%d error=%q", id, referenceId, req.Amount, err.Error()))
@@ -346,13 +352,6 @@ func genStripeLink(referenceId string, customerId string, email string, amount i
 	stripe.Key = setting.StripeApiSecret
 
 	// Use custom URLs if provided, otherwise use defaults
-	if successURL == "" {
-		successURL = paymentReturnPath("/console/log")
-	}
-	if cancelURL == "" {
-		cancelURL = paymentReturnPath("/console/topup")
-	}
-
 	params := &stripe.CheckoutSessionParams{
 		ClientReferenceID: stripe.String(referenceId),
 		SuccessURL:        stripe.String(successURL),

@@ -29,20 +29,21 @@ type TopUp struct {
 }
 
 type TopUpStatsSummary struct {
-	OrderCount        int64   `json:"order_count"`
-	UserCount         int64   `json:"user_count"`
-	TotalMoney        float64 `json:"total_money"`
-	AverageOrderMoney float64 `json:"average_order_money"`
+	OrderCount int64   `json:"order_count"`
+	UserCount  int64   `json:"user_count"`
+	TotalMoney float64 `json:"total_money"`
 }
 
-type UserTopUpStat struct {
-	UserId            int     `json:"user_id"`
-	Username          string  `json:"username"`
-	DisplayName       string  `json:"display_name"`
-	OrderCount        int64   `json:"order_count"`
-	TotalMoney        float64 `json:"total_money"`
-	AverageOrderMoney float64 `json:"average_order_money"`
-	LastCompleteTime  int64   `json:"last_complete_time"`
+type TopUpStatsOrder struct {
+	Id              int     `json:"id"`
+	TradeNo         string  `json:"trade_no"`
+	UserId          int     `json:"user_id"`
+	Username        string  `json:"username"`
+	DisplayName     string  `json:"display_name"`
+	PaymentMethod   string  `json:"payment_method"`
+	PaymentProvider string  `json:"payment_provider"`
+	Money           float64 `json:"money"`
+	CompleteTime    int64   `json:"complete_time"`
 }
 
 const (
@@ -345,31 +346,31 @@ func applyTopUpStatsKeyword(query *gorm.DB, keyword string) (*gorm.DB, error) {
 	}
 
 	conditions := make([]string, 0, 2)
-	args := make([]interface{}, 0, 3)
+	args := make([]interface{}, 0, 4)
 	if userId, err := strconv.Atoi(keyword); err == nil && userId > 0 {
 		conditions = append(conditions, "t.user_id = ?")
 		args = append(args, userId)
 	}
 
+	lowerKeyword := strings.ToLower(keyword)
 	if utf8.RuneCountInString(keyword) >= 2 {
-		pattern, err := sanitizeLikePattern("%" + strings.ToLower(keyword) + "%")
+		pattern, err := sanitizeLikePattern("%" + lowerKeyword + "%")
 		if err != nil {
 			return nil, err
 		}
-		conditions = append(conditions, "(LOWER(COALESCE(u.username, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(u.display_name, '')) LIKE ? ESCAPE '!')")
-		args = append(args, pattern, pattern)
+		conditions = append(conditions, "(LOWER(COALESCE(u.username, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(u.display_name, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(t.trade_no, '')) LIKE ? ESCAPE '!')")
+		args = append(args, pattern, pattern, pattern)
 	} else {
-		conditions = append(conditions, "(LOWER(COALESCE(u.username, '')) = ? OR LOWER(COALESCE(u.display_name, '')) = ?)")
-		lowerKeyword := strings.ToLower(keyword)
-		args = append(args, lowerKeyword, lowerKeyword)
+		conditions = append(conditions, "(LOWER(COALESCE(u.username, '')) = ? OR LOWER(COALESCE(u.display_name, '')) = ? OR LOWER(COALESCE(t.trade_no, '')) = ?)")
+		args = append(args, lowerKeyword, lowerKeyword, lowerKeyword)
 	}
 
 	return query.Where("("+strings.Join(conditions, " OR ")+")", args...), nil
 }
 
-// GetUserTopUpStats aggregates successful top-ups by user for an inclusive
-// completion-time range. It is called only by the admin controller.
-func GetUserTopUpStats(startTime int64, endTime int64, keyword string, pageInfo *common.PageInfo) (summary TopUpStatsSummary, items []UserTopUpStat, total int64, err error) {
+// GetUserTopUpStats returns a summary and paginated successful orders for an
+// inclusive completion-time range. It is called only by the admin controller.
+func GetUserTopUpStats(startTime int64, endTime int64, keyword string, pageInfo *common.PageInfo) (summary TopUpStatsSummary, items []TopUpStatsOrder, total int64, err error) {
 	query := DB.Table("top_ups AS t").
 		Joins("LEFT JOIN users AS u ON u.id = t.user_id").
 		Where("t.status = ? AND t.complete_time >= ? AND t.complete_time <= ?", common.TopUpStatusSuccess, startTime, endTime)
@@ -379,24 +380,23 @@ func GetUserTopUpStats(startTime int64, endTime int64, keyword string, pageInfo 
 	}
 
 	if err = query.Session(&gorm.Session{}).
-		Select("COUNT(*) AS order_count, COUNT(DISTINCT t.user_id) AS user_count, COALESCE(SUM(t.money), 0) AS total_money, COALESCE(AVG(t.money), 0) AS average_order_money").
+		Select("COUNT(*) AS order_count, COUNT(DISTINCT t.user_id) AS user_count, COALESCE(SUM(t.money), 0) AS total_money").
 		Scan(&summary).Error; err != nil {
 		return summary, nil, 0, err
 	}
 
-	if err = query.Session(&gorm.Session{}).Distinct("t.user_id").Count(&total).Error; err != nil {
+	if err = query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return summary, nil, 0, err
 	}
 
-	items = make([]UserTopUpStat, 0)
+	items = make([]TopUpStatsOrder, 0)
 	if total == 0 {
 		return summary, items, 0, nil
 	}
 
 	err = query.Session(&gorm.Session{}).
-		Select("t.user_id AS user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, COUNT(*) AS order_count, COALESCE(SUM(t.money), 0) AS total_money, COALESCE(AVG(t.money), 0) AS average_order_money, MAX(t.complete_time) AS last_complete_time").
-		Group("t.user_id, u.username, u.display_name").
-		Order("total_money DESC, t.user_id ASC").
+		Select("t.id AS id, t.trade_no AS trade_no, t.user_id AS user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, COALESCE(t.payment_method, '') AS payment_method, COALESCE(t.payment_provider, '') AS payment_provider, t.money AS money, t.complete_time AS complete_time").
+		Order("t.complete_time DESC, t.id DESC").
 		Limit(pageInfo.GetPageSize()).
 		Offset(pageInfo.GetStartIdx()).
 		Scan(&items).Error

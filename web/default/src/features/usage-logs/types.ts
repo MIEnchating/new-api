@@ -92,6 +92,13 @@ export interface ChannelAffinityInfo {
   using_group?: string
 }
 
+export interface ChannelRouteStickyInfo {
+  group?: string
+  model?: string
+  request_path?: string
+  channel_id?: number
+}
+
 export const USAGE_BILLING_PATH = {
   LOCAL: 'local',
   UPSTREAM: 'upstream',
@@ -114,6 +121,7 @@ export interface LogOtherData {
     local_count_tokens?: boolean
     usage_billing_path?: UsageBillingPath | string
     channel_affinity?: ChannelAffinityInfo
+    channel_route_sticky?: ChannelRouteStickyInfo
     // Top-up audit fields (type=1, admin only)
     payment_method?: string
     callback_payment_method?: string
@@ -153,6 +161,9 @@ export interface LogOtherData {
   }
   // Login audit fields (type=7); visible to the log owner
   login_method?: string
+  second_factor_method?: string
+  request_method?: string
+  request_route?: string
   user_agent?: string
   request_path?: string
   request_conversion?: string[]

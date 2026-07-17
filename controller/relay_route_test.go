@@ -43,6 +43,29 @@ func TestShouldAttemptNextChannelKeepsRouteAndRetryMutuallyExclusive(t *testing.
 	assert.False(t, shouldAttemptNextChannel(c, err, 10, false))
 }
 
+func TestSetRelayResponseRequestIdReplacesUpstreamRequestId(t *testing.T) {
+	err := types.NewOpenAIError(
+		errors.New("upstream failed (request id: upstream-request-id)"),
+		types.ErrorCodeBadResponse,
+		http.StatusBadGateway,
+	)
+
+	setRelayResponseRequestId(err, "local-request-id")
+
+	assert.Equal(t, "upstream failed (request id: local-request-id)", err.Error())
+	assert.Equal(t, "upstream failed (request id: local-request-id)", err.ToOpenAIError().Message)
+}
+
+func TestFormatRelayErrorLogContentStripsUpstreamRequestId(t *testing.T) {
+	err := types.NewOpenAIError(
+		errors.New("upstream failed (request_id: upstream-request-id)"),
+		types.ErrorCodeBadResponse,
+		http.StatusBadGateway,
+	)
+
+	assert.Equal(t, "status_code=502, upstream failed", formatRelayErrorLogContent(err))
+}
+
 func TestShouldAttemptNextTaskChannelDoesNotRouteLockedChannel(t *testing.T) {
 	oldRouteEnabled := common.ChannelRouteCooldownEnabled
 	oldCooldownSeconds := common.ChannelRouteCooldownSeconds

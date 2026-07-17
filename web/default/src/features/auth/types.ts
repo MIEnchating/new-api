@@ -75,6 +75,14 @@ export interface Login2FAResponse {
   data?: User
 }
 
+export interface Login2FAStatusResponse {
+  success: boolean
+  message: string
+  data?: {
+    pending: boolean
+  }
+}
+
 export interface ApiResponse {
   success: boolean
   message: string
@@ -134,6 +142,7 @@ export interface SystemStatus {
   // Allow direct access to common properties
   version?: string
   system_name?: string
+  server_address?: string
   logo?: string
   github_oauth?: boolean
   github_client_id?: string

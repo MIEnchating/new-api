@@ -17,14 +17,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { Table } from '@tanstack/react-table'
-import { ChevronDown, Loader2, X as Cross2Icon } from 'lucide-react'
+import {
+  ChevronDown,
+  Loader2,
+  Search as SearchIcon,
+  SlidersHorizontal,
+  X as Cross2Icon,
+} from 'lucide-react'
 import * as React from 'react'
 import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useDebounce } from '@/hooks'
+import { useDebounce, useMediaQuery } from '@/hooks'
 import { cn } from '@/lib/utils'
 
 import { DataTableFacetedFilter } from './faceted-filter'
@@ -135,6 +141,11 @@ export type DataTableToolbarProps<TData> = {
    * Outer wrapper className override.
    */
   className?: string
+  /**
+   * On mobile, keep the primary search visible and collapse secondary filters
+   * behind a compact filter toggle. Desktop layout is unchanged.
+   */
+  mobileCollapsibleFilters?: boolean
 }
 
 /**
@@ -153,7 +164,9 @@ export type DataTableToolbarProps<TData> = {
  */
 export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
   const { t } = useTranslation()
+  const isMobile = useMediaQuery('(max-width: 640px)')
   const [expanded, setExpanded] = useState(false)
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   const [isSearchComposing, setIsSearchComposing] = useState(false)
 
   const filters = props.filters ?? []
@@ -243,6 +256,12 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
     queueSearchValue(value)
   }
 
+  const handleClearSearch = () => {
+    setIsSearchComposing(false)
+    setSearchDraft({ baseValue: currentSearchValue, value: '' })
+    commitSearchValue('')
+  }
+
   const searchInput = (
     <Input
       placeholder={placeholder}
@@ -252,6 +271,33 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
       onCompositionEnd={handleSearchCompositionEnd}
       className='w-full sm:w-[200px] lg:w-[240px]'
     />
+  )
+
+  const mobileSearchInput = (
+    <div className='relative min-w-0 flex-1'>
+      <SearchIcon
+        className='text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2'
+        aria-hidden='true'
+      />
+      <Input
+        placeholder={placeholder}
+        value={searchValue}
+        onChange={handleSearchChange}
+        onCompositionStart={handleSearchCompositionStart}
+        onCompositionEnd={handleSearchCompositionEnd}
+        className='h-9 pr-8 pl-8'
+      />
+      {searchValue && (
+        <button
+          type='button'
+          onClick={handleClearSearch}
+          aria-label={t('Clear')}
+          className='text-muted-foreground hover:text-foreground focus-visible:ring-ring absolute top-1/2 right-1.5 flex size-6 -translate-y-1/2 items-center justify-center rounded-md focus-visible:ring-2 focus-visible:outline-none'
+        >
+          <Cross2Icon className='size-3.5' />
+        </button>
+      )}
+    </div>
   )
 
   const filterChips = React.useMemo(
@@ -340,6 +386,72 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
   ) : null
 
   const hasLeftActions = props.leftActions != null
+
+  const activeMobileFilterCount =
+    filters.reduce((count, filter) => {
+      const value = props.table.getColumn(filter.columnId)?.getFilterValue()
+      if (Array.isArray(value)) {
+        return value.some((item) => item !== 'all') ? count + 1 : count
+      }
+      return value != null && value !== '' ? count + 1 : count
+    }, 0) + (props.hasAdditionalFilters ? 1 : 0)
+
+  if (
+    isMobile &&
+    props.mobileCollapsibleFilters &&
+    !hasLeftActions &&
+    (filters.length > 0 || props.additionalSearch != null)
+  ) {
+    return (
+      <div className={cn('flex flex-col gap-2', props.className)}>
+        <div className='flex min-w-0 items-center gap-2'>
+          {props.customSearch !== undefined
+            ? props.customSearch
+            : mobileSearchInput}
+          <Button
+            type='button'
+            variant={mobileFiltersOpen ? 'secondary' : 'outline'}
+            size='sm'
+            onClick={() => setMobileFiltersOpen((open) => !open)}
+            aria-expanded={mobileFiltersOpen}
+            className='h-9 shrink-0 gap-1.5 px-2.5'
+          >
+            <SlidersHorizontal className='size-4' />
+            {t('Filter')}
+            {activeMobileFilterCount > 0 && (
+              <span className='bg-primary text-primary-foreground flex min-w-4 items-center justify-center rounded-sm px-1 font-mono text-[10px] leading-4'>
+                {activeMobileFilterCount}
+              </span>
+            )}
+          </Button>
+        </div>
+
+        {mobileFiltersOpen && (
+          <div className='border-border/70 bg-muted/15 flex flex-col gap-2 rounded-lg border p-2'>
+            {props.additionalSearch && (
+              <div className='[&>*]:w-full'>{props.additionalSearch}</div>
+            )}
+            <div className='flex flex-wrap items-center gap-2'>
+              {filterChips}
+            </div>
+            {isFiltered && (
+              <div className='flex justify-end'>{resetButton}</div>
+            )}
+          </div>
+        )}
+
+        <div className='flex min-w-0 items-center gap-1.5'>
+          {props.preActions}
+          <div className='ms-auto flex shrink-0 items-center gap-1.5'>
+            {searchButton}
+            {viewToggleNode}
+            {viewOptionsNode}
+            {expandToggle}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (hasLeftActions) {
     return (

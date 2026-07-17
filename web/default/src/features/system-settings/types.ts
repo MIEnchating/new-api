@@ -115,6 +115,7 @@ export type SiteSettings = {
   About: string
   HomePageContent: string
   ServerAddress: string
+  TrustedSiteOrigins: string
   'legal.user_agreement': string
   'legal.privacy_policy': string
   HeaderNavModules: string
@@ -230,6 +231,7 @@ export type ModelSettings = {
   ChannelRouteCooldownEnabled: boolean
   ChannelRouteCooldownSeconds: number
   ChannelRouteStickyEnabled: boolean
+  ChannelRouteSameChannelRetries: number
   ChannelDisableThreshold: string
   AutomaticDisableChannelEnabled: boolean
   AutomaticEnableChannelEnabled: boolean
