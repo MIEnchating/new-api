@@ -113,6 +113,108 @@ func SyncChannelCache(frequency int) {
 
 type ChannelCandidateFilter func(channel *Channel) bool
 
+type ChannelSelectionCandidate struct {
+	ChannelID   int    `json:"channel_id"`
+	ChannelName string `json:"channel_name"`
+	Priority    int64  `json:"priority"`
+	Weight      int    `json:"weight"`
+	Status      int    `json:"status"`
+}
+
+// ListSatisfiedChannelCandidates returns the deterministic candidate snapshot
+// used to explain routing decisions. It never performs weighted selection.
+func ListSatisfiedChannelCandidates(group string, modelName string, requestPath string) ([]ChannelSelectionCandidate, error) {
+	if !common.MemoryCacheEnabled {
+		return listSatisfiedChannelCandidatesFromDB(group, modelName, requestPath)
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	channelIDs := filterChannelsByRequestPathAndModel(group2model2channels[group][modelName], requestPath, modelName)
+	if len(channelIDs) == 0 {
+		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
+		channelIDs = filterChannelsByRequestPathAndModel(group2model2channels[group][normalizedModel], requestPath, modelName)
+	}
+
+	candidates := make([]ChannelSelectionCandidate, 0, len(channelIDs))
+	seen := make(map[int]struct{}, len(channelIDs))
+	for _, channelID := range channelIDs {
+		if _, exists := seen[channelID]; exists {
+			continue
+		}
+		channel, ok := channelsIDM[channelID]
+		if !ok {
+			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelID)
+		}
+		seen[channelID] = struct{}{}
+		candidates = append(candidates, ChannelSelectionCandidate{
+			ChannelID:   channel.Id,
+			ChannelName: channel.Name,
+			Priority:    channel.GetPriority(),
+			Weight:      channel.GetWeight(),
+			Status:      channel.Status,
+		})
+	}
+	return candidates, nil
+}
+
+func listSatisfiedChannelCandidatesFromDB(group string, modelName string, requestPath string) ([]ChannelSelectionCandidate, error) {
+	var abilities []Ability
+	query := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, modelName, true)
+	if err := query.Order("priority DESC, weight DESC").Find(&abilities).Error; err != nil {
+		return nil, err
+	}
+	if len(abilities) == 0 {
+		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
+		if normalizedModel != modelName {
+			query = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, normalizedModel, true)
+			if err := query.Order("priority DESC, weight DESC").Find(&abilities).Error; err != nil {
+				return nil, err
+			}
+		}
+	}
+	abilities = filterAbilitiesByRequestPathAndModel(abilities, requestPath, modelName)
+	if len(abilities) == 0 {
+		return nil, nil
+	}
+
+	channelIDs := make([]int, 0, len(abilities))
+	seen := make(map[int]struct{}, len(abilities))
+	for _, ability := range abilities {
+		if _, exists := seen[ability.ChannelId]; exists {
+			continue
+		}
+		seen[ability.ChannelId] = struct{}{}
+		channelIDs = append(channelIDs, ability.ChannelId)
+	}
+
+	var channels []*Channel
+	if err := DB.Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+		return nil, err
+	}
+	channelByID := make(map[int]*Channel, len(channels))
+	for _, channel := range channels {
+		channelByID[channel.Id] = channel
+	}
+
+	candidates := make([]ChannelSelectionCandidate, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		channel, exists := channelByID[channelID]
+		if !exists {
+			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelID)
+		}
+		candidates = append(candidates, ChannelSelectionCandidate{
+			ChannelID:   channel.Id,
+			ChannelName: channel.Name,
+			Priority:    channel.GetPriority(),
+			Weight:      channel.GetWeight(),
+			Status:      channel.Status,
+		})
+	}
+	return candidates, nil
+}
+
 func GetRandomSatisfiedChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
 	return GetRandomSatisfiedChannelWithFilter(group, model, retry, requestPath, nil)
 }

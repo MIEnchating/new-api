@@ -182,8 +182,8 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
-      - name: Generate release notes
-        run: node .github/scripts/generate-release-notes.mjs "$GITHUB_REF_NAME" release-notes.md
+      - name: Generate standardized release notes
+        run: node .github/scripts/generate-release-notes.mjs "$GITHUB_REF_NAME" release-notes.md --require-source
       - name: Publish release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:

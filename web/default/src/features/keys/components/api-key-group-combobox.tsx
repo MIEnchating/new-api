@@ -144,7 +144,7 @@ export function ApiKeyGroupCombobox({
             aria-expanded={open}
             disabled={disabled}
             className={cn(
-              'border-input bg-muted/40 hover:bg-muted/55 hover:text-foreground active:bg-background data-popup-open:border-ring data-popup-open:bg-background data-popup-open:ring-ring/20 h-auto w-full justify-between gap-2 text-start shadow-none transition-[background-color,border-color,box-shadow] duration-150 data-popup-open:ring-[3px]',
+              'border-input bg-muted/40 hover:bg-muted/55 hover:text-foreground active:bg-background data-popup-open:border-ring data-popup-open:bg-background data-popup-open:ring-ring/20 h-auto min-w-0 w-full justify-between gap-2 overflow-hidden text-start shadow-none transition-[background-color,border-color,box-shadow] duration-150 data-popup-open:ring-[3px]',
               compact
                 ? 'rounded-lg px-2.5 py-1'
                 : 'min-h-14 rounded-lg px-3 py-2 sm:min-h-20 sm:gap-3 sm:px-4 sm:py-3'
@@ -152,7 +152,7 @@ export function ApiKeyGroupCombobox({
           />
         }
       >
-        <span className='flex min-w-0 flex-1 items-center justify-between gap-2 sm:gap-3'>
+        <span className='flex min-w-0 flex-1 items-center justify-between gap-2 overflow-hidden sm:gap-3'>
           <span className='min-w-0'>
             <span className='block truncate font-medium'>
               {selectedOption?.label || placeholder || t('Select a group')}

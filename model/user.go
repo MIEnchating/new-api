@@ -506,7 +506,7 @@ func inviteUser(inviterId int) (err error) {
 	return DB.Save(user).Error
 }
 
-func (user *User) TransferAffQuotaToQuota(quota int) error {
+func (user *User) TransferAffQuotaToQuota(quota int, reference string) error {
 	// 检查quota是否小于最小额度
 	if float64(quota) < common.QuotaPerUnit {
 		return fmt.Errorf("转移额度最小为%s！", logger.LogQuota(int(common.QuotaPerUnit)))
@@ -538,9 +538,27 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	if err := tx.Save(user).Error; err != nil {
 		return err
 	}
+	if reference == "" || strings.HasSuffix(reference, ":") {
+		reference = fmt.Sprintf("affiliate-transfer:%d:%d", user.Id, common.GetTimestamp())
+	}
+	if err := CreateBillingTransaction(tx, &BillingTransaction{
+		EventKey:      reference,
+		UserId:        user.Id,
+		Type:          BillingTypeAffiliate,
+		Quota:         quota,
+		Reference:     reference,
+		PaymentMethod: "affiliate",
+		Status:        "success",
+		CreatedAt:     common.GetTimestamp(),
+	}); err != nil {
+		return err
+	}
 
 	// 提交事务
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+	return updateUserCache(*user)
 }
 
 func (user *User) prepareForInsert(tx *gorm.DB) error {

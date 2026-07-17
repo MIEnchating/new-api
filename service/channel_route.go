@@ -20,10 +20,19 @@ const (
 	ginKeyChannelRouteModel         = "channel_route_model"
 	ginKeyChannelRouteRequestPath   = "channel_route_request_path"
 	ginKeyChannelRouteStickyLogInfo = "channel_route_sticky_log_info"
+	channelRouteAffinityNamespace   = "channel_route_sticky"
 )
 
 var channelRouteCooldowns sync.Map
-var channelRouteStickyChannels sync.Map
+var channelRouteAffinityStoreOnce sync.Once
+var channelRouteAffinityStore *stickyChannelStore
+
+type ChannelRouteAffinityStats struct {
+	Enabled       bool   `json:"enabled"`
+	Total         int    `json:"total"`
+	CacheCapacity int    `json:"cache_capacity"`
+	CacheAlgo     string `json:"cache_algo"`
+}
 
 func IsChannelRouteEnabled() bool {
 	return common.ChannelRouteCooldownEnabled && common.ChannelRouteCooldownSeconds > 0
@@ -46,29 +55,46 @@ func channelRouteStickyScope(group string, modelName string, requestPath string)
 }
 
 func channelRouteStickyKey(group string, modelName string, requestPath string) string {
-	return "channel_route_sticky:" + common.GenerateHMAC(channelRouteStickyScope(group, modelName, requestPath))
+	return common.GenerateHMAC(channelRouteStickyScope(group, modelName, requestPath))
+}
+
+func getChannelRouteAffinityStore() *stickyChannelStore {
+	channelRouteAffinityStoreOnce.Do(func() {
+		channelRouteAffinityStore = newStickyChannelStore(stickyChannelStoreConfig{
+			Namespace: channelRouteAffinityNamespace,
+			Capacity:  100_000,
+		})
+	})
+	return channelRouteAffinityStore
+}
+
+func GetChannelRouteAffinityStats() ChannelRouteAffinityStats {
+	store := getChannelRouteAffinityStore()
+	keys, err := store.Keys()
+	if err != nil {
+		common.SysError("channel route affinity cache list failed: " + err.Error())
+		keys = nil
+	}
+	capacity, _ := store.Capacity()
+	algorithm, _ := store.Algorithm()
+	return ChannelRouteAffinityStats{
+		Enabled:       IsChannelRouteStickyEnabled(),
+		Total:         len(keys),
+		CacheCapacity: capacity,
+		CacheAlgo:     algorithm,
+	}
 }
 
 func GetChannelRouteStickyChannel(group string, modelName string, requestPath string) int {
 	if group == "" || modelName == "" {
 		return 0
 	}
-	if common.RedisEnabled && common.RDB != nil {
-		value, err := common.RedisGet(channelRouteStickyKey(group, modelName, requestPath))
-		if err == nil {
-			channelID, parseErr := strconv.Atoi(value)
-			if parseErr == nil && channelID > 0 {
-				return channelID
-			}
-		}
-	}
-	value, ok := channelRouteStickyChannels.Load(channelRouteStickyScope(group, modelName, requestPath))
-	if !ok {
+	channelID, found, err := getChannelRouteAffinityStore().Get(channelRouteStickyKey(group, modelName, requestPath))
+	if err != nil {
+		common.SysLog("failed to get channel route affinity: " + err.Error())
 		return 0
 	}
-	channelID, ok := value.(int)
-	if !ok || channelID <= 0 {
-		channelRouteStickyChannels.Delete(channelRouteStickyScope(group, modelName, requestPath))
+	if !found {
 		return 0
 	}
 	return channelID
@@ -78,24 +104,33 @@ func SetChannelRouteStickyChannel(group string, modelName string, requestPath st
 	if group == "" || modelName == "" || channelID <= 0 {
 		return
 	}
-	if common.RedisEnabled && common.RDB != nil {
-		if err := common.RedisSet(channelRouteStickyKey(group, modelName, requestPath), strconv.Itoa(channelID), 0); err != nil {
-			common.SysLog("failed to set channel route sticky in redis: " + err.Error())
-		}
+	if err := getChannelRouteAffinityStore().SetWithTTL(
+		channelRouteStickyKey(group, modelName, requestPath),
+		channelID,
+		0,
+	); err != nil {
+		common.SysLog("failed to set channel route affinity: " + err.Error())
 	}
-	channelRouteStickyChannels.Store(channelRouteStickyScope(group, modelName, requestPath), channelID)
 }
 
 func ClearChannelRouteStickyChannel(group string, modelName string, requestPath string) {
 	if group == "" || modelName == "" {
 		return
 	}
-	if common.RedisEnabled && common.RDB != nil {
-		if err := common.RedisDel(channelRouteStickyKey(group, modelName, requestPath)); err != nil {
-			common.SysLog("failed to delete channel route sticky in redis: " + err.Error())
-		}
+	if _, err := getChannelRouteAffinityStore().Delete(channelRouteStickyKey(group, modelName, requestPath)); err != nil {
+		common.SysLog("failed to delete channel route affinity: " + err.Error())
 	}
-	channelRouteStickyChannels.Delete(channelRouteStickyScope(group, modelName, requestPath))
+}
+
+func ClearChannelRouteAffinityByChannel(channelID int) (int, error) {
+	if channelID <= 0 {
+		return 0, fmt.Errorf("invalid channel ID")
+	}
+	return getChannelRouteAffinityStore().DeleteByChannelID(channelID)
+}
+
+func ClearAllChannelRouteAffinity() (int, error) {
+	return getChannelRouteAffinityStore().ClearAll()
 }
 
 func isChannelRouteFrozenInMemory(group string, channelID int, now int64) bool {
@@ -249,7 +284,11 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 		return nil, fmt.Errorf("retry param is nil")
 	}
 	if !IsChannelRouteEnabled() {
-		return model.GetRandomSatisfiedChannel(group, param.ModelName, retry, param.RequestPath)
+		channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, retry, param.RequestPath)
+		if err == nil && channel != nil {
+			TrackChannelExecutionSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry)
+		}
+		return channel, err
 	}
 
 	now := common.GetTimestamp()
@@ -257,6 +296,9 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 		stickyChannelID := GetChannelRouteStickyChannel(group, param.ModelName, param.RequestPath)
 		if stickyChannelID > 0 {
 			if IsChannelRouteFrozen(group, stickyChannelID, now) {
+				if stickyChannel, _ := model.CacheGetChannel(stickyChannelID); stickyChannel != nil {
+					TrackChannelExecutionSkipped(param.Ctx, group, param.ModelName, param.RequestPath, stickyChannel, "affinity_cooling", GetChannelRouteCooldownUntil(group, stickyChannelID, now))
+				}
 				ClearChannelRouteStickyChannel(group, param.ModelName, param.RequestPath)
 			} else {
 				channel, err := model.GetRandomSatisfiedChannelWithFilter(
@@ -274,6 +316,8 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 				if channel != nil {
 					TrackChannelRouteSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
 					markChannelRouteStickyHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
+					TrackChannelExecutionAffinityHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id, "route_affinity")
+					TrackChannelExecutionSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry)
 					logger.LogDebug(param.Ctx, "channel route selected sticky channel: group=%s channel=%d", group, channel.Id)
 					return channel, nil
 				}
@@ -291,12 +335,14 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 			frozen := IsChannelRouteFrozen(group, channel.Id, now)
 			if frozen {
 				logger.LogDebug(param.Ctx, "channel route skipped cooldown channel: group=%s channel=%d", group, channel.Id)
+				TrackChannelExecutionSkipped(param.Ctx, group, param.ModelName, param.RequestPath, channel, "cooling", GetChannelRouteCooldownUntil(group, channel.Id, now))
 			}
 			return !frozen
 		},
 	)
 	if err == nil && channel != nil {
 		TrackChannelRouteSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
+		TrackChannelExecutionSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry)
 	}
 	return channel, err
 }
@@ -336,6 +382,7 @@ func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 		}
 	}
 	until := FreezeChannelRoute(group, channelID, cooldownSeconds)
+	TrackChannelExecutionCooling(c, group, channelID, until)
 	logger.LogWarn(c, fmt.Sprintf("channel route frozen: group=%s channel=%d cooldown=%ds until=%d",
 		group, channelID, cooldownSeconds, until))
 	return true

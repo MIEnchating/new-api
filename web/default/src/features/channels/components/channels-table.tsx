@@ -164,9 +164,11 @@ export function ChannelsTable() {
   const handleShowUserGroupsChange = (checked: boolean) => {
     setShowUserGroups(checked)
     localStorage.setItem(CHANNELS_SHOW_USER_GROUPS_STORAGE_KEY, String(checked))
-    handleColumnFiltersChange((previous) =>
-      previous.filter((filter) => filter.id !== 'group')
-    )
+    if (!checked && columnFilters.some((filter) => filter.id === 'group')) {
+      handleColumnFiltersChange((previous) =>
+        previous.filter((filter) => filter.id !== 'group')
+      )
+    }
   }
 
   // Extract filters from column filters

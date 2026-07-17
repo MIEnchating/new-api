@@ -108,6 +108,58 @@ func (c *HybridCache[V]) Get(key string) (value V, found bool, err error) {
 	return c.memCache().Get(full)
 }
 
+// GetMany accepts either fully namespaced keys or raw keys and returns values
+// keyed by their fully namespaced cache keys.
+func (c *HybridCache[V]) GetMany(keys []string) (map[string]V, error) {
+	values := make(map[string]V, len(keys))
+	if len(keys) == 0 {
+		return values, nil
+	}
+
+	fullKeys := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if full := c.ns.FullKey(key); full != "" {
+			fullKeys = append(fullKeys, full)
+		}
+	}
+	if len(fullKeys) == 0 {
+		return values, nil
+	}
+
+	if c.redisOn() {
+		ctx, cancel := context.WithTimeout(context.Background(), defaultRedisScanTimeout)
+		defer cancel()
+
+		var firstErr error
+		for start := 0; start < len(fullKeys); start += 1000 {
+			end := min(start+1000, len(fullKeys))
+			batch := fullKeys[start:end]
+			rawValues, err := c.redis.MGet(ctx, batch...).Result()
+			if err != nil {
+				return values, err
+			}
+			for index, raw := range rawValues {
+				text, ok := raw.(string)
+				if !ok {
+					continue
+				}
+				value, decodeErr := c.redisCodec.Decode(text)
+				if decodeErr != nil {
+					if firstErr == nil {
+						firstErr = decodeErr
+					}
+					continue
+				}
+				values[batch[index]] = value
+			}
+		}
+		return values, firstErr
+	}
+
+	memoryValues, _, err := c.memCache().GetMany(fullKeys)
+	return memoryValues, err
+}
+
 func (c *HybridCache[V]) SetWithTTL(key string, v V, ttl time.Duration) error {
 	full := c.ns.FullKey(key)
 	if full == "" {

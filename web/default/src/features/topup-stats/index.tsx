@@ -22,6 +22,7 @@ import { CircleDollarSign, ReceiptText, RefreshCw, Users } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { CompactDateTimeRangePicker } from '@/components/compact-date-time-range-picker'
 import { DataTablePage, useDataTable } from '@/components/data-table'
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
@@ -31,7 +32,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { CompactDateTimeRangePicker } from '@/features/usage-logs/components/compact-date-time-range-picker'
 import dayjs from '@/lib/dayjs'
 import { formatNumber } from '@/lib/format'
 

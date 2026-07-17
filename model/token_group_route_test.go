@@ -52,3 +52,16 @@ func TestNormalizeTokenGroupRouteConfigSerializesNormalizedRoutes(t *testing.T) 
 	assert.Equal(t, "premium", routes[0].Group)
 	assert.Equal(t, `[{"group":"premium","priority":2,"cooldown_seconds":120},{"group":"fallback","priority":1,"cooldown_seconds":60}]`, normalizedConfig)
 }
+
+func TestTokenGetGroupRoutesExcludesDisabledRoutes(t *testing.T) {
+	token := Token{GroupRouteConfig: `[
+		{"group":"fallback","priority":1,"cooldown_seconds":60,"enabled":false},
+		{"group":"premium","priority":2,"cooldown_seconds":120,"enabled":true}
+	]`}
+
+	routes := token.GetGroupRoutes()
+
+	require.Len(t, routes, 1)
+	assert.Equal(t, "premium", routes[0].Group)
+	assert.True(t, routes[0].IsEnabled())
+}

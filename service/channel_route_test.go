@@ -44,7 +44,11 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	common.RetryTimes = 0
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	channelRouteCooldowns = sync.Map{}
-	channelRouteStickyChannels = sync.Map{}
+	channelRouteAffinityStoreOnce = sync.Once{}
+	channelRouteAffinityStore = nil
+	channelExecutionTraceCacheOnce = sync.Once{}
+	channelExecutionTraceCache = nil
+	channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
 	tokenGroupRouteCooldowns = sync.Map{}
 
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -62,7 +66,11 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 		common.ChannelRouteSameChannelRetries = oldChannelRouteSameChannelRetries
 		common.RetryTimes = oldRetryTimes
 		channelRouteCooldowns = sync.Map{}
-		channelRouteStickyChannels = sync.Map{}
+		channelRouteAffinityStoreOnce = sync.Once{}
+		channelRouteAffinityStore = nil
+		channelExecutionTraceCacheOnce = sync.Once{}
+		channelExecutionTraceCache = nil
+		channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
 		tokenGroupRouteCooldowns = sync.Map{}
 		model.DB = oldDB
 		model.LOG_DB = oldLogDB
@@ -310,6 +318,67 @@ func TestChannelRouteStickyKeepsLastSuccessfulFallback(t *testing.T) {
 	assert.Equal(t, 1, recovered.Id)
 }
 
+func TestClearChannelRouteAffinityByChannelOnlyClearsMatchingChannel(t *testing.T) {
+	setupChannelRouteTest(t)
+
+	SetChannelRouteStickyChannel("default", "model-a", "/v1/responses", 1)
+	SetChannelRouteStickyChannel("default", "model-b", "/v1/responses", 1)
+	SetChannelRouteStickyChannel("default", "model-c", "/v1/responses", 2)
+
+	deleted, err := ClearChannelRouteAffinityByChannel(1)
+	require.NoError(t, err)
+	assert.Equal(t, 2, deleted)
+	assert.Zero(t, GetChannelRouteStickyChannel("default", "model-a", "/v1/responses"))
+	assert.Zero(t, GetChannelRouteStickyChannel("default", "model-b", "/v1/responses"))
+	assert.Equal(t, 2, GetChannelRouteStickyChannel("default", "model-c", "/v1/responses"))
+}
+
+func TestClearAllChannelRouteAffinityClearsEveryChannel(t *testing.T) {
+	setupChannelRouteTest(t)
+
+	SetChannelRouteStickyChannel("default", "model-a", "/v1/responses", 1)
+	SetChannelRouteStickyChannel("default", "model-b", "/v1/responses", 2)
+
+	deleted, err := ClearAllChannelRouteAffinity()
+	require.NoError(t, err)
+	assert.Equal(t, 2, deleted)
+	assert.Zero(t, GetChannelRouteStickyChannel("default", "model-a", "/v1/responses"))
+	assert.Zero(t, GetChannelRouteStickyChannel("default", "model-b", "/v1/responses"))
+}
+
+func TestChannelRouteAffinityStatsUseSharedStore(t *testing.T) {
+	setupChannelRouteTest(t)
+	common.ChannelRouteStickyEnabled = true
+
+	SetChannelRouteStickyChannel("default", "model-a", "/v1/responses", 1)
+	SetChannelRouteStickyChannel("default", "model-b", "/v1/responses", 2)
+
+	stats := GetChannelRouteAffinityStats()
+	assert.True(t, stats.Enabled)
+	assert.Equal(t, 2, stats.Total)
+	assert.Equal(t, 100_000, stats.CacheCapacity)
+	assert.Equal(t, "lru", stats.CacheAlgo)
+}
+
+func TestChannelRouteAffinityKeepsExistingRedisKeyFormat(t *testing.T) {
+	setupChannelRouteTest(t)
+
+	group := "default"
+	modelName := "gpt-5"
+	requestPath := "/v1/responses"
+	expected := "channel_route_sticky:" + common.GenerateHMAC(
+		channelRouteStickyScope(group, modelName, requestPath),
+	)
+
+	assert.Equal(
+		t,
+		expected,
+		getChannelRouteAffinityStore().FullKey(
+			channelRouteStickyKey(group, modelName, requestPath),
+		),
+	)
+}
+
 func TestChannelRouteCooldownKeepsTokenGroupBeforeFallingBackGroup(t *testing.T) {
 	db := setupChannelRouteTest(t)
 	seedChannelRouteChannel(t, db, 1, "premium", 2)
@@ -328,4 +397,67 @@ func TestChannelRouteCooldownKeepsTokenGroupBeforeFallingBackGroup(t *testing.T)
 	require.NotNil(t, channel)
 	assert.Equal(t, "premium", group)
 	assert.Equal(t, 2, channel.Id)
+}
+
+func TestChannelExecutionPlanAndTraceFollowActualRoute(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	seedChannelRouteChannel(t, db, 1, "default", 2)
+	seedChannelRouteChannel(t, db, 2, "default", 1)
+	model.InitChannelCache()
+
+	plan, err := BuildChannelExecutionPlan("default", channelRouteTestModel, "/v1/chat/completions", "route")
+	require.NoError(t, err)
+	require.Len(t, plan.Pools, 2)
+	assert.Equal(t, int64(2), plan.Pools[0].Priority)
+	assert.Equal(t, 1, plan.Pools[0].Candidates[0].ChannelID)
+	assert.Equal(t, 2, plan.Pools[1].Candidates[0].ChannelID)
+
+	ctx := newChannelRouteContext()
+	ctx.Set(common.RequestIdKey, "request-trace-test")
+	param := newChannelRouteRetryParam(ctx, "default")
+	first, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, 1, first.Id)
+	state, traceExists := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, traceExists)
+	require.NotEmpty(t, state.trace.Events)
+	assert.Equal(t, "active", state.trace.Events[0].State)
+
+	TrackChannelExecutionFailure(ctx, first.Id, "upstream failed")
+	assert.True(t, MarkChannelRouteFailure(ctx, newChannelRouteFailure()))
+	second, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	assert.Equal(t, 2, second.Id)
+	MarkChannelExecutionSuccess(ctx)
+
+	trace, found, err := GetChannelExecutionTrace("request-trace-test")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "success", trace.Status)
+	require.GreaterOrEqual(t, len(trace.Events), 6)
+	assert.Equal(t, "active", trace.Events[0].State)
+	assert.Equal(t, []int{2}, trace.Events[0].NextIDs)
+	assert.Equal(t, "failed", trace.Events[1].State)
+	assert.Equal(t, "cooling", trace.Events[2].State)
+	assert.Equal(t, "skipped", trace.Events[3].State)
+	assert.Equal(t, "active", trace.Events[4].State)
+	assert.Equal(t, "success", trace.Events[len(trace.Events)-1].State)
+	recent, err := ListChannelExecutionTraces(1, "default", 20)
+	require.NoError(t, err)
+	require.Len(t, recent, 1)
+	assert.Equal(t, "request-trace-test", recent[0].RequestID)
+	recent, err = ListChannelExecutionTraces(0, "default", 20)
+	require.NoError(t, err)
+	require.Len(t, recent, 1)
+	assert.Equal(t, "request-trace-test", recent[0].RequestID)
+	recent, err = ListChannelExecutionTraces(1, "other", 20)
+	require.NoError(t, err)
+	assert.Empty(t, recent)
+
+	adminInfo := map[string]interface{}{}
+	AppendChannelExecutionTraceAdminInfo(ctx, adminInfo)
+	_, exists := adminInfo["channel_execution_trace"]
+	assert.True(t, exists)
 }

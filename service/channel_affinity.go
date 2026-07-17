@@ -32,7 +32,7 @@ const (
 
 var (
 	channelAffinityCacheOnce sync.Once
-	channelAffinityCache     *cachex.HybridCache[int]
+	channelAffinityCache     *stickyChannelStore
 
 	channelAffinityUsageCacheStatsOnce  sync.Once
 	channelAffinityUsageCacheStatsCache *cachex.HybridCache[ChannelAffinityUsageCacheCounters]
@@ -78,7 +78,7 @@ type ChannelAffinityCacheStats struct {
 	CacheAlgo     string         `json:"cache_algo"`
 }
 
-func getChannelAffinityCache() *cachex.HybridCache[int] {
+func getChannelAffinityCache() *stickyChannelStore {
 	channelAffinityCacheOnce.Do(func() {
 		setting := operation_setting.GetChannelAffinitySetting()
 		capacity := setting.MaxEntries
@@ -90,19 +90,10 @@ func getChannelAffinityCache() *cachex.HybridCache[int] {
 			defaultTTLSeconds = 3600
 		}
 
-		channelAffinityCache = cachex.NewHybridCache[int](cachex.HybridCacheConfig[int]{
-			Namespace: cachex.Namespace(channelAffinityCacheNamespace),
-			Redis:     common.RDB,
-			RedisEnabled: func() bool {
-				return common.RedisEnabled && common.RDB != nil
-			},
-			RedisCodec: cachex.IntCodec{},
-			Memory: func() *hot.HotCache[string, int] {
-				return hot.NewHotCache[string, int](hot.LRU, capacity).
-					WithTTL(time.Duration(defaultTTLSeconds) * time.Second).
-					WithJanitor().
-					Build()
-			},
+		channelAffinityCache = newStickyChannelStore(stickyChannelStoreConfig{
+			Namespace:  channelAffinityCacheNamespace,
+			Capacity:   capacity,
+			DefaultTTL: time.Duration(defaultTTLSeconds) * time.Second,
 		})
 	})
 	return channelAffinityCache
@@ -197,17 +188,12 @@ func GetChannelAffinityCacheStats() ChannelAffinityCacheStats {
 
 func ClearChannelAffinityCacheAll() int {
 	cache := getChannelAffinityCache()
-	keys, err := cache.Keys()
+	deleted, err := cache.ClearAll()
 	if err != nil {
-		common.SysError(fmt.Sprintf("channel affinity cache list keys failed: err=%v", err))
-		keys = nil
+		common.SysError(fmt.Sprintf("channel affinity cache clear failed: err=%v", err))
+		return 0
 	}
-	if len(keys) > 0 {
-		if _, err := cache.DeleteMany(keys); err != nil {
-			common.SysError(fmt.Sprintf("channel affinity cache delete many failed: err=%v", err))
-		}
-	}
-	return len(keys)
+	return deleted
 }
 
 func ClearChannelAffinityCacheByRuleName(ruleName string) (int, error) {

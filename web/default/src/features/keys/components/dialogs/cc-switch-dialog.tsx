@@ -55,6 +55,9 @@ const APP_CONFIGS = {
 type AppType = keyof typeof APP_CONFIGS
 
 function getServerAddress(): string {
+  if (import.meta.env.DEV) {
+    return window.location.origin
+  }
   try {
     const raw = localStorage.getItem('status')
     if (raw) {

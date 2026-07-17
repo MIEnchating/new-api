@@ -1,0 +1,79 @@
+name: Sync Release Notes
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/release-notes/v*.md"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to update"
+        required: true
+        type: string
+
+jobs:
+  sync:
+    name: Update Existing Releases
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Collect release tags
+        id: tags
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          MANUAL_TAG: ${{ inputs.tag }}
+        run: |
+          tags_file="$RUNNER_TEMP/release-tags.txt"
+          : > "$tags_file"
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            printf '%s\n' "$MANUAL_TAG" >> "$tags_file"
+          else
+            git diff --name-only "$BEFORE_SHA" "$CURRENT_SHA" -- '.github/release-notes/v*.md' |
+              while IFS= read -r file; do
+                basename "$file" .md
+              done >> "$tags_file"
+          fi
+
+          sort -u -o "$tags_file" "$tags_file"
+          if [[ -s "$tags_file" ]]; then
+            echo "has_tags=true" >> "$GITHUB_OUTPUT"
+            echo "Release tags to sync:"
+            cat "$tags_file"
+          else
+            echo "has_tags=false" >> "$GITHUB_OUTPUT"
+            echo "No versioned release notes changed."
+          fi
+
+      - name: Generate and sync release notes
+        if: steps.tags.outputs.has_tags == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          while IFS= read -r tag; do
+            [[ "$tag" =~ ^[A-Za-z0-9._-]+$ ]] || {
+              echo "Unsupported release tag: $tag" >&2
+              exit 1
+            }
+
+            notes_file="$RUNNER_TEMP/$tag-release-notes.md"
+            node .github/scripts/generate-release-notes.mjs "$tag" "$notes_file" --require-source
+
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release edit "$tag" --notes-file "$notes_file"
+              echo "Updated release notes for $tag"
+            else
+              echo "Release $tag does not exist yet; tag publishing will create it later."
+            fi
+          done < "$RUNNER_TEMP/release-tags.txt"

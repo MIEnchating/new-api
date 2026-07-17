@@ -850,11 +850,7 @@ export function useChannelsColumns(
           isTagAggregateRow(row.original) ? (
             <span className='text-muted-foreground'>-</span>
           ) : (
-            <ChannelRouteStatusBadge
-              channelId={row.original.id}
-              channelStatus={row.original.status}
-              routeStatus={row.original.route_status}
-            />
+            <ChannelRouteStatusBadge channel={row.original} />
           ),
         size: 150,
         enableSorting: false,

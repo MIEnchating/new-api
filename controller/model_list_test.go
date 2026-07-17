@@ -215,6 +215,45 @@ func TestGetUserModelsFiltersByRequestedGroup(t *testing.T) {
 	require.Empty(t, decodeUserModelsResponse(t, vipRecorder))
 }
 
+func TestListModelsUsesAllEnabledTokenRouteGroups(t *testing.T) {
+	withSelfUseModeEnabled(t)
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.Create(&[]model.Ability{
+		{Group: "route-primary", Model: "zz-route-primary-model", ChannelId: 1, Enabled: true},
+		{Group: "route-fallback", Model: "zz-route-fallback-model", ChannelId: 2, Enabled: true},
+		{Group: "not-routed", Model: "zz-not-routed-model", ChannelId: 3, Enabled: true},
+	}).Error)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	common.SetContextKey(ctx, constant.ContextKeyUserGroup, "default")
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroupRoutes, []model.TokenGroupRoute{
+		{Group: "route-primary", Priority: 1, CooldownSeconds: 60},
+		{Group: "route-fallback", Priority: 0, CooldownSeconds: 60},
+	})
+
+	ListModels(ctx, constant.ChannelTypeOpenAI)
+
+	models := decodeListModelsResponse(t, recorder)
+	require.Contains(t, models, "zz-route-primary-model")
+	require.Contains(t, models, "zz-route-fallback-model")
+	require.NotContains(t, models, "zz-not-routed-model")
+}
+
+func TestGetModelListGroupsIgnoresDisabledTokenRoute(t *testing.T) {
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	disabled := false
+	common.SetContextKey(ctx, constant.ContextKeyTokenGroupRoutes, []model.TokenGroupRoute{
+		{Group: "enabled-route", Priority: 1, CooldownSeconds: 60},
+		{Group: "disabled-route", Priority: 0, CooldownSeconds: 60, Enabled: &disabled},
+	})
+
+	groups, err := getModelListGroups(ctx)
+	require.NoError(t, err)
+	require.Equal(t, []string{"enabled-route"}, groups.ownerGroups)
+}
+
 func TestListModelsIncludesTieredBillingModel(t *testing.T) {
 	withSelfUseModeDisabled(t)
 	withTieredBillingConfig(t, map[string]string{

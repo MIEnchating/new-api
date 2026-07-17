@@ -100,8 +100,30 @@ export const GroupRatioForm = memo(function GroupRatioForm({
     setEditMode((prev) => (prev === 'visual' ? 'json' : 'visual'))
   }, [])
 
+  const autoGroupDefaultControl = (
+    <FormField
+      control={form.control}
+      name='DefaultUseAutoGroup'
+      render={({ field }) => (
+        <SettingsSwitchItem>
+          <SettingsSwitchContent>
+            <FormLabel>{t('Default to auto groups')}</FormLabel>
+            <FormDescription>
+              {t(
+                'When enabled, automatically generated initial tokens use the auto group.'
+              )}
+            </FormDescription>
+          </SettingsSwitchContent>
+          <FormControl>
+            <Switch checked={field.value} onCheckedChange={field.onChange} />
+          </FormControl>
+        </SettingsSwitchItem>
+      )}
+    />
+  )
+
   return (
-    <div className='space-y-6'>
+    <div className='space-y-6 pb-4 sm:pb-6'>
       <div className='flex flex-wrap justify-end gap-2'>
         <Button variant='outline' size='sm' onClick={() => setGuideOpen(true)}>
           <HelpCircle className='mr-2 h-4 w-4' />
@@ -145,32 +167,10 @@ export const GroupRatioForm = memo(function GroupRatioForm({
               autoGroups={form.watch('AutoGroups')}
               groupOrder={form.watch('GroupOrder')}
               groupSpecialUsableGroup={form.watch('GroupSpecialUsableGroup')}
+              autoGroupDefaultControl={autoGroupDefaultControl}
               onChange={(field, value) =>
                 handleFieldChange(field as keyof GroupFormValues, value)
               }
-            />
-
-            <FormField
-              control={form.control}
-              name='DefaultUseAutoGroup'
-              render={({ field }) => (
-                <SettingsSwitchItem>
-                  <SettingsSwitchContent>
-                    <FormLabel>{t('Default to auto groups')}</FormLabel>
-                    <FormDescription>
-                      {t(
-                        'When enabled, automatically generated initial tokens use the auto group.'
-                      )}
-                    </FormDescription>
-                  </SettingsSwitchContent>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </SettingsSwitchItem>
-              )}
             />
           </div>
         ) : (
@@ -254,6 +254,8 @@ export const GroupRatioForm = memo(function GroupRatioForm({
               )}
             />
 
+            {autoGroupDefaultControl}
+
             <FormField
               control={form.control}
               name='AutoGroups'
@@ -265,7 +267,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   </FormControl>
                   <FormDescription>
                     {t(
-                      'JSON array of group identifiers. When enabled below, new tokens rotate through this list.'
+                      'JSON array of group identifiers. When enabled above, new tokens rotate through this list.'
                     )}
                   </FormDescription>
                   <FormMessage />
@@ -308,29 +310,6 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   </FormDescription>
                   <FormMessage />
                 </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name='DefaultUseAutoGroup'
-              render={({ field }) => (
-                <SettingsSwitchItem>
-                  <SettingsSwitchContent>
-                    <FormLabel>{t('Default to auto groups')}</FormLabel>
-                    <FormDescription>
-                      {t(
-                        'When enabled, automatically generated initial tokens use the auto group.'
-                      )}
-                    </FormDescription>
-                  </SettingsSwitchContent>
-                  <FormControl>
-                    <Switch
-                      checked={field.value}
-                      onCheckedChange={field.onChange}
-                    />
-                  </FormControl>
-                </SettingsSwitchItem>
               )}
             />
           </SettingsForm>

@@ -178,6 +178,22 @@ type modelListGroups struct {
 func getModelListGroups(c *gin.Context) (modelListGroups, error) {
 	tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
 	userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+	if routes, ok := common.GetContextKeyType[[]model.TokenGroupRoute](c, constant.ContextKeyTokenGroupRoutes); ok {
+		routes = model.EnabledTokenGroupRoutes(routes)
+		ownerGroups := make([]string, 0, len(routes))
+		for _, route := range routes {
+			if route.Group != "" && !common.StringsContains(ownerGroups, route.Group) {
+				ownerGroups = append(ownerGroups, route.Group)
+			}
+		}
+		if len(ownerGroups) > 0 {
+			return modelListGroups{
+				userGroup:   userGroup,
+				tokenGroup:  tokenGroup,
+				ownerGroups: ownerGroups,
+			}, nil
+		}
+	}
 	if userGroup == "" && (tokenGroup == "" || tokenGroup == "auto") {
 		var err error
 		userGroup, err = model.GetUserGroup(c.GetInt("id"), false)
@@ -246,9 +262,9 @@ func ListModels(c *gin.Context, modelType int) {
 		}
 	} else {
 		var models []string
-		if groups.tokenGroup == "auto" {
-			for _, autoGroup := range ownerGroups {
-				groupModels := model.GetGroupEnabledModels(autoGroup)
+		if groups.tokenGroup == "auto" || len(ownerGroups) > 1 {
+			for _, ownerGroup := range ownerGroups {
+				groupModels := model.GetGroupEnabledModels(ownerGroup)
 				for _, g := range groupModels {
 					if !common.StringsContains(models, g) {
 						models = append(models, g)

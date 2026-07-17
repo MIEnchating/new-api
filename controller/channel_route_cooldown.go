@@ -52,3 +52,51 @@ func ClearChannelRouteCooldown(c *gin.Context) {
 		"groups":     groups,
 	})
 }
+
+func ClearChannelRouteAffinity(c *gin.Context) {
+	channelID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || channelID <= 0 {
+		common.ApiErrorMsg(c, "无效的渠道 ID")
+		return
+	}
+
+	if _, err := model.GetChannelById(channelID, false); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	deleted, err := service.ClearChannelRouteAffinityByChannel(channelID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	recordManageAudit(c, "channel.route_affinity_clear", map[string]interface{}{
+		"id":      channelID,
+		"deleted": deleted,
+	})
+	common.ApiSuccess(c, gin.H{
+		"channel_id": channelID,
+		"deleted":    deleted,
+	})
+}
+
+func ClearAllChannelRouteAffinity(c *gin.Context) {
+	deleted, err := service.ClearAllChannelRouteAffinity()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	recordManageAudit(c, "channel.route_affinity_clear", map[string]interface{}{
+		"all":     true,
+		"deleted": deleted,
+	})
+	common.ApiSuccess(c, gin.H{
+		"deleted": deleted,
+	})
+}
+
+func GetChannelRouteAffinityStats(c *gin.Context) {
+	common.ApiSuccess(c, service.GetChannelRouteAffinityStats())
+}

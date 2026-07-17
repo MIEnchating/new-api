@@ -63,7 +63,7 @@ export function Channels() {
       typeof channelRouteCooldownSeconds === 'number'
         ? `${channelRouteCooldownSeconds}s`
         : null,
-      channelRouteStickyEnabled ? t('Route stickiness') : null,
+      channelRouteStickyEnabled ? t('Route affinity') : null,
       typeof channelRouteSameChannelRetries === 'number' &&
       channelRouteSameChannelRetries > 0
         ? `${t('Same-channel retries')} ${channelRouteSameChannelRetries}`
@@ -96,7 +96,7 @@ export function Channels() {
             : '-'}
         </p>
         <p>
-          {t('Channel route stickiness')}:{' '}
+          {t('Channel route affinity')}:{' '}
           {t(channelRouteStickyEnabled ? 'Enabled' : 'Disabled')}
         </p>
         <p>

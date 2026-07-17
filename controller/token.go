@@ -42,13 +42,17 @@ func normalizeTokenGroupRouteConfigForUser(userID int, config string) (string, e
 	if len(routes) == 0 {
 		return "", nil
 	}
+	activeRoutes := model.EnabledTokenGroupRoutes(routes)
+	if len(activeRoutes) == 0 {
+		return "", fmt.Errorf("请至少启用一条分组路由规则")
+	}
 
 	userGroup, err := model.GetUserGroup(userID, false)
 	if err != nil {
 		return "", err
 	}
 	usableGroups := service.GetUserUsableGroups(userGroup)
-	for _, route := range routes {
+	for _, route := range activeRoutes {
 		if route.Group == "auto" {
 			return "", fmt.Errorf("密钥路由不支持 auto 分组")
 		}

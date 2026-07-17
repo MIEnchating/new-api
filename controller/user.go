@@ -456,7 +456,7 @@ func TransferAffQuota(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	err = user.TransferAffQuotaToQuota(tran.Quota)
+	err = user.TransferAffQuotaToQuota(tran.Quota, "affiliate-transfer:"+c.GetString(common.RequestIdKey))
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserTransferFailed, map[string]any{"Error": err.Error()})
 		return
@@ -1138,7 +1138,8 @@ func ManageUser(c *gin.Context) {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
 				return
 			}
-			if err := model.IncreaseUserQuota(user.Id, req.Value, true); err != nil {
+			_, _, _, err := model.AdjustUserQuotaWithBilling(user.Id, req.Value, req.Mode, c.GetInt("id"), "admin-adjustment:"+c.GetString(common.RequestIdKey))
+			if err != nil {
 				common.ApiError(c, err)
 				return
 			}
@@ -1150,7 +1151,8 @@ func ManageUser(c *gin.Context) {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
 				return
 			}
-			if err := model.DecreaseUserQuota(user.Id, req.Value, true); err != nil {
+			_, _, _, err := model.AdjustUserQuotaWithBilling(user.Id, req.Value, req.Mode, c.GetInt("id"), "admin-adjustment:"+c.GetString(common.RequestIdKey))
+			if err != nil {
 				common.ApiError(c, err)
 				return
 			}
@@ -1158,14 +1160,14 @@ func ManageUser(c *gin.Context) {
 				"quota": logger.LogQuota(req.Value),
 			})
 		case "override":
-			oldQuota := user.Quota
-			if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("quota", req.Value).Error; err != nil {
+			oldQuota, newQuota, _, err := model.AdjustUserQuotaWithBilling(user.Id, req.Value, req.Mode, c.GetInt("id"), "admin-adjustment:"+c.GetString(common.RequestIdKey))
+			if err != nil {
 				common.ApiError(c, err)
 				return
 			}
 			recordManageAuditFor(c, user.Id, "user.quota_override", map[string]interface{}{
 				"from": logger.LogQuota(oldQuota),
-				"to":   logger.LogQuota(req.Value),
+				"to":   logger.LogQuota(newQuota),
 			})
 		default:
 			common.ApiErrorI18n(c, i18n.MsgInvalidParams)

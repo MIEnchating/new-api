@@ -364,6 +364,7 @@ func MarkTokenGroupRouteFailure(c *gin.Context, err *types.NewAPIError) {
 		return
 	}
 	until := FreezeTokenGroupRoute(tokenID, group, modelName, requestPath, cooldownSeconds)
+	TrackChannelExecutionGroupEvent(c, group, modelName, requestPath, "cooling", "group_route_failure", until)
 	stickyHit := common.GetContextKeyBool(c, constant.ContextKeyTokenGroupRouteStickyHit)
 	if IsTokenGroupRouteStickyEnabled(c) {
 		clearTokenGroupRouteStickyScope(tokenID, modelName, requestPath)
@@ -433,7 +434,7 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 		startGroupIndex = 0
 	}
 	if startGroupIndex >= len(routes) {
-		return nil, "", fmt.Errorf("密钥路由分组已全部尝试完毕")
+		return nil, "", fmt.Errorf("密钥分组路由规则已全部尝试完毕")
 	}
 
 	now := common.GetTimestamp()
@@ -458,6 +459,7 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 					}
 					if channel != nil {
 						common.SetContextKey(param.Ctx, constant.ContextKeyTokenGroupRouteStickyHit, true)
+						TrackChannelExecutionGroupEvent(param.Ctx, group, param.ModelName, param.RequestPath, "affinity_hit", "group_affinity", 0)
 						return channel, group, nil
 					}
 					clearTokenGroupRouteStickyScope(tokenID, param.ModelName, param.RequestPath)
@@ -473,6 +475,7 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 		selectGroup = route.Group
 		if IsTokenGroupRouteFrozen(tokenID, route.Group, param.ModelName, param.RequestPath, now) {
 			skippedCooldown = true
+			TrackChannelExecutionGroupEvent(param.Ctx, route.Group, param.ModelName, param.RequestPath, "skipped", "group_cooling", GetTokenGroupRouteCooldownUntil(tokenID, route.Group, param.ModelName, param.RequestPath, now))
 			logger.LogDebug(param.Ctx, "Token group route skipped cooldown group: %s", route.Group)
 			continue
 		}
@@ -483,6 +486,7 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 		}
 		if channel == nil {
 			common.SetContextKey(param.Ctx, constant.ContextKeyTokenGroupRouteIndex, i+1)
+			TrackChannelExecutionGroupEvent(param.Ctx, route.Group, param.ModelName, param.RequestPath, "skipped", "group_unsupported", 0)
 			logger.LogDebug(param.Ctx, "Token group route group does not support request, skipped: group=%s model=%s path=%s",
 				route.Group, param.ModelName, param.RequestPath)
 			continue
@@ -491,7 +495,7 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 	}
 
 	if skippedCooldown {
-		return nil, selectGroup, fmt.Errorf("密钥路由分组正在冷却，暂无可用分组")
+		return nil, selectGroup, fmt.Errorf("密钥分组路由规则正在冷却，暂无可用分组")
 	}
 	return nil, selectGroup, nil
 }

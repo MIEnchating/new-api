@@ -26,6 +26,7 @@ export const apiKeyGroupRouteSchema = z.object({
   group: z.string(),
   priority: z.number(),
   cooldown_seconds: z.number(),
+  enabled: z.boolean().optional(),
 })
 
 export type ApiKeyGroupRoute = z.infer<typeof apiKeyGroupRouteSchema>

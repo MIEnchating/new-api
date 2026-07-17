@@ -17,7 +17,17 @@ SESSION_SECRET_FILE="${RUN_DIR}/session-secret"
 
 is_running() {
   local pid_file="$1"
-  [[ -f "${pid_file}" ]] && kill -0 "$(<"${pid_file}")" 2>/dev/null
+  local command_marker="$2"
+  local pid
+  local command_line
+
+  [[ -f "${pid_file}" ]] || return 1
+  pid="$(<"${pid_file}")"
+  [[ "${pid}" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "${pid}" 2>/dev/null || return 1
+  [[ -r "/proc/${pid}/cmdline" ]] || return 1
+  command_line="$(tr '\0' ' ' <"/proc/${pid}/cmdline")"
+  [[ "${command_line}" == *"${command_marker}"* ]]
 }
 
 load_environment() {
@@ -56,7 +66,8 @@ load_environment() {
 }
 
 start_services() {
-  if is_running "${BACKEND_PID_FILE}" || is_running "${FRONTEND_PID_FILE}"; then
+  if is_running "${BACKEND_PID_FILE}" "${BUILD_DIR}/new-api-dev" ||
+    is_running "${FRONTEND_PID_FILE}" "${BUN_BIN} run dev --port ${FRONTEND_PORT}"; then
     echo "Development services are already running." >&2
     exit 1
   fi
@@ -100,7 +111,8 @@ start_services() {
 stop_process() {
   local name="$1"
   local pid_file="$2"
-  if ! is_running "${pid_file}"; then
+  local command_marker="$3"
+  if ! is_running "${pid_file}" "${command_marker}"; then
     rm -f "${pid_file}"
     echo "${name}: stopped"
     return
@@ -120,17 +132,17 @@ stop_process() {
 }
 
 stop_services() {
-  stop_process "Frontend" "${FRONTEND_PID_FILE}"
-  stop_process "Backend" "${BACKEND_PID_FILE}"
+  stop_process "Frontend" "${FRONTEND_PID_FILE}" "${BUN_BIN} run dev --port ${FRONTEND_PORT}"
+  stop_process "Backend" "${BACKEND_PID_FILE}" "${BUILD_DIR}/new-api-dev"
 }
 
 show_status() {
-  if is_running "${BACKEND_PID_FILE}"; then
+  if is_running "${BACKEND_PID_FILE}" "${BUILD_DIR}/new-api-dev"; then
     echo "Backend: running (PID $(<"${BACKEND_PID_FILE}"), port ${BACKEND_PORT})"
   else
     echo "Backend: stopped"
   fi
-  if is_running "${FRONTEND_PID_FILE}"; then
+  if is_running "${FRONTEND_PID_FILE}" "${BUN_BIN} run dev --port ${FRONTEND_PORT}"; then
     echo "Frontend: running (PID $(<"${FRONTEND_PID_FILE}"), port ${FRONTEND_PORT})"
   else
     echo "Frontend: stopped"

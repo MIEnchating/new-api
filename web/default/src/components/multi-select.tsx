@@ -164,7 +164,7 @@ export function MultiSelect(props: MultiSelectProps) {
     if (canCreate) {
       set.add(trimmedInput)
     }
-    return Array.from(set)
+    return [...set]
   }, [props.options, props.selected, canCreate, trimmedInput])
 
   const addValues = React.useCallback(
@@ -265,7 +265,7 @@ export function MultiSelect(props: MultiSelectProps) {
           {(values: string[]) => {
             if (props.renderSelectedSummary) {
               return (
-                <span className='bg-muted text-muted-foreground flex h-[calc(--spacing(5.25))] w-fit items-center justify-center rounded-sm px-1.5 font-mono text-xs font-medium whitespace-nowrap'>
+                <span className='bg-muted text-muted-foreground flex h-[calc(--spacing(5.25))] max-w-full min-w-0 items-center justify-center truncate rounded-sm px-1.5 font-mono text-xs font-medium whitespace-nowrap'>
                   {props.renderSelectedSummary(values)}
                 </span>
               )

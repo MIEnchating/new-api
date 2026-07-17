@@ -25,6 +25,8 @@ import {
   API_KEY_FORM_DEFAULT_VALUES,
   getApiKeyFormDefaultValues,
   getApiKeyFormSchema,
+  parseApiKeyGroupRouteConfig,
+  transformFormDataToPayload,
 } from './api-key-form'
 
 const schema = getApiKeyFormSchema(t)
@@ -36,6 +38,7 @@ describe('API key form schema', () => {
     assert.equal(defaults.group, '')
     assert.equal(defaults.cross_group_retry, false)
     assert.equal(defaults.group_routes?.[0]?.group, '')
+    assert.equal(defaults.group_routes?.[0]?.enabled, true)
   })
 
   test('ignores hidden route constraints when group routing is disabled', () => {
@@ -90,5 +93,63 @@ describe('API key form schema', () => {
     assert.equal(issuePaths.has('group_routes.0.cooldown_seconds'), true)
     assert.equal(issuePaths.has('group_routes.1.group'), true)
     assert.equal(issuePaths.has('group_routes.1.cooldown_seconds'), true)
+  })
+
+  test('requires one enabled route group when group routing is enabled', () => {
+    const result = schema.safeParse({
+      ...API_KEY_FORM_DEFAULT_VALUES,
+      name: 'test-key',
+      group_route_enabled: true,
+      group_routes: [
+        {
+          group: 'default',
+          priority: 1,
+          cooldown_seconds: 60,
+          enabled: false,
+        },
+      ],
+    })
+
+    assert.equal(result.success, false)
+    if (result.success) return
+    assert.equal(
+      result.error.issues.some(
+        (issue) => issue.path.join('.') === 'group_routes'
+      ),
+      true
+    )
+  })
+
+  test('treats legacy routes as enabled and preserves disabled routes', () => {
+    const legacyRoutes = parseApiKeyGroupRouteConfig(
+      '[{"group":"default","priority":1,"cooldown_seconds":60}]'
+    )
+    assert.equal(legacyRoutes[0]?.enabled, true)
+
+    const payload = transformFormDataToPayload({
+      ...API_KEY_FORM_DEFAULT_VALUES,
+      name: 'test-key',
+      group_route_enabled: true,
+      group_routes: [
+        {
+          group: 'default',
+          priority: 1,
+          cooldown_seconds: 60,
+          enabled: false,
+        },
+        {
+          group: 'fallback',
+          priority: 0,
+          cooldown_seconds: 60,
+          enabled: true,
+        },
+      ],
+    })
+    const storedRoutes = JSON.parse(payload.group_route_config) as Array<{
+      enabled: boolean
+    }>
+
+    assert.equal(storedRoutes[0]?.enabled, false)
+    assert.equal(storedRoutes[1]?.enabled, true)
   })
 })

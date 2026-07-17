@@ -99,6 +99,30 @@ export interface ChannelRouteStickyInfo {
   channel_id?: number
 }
 
+export interface ChannelExecutionTraceInfo {
+  request_id?: string
+  mode?: 'route' | 'retry'
+  group?: string
+  model?: string
+  request_path?: string
+  status?: 'running' | 'success' | 'failed' | 'cancelled'
+  started_at?: number
+  updated_at?: number
+  events?: Array<{
+    sequence?: number
+    timestamp?: number
+    group?: string
+    channel_id?: number
+    channel_name?: string
+    priority?: number
+    state?: string
+    reason?: string
+    retry_index?: number
+    next_ids?: number[]
+    cooldown_until?: number
+  }>
+}
+
 export const USAGE_BILLING_PATH = {
   LOCAL: 'local',
   UPSTREAM: 'upstream',
@@ -122,6 +146,7 @@ export interface LogOtherData {
     usage_billing_path?: UsageBillingPath | string
     channel_affinity?: ChannelAffinityInfo
     channel_route_sticky?: ChannelRouteStickyInfo
+    channel_execution_trace?: ChannelExecutionTraceInfo
     // Top-up audit fields (type=1, admin only)
     payment_method?: string
     callback_payment_method?: string

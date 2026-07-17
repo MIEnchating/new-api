@@ -21,8 +21,8 @@ import { useQuery } from '@tanstack/react-query'
 import {
   ChevronDown,
   KeyRound,
+  Network,
   Plus,
-  Route,
   Settings2,
   Trash2,
   WalletCards,
@@ -377,6 +377,7 @@ export function ApiKeysMutateDrawer({
                               group: '',
                               priority: 1,
                               cooldown_seconds: 60,
+                              enabled: true,
                             })
                           }
                         }}
@@ -389,9 +390,9 @@ export function ApiKeysMutateDrawer({
               {groupRouteEnabled ? (
                 <div className='flex flex-col gap-3'>
                   <SideDrawerSectionHeader
-                    title={t('Route Groups')}
+                    title={t('Group routing rules')}
                     description={t('Higher priority groups are tried first')}
-                    icon={<Route className='size-4' />}
+                    icon={<Network className='size-4' />}
                   />
                   <FormField
                     control={form.control}
@@ -400,7 +401,7 @@ export function ApiKeysMutateDrawer({
                       <FormItem className={sideDrawerSwitchItemClassName()}>
                         <div className='flex flex-col gap-0.5'>
                           <FormLabel className='text-sm'>
-                            {t('Route stickiness')}
+                            {t('Group affinity')}
                           </FormLabel>
                           <FormDescription className='text-xs'>
                             {t(
@@ -421,87 +422,114 @@ export function ApiKeysMutateDrawer({
                     {routeFields.fields.map((routeField, index) => (
                       <div
                         key={routeField.id}
-                        className='border-border/70 grid gap-3 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_7rem_8rem_auto] sm:items-start'
+                        className='border-border/70 grid gap-3 rounded-md border p-3'
                       >
-                        <FormField
-                          control={form.control}
-                          name={`group_routes.${index}.group`}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>{t('Group')}</FormLabel>
-                              <FormControl>
-                                <ApiKeyGroupCombobox
-                                  options={routableGroups}
-                                  value={field.value}
-                                  onValueChange={field.onChange}
-                                  placeholder={t('Select a group')}
-                                  compact
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
+                        <div className='grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_5rem] sm:items-start'>
+                          <FormField
+                            control={form.control}
+                            name={`group_routes.${index}.group`}
+                            render={({ field }) => (
+                              <FormItem className='min-w-0'>
+                                <FormLabel>{t('Group')}</FormLabel>
+                                <FormControl>
+                                  <ApiKeyGroupCombobox
+                                    options={routableGroups}
+                                    value={field.value}
+                                    onValueChange={field.onChange}
+                                    placeholder={t('Select a group')}
+                                    compact
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
 
-                        <FormField
-                          control={form.control}
-                          name={`group_routes.${index}.priority`}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>{t('Priority')}</FormLabel>
-                              <FormControl>
-                                <Input
-                                  {...field}
-                                  type='number'
-                                  min='0'
-                                  step='1'
-                                  onChange={(e) =>
-                                    field.onChange(
-                                      Number.parseInt(e.target.value, 10) || 0
-                                    )
-                                  }
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
+                          <FormField
+                            control={form.control}
+                            name={`group_routes.${index}.enabled`}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Status')}</FormLabel>
+                                <FormControl>
+                                  <Switch
+                                    checked={field.value !== false}
+                                    onCheckedChange={field.onChange}
+                                    className='my-[9px]'
+                                    aria-label={t('Enabled')}
+                                  />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                        </div>
 
-                        <FormField
-                          control={form.control}
-                          name={`group_routes.${index}.cooldown_seconds`}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>{t('Cooldown')}</FormLabel>
-                              <FormControl>
-                                <Input
-                                  {...field}
-                                  type='number'
-                                  min='1'
-                                  max='31536000'
-                                  step='1'
-                                  onChange={(e) =>
-                                    field.onChange(
-                                      Number.parseInt(e.target.value, 10) || 1
-                                    )
-                                  }
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
+                        <div className='grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.25rem] sm:items-start'>
+                          <FormField
+                            control={form.control}
+                            name={`group_routes.${index}.priority`}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Priority')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    {...field}
+                                    type='number'
+                                    min='0'
+                                    step='1'
+                                    onChange={(e) =>
+                                      field.onChange(
+                                        Number.parseInt(e.target.value, 10) || 0
+                                      )
+                                    }
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
 
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='icon'
-                          className='mt-0 sm:mt-7'
-                          onClick={() => routeFields.remove(index)}
-                          aria-label={t('Remove route group')}
-                        >
-                          <Trash2 className='size-4' />
-                        </Button>
+                          <FormField
+                            control={form.control}
+                            name={`group_routes.${index}.cooldown_seconds`}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Cooldown')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    {...field}
+                                    type='number'
+                                    min='1'
+                                    max='31536000'
+                                    step='1'
+                                    onChange={(e) =>
+                                      field.onChange(
+                                        Number.parseInt(e.target.value, 10) || 1
+                                      )
+                                    }
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <div className='grid gap-2'>
+                            <span
+                              aria-hidden='true'
+                              className='hidden h-3.5 sm:block'
+                            />
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='icon'
+                              onClick={() => routeFields.remove(index)}
+                              aria-label={t('Remove group routing rule')}
+                            >
+                              <Trash2 className='size-4' />
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     ))}
 
@@ -514,11 +542,12 @@ export function ApiKeysMutateDrawer({
                           group: '',
                           priority: nextRoutePriority(),
                           cooldown_seconds: 60,
+                          enabled: true,
                         })
                       }
                     >
                       <Plus className='size-4' />
-                      {t('Add route group')}
+                      {t('Add group routing rule')}
                     </Button>
                     {groupRoutesMessage && (
                       <p className='text-destructive text-sm'>

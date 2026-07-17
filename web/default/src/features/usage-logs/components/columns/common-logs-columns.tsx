@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { GitBranch, KeyRound, Pin, Sparkles } from 'lucide-react'
+import { GitBranch, KeyRound, Route, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -465,9 +465,9 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     {routeSticky && (
                       <span
                         className='absolute -top-1 -right-1 leading-none text-sky-500'
-                        aria-label={t('Channel route stickiness')}
+                        aria-label={t('Channel route affinity')}
                       >
-                        <Pin className='size-3 fill-current' />
+                        <Route className='size-3.5 stroke-[2.25]' />
                       </span>
                     )}
                   </div>
@@ -511,7 +511,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     {routeSticky && (
                       <div className='border-t pt-1 text-xs'>
                         <p className='font-medium'>
-                          {t('Channel route stickiness')}
+                          {t('Channel route affinity')}
                         </p>
                         <p>
                           {t('Group')}:{' '}

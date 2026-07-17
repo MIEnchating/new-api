@@ -18,12 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
-import { Clock, Edit, Route } from 'lucide-react'
+import { Clock, Edit, Network } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
-import { StatusBadge } from '@/components/status-badge'
+import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -105,8 +105,8 @@ export function ApiKeyRouteDetailDialog() {
       <DialogContent className='sm:max-w-lg'>
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>
-            <Route className='size-4' />
-            {t('Route Groups')}
+            <Network className='size-4' />
+            {t('Group routing rules')}
           </DialogTitle>
           <DialogDescription>
             {currentRow?.name
@@ -118,13 +118,25 @@ export function ApiKeyRouteDetailDialog() {
         {routes.length > 0 ? (
           <div className='space-y-2'>
             {routes.map((route, index) => {
-              const coolingStatuses = (routeStatusMap.get(route.group) ?? [])
-                .map((status) => ({
-                  status,
-                  remaining: getRouteCooldownRemaining(status, now),
-                }))
-                .filter(({ remaining }) => remaining > 0)
+              const enabled = route.enabled !== false
+              const coolingStatuses = enabled
+                ? (routeStatusMap.get(route.group) ?? [])
+                    .map((status) => ({
+                      status,
+                      remaining: getRouteCooldownRemaining(status, now),
+                    }))
+                    .filter(({ remaining }) => remaining > 0)
+                : []
               const cooling = coolingStatuses.length > 0
+              let statusLabel = t('Normal')
+              let statusVariant: StatusBadgeProps['variant'] = 'success'
+              if (!enabled) {
+                statusLabel = t('Disabled')
+                statusVariant = 'neutral'
+              } else if (cooling) {
+                statusLabel = t('Cooling')
+                statusVariant = 'warning'
+              }
               return (
                 <div
                   key={route.group}
@@ -143,8 +155,8 @@ export function ApiKeyRouteDetailDialog() {
                         copyable={false}
                       />
                       <StatusBadge
-                        label={cooling ? t('Cooling') : t('Normal')}
-                        variant={cooling ? 'warning' : 'success'}
+                        label={statusLabel}
+                        variant={statusVariant}
                         copyable={false}
                       />
                     </div>

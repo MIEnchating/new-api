@@ -186,6 +186,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		RequestPath: c.Request.URL.Path,
 		Retry:       common.GetPointer(0),
 	}
+	defer service.FinalizeChannelExecutionTrace(c)
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
 	var retrySameChannel *model.Channel
@@ -210,6 +211,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			break
 		}
 
+		service.TrackResolvedChannelExecutionAttempt(c, relayInfo.UsingGroup, relayInfo.OriginModelName, c.Request.URL.Path, channel, retryParam.GetRetry())
 		addUsedChannel(c, channel.Id)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
@@ -265,6 +267,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			relayInfo.LastError = nil
 			service.MarkChannelRouteSuccess(c)
 			service.MarkTokenGroupRouteSuccess(c)
+			service.MarkChannelExecutionSuccess(c)
 			return
 		}
 		if c.Request.Context().Err() != nil {
@@ -277,9 +280,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
+		service.TrackChannelExecutionFailure(c, channel.Id, newAPIError.ErrorWithStatusCode())
 		if service.ShouldRetrySameChannelRoute(newAPIError, sameChannelRetriesUsed) {
 			sameChannelRetriesUsed++
 			retrySameChannel = channel
+			service.TrackChannelExecutionSameChannelRetry(c, channel, sameChannelRetriesUsed)
 			logger.LogInfo(c, fmt.Sprintf("渠道路由同渠道重试：渠道 #%d（%d/%d）", channel.Id, sameChannelRetriesUsed, common.ChannelRouteSameChannelRetries))
 			continue
 		}
@@ -303,6 +308,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		logger.LogInfo(c, retryLogStr)
 	}
 	if newAPIError != nil {
+		service.MarkChannelExecutionFailed(c, newAPIError.Error())
 		gopool.Go(func() {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
@@ -472,6 +478,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		}
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
 		service.AppendChannelRouteStickyAdminInfo(c, adminInfo)
+		service.AppendChannelExecutionTraceAdminInfo(c, adminInfo)
 		other["admin_info"] = adminInfo
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
@@ -616,6 +623,7 @@ func RelayTask(c *gin.Context) {
 		RequestPath: c.Request.URL.Path,
 		Retry:       common.GetPointer(0),
 	}
+	defer service.FinalizeChannelExecutionTrace(c)
 
 	lockedChannel, channelLocked := relayInfo.LockedChannel.(*model.Channel)
 	channelLocked = channelLocked && lockedChannel != nil
@@ -651,6 +659,7 @@ func RelayTask(c *gin.Context) {
 			}
 		}
 
+		service.TrackResolvedChannelExecutionAttempt(c, relayInfo.UsingGroup, relayInfo.OriginModelName, c.Request.URL.Path, channel, retryParam.GetRetry())
 		addUsedChannel(c, channel.Id)
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
@@ -671,9 +680,11 @@ func RelayTask(c *gin.Context) {
 		channelRouteFailed := false
 		if !taskErr.LocalError {
 			routeError := types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
+			service.TrackChannelExecutionFailure(c, channel.Id, routeError.ErrorWithStatusCode())
 			if !channelLocked && service.ShouldRetrySameChannelRoute(routeError, sameChannelRetriesUsed) {
 				sameChannelRetriesUsed++
 				retrySameChannel = channel
+				service.TrackChannelExecutionSameChannelRetry(c, channel, sameChannelRetriesUsed)
 				logger.LogInfo(c, fmt.Sprintf("渠道路由同渠道重试：渠道 #%d（%d/%d）", channel.Id, sameChannelRetriesUsed, common.ChannelRouteSameChannelRetries))
 				continue
 			}
@@ -704,6 +715,7 @@ func RelayTask(c *gin.Context) {
 	if taskErr == nil {
 		service.MarkChannelRouteSuccess(c)
 		service.MarkTokenGroupRouteSuccess(c)
+		service.MarkChannelExecutionSuccess(c)
 		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
 			common.SysError("settle task billing error: " + settleErr.Error())
 		}
@@ -732,6 +744,7 @@ func RelayTask(c *gin.Context) {
 	}
 
 	if taskErr != nil {
+		service.MarkChannelExecutionFailed(c, taskErr.Message)
 		respondTaskError(c, taskErr)
 	}
 }

@@ -213,6 +213,9 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         const apiKey = row.original
         const routes = parseApiKeyGroupRouteConfig(apiKey.group_route_config)
         if (routes.length > 0) {
+          const activeRoutes = routes.filter((route) => route.enabled !== false)
+          const displayedRoutes =
+            activeRoutes.length > 0 ? activeRoutes : routes
           return (
             <Tooltip>
               <TooltipTrigger
@@ -221,7 +224,7 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
                     type='button'
                     variant='ghost'
                     className='-ml-2 h-auto justify-start px-2 py-1'
-                    aria-label={t('Route Groups')}
+                    aria-label={t('Group routing rules')}
                     onClick={() => {
                       setCurrentRow(apiKey)
                       setOpen('route-detail')
@@ -230,7 +233,7 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
                 }
               >
                 <span className='flex max-w-full min-w-0 items-center gap-1.5 overflow-hidden text-xs'>
-                  {routes.slice(0, 2).map((route) => (
+                  {displayedRoutes.slice(0, 2).map((route) => (
                     <GroupBadge
                       key={route.group}
                       group={route.group}
@@ -245,6 +248,7 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
                     <div key={route.group}>
                       {route.group}: {t('Priority')} {route.priority},{' '}
                       {t('Cooldown')} {route.cooldown_seconds}s
+                      {route.enabled === false ? ` (${t('Disabled')})` : ''}
                     </div>
                   ))}
                 </div>

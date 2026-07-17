@@ -37,9 +37,7 @@ import { channelsQueryKeys } from '../lib'
 import type { Channel } from '../types'
 
 type ChannelRouteStatusBadgeProps = {
-  channelId: number
-  channelStatus: Channel['status']
-  routeStatus?: Channel['route_status']
+  channel: Channel
 }
 
 type CooldownStatus = {
@@ -104,12 +102,15 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
   const [isRestoring, setIsRestoring] = useState(false)
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const cooldownEntries = useMemo<CooldownEntry[]>(() => {
-    if (props.channelStatus !== CHANNEL_STATUS.ENABLED || !props.routeStatus) {
+    if (
+      props.channel.status !== CHANNEL_STATUS.ENABLED ||
+      !props.channel.route_status
+    ) {
       return []
     }
 
     const receivedAt = Math.floor(Date.now() / 1000)
-    const groupEntries = (props.routeStatus.groups ?? [])
+    const groupEntries = (props.channel.route_status.groups ?? [])
       .map((group, index) => ({
         key: `${group.group}-${index}`,
         group: group.group,
@@ -121,9 +122,9 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
       return groupEntries
     }
 
-    const until = resolveCooldownUntil(props.routeStatus, receivedAt)
+    const until = resolveCooldownUntil(props.channel.route_status, receivedAt)
     return until > 0 ? [{ key: 'channel', until }] : []
-  }, [props.channelStatus, props.routeStatus])
+  }, [props.channel.route_status, props.channel.status])
   const activeCooldowns = cooldownEntries
     .map((entry) => ({ ...entry, remaining: Math.max(0, entry.until - now) }))
     .filter((entry) => entry.remaining > 0)
@@ -143,9 +144,9 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
       setNow(Math.floor(Date.now() / 1000))
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [isCooling, props.channelStatus, props.routeStatus])
+  }, [isCooling, props.channel.route_status, props.channel.status])
 
-  const staticState = resolveStaticChannelState(props.channelStatus)
+  const staticState = resolveStaticChannelState(props.channel.status)
   if (staticState) {
     return (
       <StatusBadge variant={staticState.variant} size='sm' copyable={false}>
@@ -181,7 +182,7 @@ export function ChannelRouteStatusBadge(props: ChannelRouteStatusBadgeProps) {
     event.stopPropagation()
     setIsRestoring(true)
     try {
-      const result = await clearChannelRouteCooldown(props.channelId)
+      const result = await clearChannelRouteCooldown(props.channel.id)
       if (!result.success) {
         toast.error(result.message || t('Failed to restore channel'))
         return

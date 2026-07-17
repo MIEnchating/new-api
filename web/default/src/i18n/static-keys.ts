@@ -257,6 +257,25 @@ export const STATIC_I18N_KEYS = [
 
   // Channel Affinity section
   'Channel Affinity',
+  'Channel route affinity',
+  'Route affinity',
+  'Channel affinity',
+  'Affinity hit',
+  'Same-channel retry',
+  'Succeeded',
+  'Failed',
+  'Cooling',
+  'Skipped',
+  'Finished',
+  'Running',
+  'Cancelled',
+  'Unknown',
+  'Affinity target is cooling',
+  'Channel is cooling',
+  'Group route failed',
+  'Group affinity',
+  'Group is cooling',
+  'Group does not support this request',
 
   // Models constants
   'Exact Match',
@@ -320,6 +339,15 @@ export const STATIC_I18N_KEYS = [
   'Sonnet Model',
   'Opus Model',
   'Enter model name',
+
+  // Billing history
+  'Online Top-up',
+  'Affiliate Transfer',
+  'Admin Adjustment',
+  'Search users by ID or name...',
+  'All transaction types',
+  'Quota Change',
+  'View balance changes from top-ups, redemptions, affiliate transfers, and administrator adjustments',
 
   // User binding dialog
   'Account Binding Management',

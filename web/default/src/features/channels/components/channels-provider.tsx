@@ -88,6 +88,9 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
     return localStorage.getItem('enable-tag-mode') === 'true'
   })
   const [idSort, setIdSort] = useState(() => {
+    if (localStorage.getItem('channels-priority-sort') === 'true') {
+      return false
+    }
     const stored = localStorage.getItem('channels-id-sort')
     return stored === null ? true : stored === 'true'
   })

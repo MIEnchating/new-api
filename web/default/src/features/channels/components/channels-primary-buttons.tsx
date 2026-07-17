@@ -29,6 +29,7 @@ import {
   SortAsc,
   RefreshCw,
   ArrowUpFromLine,
+  Workflow,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -65,6 +66,7 @@ import {
   handleUpdateAllBalances,
 } from '../lib'
 import { useChannels } from './channels-provider'
+import { ChannelExecutionDialog } from './dialogs/channel-execution-dialog'
 
 export function ChannelsPrimaryButtons() {
   const { t } = useTranslation()
@@ -85,6 +87,7 @@ export function ChannelsPrimaryButtons() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showConsistencyDialog, setShowConsistencyDialog] = useState(false)
   const [isRepairingConsistency, setIsRepairingConsistency] = useState(false)
+  const [showExecutionDialog, setShowExecutionDialog] = useState(false)
   const currentUser = useAuthStore((s) => s.auth.user)
   const canEditSensitive = hasPermission(
     currentUser,
@@ -100,11 +103,19 @@ export function ChannelsPrimaryButtons() {
   const handleIdSortToggle = (checked: boolean) => {
     localStorage.setItem('channels-id-sort', String(checked))
     setIdSort(checked)
+    if (checked) {
+      localStorage.setItem('channels-priority-sort', 'false')
+      setPrioritySort(false)
+    }
   }
 
   const handlePrioritySortToggle = (checked: boolean) => {
     localStorage.setItem('channels-priority-sort', String(checked))
     setPrioritySort(checked)
+    if (checked) {
+      localStorage.setItem('channels-id-sort', 'false')
+      setIdSort(false)
+    }
   }
 
   const handleBatchModeToggle = (checked: boolean) => {
@@ -173,6 +184,23 @@ export function ChannelsPrimaryButtons() {
             />
           </div>
         </div>
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={() => setShowExecutionDialog(true)}
+              />
+            }
+          >
+            <Workflow className='h-4 w-4' />
+            <span className='max-sm:hidden'>{t('Execution plan')}</span>
+          </TooltipTrigger>
+          <TooltipContent>{t('Execution plan')}</TooltipContent>
+        </Tooltip>
 
         {/* Create Channel */}
         <Tooltip>
@@ -354,6 +382,11 @@ export function ChannelsPrimaryButtons() {
             setIsRepairingConsistency(false)
           }
         }}
+      />
+
+      <ChannelExecutionDialog
+        open={showExecutionDialog}
+        onOpenChange={setShowExecutionDialog}
       />
     </>
   )

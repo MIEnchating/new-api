@@ -31,6 +31,13 @@ import {
   UserCog,
   Info,
   LogIn,
+  Activity,
+  CheckCircle2,
+  CircleDot,
+  RefreshCcw,
+  SkipForward,
+  Snowflake,
+  XCircle,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -143,6 +150,87 @@ function DetailSection(props: {
       </div>
     </div>
   )
+}
+
+function executionEventIcon(state?: string) {
+  switch (state) {
+    case 'active':
+      return CircleDot
+    case 'success':
+      return CheckCircle2
+    case 'failed':
+      return XCircle
+    case 'cooling':
+      return Snowflake
+    case 'same_channel_retry':
+      return RefreshCcw
+    case 'skipped':
+      return SkipForward
+    default:
+      return Activity
+  }
+}
+
+function executionEventVariant(state?: string): StatusBadgeProps['variant'] {
+  switch (state) {
+    case 'success':
+      return 'success'
+    case 'failed':
+      return 'danger'
+    case 'active':
+      return 'info'
+    case 'cooling':
+    case 'same_channel_retry':
+      return 'warning'
+    case 'affinity_hit':
+      return 'purple'
+    default:
+      return 'neutral'
+  }
+}
+
+function executionEventLabel(state?: string) {
+  switch (state) {
+    case 'active':
+      return 'Active'
+    case 'affinity_hit':
+      return 'Affinity hit'
+    case 'same_channel_retry':
+      return 'Same-channel retry'
+    case 'success':
+      return 'Succeeded'
+    case 'failed':
+      return 'Failed'
+    case 'cooling':
+      return 'Cooling'
+    case 'skipped':
+      return 'Skipped'
+    case 'finished':
+      return 'Finished'
+    default:
+      return 'Unknown'
+  }
+}
+
+function executionTraceStatusLabel(status?: string) {
+  switch (status) {
+    case 'running':
+      return 'Running'
+    case 'success':
+      return 'Succeeded'
+    case 'failed':
+      return 'Failed'
+    case 'cancelled':
+      return 'Cancelled'
+    default:
+      return 'Unknown'
+  }
+}
+
+function executionTraceVariant(status?: string): StatusBadgeProps['variant'] {
+  if (status === 'success') return 'success'
+  if (status === 'running') return 'info'
+  return 'danger'
 }
 
 function formatRatio(ratio: number | undefined): string {
@@ -819,6 +907,94 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
         </div>
+
+        {props.isAdmin &&
+        other?.admin_info?.channel_execution_trace?.events?.length ? (
+          <DetailSection
+            icon={<Activity className='size-3.5' aria-hidden='true' />}
+            label={t('Channel execution trace')}
+          >
+            <div className='mb-2 flex flex-wrap items-center gap-2 border-b pb-2'>
+              <StatusBadge
+                variant={executionTraceVariant(
+                  other.admin_info.channel_execution_trace.status
+                )}
+                size='sm'
+                copyable={false}
+              >
+                {t(
+                  executionTraceStatusLabel(
+                    other.admin_info.channel_execution_trace.status
+                  )
+                )}
+              </StatusBadge>
+              <span className='text-muted-foreground text-xs'>
+                {t(
+                  other.admin_info.channel_execution_trace.mode === 'route'
+                    ? 'Channel routing'
+                    : 'Traditional retry'
+                )}
+              </span>
+            </div>
+            <div>
+              {other.admin_info.channel_execution_trace.events.map(
+                (event, index, events) => {
+                  const EventIcon = executionEventIcon(event.state)
+                  return (
+                    <div
+                      key={`${event.sequence ?? index}-${event.timestamp ?? 0}`}
+                      className='relative grid grid-cols-[24px_minmax(0,1fr)] gap-2.5 pb-3 last:pb-0'
+                    >
+                      {index < events.length - 1 && (
+                        <span className='bg-border absolute top-6 bottom-0 left-[11px] w-px' />
+                      )}
+                      <span className='bg-background z-10 flex size-6 items-center justify-center rounded-full border'>
+                        <EventIcon className='text-muted-foreground size-3' />
+                      </span>
+                      <div className='min-w-0'>
+                        <div className='flex flex-wrap items-center gap-1.5'>
+                          <StatusBadge
+                            variant={executionEventVariant(event.state)}
+                            size='sm'
+                            copyable={false}
+                          >
+                            {t(executionEventLabel(event.state))}
+                          </StatusBadge>
+                          {event.group && (
+                            <span className='font-mono text-xs'>
+                              {event.group}
+                            </span>
+                          )}
+                          {event.channel_id ? (
+                            <span className='text-xs font-medium'>
+                              #{event.channel_id} {event.channel_name}
+                            </span>
+                          ) : null}
+                          {event.timestamp ? (
+                            <span className='text-muted-foreground ml-auto font-mono text-[11px] tabular-nums'>
+                              {new Date(event.timestamp).toLocaleTimeString()}
+                            </span>
+                          ) : null}
+                        </div>
+                        {(event.reason || event.next_ids?.length) && (
+                          <p className='text-muted-foreground mt-1 text-xs break-all'>
+                            {event.reason || ''}
+                            {event.reason && event.next_ids?.length
+                              ? ' · '
+                              : ''}
+                            {event.next_ids?.length
+                              ? `${t('Next candidate pool')}: ${event.next_ids.map((id) => `#${id}`).join(', ')}`
+                              : ''}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                }
+              )}
+            </div>
+          </DetailSection>
+        ) : null}
 
         {/* Request conversion (admin only, not for refund) */}
         {showConversion && (

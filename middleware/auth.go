@@ -425,6 +425,11 @@ func TokenAuth() func(c *gin.Context) {
 				abortWithOpenAiMessage(c, http.StatusForbidden, routeErr.Error())
 				return
 			}
+			routes = model.EnabledTokenGroupRoutes(routes)
+			if len(routes) == 0 {
+				abortWithOpenAiMessage(c, http.StatusForbidden, "密钥路由没有已启用的分组")
+				return
+			}
 			usableGroups := service.GetUserUsableGroups(userGroup)
 			for _, route := range routes {
 				if route.Group == "auto" {

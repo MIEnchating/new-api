@@ -92,6 +92,14 @@ export function getApiKeyFormSchema(t: TFunction) {
         return
       }
 
+      if (!data.group_routes.some((route) => route.enabled !== false)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['group_routes'],
+          message: t('Please enable at least one route group'),
+        })
+      }
+
       const groups = new Set<string>()
       data.group_routes.forEach((route, index) => {
         const result = enabledGroupRouteSchema.safeParse(route)
@@ -133,7 +141,14 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   cross_group_retry: true,
   group_route_enabled: false,
   group_route_sticky: false,
-  group_routes: [{ group: DEFAULT_GROUP, priority: 1, cooldown_seconds: 60 }],
+  group_routes: [
+    {
+      group: DEFAULT_GROUP,
+      priority: 1,
+      cooldown_seconds: 60,
+      enabled: true,
+    },
+  ],
   tokenCount: 1,
 }
 
@@ -142,7 +157,9 @@ export function getApiKeyFormDefaultValues(): ApiKeyFormValues {
     ...API_KEY_FORM_DEFAULT_VALUES,
     group: '',
     cross_group_retry: false,
-    group_routes: [{ group: '', priority: 1, cooldown_seconds: 60 }],
+    group_routes: [
+      { group: '', priority: 1, cooldown_seconds: 60, enabled: true },
+    ],
   }
 }
 
@@ -158,7 +175,12 @@ export function parseApiKeyGroupRouteConfig(
     if (!result.success) {
       return []
     }
-    return [...result.data].sort((a, b) => b.priority - a.priority)
+    return result.data
+      .map((route) => ({
+        ...route,
+        enabled: route.enabled !== false,
+      }))
+      .sort((a, b) => b.priority - a.priority)
   } catch {
     return []
   }
@@ -202,6 +224,7 @@ export function transformFormDataToPayload(
               group: route.group,
               priority: route.priority,
               cooldown_seconds: route.cooldown_seconds,
+              enabled: route.enabled !== false,
             }))
           )
         : '',
@@ -239,7 +262,14 @@ export function transformApiKeyToFormDefaults(
     group_routes:
       groupRoutes.length > 0
         ? groupRoutes
-        : [{ group: DEFAULT_GROUP, priority: 1, cooldown_seconds: 60 }],
+        : [
+            {
+              group: DEFAULT_GROUP,
+              priority: 1,
+              cooldown_seconds: 60,
+              enabled: true,
+            },
+          ],
     tokenCount: 1,
   }
 }

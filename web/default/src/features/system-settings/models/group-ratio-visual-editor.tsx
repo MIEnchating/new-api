@@ -45,7 +45,14 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react'
-import { useState, useMemo, useEffect, useCallback, memo } from 'react'
+import {
+  useState,
+  useMemo,
+  useEffect,
+  useCallback,
+  memo,
+  type ReactNode,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -104,6 +111,7 @@ type GroupRatioVisualEditorProps = {
   autoGroups: string
   groupOrder: string
   groupSpecialUsableGroup: string
+  autoGroupDefaultControl: ReactNode
   onChange: (field: string, value: string) => void
 }
 
@@ -325,6 +333,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   autoGroups,
   groupOrder,
   groupSpecialUsableGroup,
+  autoGroupDefaultControl,
   onChange,
 }: GroupRatioVisualEditorProps) {
   const { t } = useTranslation()
@@ -412,6 +421,8 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         groupOptions={registryNames}
         onChange={(value) => onChange('GroupSpecialUsableGroup', value)}
       />
+
+      {autoGroupDefaultControl}
 
       {/* Auto Groups */}
       <Card className={sectionCardClassName}>

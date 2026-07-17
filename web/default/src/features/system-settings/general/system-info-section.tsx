@@ -308,6 +308,26 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
 
               <FormField
                 control={form.control}
+                name='Logo'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Logo URL')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder={t('https://example.com/logo.png')}
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t('URL to your logo image (optional)')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
                 name='TrustedSiteOrigins'
                 render={({ field }) => (
                   <FormItem>
@@ -325,26 +345,6 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
                       {t(
                         'One address per line. OAuth and payment returns may use the current address only when it is listed here.'
                       )}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name='Logo'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Logo URL')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder={t('https://example.com/logo.png')}
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {t('URL to your logo image (optional)')}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

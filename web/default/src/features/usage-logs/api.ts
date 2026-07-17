@@ -33,8 +33,12 @@ import type {
 // Generic API Helpers
 // ============================================================================
 
-function buildApiPath(endpoint: string, isAdmin: boolean): string {
-  return isAdmin ? endpoint : `${endpoint}/self`
+function buildListApiPath(endpoint: string, isAdmin: boolean): string {
+  return isAdmin ? `${endpoint}/` : `${endpoint}/self`
+}
+
+function buildStatsApiPath(endpoint: string, isAdmin: boolean): string {
+  return isAdmin ? `${endpoint}/stat` : `${endpoint}/self/stat`
 }
 
 async function fetchLogs<T>(
@@ -48,7 +52,7 @@ async function fetchLogs<T>(
     page_size: paramRecord.page_size || 20,
     ...params,
   })
-  const path = buildApiPath(endpoint, isAdmin)
+  const path = buildListApiPath(endpoint, isAdmin)
   const res = await api.get(`${path}?${queryParams}`)
   return res.data
 }
@@ -61,8 +65,8 @@ async function fetchLogStats<T>(
   const queryParams = buildQueryParams(
     params as unknown as Record<string, unknown>
   )
-  const path = buildApiPath(endpoint, isAdmin)
-  const res = await api.get(`${path}/stat?${queryParams}`)
+  const path = buildStatsApiPath(endpoint, isAdmin)
+  const res = await api.get(`${path}?${queryParams}`)
   return res.data
 }
 

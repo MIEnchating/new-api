@@ -252,33 +252,53 @@ export type TopupStatus = 'success' | 'pending' | 'expired'
 /**
  * Topup billing record
  */
-export interface TopupRecord {
-  /** Record ID */
-  id: number
+export type BillingRecordType =
+  | 'online_topup'
+  | 'redemption'
+  | 'affiliate_transfer'
+  | 'admin_adjustment'
+
+export interface BillingRecord {
+  /** Stable source-prefixed record ID */
+  id: string
   /** User ID */
   user_id: number
-  /** Topup amount (quota) */
-  amount: number
+  username?: string
+  display_name?: string
+  /** Billing event type */
+  type: BillingRecordType
+  /** Signed raw quota delta */
+  quota: number
   /** Payment amount (actual money paid) */
   money: number
-  /** Trade/order number */
-  trade_no: string
+  /** Order number or event reference */
+  reference: string
   /** Payment method type */
   payment_method: string
-  /** Creation timestamp */
-  create_time: number
-  /** Completion timestamp */
-  complete_time?: number
+  /** Event timestamp */
+  created_at: number
   /** Payment status */
   status: TopupStatus
+  operator_user_id?: number
+  detail?: string
 }
 
 /**
  * Billing history response
  */
 export interface BillingHistoryResponse {
-  items: TopupRecord[]
+  items: BillingRecord[]
   total: number
+}
+
+export interface BillingHistoryParams {
+  page: number
+  pageSize: number
+  keyword?: string
+  userKeyword?: string
+  types?: BillingRecordType[]
+  startTimestamp?: number
+  endTimestamp?: number
 }
 
 /**

@@ -117,6 +117,8 @@ func Distribute() func(c *gin.Context) {
 										channel = preferred
 										affinityUsable = true
 										service.MarkChannelAffinityUsed(c, g, preferred.Id)
+										service.TrackChannelExecutionAffinityHit(c, g, modelRequest.Model, c.Request.URL.Path, preferred.Id, "channel_affinity")
+										service.TrackChannelExecutionSelection(c, g, modelRequest.Model, c.Request.URL.Path, preferred, 0)
 										break
 									}
 								}
@@ -125,6 +127,8 @@ func Distribute() func(c *gin.Context) {
 								selectGroup = usingGroup
 								affinityUsable = true
 								service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+								service.TrackChannelExecutionAffinityHit(c, usingGroup, modelRequest.Model, c.Request.URL.Path, preferred.Id, "channel_affinity")
+								service.TrackChannelExecutionSelection(c, usingGroup, modelRequest.Model, c.Request.URL.Path, preferred, 0)
 							}
 						}
 						if !affinityUsable && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
@@ -159,9 +163,6 @@ func Distribute() func(c *gin.Context) {
 						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
 						return
 					}
-				}
-				if service.IsChannelRouteEnabled() && channel != nil && selectGroup != "" {
-					service.TrackChannelRouteSelection(c, selectGroup, modelRequest.Model, c.Request.URL.Path, channel.Id)
 				}
 			}
 		}

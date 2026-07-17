@@ -40,6 +40,21 @@ type TokenGroupRoute struct {
 	Group           string `json:"group"`
 	Priority        int    `json:"priority"`
 	CooldownSeconds int    `json:"cooldown_seconds"`
+	Enabled         *bool  `json:"enabled,omitempty"`
+}
+
+func (route TokenGroupRoute) IsEnabled() bool {
+	return route.Enabled == nil || *route.Enabled
+}
+
+func EnabledTokenGroupRoutes(routes []TokenGroupRoute) []TokenGroupRoute {
+	enabled := make([]TokenGroupRoute, 0, len(routes))
+	for _, route := range routes {
+		if route.IsEnabled() {
+			enabled = append(enabled, route)
+		}
+	}
+	return enabled
 }
 
 func NormalizeTokenGroupRoutes(routes []TokenGroupRoute) ([]TokenGroupRoute, error) {
@@ -104,7 +119,7 @@ func (token *Token) GetGroupRoutes() []TokenGroupRoute {
 	if err != nil {
 		return nil
 	}
-	return routes
+	return EnabledTokenGroupRoutes(routes)
 }
 
 func (token *Token) Clean() {

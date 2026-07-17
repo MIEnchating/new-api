@@ -32,6 +32,7 @@ import type {
   AffiliateCodeResponse,
   AffiliateTransferResponse,
   BillingHistoryResponse,
+  BillingHistoryParams,
   CompleteOrderRequest,
   CreemPaymentRequest,
   CreemPaymentResponse,
@@ -191,18 +192,25 @@ export async function transferAffiliateQuota(
  * Get billing history for current user
  */
 export async function getUserBillingHistory(
-  page: number,
-  pageSize: number,
-  keyword?: string
+  params: BillingHistoryParams
 ): Promise<ApiResponse<BillingHistoryResponse>> {
-  const params = new URLSearchParams({
-    p: page.toString(),
-    page_size: pageSize.toString(),
+  const searchParams = new URLSearchParams({
+    p: params.page.toString(),
+    page_size: params.pageSize.toString(),
   })
-  if (keyword) {
-    params.append('keyword', keyword)
+  if (params.keyword) {
+    searchParams.set('keyword', params.keyword)
   }
-  const res = await api.get(`/api/user/topup/self?${params.toString()}`)
+  if (params.types?.length) {
+    searchParams.set('types', params.types.join(','))
+  }
+  if (params.startTimestamp) {
+    searchParams.set('start_timestamp', String(params.startTimestamp))
+  }
+  if (params.endTimestamp) {
+    searchParams.set('end_timestamp', String(params.endTimestamp))
+  }
+  const res = await api.get(`/api/user/billing/self?${searchParams.toString()}`)
   return res.data
 }
 
@@ -210,18 +218,28 @@ export async function getUserBillingHistory(
  * Get billing history for all users (admin only)
  */
 export async function getAllBillingHistory(
-  page: number,
-  pageSize: number,
-  keyword?: string
+  params: BillingHistoryParams
 ): Promise<ApiResponse<BillingHistoryResponse>> {
-  const params = new URLSearchParams({
-    p: page.toString(),
-    page_size: pageSize.toString(),
+  const searchParams = new URLSearchParams({
+    p: params.page.toString(),
+    page_size: params.pageSize.toString(),
   })
-  if (keyword) {
-    params.append('keyword', keyword)
+  if (params.keyword) {
+    searchParams.set('keyword', params.keyword)
   }
-  const res = await api.get(`/api/user/topup?${params.toString()}`)
+  if (params.userKeyword) {
+    searchParams.set('user_keyword', params.userKeyword)
+  }
+  if (params.types?.length) {
+    searchParams.set('types', params.types.join(','))
+  }
+  if (params.startTimestamp) {
+    searchParams.set('start_timestamp', String(params.startTimestamp))
+  }
+  if (params.endTimestamp) {
+    searchParams.set('end_timestamp', String(params.endTimestamp))
+  }
+  const res = await api.get(`/api/user/billing?${searchParams.toString()}`)
   return res.data
 }
 

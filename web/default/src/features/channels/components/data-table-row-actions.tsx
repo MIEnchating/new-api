@@ -33,9 +33,11 @@ import {
   RefreshCw,
   Loader2,
   LoaderCircle,
+  Unlink2,
 } from 'lucide-react'
 import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
@@ -59,6 +61,7 @@ import {
 } from '@/lib/admin-permissions'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { clearChannelRouteAffinity } from '../api'
 import { MODEL_FETCHABLE_TYPES } from '../constants'
 import {
   channelsQueryKeys,
@@ -85,6 +88,9 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((s) => s.auth.user)
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
+  const [routeAffinityConfirmOpen, setRouteAffinityConfirmOpen] =
+    useState(false)
+  const [isClearingRouteAffinity, setIsClearingRouteAffinity] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
 
@@ -94,6 +100,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     currentUser,
     ADMIN_PERMISSION_RESOURCES.CHANNEL,
     ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
+  )
+  const canOperate = hasPermission(
+    currentUser,
+    ADMIN_PERMISSION_RESOURCES.CHANNEL,
+    ADMIN_PERMISSION_ACTIONS.OPERATE
   )
 
   const handleEdit = () => {
@@ -352,6 +363,19 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             </DropdownMenuItem>
           )}
 
+          <DropdownMenuItem
+            disabled={!canOperate}
+            onClick={() => {
+              if (!canOperate) return
+              setRouteAffinityConfirmOpen(true)
+            }}
+          >
+            {t('Clear route affinity')}
+            <DropdownMenuShortcut>
+              <Unlink2 size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
           <DropdownMenuSeparator />
 
           {/* Delete */}
@@ -370,6 +394,36 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <ConfirmDialog
+        open={routeAffinityConfirmOpen}
+        onOpenChange={setRouteAffinityConfirmOpen}
+        title={t('Clear route affinity')}
+        desc={t(
+          'This clears all route affinity records pointing to channel "{{name}}". Future requests will select a channel again.',
+          { name: channel.name }
+        )}
+        confirmText={t('Clear')}
+        destructive
+        isLoading={isClearingRouteAffinity}
+        handleConfirm={async () => {
+          if (!canOperate) return
+          setIsClearingRouteAffinity(true)
+          try {
+            const result = await clearChannelRouteAffinity(channel.id)
+            if (!result.success) {
+              toast.error(result.message || t('Failed to clear route affinity'))
+              return
+            }
+            toast.success(t('Route affinity cleared'))
+            setRouteAffinityConfirmOpen(false)
+          } catch {
+            toast.error(t('Failed to clear route affinity'))
+          } finally {
+            setIsClearingRouteAffinity(false)
+          }
+        }}
+      />
 
       <ConfirmDialog
         open={deleteConfirmOpen}

@@ -28,7 +28,21 @@ import {
   completeOrder,
   isApiSuccess,
 } from '../api'
-import type { TopupRecord } from '../types'
+import type { BillingRecord, BillingRecordType } from '../types'
+
+const ALL_BILLING_TYPES: BillingRecordType[] = [
+  'online_topup',
+  'redemption',
+  'affiliate_transfer',
+  'admin_adjustment',
+]
+
+function defaultStartTime() {
+  const value = new Date()
+  value.setDate(value.getDate() - 30)
+  value.setHours(0, 0, 0, 0)
+  return value
+}
 
 // ============================================================================
 // Billing History Hook
@@ -45,11 +59,15 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
   const { initialPage = 1, initialPageSize = 10 } = options
   const isAdmin = useIsAdmin()
 
-  const [records, setRecords] = useState<TopupRecord[]>([])
+  const [records, setRecords] = useState<BillingRecord[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(initialPage)
   const [pageSize, setPageSize] = useState(initialPageSize)
   const [keyword, setKeyword] = useState('')
+  const [userKeyword, setUserKeyword] = useState('')
+  const [types, setTypes] = useState<BillingRecordType[]>(ALL_BILLING_TYPES)
+  const [startTime, setStartTime] = useState<Date | undefined>(defaultStartTime)
+  const [endTime, setEndTime] = useState<Date | undefined>(() => new Date())
   const [loading, setLoading] = useState(false)
   const [completing, setCompleting] = useState(false)
 
@@ -59,9 +77,22 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
   const fetchBillingHistory = useCallback(async () => {
     setLoading(true)
     try {
+      const params = {
+        page,
+        pageSize,
+        keyword,
+        userKeyword: isAdmin ? userKeyword : undefined,
+        types,
+        startTimestamp: startTime
+          ? Math.floor(startTime.getTime() / 1000)
+          : undefined,
+        endTimestamp: endTime
+          ? Math.floor(endTime.getTime() / 1000)
+          : undefined,
+      }
       const response = isAdmin
-        ? await getAllBillingHistory(page, pageSize, keyword)
-        : await getUserBillingHistory(page, pageSize, keyword)
+        ? await getAllBillingHistory(params)
+        : await getUserBillingHistory(params)
 
       if (isApiSuccess(response) && response.data) {
         setRecords(response.data.items || [])
@@ -82,7 +113,7 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     } finally {
       setLoading(false)
     }
-  }, [isAdmin, page, pageSize, keyword])
+  }, [isAdmin, page, pageSize, keyword, userKeyword, types, startTime, endTime])
 
   /**
    * Complete a pending order (admin only)
@@ -141,6 +172,26 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     setPage(1) // Reset to first page when searching
   }, [])
 
+  const handleUserSearch = useCallback((newKeyword: string) => {
+    setUserKeyword(newKeyword)
+    setPage(1)
+  }, [])
+
+  const handleTypesChange = useCallback((newTypes: string[]) => {
+    setTypes(newTypes as BillingRecordType[])
+    setPage(1)
+  }, [])
+
+  const handleStartTimeChange = useCallback((value: Date | undefined) => {
+    setStartTime(value)
+    setPage(1)
+  }, [])
+
+  const handleEndTimeChange = useCallback((value: Date | undefined) => {
+    setEndTime(value)
+    setPage(1)
+  }, [])
+
   // Fetch data when dependencies change
   useEffect(() => {
     fetchBillingHistory()
@@ -152,12 +203,20 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     page,
     pageSize,
     keyword,
+    userKeyword,
+    types,
+    startTime,
+    endTime,
     loading,
     completing,
     isAdmin,
     handlePageChange,
     handlePageSizeChange,
     handleSearch,
+    handleUserSearch,
+    handleTypesChange,
+    handleStartTimeChange,
+    handleEndTimeChange,
     handleCompleteOrder,
     refresh: fetchBillingHistory,
   }

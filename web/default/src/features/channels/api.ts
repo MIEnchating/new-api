@@ -18,6 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api, type ApiRequestConfig } from '@/lib/api'
 
+import {
+  normalizeChannelExecutionOptions,
+  type RawChannelExecutionOptions,
+} from './lib/channel-execution-options'
 import type {
   AddChannelRequest,
   BatchDeleteParams,
@@ -72,6 +76,74 @@ export type CodexCredentialRefreshResponse = {
   }
 }
 
+export type ChannelExecutionCandidate = {
+  channel_id: number
+  channel_name: string
+  priority: number
+  weight: number
+  state: 'candidate' | 'cooling'
+  cooldown_until?: number
+}
+
+export type ChannelExecutionPlan = {
+  mode: 'route' | 'retry'
+  group: string
+  model: string
+  request_path: string
+  max_attempts: number
+  pools: Array<{
+    priority: number
+    candidates: ChannelExecutionCandidate[]
+  }>
+}
+
+export type ChannelExecutionEvent = {
+  sequence: number
+  timestamp: number
+  group?: string
+  channel_id?: number
+  channel_name?: string
+  priority?: number
+  state:
+    | 'active'
+    | 'affinity_hit'
+    | 'same_channel_retry'
+    | 'success'
+    | 'failed'
+    | 'cooling'
+    | 'skipped'
+    | 'finished'
+  reason?: string
+  retry_index?: number
+  next_ids?: number[]
+  cooldown_until?: number
+}
+
+export type ChannelExecutionTrace = {
+  request_id: string
+  mode: 'route' | 'retry'
+  group: string
+  model: string
+  request_path: string
+  status: 'running' | 'success' | 'failed' | 'cancelled'
+  started_at: number
+  updated_at: number
+  events: ChannelExecutionEvent[]
+}
+
+export type ChannelExecutionOption = {
+  id: number
+  name: string
+  group: string
+  models: string
+  status: number
+}
+
+export type ChannelExecutionGroupOption = {
+  name: string
+  models: string[]
+}
+
 // ============================================================================
 // Base Channel CRUD Operations
 // ============================================================================
@@ -82,7 +154,7 @@ export type CodexCredentialRefreshResponse = {
 export async function getChannels(
   params: GetChannelsParams = {}
 ): Promise<GetChannelsResponse> {
-  const res = await api.get('/api/channel', { params })
+  const res = await api.get('/api/channel/', { params })
   return res.data
 }
 
@@ -119,7 +191,7 @@ export async function getChannelOps(): Promise<ChannelOpsResponse> {
 export async function createChannel(
   data: AddChannelRequest
 ): Promise<{ success: boolean; message?: string }> {
-  const res = await api.post('/api/channel', data, channelActionConfig())
+  const res = await api.post('/api/channel/', data, channelActionConfig())
   return res.data
 }
 
@@ -161,6 +233,85 @@ export async function clearChannelRouteCooldown(
     `/api/channel/${id}/route/cooldown/clear`,
     undefined,
     channelActionConfig({ params: group ? { group } : undefined })
+  )
+  return res.data
+}
+
+export async function clearChannelRouteAffinity(id: number): Promise<{
+  success: boolean
+  message?: string
+  data?: { deleted?: number }
+}> {
+  const res = await api.delete(
+    `/api/channel/${id}/route/affinity`,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export async function getChannelExecutionPlan(params: {
+  group: string
+  model: string
+  path?: string
+  mode: 'route' | 'retry'
+}): Promise<{
+  success: boolean
+  message?: string
+  data?: ChannelExecutionPlan
+}> {
+  const res = await api.get(
+    '/api/channel/route/plan',
+    channelActionConfig({ params })
+  )
+  return res.data
+}
+
+export async function getChannelExecutionOptions(): Promise<{
+  success: boolean
+  message?: string
+  data?: {
+    channels: ChannelExecutionOption[]
+    groups: ChannelExecutionGroupOption[]
+  }
+}> {
+  const res = await api.get<{
+    success: boolean
+    message?: string
+    data?: RawChannelExecutionOptions
+  }>('/api/channel/route/channels', channelActionConfig())
+  const response = res.data
+  return {
+    ...response,
+    data: response.success
+      ? normalizeChannelExecutionOptions(response.data)
+      : undefined,
+  }
+}
+
+export async function getChannelExecutionTrace(requestId: string): Promise<{
+  success: boolean
+  message?: string
+  data?: ChannelExecutionTrace
+}> {
+  const res = await api.get(
+    `/api/channel/route/trace/${encodeURIComponent(requestId)}`,
+    channelActionConfig()
+  )
+  return res.data
+}
+
+export async function getRecentChannelExecutionTraces(params: {
+  channel_id?: number
+  group: string
+  limit?: number
+}): Promise<{
+  success: boolean
+  message?: string
+  data?: ChannelExecutionTrace[]
+}> {
+  const res = await api.get(
+    '/api/channel/route/traces',
+    channelActionConfig({ params })
   )
   return res.data
 }
@@ -665,6 +816,6 @@ export async function getPrefillGroups(
   message?: string
   data?: Array<{ id: number; name: string; items: string | string[] }>
 }> {
-  const res = await api.get('/api/prefill_group', { params: { type } })
+  const res = await api.get('/api/prefill_group/', { params: { type } })
   return res.data
 }
