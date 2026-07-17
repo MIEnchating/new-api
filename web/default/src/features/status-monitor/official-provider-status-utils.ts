@@ -1,5 +1,7 @@
 import type { TFunction } from 'i18next'
 
+import type { OfficialProviderIncident, OfficialProviderStatus } from './types'
+
 const INCIDENT_STATUS_LABELS: Record<string, string> = {
   investigating: 'Investigating',
   identified: 'Identified',
@@ -9,6 +11,57 @@ const INCIDENT_STATUS_LABELS: Record<string, string> = {
   scheduled: 'Scheduled',
   in_progress: 'In progress',
   completed: 'Completed',
+}
+
+const FINISHED_INCIDENT_STATUSES = new Set([
+  'resolved',
+  'completed',
+  'postmortem',
+])
+
+function normalizeStatus(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[-\s]+/g, '_')
+}
+
+export function isOfficialIncidentActive(incident: OfficialProviderIncident) {
+  return !FINISHED_INCIDENT_STATUSES.has(normalizeStatus(incident.status))
+}
+
+export function getActiveOfficialIncidents(provider: OfficialProviderStatus) {
+  return provider.incidents.filter(isOfficialIncidentActive)
+}
+
+export function getEffectiveOfficialIndicator(
+  provider: OfficialProviderStatus
+) {
+  const declaredIndicator =
+    normalizeStatus(provider.indicator || 'none') || 'none'
+  if (declaredIndicator !== 'none') return declaredIndicator
+
+  const activeIncidents = getActiveOfficialIncidents(provider)
+  if (activeIncidents.length === 0) return 'none'
+
+  const impacts = new Set(
+    activeIncidents.map((incident) => normalizeStatus(incident.impact))
+  )
+  if (impacts.has('critical')) return 'critical'
+  if (impacts.has('major')) return 'major'
+  if (impacts.has('minor')) return 'minor'
+
+  const hasMaintenance = activeIncidents.some((incident) => {
+    const status = normalizeStatus(incident.status)
+    return status === 'scheduled' || status === 'in_progress'
+  })
+  return hasMaintenance ? 'maintenance' : 'minor'
+}
+
+export function isOfficialProviderAffected(provider: OfficialProviderStatus) {
+  return (
+    !provider.available || getEffectiveOfficialIndicator(provider) !== 'none'
+  )
 }
 
 export function formatOfficialTime(value: string, locale?: string) {
@@ -27,10 +80,7 @@ export function formatOfficialTime(value: string, locale?: string) {
 }
 
 export function formatIncidentStatus(value: string, t: TFunction) {
-  const normalizedKey = value
-    .trim()
-    .toLowerCase()
-    .replaceAll(/[-\s]+/g, '_')
+  const normalizedKey = normalizeStatus(value)
   const translationKey = INCIDENT_STATUS_LABELS[normalizedKey]
   if (translationKey) return t(translationKey)
 

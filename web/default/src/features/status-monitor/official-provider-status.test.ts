@@ -6,7 +6,11 @@ import type { TFunction } from 'i18next'
 import {
   formatIncidentStatus,
   formatOfficialTime,
+  getActiveOfficialIncidents,
+  getEffectiveOfficialIndicator,
+  isOfficialProviderAffected,
 } from './official-provider-status-utils'
+import type { OfficialProviderStatus } from './types'
 
 const translate = ((key: string) => {
   const translations: Record<string, string> = {
@@ -17,6 +21,32 @@ const translate = ((key: string) => {
   }
   return translations[key] ?? key
 }) as TFunction
+
+function createProvider(
+  overrides: Partial<OfficialProviderStatus> = {}
+): OfficialProviderStatus {
+  return {
+    provider: 'OpenAI',
+    available: true,
+    indicator: 'none',
+    description: 'All Systems Operational',
+    status_url: 'https://status.example.com',
+    subscribe_url: '',
+    incidents: [],
+    ...overrides,
+  }
+}
+
+function createIncident(status: string, impact: string) {
+  return {
+    name: 'API errors',
+    status,
+    impact,
+    message: '',
+    updated_at: '2026-07-17T00:00:00Z',
+    url: '',
+  }
+}
 
 describe('official provider status formatting', () => {
   test('translates standard incident states', () => {
@@ -44,5 +74,47 @@ describe('official provider status formatting', () => {
     const formatted = formatOfficialTime('2026-07-16T16:36:46Z', 'en-US')
 
     assert.match(formatted, /^07[/-]16[/-]2026/)
+  })
+
+  test('treats an active incident as affected when the summary says none', () => {
+    const provider = createProvider({
+      incidents: [createIncident('identified', 'none')],
+    })
+
+    assert.equal(getEffectiveOfficialIndicator(provider), 'minor')
+    assert.equal(isOfficialProviderAffected(provider), true)
+    assert.equal(getActiveOfficialIncidents(provider).length, 1)
+  })
+
+  test('uses the highest active incident impact', () => {
+    const provider = createProvider({
+      incidents: [
+        createIncident('investigating', 'minor'),
+        createIncident('identified', 'major'),
+      ],
+    })
+
+    assert.equal(getEffectiveOfficialIndicator(provider), 'major')
+  })
+
+  test('does not count completed incidents as active', () => {
+    const provider = createProvider({
+      incidents: [
+        createIncident('resolved', 'major'),
+        createIncident('completed', 'minor'),
+        createIncident('postmortem', 'minor'),
+      ],
+    })
+
+    assert.equal(getEffectiveOfficialIndicator(provider), 'none')
+    assert.equal(isOfficialProviderAffected(provider), false)
+    assert.deepEqual(getActiveOfficialIncidents(provider), [])
+  })
+
+  test('keeps an unavailable provider affected without incidents', () => {
+    assert.equal(
+      isOfficialProviderAffected(createProvider({ available: false })),
+      true
+    )
   })
 })

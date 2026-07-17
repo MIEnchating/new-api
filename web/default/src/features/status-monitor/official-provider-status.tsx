@@ -26,6 +26,9 @@ import { cn } from '@/lib/utils'
 import {
   formatIncidentStatus,
   formatOfficialTime,
+  getActiveOfficialIncidents,
+  getEffectiveOfficialIndicator,
+  isOfficialProviderAffected,
 } from './official-provider-status-utils'
 import type {
   OfficialProviderStatus,
@@ -95,10 +98,12 @@ function getIncidentVariant(status: string, impact: string): StatusVariant {
     return 'success'
   }
   if (normalizedStatus === 'monitoring') return 'info'
+  if (normalizedStatus === 'scheduled' || normalizedStatus === 'in_progress') {
+    return 'info'
+  }
   if (normalizedImpact === 'major' || normalizedImpact === 'critical') {
     return 'danger'
   }
-  if (normalizedImpact === 'none') return 'neutral'
   return 'warning'
 }
 
@@ -132,8 +137,10 @@ function ProviderAction(props: {
 function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const activeIncidents = getActiveOfficialIncidents(provider)
+  const effectiveIndicator = getEffectiveOfficialIndicator(provider)
   const meta = provider.available
-    ? (INDICATOR_META[provider.indicator] ?? UNAVAILABLE_META)
+    ? (INDICATOR_META[effectiveIndicator] ?? UNAVAILABLE_META)
     : UNAVAILABLE_META
   const StatusIcon = meta.icon
 
@@ -162,9 +169,9 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
               >
                 {t(meta.label)}
               </StatusBadge>
-              {provider.incidents.length > 0 ? (
+              {activeIncidents.length > 0 ? (
                 <span className='text-muted-foreground text-xs tabular-nums'>
-                  {provider.incidents.length} {t('Active incidents')}
+                  {activeIncidents.length} {t('Active incidents')}
                 </span>
               ) : null}
             </div>
@@ -185,9 +192,9 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
         </div>
       </header>
 
-      {provider.incidents.length > 0 ? (
+      {activeIncidents.length > 0 ? (
         <div className='divide-y border-t'>
-          {provider.incidents.map((incident) => (
+          {activeIncidents.map((incident) => (
             <div
               key={`${incident.name}-${incident.updated_at}`}
               className='bg-muted/10 px-3.5 py-3.5 sm:px-4'
@@ -257,11 +264,9 @@ export function OfficialProviderStatuses(props: {
 }) {
   const { t } = useTranslation()
   const providers = props.response?.data.providers ?? []
-  const affectedProviders = providers.filter(
-    (provider) => !provider.available || provider.indicator !== 'none'
-  ).length
+  const affectedProviders = providers.filter(isOfficialProviderAffected).length
   const activeIncidents = providers.reduce(
-    (count, provider) => count + provider.incidents.length,
+    (count, provider) => count + getActiveOfficialIncidents(provider).length,
     0
   )
   let content = (
