@@ -22,6 +22,8 @@ import { useEffect } from 'react'
 import { toast } from 'sonner'
 
 import { wechatLoginByCode } from '@/features/auth/api'
+import { normalizeOAuthRedirectTarget } from '@/features/auth/lib/oauth-redirect'
+import { saveUserId } from '@/features/auth/lib/storage'
 import { getSelf } from '@/lib/api'
 import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 
@@ -41,9 +43,16 @@ function OAuthComponent() {
           await wechatLoginByCode(search.code)
         }
         const res = await getSelf()
-        if (res?.success) {
-          useAuthStore.getState().auth.setUser(res.data as AuthUser)
-          const target = search?.redirect || '/dashboard'
+        if (res?.success && res.data) {
+          const user = res.data as AuthUser
+          useAuthStore.getState().auth.setUser(user)
+          if (user.id != null) {
+            saveUserId(user.id)
+          }
+          const target = normalizeOAuthRedirectTarget(
+            search?.redirect,
+            window.location.origin
+          )
           navigate({ to: target, replace: true })
           return
         }

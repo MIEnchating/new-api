@@ -23,7 +23,7 @@ export function buildOAuthReturnURL(
     if (origin.protocol !== 'https:' || origin.origin === currentOrigin) {
       return null
     }
-    return `${origin.origin}${target}`
+    return `${origin.origin}/oauth?redirect=${encodeURIComponent(target)}`
   } catch {
     return null
   }

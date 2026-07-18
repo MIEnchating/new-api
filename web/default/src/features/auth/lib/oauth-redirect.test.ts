@@ -34,7 +34,7 @@ describe('OAuth redirects', () => {
         '/dashboard',
         currentOrigin
       ),
-      'https://www.example.com/dashboard'
+      'https://www.example.com/oauth?redirect=%2Fdashboard'
     )
     assert.equal(
       buildOAuthReturnURL(

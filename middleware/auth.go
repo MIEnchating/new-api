@@ -35,6 +35,10 @@ func validUserInfo(username string, role int) bool {
 }
 
 func authHelper(c *gin.Context, minRole int) {
+	authHelperWithOptions(c, minRole, false)
+}
+
+func authHelperWithOptions(c *gin.Context, minRole int, allowMissingUserID bool) {
 	session := sessions.Default(c)
 	username := session.Get("username")
 	role := session.Get("role")
@@ -96,12 +100,15 @@ func authHelper(c *gin.Context, minRole int) {
 	// get header New-Api-User
 	apiUserIdStr := c.Request.Header.Get("New-Api-User")
 	if apiUserIdStr == "" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": common.TranslateMessage(c, i18n.MsgAuthUserIdNotProvided),
-		})
-		c.Abort()
-		return
+		if !allowMissingUserID {
+			c.JSON(http.StatusUnauthorized, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgAuthUserIdNotProvided),
+			})
+			c.Abort()
+			return
+		}
+		apiUserIdStr = fmt.Sprint(id)
 	}
 	apiUserId, err := strconv.Atoi(apiUserIdStr)
 	if err != nil {
@@ -181,6 +188,15 @@ func TryUserAuth() func(c *gin.Context) {
 func UserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		authHelper(c, common.RoleCommonUser)
+	}
+}
+
+// UserSelfAuth allows GET /api/user/self to restore client-side identity from
+// an already authenticated session. Explicit user ID headers are still
+// validated, and every other user endpoint continues to require the header.
+func UserSelfAuth() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		authHelperWithOptions(c, common.RoleCommonUser, true)
 	}
 }
 
