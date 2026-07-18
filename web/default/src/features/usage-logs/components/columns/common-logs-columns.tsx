@@ -383,154 +383,180 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
             Number.isFinite(multiKeyIndex)
 
           return (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <div className='flex max-w-[160px] flex-col gap-0.5' />
-                  }
-                >
-                  <div className='inline-flex w-fit items-center gap-1'>
-                    <StatusBadge
-                      label={channelIdDisplay}
-                      autoColor={String(log.channel)}
-                      copyText={String(log.channel)}
-                      size='sm'
-                      showDot={false}
-                      className='font-mono'
-                    />
-                    {showMultiKeyIndex && (
+            <TooltipProvider delay={100}>
+              <div className='flex max-w-[160px] flex-col gap-0.5'>
+                <div className='inline-flex w-fit items-center gap-1'>
+                  <Tooltip>
+                    <TooltipTrigger render={<span className='inline-flex' />}>
                       <StatusBadge
-                        label={String(multiKeyIndex)}
+                        label={channelIdDisplay}
+                        autoColor={String(log.channel)}
+                        copyText={String(log.channel)}
                         size='sm'
                         showDot={false}
-                        copyable={false}
-                        variant='neutral'
-                        className='h-5 min-w-5 justify-center rounded-full px-1 font-mono text-xs'
-                        aria-label={`${t('Key')} ${multiKeyIndex}`}
+                        className='font-mono'
                       />
-                    )}
-                    {hasRetryChain && (
-                      <Popover>
-                        <PopoverTrigger
-                          render={
-                            <button
-                              type='button'
-                              className='text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex size-5 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:ring-2 focus-visible:outline-none'
-                              aria-label={t('Retry Chain')}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                          }
-                        >
-                          <GitBranch
-                            className='size-3.5 text-amber-500'
-                            aria-hidden='true'
+                    </TooltipTrigger>
+                    <TooltipContent side='top' align='center'>
+                      <div className='space-y-1'>
+                        <p>
+                          {sensitiveVisible ? channelDisplay : channelIdDisplay}
+                        </p>
+                        {channelChain && (
+                          <p className='text-muted-foreground text-xs'>
+                            {t('Chain')}: {channelChain}
+                          </p>
+                        )}
+                        {showMultiKeyIndex && (
+                          <p className='text-muted-foreground text-xs'>
+                            {t('Key')}: {multiKeyIndex}
+                          </p>
+                        )}
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                  {showMultiKeyIndex && (
+                    <StatusBadge
+                      label={String(multiKeyIndex)}
+                      size='sm'
+                      showDot={false}
+                      copyable={false}
+                      variant='neutral'
+                      className='h-5 min-w-5 justify-center rounded-full px-1 font-mono text-xs'
+                      aria-label={`${t('Key')} ${multiKeyIndex}`}
+                    />
+                  )}
+                  {hasRetryChain && (
+                    <Popover>
+                      <PopoverTrigger
+                        render={
+                          <button
+                            type='button'
+                            className='text-muted-foreground hover:text-foreground focus-visible:ring-ring inline-flex size-5 shrink-0 items-center justify-center rounded-full transition-colors focus-visible:ring-2 focus-visible:outline-none'
+                            aria-label={t('Retry Chain')}
+                            onClick={(e) => e.stopPropagation()}
                           />
-                        </PopoverTrigger>
-                        <PopoverContent
-                          side='top'
-                          align='start'
-                          className='w-64 text-xs'
-                        >
-                          <div className='flex flex-col gap-1'>
-                            <p className='font-medium'>{t('Retry Chain')}</p>
-                            <p className='text-muted-foreground font-mono break-all'>
-                              {channelChain}
-                            </p>
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                    )}
-                    {affinity && (
-                      <button
-                        type='button'
-                        className='focus-visible:ring-ring inline-flex size-5 shrink-0 items-center justify-center rounded-md border border-amber-500/20 bg-amber-500/10 text-amber-600 transition-colors hover:bg-amber-500/20 focus-visible:ring-2 focus-visible:outline-none dark:text-amber-400'
-                        aria-label={t('Channel Affinity')}
-                        title={t('Channel Affinity')}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setAffinityTarget({
-                            rule_name: affinity.rule_name || '',
-                            using_group:
-                              affinity.using_group ||
-                              affinity.selected_group ||
-                              '',
-                            key_hint: affinity.key_hint || '',
-                            key_fp: affinity.key_fp || '',
-                          })
-                          setAffinityDialogOpen(true)
-                        }}
+                        }
+                      >
+                        <GitBranch
+                          className='size-3.5 text-amber-500'
+                          aria-hidden='true'
+                        />
+                      </PopoverTrigger>
+                      <PopoverContent
+                        side='top'
+                        align='start'
+                        className='w-64 text-xs'
+                      >
+                        <div className='flex flex-col gap-1'>
+                          <p className='font-medium'>{t('Retry Chain')}</p>
+                          <p className='text-muted-foreground font-mono break-all'>
+                            {channelChain}
+                          </p>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  )}
+                  {affinity && (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type='button'
+                            className='focus-visible:ring-ring inline-flex size-5 shrink-0 items-center justify-center rounded-md border border-amber-500/20 bg-amber-500/10 text-amber-600 transition-colors hover:bg-amber-500/20 focus-visible:ring-2 focus-visible:outline-none dark:text-amber-400'
+                            aria-label={t('Channel Affinity')}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setAffinityTarget({
+                                rule_name: affinity.rule_name || '',
+                                using_group:
+                                  affinity.using_group ||
+                                  affinity.selected_group ||
+                                  '',
+                                key_hint: affinity.key_hint || '',
+                                key_fp: affinity.key_fp || '',
+                              })
+                              setAffinityDialogOpen(true)
+                            }}
+                          />
+                        }
                       >
                         <Sparkles className='size-3' aria-hidden='true' />
-                      </button>
-                    )}
-                    {routeSticky && (
-                      <span
-                        className='inline-flex size-5 shrink-0 items-center justify-center rounded-md border border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-400'
-                        aria-label={t('Channel route affinity')}
-                        title={t('Channel route affinity')}
+                      </TooltipTrigger>
+                      <TooltipContent side='top' align='center'>
+                        <div className='space-y-1'>
+                          <p>
+                            {sensitiveVisible
+                              ? channelDisplay
+                              : channelIdDisplay}
+                          </p>
+                          <div className='border-t pt-1 text-xs'>
+                            <p className='font-medium'>
+                              {t('Channel Affinity')}
+                            </p>
+                            <p>
+                              {t('Rule')}: {affinity.rule_name || '-'}
+                            </p>
+                            <p>
+                              {t('Group')}:{' '}
+                              {sensitiveVisible
+                                ? affinity.using_group ||
+                                  affinity.selected_group ||
+                                  '-'
+                                : '••••'}
+                            </p>
+                          </div>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                  {routeSticky && (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <span
+                            className='inline-flex size-5 shrink-0 items-center justify-center rounded-md border border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-400'
+                            aria-label={t('Channel route affinity')}
+                          />
+                        }
                       >
                         <Workflow
                           className='size-3.5 stroke-[2.25]'
                           aria-hidden='true'
                         />
-                      </span>
-                    )}
-                  </div>
-                  {log.channel_name && (
-                    <span className='text-muted-foreground/70 truncate [font-family:var(--font-body)] !text-xs'>
-                      {channelName}
-                    </span>
+                      </TooltipTrigger>
+                      <TooltipContent side='top' align='center'>
+                        <div className='space-y-1'>
+                          <p>
+                            {sensitiveVisible
+                              ? channelDisplay
+                              : channelIdDisplay}
+                          </p>
+                          <div className='border-t pt-1 text-xs'>
+                            <p className='font-medium'>
+                              {t('Channel route affinity')}
+                            </p>
+                            <p>
+                              {t('Group')}:{' '}
+                              {sensitiveVisible
+                                ? routeSticky.group || '-'
+                                : '••••'}
+                            </p>
+                            <p>
+                              {t('Model')}: {routeSticky.model || '-'}
+                            </p>
+                          </div>
+                        </div>
+                      </TooltipContent>
+                    </Tooltip>
                   )}
-                </TooltipTrigger>
-                <TooltipContent>
-                  <div className='space-y-1'>
-                    <p>
-                      {sensitiveVisible ? channelDisplay : channelIdDisplay}
-                    </p>
-                    {channelChain && (
-                      <p className='text-muted-foreground text-xs'>
-                        {t('Chain')}: {channelChain}
-                      </p>
-                    )}
-                    {showMultiKeyIndex && (
-                      <p className='text-muted-foreground text-xs'>
-                        {t('Key')}: {multiKeyIndex}
-                      </p>
-                    )}
-                    {affinity && (
-                      <div className='border-t pt-1 text-xs'>
-                        <p className='font-medium'>{t('Channel Affinity')}</p>
-                        <p>
-                          {t('Rule')}: {affinity.rule_name || '-'}
-                        </p>
-                        <p>
-                          {t('Group')}:{' '}
-                          {sensitiveVisible
-                            ? affinity.using_group ||
-                              affinity.selected_group ||
-                              '-'
-                            : '••••'}
-                        </p>
-                      </div>
-                    )}
-                    {routeSticky && (
-                      <div className='border-t pt-1 text-xs'>
-                        <p className='font-medium'>
-                          {t('Channel route affinity')}
-                        </p>
-                        <p>
-                          {t('Group')}:{' '}
-                          {sensitiveVisible ? routeSticky.group || '-' : '••••'}
-                        </p>
-                        <p>
-                          {t('Model')}: {routeSticky.model || '-'}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </TooltipContent>
-              </Tooltip>
+                </div>
+                {log.channel_name && (
+                  <span className='text-muted-foreground/70 truncate [font-family:var(--font-body)] !text-xs'>
+                    {channelName}
+                  </span>
+                )}
+              </div>
             </TooltipProvider>
           )
         },
