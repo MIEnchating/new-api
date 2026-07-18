@@ -62,27 +62,37 @@ type ChannelExecutionEvent struct {
 	CooldownUntil int64  `json:"cooldown_until,omitempty"`
 }
 
+type ChannelExecutionRouteGroupStatus struct {
+	Group         string `json:"group"`
+	Status        string `json:"status"`
+	CooldownUntil int64  `json:"cooldown_until,omitempty"`
+}
+
 type ChannelExecutionTrace struct {
-	RequestID   string                  `json:"request_id"`
-	Mode        string                  `json:"mode"`
-	Group       string                  `json:"group"`
-	Model       string                  `json:"model"`
-	RequestPath string                  `json:"request_path"`
-	Status      string                  `json:"status"`
-	StartedAt   int64                   `json:"started_at"`
-	UpdatedAt   int64                   `json:"updated_at"`
-	Events      []ChannelExecutionEvent `json:"events"`
-	Compact     bool                    `json:"compact,omitempty"`
-	ChannelIDs  []int                   `json:"channel_ids,omitempty"`
-	AffinityHit bool                    `json:"affinity_hit,omitempty"`
+	RequestID          string                             `json:"request_id"`
+	Mode               string                             `json:"mode"`
+	Group              string                             `json:"group"`
+	RouteGroups        []string                           `json:"route_groups,omitempty"`
+	RouteGroupStatuses []ChannelExecutionRouteGroupStatus `json:"route_group_statuses,omitempty"`
+	Model              string                             `json:"model"`
+	RequestPath        string                             `json:"request_path"`
+	Status             string                             `json:"status"`
+	StartedAt          int64                              `json:"started_at"`
+	UpdatedAt          int64                              `json:"updated_at"`
+	Events             []ChannelExecutionEvent            `json:"events"`
+	Compact            bool                               `json:"compact,omitempty"`
+	ChannelIDs         []int                              `json:"channel_ids,omitempty"`
+	AffinityHit        bool                               `json:"affinity_hit,omitempty"`
 }
 
 type ChannelExecutionTraceSummary struct {
-	Compact     bool   `json:"compact"`
-	Mode        string `json:"mode"`
-	Status      string `json:"status"`
-	ChannelIDs  []int  `json:"channel_ids,omitempty"`
-	AffinityHit bool   `json:"affinity_hit,omitempty"`
+	Compact            bool                               `json:"compact"`
+	Mode               string                             `json:"mode"`
+	Status             string                             `json:"status"`
+	RouteGroups        []string                           `json:"route_groups,omitempty"`
+	RouteGroupStatuses []ChannelExecutionRouteGroupStatus `json:"route_group_statuses,omitempty"`
+	ChannelIDs         []int                              `json:"channel_ids,omitempty"`
+	AffinityHit        bool                               `json:"affinity_hit,omitempty"`
 }
 
 type channelExecutionTraceState struct {
@@ -198,10 +208,15 @@ func ensureChannelExecutionTrace(c *gin.Context, group string, modelName string,
 		}
 	}
 	now := time.Now().UnixMilli()
+	routeGroups := make([]string, 0)
+	for _, route := range getTokenGroupRoutes(c) {
+		routeGroups = append(routeGroups, route.Group)
+	}
 	state := &channelExecutionTraceState{trace: ChannelExecutionTrace{
 		RequestID:   c.GetString(common.RequestIdKey),
 		Mode:        ChannelExecutionMode(),
 		Group:       group,
+		RouteGroups: routeGroups,
 		Model:       modelName,
 		RequestPath: requestPath,
 		Status:      "running",
@@ -218,6 +233,7 @@ func publishChannelExecutionTrace(state *channelExecutionTraceState) {
 	if state == nil {
 		return
 	}
+	updateChannelExecutionRouteGroupStatuses(&state.trace)
 	snapshot := state.trace
 	snapshot.Events = append([]ChannelExecutionEvent(nil), state.trace.Events...)
 	if snapshot.RequestID == "" {
@@ -227,6 +243,49 @@ func publishChannelExecutionTrace(state *channelExecutionTraceState) {
 		common.SysLog("failed to cache channel execution trace: " + err.Error())
 	}
 	indexChannelExecutionTrace(snapshot)
+}
+
+func updateChannelExecutionRouteGroupStatuses(trace *ChannelExecutionTrace) {
+	if trace == nil || len(trace.RouteGroups) == 0 {
+		return
+	}
+	statuses := make([]ChannelExecutionRouteGroupStatus, len(trace.RouteGroups))
+	indexByGroup := make(map[string]int, len(trace.RouteGroups))
+	for index, group := range trace.RouteGroups {
+		statuses[index] = ChannelExecutionRouteGroupStatus{Group: group, Status: "pending"}
+		indexByGroup[group] = index
+	}
+	for _, event := range trace.Events {
+		if event.Group == "" {
+			continue
+		}
+		index, exists := indexByGroup[event.Group]
+		if !exists {
+			continue
+		}
+		status := ""
+		switch event.State {
+		case "active", "affinity_hit":
+			status = "active"
+		case "success":
+			status = "success"
+		case "failed":
+			status = "failed"
+		case "cooling":
+			status = "cooling"
+		case "skipped":
+			status = "skipped"
+		case "finished":
+			status = "failed"
+		}
+		if status != "" {
+			statuses[index].Status = status
+			if event.CooldownUntil > 0 {
+				statuses[index].CooldownUntil = event.CooldownUntil
+			}
+		}
+	}
+	trace.RouteGroupStatuses = statuses
 }
 
 func channelExecutionRecentKey(channelID int, group string) string {
@@ -564,13 +623,13 @@ func TrackResolvedChannelExecutionAttempt(c *gin.Context, group string, modelNam
 				return
 			}
 		}
-		if state.trace.Group != "" {
+		if group == "" && state.trace.Group != "" {
 			group = state.trace.Group
 		}
-		if state.trace.Model != "" {
+		if modelName == "" && state.trace.Model != "" {
 			modelName = state.trace.Model
 		}
-		if state.trace.RequestPath != "" {
+		if requestPath == "" && state.trace.RequestPath != "" {
 			requestPath = state.trace.RequestPath
 		}
 		state.mu.Unlock()
@@ -629,7 +688,9 @@ func TrackChannelExecutionCooling(c *gin.Context, group string, channelID int, u
 }
 
 func TrackChannelExecutionGroupEvent(c *gin.Context, group string, modelName string, requestPath string, state string, reason string, cooldownUntil int64) {
-	appendChannelExecutionEvent(c, group, modelName, requestPath, ChannelExecutionEvent{
+	// Group-routing events describe a candidate route and must not become the
+	// trace's actual execution group before a channel is selected.
+	appendChannelExecutionEvent(c, "", modelName, requestPath, ChannelExecutionEvent{
 		Group: group, State: state, Reason: reason, CooldownUntil: cooldownUntil,
 	})
 }
@@ -747,11 +808,13 @@ func appendChannelExecutionTraceAdminInfo(c *gin.Context, adminInfo map[string]i
 			}
 		}
 		adminInfo["channel_execution_trace"] = ChannelExecutionTraceSummary{
-			Compact:     true,
-			Mode:        snapshot.Mode,
-			Status:      snapshot.Status,
-			ChannelIDs:  channelIDs,
-			AffinityHit: affinityHit,
+			Compact:            true,
+			Mode:               snapshot.Mode,
+			Status:             snapshot.Status,
+			RouteGroups:        append([]string(nil), snapshot.RouteGroups...),
+			RouteGroupStatuses: append([]ChannelExecutionRouteGroupStatus(nil), snapshot.RouteGroupStatuses...),
+			ChannelIDs:         channelIDs,
+			AffinityHit:        affinityHit,
 		}
 		return
 	}

@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
 import {
-  ChevronDown,
   Copy,
   Check,
   Route,
@@ -41,7 +40,6 @@ import {
   Snowflake,
   XCircle,
 } from 'lucide-react'
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
@@ -201,7 +199,17 @@ function executionEventVariant(state?: string): StatusBadgeProps['variant'] {
   }
 }
 
-function executionEventLabel(state?: string) {
+function executionEventLabel(state?: string, isGroupEvent = false) {
+  if (isGroupEvent) {
+    switch (state) {
+      case 'affinity_hit':
+        return 'Reused affinity group'
+      case 'cooling':
+        return 'Group entered cooldown'
+      case 'skipped':
+        return 'Candidate group skipped'
+    }
+  }
   switch (state) {
     case 'active':
       return 'Channel request started'
@@ -224,7 +232,10 @@ function executionEventLabel(state?: string) {
   }
 }
 
-function executionEventDescription(state?: string) {
+function executionEventDescription(state?: string, isGroupEvent = false) {
+  if (isGroupEvent) {
+    return 'This is a group-routing decision, not an upstream channel request'
+  }
   switch (state) {
     case 'active':
       return 'The upstream request has been sent to this channel'
@@ -272,6 +283,38 @@ function executionTraceStatusLabel(status?: string) {
       return 'Cancelled'
     default:
       return 'Unknown'
+  }
+}
+
+function routeGroupStatusLabel(status?: string) {
+  switch (status) {
+    case 'active':
+      return 'Active'
+    case 'cooling':
+      return 'Cooling'
+    case 'skipped':
+      return 'Skipped'
+    case 'success':
+      return 'Succeeded'
+    case 'failed':
+      return 'Failed'
+    default:
+      return 'Pending'
+  }
+}
+
+function routeGroupStatusVariant(status?: string): StatusBadgeProps['variant'] {
+  switch (status) {
+    case 'active':
+      return 'info'
+    case 'cooling':
+      return 'warning'
+    case 'success':
+      return 'success'
+    case 'failed':
+      return 'danger'
+    default:
+      return 'neutral'
   }
 }
 
@@ -595,7 +638,6 @@ interface DetailsDialogProps {
 
 export function DetailsDialog(props: DetailsDialogProps) {
   const { t } = useTranslation()
-  const [fullExecutionTraceOpen, setFullExecutionTraceOpen] = useState(false)
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
   const details = props.log.content ?? ''
   const other = parseLogOther(props.log.other)
@@ -836,7 +878,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
     <Dialog
       open={props.open}
       onOpenChange={(open) => {
-        if (!open) setFullExecutionTraceOpen(false)
         props.onOpenChange(open)
       }}
       title={
@@ -1039,6 +1080,45 @@ export function DetailsDialog(props: DetailsDialogProps) {
                     : 'Traditional retry'
                 )}
               </span>
+              {executionTrace.group ? (
+                <StatusBadge variant='neutral' size='sm' copyable={false}>
+                  {t('Actual execution group')}: {executionTrace.group}
+                </StatusBadge>
+              ) : null}
+              {executionTrace.route_groups &&
+              executionTrace.route_groups.length > 1 ? (
+                <StatusBadge
+                  variant='neutral'
+                  size='sm'
+                  copyable={false}
+                  className='max-w-full'
+                >
+                  <span className='truncate'>
+                    {t('Group route chain')}:{' '}
+                    {executionTrace.route_groups.join(' → ')}
+                  </span>
+                </StatusBadge>
+              ) : null}
+              {executionTrace.route_group_statuses?.length ? (
+                <div className='flex max-w-full flex-wrap items-center gap-1.5 text-xs'>
+                  <span className='text-muted-foreground'>
+                    {t('Group route status')}:
+                  </span>
+                  {executionTrace.route_group_statuses.map((item) => (
+                    <StatusBadge
+                      key={item.group}
+                      variant={routeGroupStatusVariant(item.status)}
+                      size='sm'
+                      copyable={false}
+                    >
+                      <span className='font-mono'>{item.group}</span>
+                      <span className='text-[11px]'>
+                        {t(routeGroupStatusLabel(item.status))}
+                      </span>
+                    </StatusBadge>
+                  ))}
+                </div>
+              ) : null}
               {showExecutionSummary ? (
                 <StatusBadge variant='neutral' size='sm' copyable={false}>
                   {t('Execution summary')}
@@ -1072,35 +1152,16 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 ) : null}
               </div>
             ) : null}
-            {isLegacySuccessfulTrace ? (
-              <Button
-                type='button'
-                variant='ghost'
-                size='sm'
-                className='text-muted-foreground mt-2 h-7 px-1.5 text-xs'
-                onClick={() => setFullExecutionTraceOpen((open) => !open)}
-              >
-                {t(
-                  fullExecutionTraceOpen
-                    ? 'Collapse full trace'
-                    : 'Expand full trace'
-                )}
-                <ChevronDown
-                  className={cn(
-                    'size-3.5 transition-transform',
-                    fullExecutionTraceOpen && 'rotate-180'
-                  )}
-                />
-              </Button>
-            ) : null}
-            {!showExecutionSummary || fullExecutionTraceOpen ? (
+            {!showExecutionSummary ? (
               <div
                 className={cn(isLegacySuccessfulTrace && 'mt-2 border-t pt-3')}
               >
                 {executionEvents.map((event, index, events) => {
                   const EventIcon = executionEventIcon(event.state)
+                  const isGroupEvent = Boolean(event.group && !event.channel_id)
                   const eventDescription = executionEventDescription(
-                    event.state
+                    event.state,
+                    isGroupEvent
                   )
                   const eventReasonIsDuplicate =
                     event.state === 'failed' &&
@@ -1131,11 +1192,15 @@ export function DetailsDialog(props: DetailsDialogProps) {
                             size='sm'
                             copyable={false}
                           >
-                            {t(executionEventLabel(event.state))}
+                            {t(executionEventLabel(event.state, isGroupEvent))}
                           </StatusBadge>
                           {event.group &&
-                            event.group !== executionTrace.group && (
+                            (isGroupEvent ||
+                              event.group !== executionTrace.group) && (
                               <span className='font-mono text-xs'>
+                                {isGroupEvent
+                                  ? `${t('Candidate group')}: `
+                                  : ''}
                                 {event.group}
                               </span>
                             )}

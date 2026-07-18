@@ -240,6 +240,20 @@ func TestTokenGroupRouteSkipsFrozenGroupAndReturnsAfterCooldownCleared(t *testin
 	require.NotNil(t, channel)
 	assert.Equal(t, "fallback", group)
 	assert.Equal(t, 1, channel.Id)
+	traceState, traceExists := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, traceExists)
+	require.NotEmpty(t, traceState.trace.Events)
+	assert.Equal(t, "fallback", traceState.trace.Group)
+	assert.Equal(t, []string{"premium", "fallback"}, traceState.trace.RouteGroups)
+	require.Len(t, traceState.trace.RouteGroupStatuses, 2)
+	assert.Equal(t, []ChannelExecutionRouteGroupStatus{
+		{Group: "premium", Status: "skipped", CooldownUntil: traceState.trace.RouteGroupStatuses[0].CooldownUntil},
+		{Group: "fallback", Status: "active"},
+	}, traceState.trace.RouteGroupStatuses)
+	assert.Equal(t, "skipped", traceState.trace.Events[0].State)
+	assert.Equal(t, "premium", traceState.trace.Events[0].Group)
+	assert.Equal(t, "active", traceState.trace.Events[len(traceState.trace.Events)-1].State)
+	assert.Equal(t, "fallback", traceState.trace.Events[len(traceState.trace.Events)-1].Group)
 
 	ClearTokenGroupRouteCooldown(11, "premium", tokenRouteTestModel, tokenRouteTestPath)
 	nextCtx := newTokenRouteContext(routes)

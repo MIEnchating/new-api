@@ -119,10 +119,18 @@ export type ChannelExecutionEvent = {
   cooldown_until?: number
 }
 
+export type ChannelExecutionRouteGroupStatus = {
+  group: string
+  status: 'pending' | 'active' | 'cooling' | 'skipped' | 'success' | 'failed'
+  cooldown_until?: number
+}
+
 export type ChannelExecutionTrace = {
   request_id: string
   mode: 'route' | 'retry'
   group: string
+  route_groups?: string[]
+  route_group_statuses?: ChannelExecutionRouteGroupStatus[]
   model: string
   request_path: string
   status: 'running' | 'success' | 'failed' | 'cancelled'

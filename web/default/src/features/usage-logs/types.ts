@@ -104,6 +104,12 @@ export interface ChannelExecutionTraceInfo {
   request_id?: string
   mode?: 'route' | 'retry'
   group?: string
+  route_groups?: string[]
+  route_group_statuses?: Array<{
+    group: string
+    status?: 'pending' | 'active' | 'cooling' | 'skipped' | 'success' | 'failed'
+    cooldown_until?: number
+  }>
   model?: string
   request_path?: string
   status?: 'running' | 'success' | 'failed' | 'cancelled'

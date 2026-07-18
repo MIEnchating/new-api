@@ -62,6 +62,7 @@ import {
   getRecentChannelExecutionTraces,
   getChannelExecutionTrace,
   type ChannelExecutionEvent,
+  type ChannelExecutionRouteGroupStatus,
 } from '../../api'
 
 type ChannelExecutionDialogProps = {
@@ -145,6 +146,42 @@ function traceStatusVariant(status: string): StatusVariant {
   return 'danger'
 }
 
+function routeGroupStatusLabel(
+  status: ChannelExecutionRouteGroupStatus['status']
+) {
+  switch (status) {
+    case 'active':
+      return 'Active'
+    case 'cooling':
+      return 'Cooling'
+    case 'skipped':
+      return 'Skipped'
+    case 'success':
+      return 'Succeeded'
+    case 'failed':
+      return 'Failed'
+    default:
+      return 'Pending'
+  }
+}
+
+function routeGroupStatusVariant(
+  status: ChannelExecutionRouteGroupStatus['status']
+): StatusVariant {
+  switch (status) {
+    case 'active':
+      return 'info'
+    case 'cooling':
+      return 'warning'
+    case 'success':
+      return 'success'
+    case 'failed':
+      return 'danger'
+    default:
+      return 'neutral'
+  }
+}
+
 function eventReasonLabel(reason?: string) {
   switch (reason) {
     case 'route_affinity':
@@ -166,6 +203,36 @@ function eventReasonLabel(reason?: string) {
     default:
       return reason || ''
   }
+}
+
+function eventAppearanceForEvent(event: ChannelExecutionEvent) {
+  const isGroupEvent = Boolean(event.group && !event.channel_id)
+  if (!isGroupEvent) return eventAppearance[event.state]
+  if (event.state === 'affinity_hit') {
+    return {
+      ...eventAppearance[event.state],
+      label: 'Reused affinity group',
+      description:
+        'This is a group-routing decision, not an upstream channel request',
+    }
+  }
+  if (event.state === 'cooling') {
+    return {
+      ...eventAppearance[event.state],
+      label: 'Group entered cooldown',
+      description:
+        'This is a group-routing decision, not an upstream channel request',
+    }
+  }
+  if (event.state === 'skipped') {
+    return {
+      ...eventAppearance[event.state],
+      label: 'Candidate group skipped',
+      description:
+        'This is a group-routing decision, not an upstream channel request',
+    }
+  }
+  return eventAppearance[event.state]
 }
 
 export function ChannelExecutionDialog({
@@ -760,6 +827,38 @@ export function ChannelExecutionDialog({
                           </dd>
                         </div>
                       ))}
+                      {trace.route_groups && trace.route_groups.length > 1 ? (
+                        <div className='min-w-0 sm:col-span-3'>
+                          <dt className='text-muted-foreground text-[11px]'>
+                            {t('Group route chain')}
+                          </dt>
+                          <dd className='truncate font-mono text-xs font-medium'>
+                            {trace.route_groups.join(' → ')}
+                          </dd>
+                        </div>
+                      ) : null}
+                      {trace.route_group_statuses?.length ? (
+                        <div className='min-w-0 sm:col-span-3'>
+                          <dt className='text-muted-foreground text-[11px]'>
+                            {t('Group route status')}
+                          </dt>
+                          <dd className='flex flex-wrap gap-1.5 pt-1'>
+                            {trace.route_group_statuses.map((item) => (
+                              <StatusBadge
+                                key={item.group}
+                                variant={routeGroupStatusVariant(item.status)}
+                                size='sm'
+                                copyable={false}
+                              >
+                                <span className='font-mono'>{item.group}</span>
+                                <span className='text-[11px]'>
+                                  {t(routeGroupStatusLabel(item.status))}
+                                </span>
+                              </StatusBadge>
+                            ))}
+                          </dd>
+                        </div>
+                      ) : null}
                     </dl>
                   </div>
                 </div>
@@ -808,7 +907,10 @@ export function ChannelExecutionDialog({
                 ) : (
                   <div>
                     {traceEvents.map((event, index) => {
-                      const appearance = eventAppearance[event.state]
+                      const appearance = eventAppearanceForEvent(event)
+                      const isGroupEvent = Boolean(
+                        event.group && !event.channel_id
+                      )
                       const Icon = appearance.icon
                       return (
                         <div
@@ -847,6 +949,9 @@ export function ChannelExecutionDialog({
                               </StatusBadge>
                               {event.group && (
                                 <span className='font-mono text-xs'>
+                                  {isGroupEvent
+                                    ? `${t('Candidate group')}: `
+                                    : ''}
                                   {event.group}
                                 </span>
                               )}
