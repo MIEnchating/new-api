@@ -88,6 +88,7 @@ func Login(c *gin.Context) {
 			common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
 			return
 		}
+		common.ClearLegacyHostOnlySessionCookie(c)
 
 		c.JSON(http.StatusOK, gin.H{
 			"message": i18n.T(c, i18n.MsgUserRequire2FA),
@@ -161,6 +162,7 @@ func setupLogin(user *model.User, c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
 		return
 	}
+	common.ClearLegacyHostOnlySessionCookie(c)
 	recordLoginAudit(user, c)
 	data := map[string]any{
 		"id":           user.Id,
@@ -191,6 +193,7 @@ func Logout(c *gin.Context) {
 		})
 		return
 	}
+	common.ClearLegacyHostOnlySessionCookie(c)
 	c.JSON(http.StatusOK, gin.H{
 		"message": "",
 		"success": true,

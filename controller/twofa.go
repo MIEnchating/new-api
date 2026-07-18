@@ -46,6 +46,8 @@ func pending2FALoginUserID(session sessions.Session, now time.Time) (int, bool) 
 // Get2FALoginStatus reports whether the current browser has completed the
 // password step and may proceed to the second-factor page.
 func Get2FALoginStatus(c *gin.Context) {
+	c.Header("Cache-Control", "no-store, private")
+	c.Header("Pragma", "no-cache")
 	_, pending := pending2FALoginUserID(sessions.Default(c), time.Now())
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -518,7 +520,6 @@ func Verify2FALogin(c *gin.Context) {
 	session.Delete("pending_username")
 	session.Delete("pending_user_id")
 	session.Delete("pending_2fa_expires_at")
-	session.Save()
 
 	setupLogin(user, c)
 }

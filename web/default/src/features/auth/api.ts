@@ -59,6 +59,7 @@ export async function get2FALoginStatus() {
   const res = await api.get<Login2FAStatusResponse>(
     '/api/user/login/2fa/status',
     {
+      params: { _: Date.now() },
       disableDuplicate: true,
       skipErrorHandler: true,
     }

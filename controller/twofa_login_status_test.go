@@ -38,6 +38,8 @@ func TestGet2FALoginStatusRequiresUnexpiredPendingSession(t *testing.T) {
 		response := httptest.NewRecorder()
 		engine.ServeHTTP(response, request)
 		require.Equal(t, http.StatusOK, response.Code)
+		require.Equal(t, "no-store, private", response.Header().Get("Cache-Control"))
+		require.Equal(t, "no-cache", response.Header().Get("Pragma"))
 
 		var body struct {
 			Success bool `json:"success"`
