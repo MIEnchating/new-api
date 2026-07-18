@@ -70,12 +70,18 @@ type ChannelTestMode = (typeof channelTestModes)[number]
 
 const errorResponseMatchModes = ['any', 'all'] as const
 type ErrorResponseMatchMode = (typeof errorResponseMatchModes)[number]
+const errorMessageMatchModes = ['contains', 'exact'] as const
+type ErrorMessageMatchMode = (typeof errorMessageMatchModes)[number]
 
 const customErrorResponseRuleSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  description: z.string().max(500),
+  priority: z.coerce.number().int(),
   enabled: z.boolean(),
   match_mode: z.enum(errorResponseMatchModes),
   status_codes: z.string(),
   message_contains: z.string(),
+  message_match_mode: z.enum(errorMessageMatchModes),
   response_status_code: z.coerce.number().int().min(0).max(599),
   response_message: z.string(),
   pass_through_status_code: z.boolean(),
@@ -240,6 +246,10 @@ function normalizeErrorResponseMatchMode(
   return value === 'all' ? 'all' : 'any'
 }
 
+function normalizeErrorMessageMatchMode(value: unknown): ErrorMessageMatchMode {
+  return value === 'exact' ? 'exact' : 'contains'
+}
+
 function parseCustomErrorResponseRules(
   value: string
 ): CustomErrorResponseRuleFormValues[] {
@@ -250,7 +260,7 @@ function parseCustomErrorResponseRules(
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
 
-    return parsed.map((item) => {
+    return parsed.map((item, index) => {
       const record =
         item && typeof item === 'object'
           ? (item as Record<string, unknown>)
@@ -258,6 +268,15 @@ function parseCustomErrorResponseRules(
       const responseStatusCode = Number(record.response_status_code)
 
       return {
+        name:
+          typeof record.name === 'string' && record.name.trim()
+            ? record.name.trim()
+            : `Rule ${index + 1}`,
+        description:
+          typeof record.description === 'string' ? record.description : '',
+        priority: Number.isInteger(Number(record.priority))
+          ? Number(record.priority)
+          : 0,
         enabled: record.enabled === true,
         match_mode: normalizeErrorResponseMatchMode(record.match_mode),
         status_codes:
@@ -266,6 +285,9 @@ function parseCustomErrorResponseRules(
           typeof record.message_contains === 'string'
             ? record.message_contains
             : '',
+        message_match_mode: normalizeErrorMessageMatchMode(
+          record.message_match_mode
+        ),
         response_status_code:
           Number.isInteger(responseStatusCode) &&
           responseStatusCode >= 100 &&
@@ -290,10 +312,16 @@ function normalizeCustomErrorResponseRules(
 ) {
   return JSON.stringify(
     rules.map((rule) => ({
+      name: rule.name.trim(),
+      description: rule.description.trim(),
+      priority: rule.priority,
       enabled: rule.enabled,
       match_mode: normalizeErrorResponseMatchMode(rule.match_mode),
       status_codes: parseHttpStatusCodeRules(rule.status_codes).normalized,
       message_contains: rule.message_contains.trim(),
+      message_match_mode: normalizeErrorMessageMatchMode(
+        rule.message_match_mode
+      ),
       response_status_code: rule.response_status_code,
       response_message: rule.response_message.trim(),
       pass_through_status_code: rule.pass_through_status_code,
@@ -879,6 +907,12 @@ export function RoutingReliabilitySection({
                     </div>
                   ) : (
                     errorRuleFields.fields.map((ruleField, index) => {
+                      const ruleName = form.watch(
+                        `error_response_setting.rules.${index}.name`
+                      )
+                      const rulePriority = form.watch(
+                        `error_response_setting.rules.${index}.priority`
+                      )
                       const passThroughStatus = form.watch(
                         `error_response_setting.rules.${index}.pass_through_status_code`
                       )
@@ -901,13 +935,15 @@ export function RoutingReliabilitySection({
                                 <SettingsSwitchItem className='flex-1 py-0'>
                                   <SettingsSwitchContent>
                                     <FormLabel>
-                                      {t('Rule {{number}}', {
-                                        number: index + 1,
-                                      })}
+                                      {ruleName ||
+                                        t('Rule {{number}}', {
+                                          number: index + 1,
+                                        })}
                                     </FormLabel>
                                     <FormDescription>
                                       {t(
-                                        'First matched enabled rule takes effect'
+                                        'Priority {{number}} · lower numbers match first',
+                                        { number: rulePriority }
                                       )}
                                     </FormDescription>
                                   </SettingsSwitchContent>
@@ -934,7 +970,74 @@ export function RoutingReliabilitySection({
                             </Button>
                           </div>
 
-                          <div className='grid min-w-0 gap-3 lg:grid-cols-2 xl:grid-cols-4'>
+                          <div className='grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_10rem]'>
+                            <FormField
+                              control={form.control}
+                              name={
+                                `error_response_setting.rules.${index}.name` as const
+                              }
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>{t('Rule name')}</FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      placeholder={t(
+                                        'e.g. Context window exceeded'
+                                      )}
+                                      {...field}
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name={
+                                `error_response_setting.rules.${index}.priority` as const
+                              }
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>{t('Priority')}</FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      type='number'
+                                      step={1}
+                                      {...safeNumberFieldProps(field)}
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          </div>
+
+                          <FormField
+                            control={form.control}
+                            name={
+                              `error_response_setting.rules.${index}.description` as const
+                            }
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Rule description')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    placeholder={t(
+                                      'Describe when and why this rule is used'
+                                    )}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <div className='text-sm font-medium'>
+                            {t('Match conditions')}
+                          </div>
+                          <div className='grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4'>
                             <FormField
                               control={form.control}
                               name={
@@ -1009,6 +1112,58 @@ export function RoutingReliabilitySection({
                             <FormField
                               control={form.control}
                               name={
+                                `error_response_setting.rules.${index}.message_match_mode` as const
+                              }
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>
+                                    {t('Error message match mode')}
+                                  </FormLabel>
+                                  <Select
+                                    items={[
+                                      {
+                                        value: 'contains',
+                                        label: t('Fuzzy contains'),
+                                      },
+                                      {
+                                        value: 'exact',
+                                        label: t('Exact message'),
+                                      },
+                                    ]}
+                                    value={field.value}
+                                    onValueChange={(value) =>
+                                      field.onChange(
+                                        normalizeErrorMessageMatchMode(value)
+                                      )
+                                    }
+                                  >
+                                    <FormControl>
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent alignItemWithTrigger={false}>
+                                      <SelectGroup>
+                                        <SelectItem value='contains'>
+                                          {t('Fuzzy contains')}
+                                        </SelectItem>
+                                        <SelectItem value='exact'>
+                                          {t('Exact message')}
+                                        </SelectItem>
+                                      </SelectGroup>
+                                    </SelectContent>
+                                  </Select>
+                                  <FormDescription>
+                                    {t('Message matching is case-insensitive')}
+                                  </FormDescription>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name={
                                 `error_response_setting.rules.${index}.message_contains` as const
                               }
                               render={({ field }) => (
@@ -1027,6 +1182,38 @@ export function RoutingReliabilitySection({
                                   </FormControl>
                                   <FormMessage />
                                 </FormItem>
+                              )}
+                            />
+                          </div>
+
+                          <div className='text-sm font-medium'>
+                            {t('Response behavior')}
+                          </div>
+                          <div className='grid min-w-0 gap-3 lg:grid-cols-2 xl:grid-cols-[1fr_12rem_1fr]'>
+                            <FormField
+                              control={form.control}
+                              name={
+                                `error_response_setting.rules.${index}.pass_through_status_code` as const
+                              }
+                              render={({ field }) => (
+                                <SettingsSwitchItem>
+                                  <SettingsSwitchContent>
+                                    <FormLabel>
+                                      {t('Pass through upstream status')}
+                                    </FormLabel>
+                                    <FormDescription>
+                                      {t(
+                                        'Return the original upstream HTTP status code'
+                                      )}
+                                    </FormDescription>
+                                  </SettingsSwitchContent>
+                                  <FormControl>
+                                    <Switch
+                                      checked={field.value}
+                                      onCheckedChange={field.onChange}
+                                    />
+                                  </FormControl>
+                                </SettingsSwitchItem>
                               )}
                             />
 
@@ -1052,35 +1239,6 @@ export function RoutingReliabilitySection({
                                   </FormControl>
                                   <FormMessage />
                                 </FormItem>
-                              )}
-                            />
-                          </div>
-
-                          <div className='grid min-w-0 gap-3 lg:grid-cols-2'>
-                            <FormField
-                              control={form.control}
-                              name={
-                                `error_response_setting.rules.${index}.pass_through_status_code` as const
-                              }
-                              render={({ field }) => (
-                                <SettingsSwitchItem>
-                                  <SettingsSwitchContent>
-                                    <FormLabel>
-                                      {t('Pass through upstream status')}
-                                    </FormLabel>
-                                    <FormDescription>
-                                      {t(
-                                        'Return the original upstream HTTP status code'
-                                      )}
-                                    </FormDescription>
-                                  </SettingsSwitchContent>
-                                  <FormControl>
-                                    <Switch
-                                      checked={field.value}
-                                      onCheckedChange={field.onChange}
-                                    />
-                                  </FormControl>
-                                </SettingsSwitchItem>
                               )}
                             />
 
@@ -1148,10 +1306,16 @@ export function RoutingReliabilitySection({
                     className='w-full justify-center gap-2'
                     onClick={() =>
                       errorRuleFields.append({
+                        name: t('Rule {{number}}', {
+                          number: errorRuleFields.fields.length + 1,
+                        }),
+                        description: '',
+                        priority: errorRuleFields.fields.length,
                         enabled: true,
                         match_mode: 'any',
                         status_codes: '429,500-599',
                         message_contains: '',
+                        message_match_mode: 'contains',
                         response_status_code: 429,
                         response_message: t(
                           'Upstream request failed. Please try again later.'

@@ -92,17 +92,12 @@ func SessionDomainForHost(hostPort string) string {
 	if SessionCookieDomain == "" {
 		return ""
 	}
-	host := strings.ToLower(hostPort)
+	host := strings.ToLower(strings.TrimSuffix(hostPort, "."))
 	if parsedHost, _, err := net.SplitHostPort(hostPort); err == nil {
-		host = strings.ToLower(parsedHost)
+		host = strings.ToLower(strings.TrimSuffix(parsedHost, "."))
 	}
 	if host == SessionCookieDomain || strings.HasSuffix(host, "."+SessionCookieDomain) {
-		for _, trustedURL := range SessionCookieTrustedURLs {
-			parsedURL, err := url.Parse(trustedURL)
-			if err == nil && strings.EqualFold(parsedURL.Hostname(), host) {
-				return SessionCookieDomain
-			}
-		}
+		return SessionCookieDomain
 	}
 	return ""
 }

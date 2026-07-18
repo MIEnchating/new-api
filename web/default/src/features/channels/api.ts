@@ -128,7 +128,10 @@ export type ChannelExecutionTrace = {
   status: 'running' | 'success' | 'failed' | 'cancelled'
   started_at: number
   updated_at: number
-  events: ChannelExecutionEvent[]
+  compact?: boolean
+  channel_ids?: number[]
+  affinity_hit?: boolean
+  events?: ChannelExecutionEvent[]
 }
 
 export type ChannelExecutionOption = {

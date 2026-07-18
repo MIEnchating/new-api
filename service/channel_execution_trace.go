@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strconv"
@@ -71,6 +72,17 @@ type ChannelExecutionTrace struct {
 	StartedAt   int64                   `json:"started_at"`
 	UpdatedAt   int64                   `json:"updated_at"`
 	Events      []ChannelExecutionEvent `json:"events"`
+	Compact     bool                    `json:"compact,omitempty"`
+	ChannelIDs  []int                   `json:"channel_ids,omitempty"`
+	AffinityHit bool                    `json:"affinity_hit,omitempty"`
+}
+
+type ChannelExecutionTraceSummary struct {
+	Compact     bool   `json:"compact"`
+	Mode        string `json:"mode"`
+	Status      string `json:"status"`
+	ChannelIDs  []int  `json:"channel_ids,omitempty"`
+	AffinityHit bool   `json:"affinity_hit,omitempty"`
 }
 
 type channelExecutionTraceState struct {
@@ -294,6 +306,17 @@ func indexChannelExecutionTrace(trace ChannelExecutionTrace) {
 }
 
 func traceTouchesChannelGroup(trace ChannelExecutionTrace, channelID int, group string) bool {
+	if trace.Compact {
+		if trace.Group != group {
+			return false
+		}
+		for _, candidateID := range trace.ChannelIDs {
+			if candidateID == channelID {
+				return true
+			}
+		}
+		return false
+	}
 	for _, event := range trace.Events {
 		eventGroup := event.Group
 		if eventGroup == "" {
@@ -307,6 +330,9 @@ func traceTouchesChannelGroup(trace ChannelExecutionTrace, channelID int, group 
 }
 
 func traceTouchesGroup(trace ChannelExecutionTrace, group string) bool {
+	if trace.Compact {
+		return trace.Group == group
+	}
 	for _, event := range trace.Events {
 		eventGroup := event.Group
 		if eventGroup == "" {
@@ -317,6 +343,84 @@ func traceTouchesGroup(trace ChannelExecutionTrace, group string) bool {
 		}
 	}
 	return false
+}
+
+func listPersistedChannelExecutionTraces(channelID int, group string, limit int, cutoff int64) ([]ChannelExecutionTrace, error) {
+	if model.LOG_DB == nil {
+		return nil, nil
+	}
+	queryLimit := limit * 10
+	if queryLimit < 50 {
+		queryLimit = 50
+	}
+	if queryLimit > 500 {
+		queryLimit = 500
+	}
+	logs := make([]model.Log, 0, queryLimit)
+	err := model.LOG_DB.
+		Select("id", "created_at", "type", "request_id", "model_name", "group", "channel_id", "other").
+		Where("created_at >= ? AND type IN ?", cutoff/1000, []int{model.LogTypeConsume, model.LogTypeError}).
+		Where(&model.Log{Group: group}).
+		Order("id DESC").
+		Limit(queryLimit).
+		Find(&logs).Error
+	if err != nil {
+		return nil, err
+	}
+
+	traces := make([]ChannelExecutionTrace, 0, limit)
+	seen := make(map[string]struct{})
+	for _, logEntry := range logs {
+		var other struct {
+			RequestPath string `json:"request_path"`
+			AdminInfo   struct {
+				ChannelExecutionTrace json.RawMessage `json:"channel_execution_trace"`
+			} `json:"admin_info"`
+		}
+		if err := json.Unmarshal([]byte(logEntry.Other), &other); err != nil || len(other.AdminInfo.ChannelExecutionTrace) == 0 {
+			continue
+		}
+		var trace ChannelExecutionTrace
+		if err := json.Unmarshal(other.AdminInfo.ChannelExecutionTrace, &trace); err != nil {
+			continue
+		}
+		if trace.RequestID == "" {
+			trace.RequestID = logEntry.RequestId
+		}
+		if trace.RequestID == "" {
+			continue
+		}
+		if _, exists := seen[trace.RequestID]; exists {
+			continue
+		}
+		if trace.Group == "" {
+			trace.Group = logEntry.Group
+		}
+		if trace.Model == "" {
+			trace.Model = logEntry.ModelName
+		}
+		if trace.RequestPath == "" {
+			trace.RequestPath = other.RequestPath
+		}
+		if trace.StartedAt == 0 {
+			trace.StartedAt = logEntry.CreatedAt * 1000
+		}
+		if trace.UpdatedAt == 0 {
+			trace.UpdatedAt = logEntry.CreatedAt * 1000
+		}
+		if logEntry.Type == model.LogTypeError && trace.Status == "running" {
+			trace.Status = "failed"
+		}
+		if !traceTouchesGroup(trace, group) || (channelID > 0 && !traceTouchesChannelGroup(trace, channelID, group)) {
+			continue
+		}
+		seen[trace.RequestID] = struct{}{}
+		traces = append(traces, trace)
+		if len(traces) >= limit {
+			break
+		}
+	}
+	return traces, nil
 }
 
 func ListChannelExecutionTraces(channelID int, group string, limit int) ([]ChannelExecutionTrace, error) {
@@ -360,7 +464,10 @@ func ListChannelExecutionTraces(channelID int, group string, limit int) ([]Chann
 				break
 			}
 		}
-		return traces, nil
+		if len(traces) > 0 {
+			return traces, nil
+		}
+		return listPersistedChannelExecutionTraces(channelID, group, limit, cutoff)
 	}
 
 	channelExecutionRecentMu.Lock()
@@ -380,7 +487,10 @@ func ListChannelExecutionTraces(channelID int, group string, limit int) ([]Chann
 	if len(traces) > limit {
 		traces = traces[:limit]
 	}
-	return traces, nil
+	if len(traces) > 0 {
+		return traces, nil
+	}
+	return listPersistedChannelExecutionTraces(channelID, group, limit, cutoff)
 }
 
 func appendChannelExecutionEvent(c *gin.Context, group string, modelName string, requestPath string, event ChannelExecutionEvent) {
@@ -608,7 +718,7 @@ func channelExecutionTraceStateFromContext(c *gin.Context) (*channelExecutionTra
 	return state, ok && state != nil
 }
 
-func AppendChannelExecutionTraceAdminInfo(c *gin.Context, adminInfo map[string]interface{}) {
+func appendChannelExecutionTraceAdminInfo(c *gin.Context, adminInfo map[string]interface{}, errorSnapshot bool) {
 	if adminInfo == nil {
 		return
 	}
@@ -620,7 +730,40 @@ func AppendChannelExecutionTraceAdminInfo(c *gin.Context, adminInfo map[string]i
 	snapshot := state.trace
 	snapshot.Events = append([]ChannelExecutionEvent(nil), state.trace.Events...)
 	state.mu.Unlock()
+	if errorSnapshot && snapshot.Status == "running" {
+		snapshot.Status = "failed"
+	}
+	// Successful SQL logs only need the execution summary. The runtime cache
+	// keeps the complete timeline for the execution-plan UI.
+	if snapshot.Status == "success" {
+		channelIDs := make([]int, 0, len(snapshot.Events))
+		affinityHit := false
+		for _, event := range snapshot.Events {
+			if event.State == "active" && event.ChannelID > 0 {
+				channelIDs = append(channelIDs, event.ChannelID)
+			}
+			if event.State == "affinity_hit" {
+				affinityHit = true
+			}
+		}
+		adminInfo["channel_execution_trace"] = ChannelExecutionTraceSummary{
+			Compact:     true,
+			Mode:        snapshot.Mode,
+			Status:      snapshot.Status,
+			ChannelIDs:  channelIDs,
+			AffinityHit: affinityHit,
+		}
+		return
+	}
 	adminInfo["channel_execution_trace"] = snapshot
+}
+
+func AppendChannelExecutionTraceAdminInfo(c *gin.Context, adminInfo map[string]interface{}) {
+	appendChannelExecutionTraceAdminInfo(c, adminInfo, false)
+}
+
+func AppendChannelExecutionTraceErrorAdminInfo(c *gin.Context, adminInfo map[string]interface{}) {
+	appendChannelExecutionTraceAdminInfo(c, adminInfo, true)
 }
 
 func GetChannelExecutionTrace(requestID string) (ChannelExecutionTrace, bool, error) {

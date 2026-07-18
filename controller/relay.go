@@ -88,22 +88,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	defer func() {
 		if newAPIError != nil {
-			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
-			operation_setting.ApplyCustomErrorResponse(newAPIError)
-			setRelayResponseRequestId(newAPIError, requestId)
-			switch relayFormat {
-			case types.RelayFormatOpenAIRealtime:
-				helper.WssError(c, ws, newAPIError.ToOpenAIError())
-			case types.RelayFormatClaude:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"type":  "error",
-					"error": newAPIError.ToClaudeError(),
-				})
-			default:
-				c.JSON(newAPIError.StatusCode, gin.H{
-					"error": newAPIError.ToOpenAIError(),
-				})
-			}
+			writeRelayErrorResponse(c, ws, relayFormat, newAPIError, requestId)
 		}
 	}()
 
@@ -237,19 +222,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		if newAPIError == nil {
-			if isStreamTimeoutFailure(relayInfo.StreamStatus) {
-				streamErr := relayInfo.StreamStatus.EndError
-				if streamErr == nil {
-					streamErr = fmt.Errorf("stream ended with %s", relayInfo.StreamStatus.EndReason)
-				}
-				processChannelError(
-					c,
-					*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-					types.NewOpenAIError(streamErr, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway),
-					relayInfo,
-				)
-				return
-			}
 			if relayInfo.StreamStatus != nil && relayInfo.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
 				return
 			}
@@ -262,6 +234,24 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				return
 			}
 			if !isSuccessfulStreamResult(relayInfo.StreamStatus) {
+				streamErr := relayInfo.StreamStatus.FailureError()
+				if streamErr == nil {
+					streamErr = errors.New("upstream stream failed")
+				}
+				streamAPIError := types.NewOpenAIError(streamErr, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
+				relayInfo.LastError = streamAPIError
+				service.TrackChannelExecutionFailure(c, channel.Id, streamAPIError.ErrorWithStatusCode())
+				channelRouteFailed := processChannelError(
+					c,
+					*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
+					streamAPIError,
+					relayInfo,
+				)
+				newAPIError = streamAPIError
+				if shouldAttemptNextChannel(c, streamAPIError, common.RetryTimes-retryParam.GetRetry(), channelRouteFailed) {
+					retryParam.IncreaseRetry()
+					continue
+				}
 				return
 			}
 			relayInfo.LastError = nil
@@ -313,6 +303,69 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 	}
+}
+
+func writeRelayErrorResponse(c *gin.Context, ws *websocket.Conn, relayFormat types.RelayFormat, err *types.NewAPIError, requestId string) {
+	if err == nil {
+		return
+	}
+	logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(err.Error())))
+	operation_setting.ApplyCustomErrorResponse(err)
+	setRelayResponseRequestId(err, requestId)
+
+	if relayFormat == types.RelayFormatOpenAIRealtime {
+		helper.WssError(c, ws, err.ToOpenAIError())
+		return
+	}
+	if c.Writer.Written() {
+		if strings.HasPrefix(strings.ToLower(c.Writer.Header().Get("Content-Type")), "text/event-stream") {
+			writeRelayStreamError(c, relayFormat, err)
+		}
+		return
+	}
+
+	if relayFormat == types.RelayFormatClaude {
+		c.JSON(err.StatusCode, gin.H{
+			"type":  "error",
+			"error": err.ToClaudeError(),
+		})
+		return
+	}
+	c.JSON(err.StatusCode, gin.H{
+		"error": err.ToOpenAIError(),
+	})
+}
+
+func writeRelayStreamError(c *gin.Context, relayFormat types.RelayFormat, err *types.NewAPIError) {
+	if c == nil || c.Writer == nil || c.Request == nil || c.Request.Context().Err() != nil {
+		return
+	}
+
+	var event string
+	var payload any
+	switch relayFormat {
+	case types.RelayFormatClaude:
+		event = "error"
+		payload = gin.H{"type": "error", "error": err.ToClaudeError()}
+	case types.RelayFormatOpenAIResponses, types.RelayFormatOpenAIResponsesCompaction:
+		event = "error"
+		payload = gin.H{"type": "error", "error": err.ToOpenAIError()}
+	default:
+		payload = gin.H{"error": err.ToOpenAIError()}
+	}
+
+	data, marshalErr := common.Marshal(payload)
+	if marshalErr != nil {
+		logger.LogError(c, "failed to marshal stream error: "+marshalErr.Error())
+		return
+	}
+	helper.ExtendWriteDeadline(c)
+	if event != "" {
+		_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, data)
+	} else {
+		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", data)
+	}
+	_ = helper.FlushWriter(c)
 }
 
 var upgrader = websocket.Upgrader{
@@ -401,6 +454,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if openaiErr == nil {
 		return false
 	}
+	if helper.StreamOutputStarted(c) {
+		return false
+	}
 	if service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
 		return false
 	}
@@ -430,6 +486,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 }
 
 func shouldAttemptNextChannel(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int, channelRouteFailed bool) bool {
+	if helper.StreamOutputStarted(c) {
+		return false
+	}
 	if service.IsChannelRouteEnabled() {
 		return channelRouteFailed
 	}
@@ -478,7 +537,7 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		}
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
 		service.AppendChannelRouteStickyAdminInfo(c, adminInfo)
-		service.AppendChannelExecutionTraceAdminInfo(c, adminInfo)
+		service.AppendChannelExecutionTraceErrorAdminInfo(c, adminInfo)
 		other["admin_info"] = adminInfo
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {

@@ -37,6 +37,7 @@ import { formatNumber } from '@/lib/format'
 
 import { getTopUpStats } from './api'
 import { useTopUpStatsColumns } from './components/topup-stats-columns'
+import { TopUpStatsMobileList } from './components/topup-stats-mobile-list'
 import type { TopUpStatsSummary } from './types'
 
 type StatsRange = {
@@ -161,28 +162,49 @@ export function TopUpStats() {
   return (
     <SectionPageLayout fixedContent>
       <SectionPageLayout.Title>{t('Top-up Stats')}</SectionPageLayout.Title>
+      <SectionPageLayout.Actions>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type='button'
+                variant='outline'
+                size='icon'
+                onClick={() => query.refetch()}
+                disabled={query.isFetching}
+                aria-label={t('Refresh')}
+              />
+            }
+          >
+            <RefreshCw
+              className={`size-4 ${query.isFetching ? 'animate-spin' : ''}`}
+            />
+          </TooltipTrigger>
+          <TooltipContent>{t('Refresh')}</TooltipContent>
+        </Tooltip>
+      </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        <div className='flex h-full min-h-0 flex-col gap-4'>
-          <div className='bg-card grid shrink-0 overflow-hidden rounded-lg border sm:grid-cols-3 sm:divide-x'>
+        <div className='flex h-full min-h-0 flex-col gap-3 sm:gap-4'>
+          <div className='bg-card grid shrink-0 grid-cols-3 divide-x overflow-hidden rounded-lg border'>
             {metrics.map((metric) => (
               <div
                 key={metric.label}
-                className='flex min-h-[72px] items-center gap-3 border-b px-4 py-3 last:border-b-0 sm:min-h-24 sm:border-b-0'
+                className='flex min-w-0 flex-col items-start gap-2 px-3 py-3 sm:min-h-24 sm:flex-row sm:items-center sm:gap-3 sm:px-4'
               >
                 <div
-                  className={`flex size-9 shrink-0 items-center justify-center rounded-md ${metric.iconClassName}`}
+                  className={`flex size-8 shrink-0 items-center justify-center rounded-md sm:size-9 ${metric.iconClassName}`}
                 >
                   <metric.icon className='size-4' aria-hidden='true' />
                 </div>
                 <div className='min-w-0'>
-                  <div className='text-muted-foreground text-xs'>
+                  <div className='text-muted-foreground truncate text-[11px] leading-4 sm:text-xs'>
                     {metric.label}
                   </div>
                   {query.isLoading ? (
-                    <Skeleton className='mt-2 h-6 w-20' />
+                    <Skeleton className='mt-1 h-6 w-14 sm:mt-2 sm:w-20' />
                   ) : (
                     <div
-                      className='mt-1 truncate text-xl font-semibold tabular-nums'
+                      className='mt-0.5 truncate text-lg font-semibold tabular-nums sm:mt-1 sm:text-xl'
                       title={metric.value}
                     >
                       {metric.value}
@@ -213,6 +235,25 @@ export function TopUpStats() {
               }
               skeletonKeyPrefix='topup-stats-skeleton'
               applyHeaderSize
+              mobile={
+                <TopUpStatsMobileList
+                  rows={rows}
+                  isLoading={query.isLoading}
+                  isFetching={query.isFetching && !query.isLoading}
+                  emptyTitle={
+                    query.isError
+                      ? t('Failed to load top-up stats')
+                      : t('No top-up data found')
+                  }
+                  emptyDescription={
+                    query.isError
+                      ? query.error.message
+                      : t(
+                          'No successful top-ups were completed in this time range.'
+                        )
+                  }
+                />
+              }
               toolbarProps={{
                 searchPlaceholder: t(
                   'Search by username, user ID, or order number...'
@@ -229,27 +270,7 @@ export function TopUpStats() {
                 hasAdditionalFilters: !isToday,
                 onReset: resetFilters,
                 hideViewOptions: true,
-                preActions: (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='icon'
-                          onClick={() => query.refetch()}
-                          disabled={query.isFetching}
-                          aria-label={t('Refresh')}
-                        />
-                      }
-                    >
-                      <RefreshCw
-                        className={`size-4 ${query.isFetching ? 'animate-spin' : ''}`}
-                      />
-                    </TooltipTrigger>
-                    <TooltipContent>{t('Refresh')}</TooltipContent>
-                  </Tooltip>
-                ),
+                mobileCollapsibleFilters: true,
               }}
             />
           </div>

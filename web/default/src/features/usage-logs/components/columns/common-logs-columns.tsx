@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { GitBranch, KeyRound, Route, Sparkles } from 'lucide-react'
+import { GitBranch, KeyRound, Sparkles, Workflow } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -390,7 +390,7 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     <div className='flex max-w-[160px] flex-col gap-0.5' />
                   }
                 >
-                  <div className='relative inline-flex w-fit items-center gap-1'>
+                  <div className='inline-flex w-fit items-center gap-1'>
                     <StatusBadge
                       label={channelIdDisplay}
                       autoColor={String(log.channel)}
@@ -444,7 +444,9 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     {affinity && (
                       <button
                         type='button'
-                        className='absolute -top-1 -right-1 leading-none text-amber-500'
+                        className='focus-visible:ring-ring inline-flex size-5 shrink-0 items-center justify-center rounded-md border border-amber-500/20 bg-amber-500/10 text-amber-600 transition-colors hover:bg-amber-500/20 focus-visible:ring-2 focus-visible:outline-none dark:text-amber-400'
+                        aria-label={t('Channel Affinity')}
+                        title={t('Channel Affinity')}
                         onClick={(e) => {
                           e.stopPropagation()
                           setAffinityTarget({
@@ -459,15 +461,19 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                           setAffinityDialogOpen(true)
                         }}
                       >
-                        <Sparkles className='size-3 fill-current' />
+                        <Sparkles className='size-3' aria-hidden='true' />
                       </button>
                     )}
                     {routeSticky && (
                       <span
-                        className='absolute -top-1 -right-1 leading-none text-sky-500'
+                        className='inline-flex size-5 shrink-0 items-center justify-center rounded-md border border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-400'
                         aria-label={t('Channel route affinity')}
+                        title={t('Channel route affinity')}
                       >
-                        <Route className='size-3.5 stroke-[2.25]' />
+                        <Workflow
+                          className='size-3.5 stroke-[2.25]'
+                          aria-hidden='true'
+                        />
                       </span>
                     )}
                   </div>

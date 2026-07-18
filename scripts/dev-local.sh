@@ -41,20 +41,24 @@ load_environment() {
   source "${ENV_FILE}"
   set +a
 
-  export SQL_DSN="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}"
+  if [[ -z "${SQL_DSN:-}" ]]; then
+    export SQL_DSN="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:5432/${POSTGRES_DB}"
+  fi
   export REDIS_CONN_STRING="${REDIS_CONN_STRING:-}"
   export REDIS_CONN_STRING="${REDIS_CONN_STRING/@redis/@127.0.0.1}"
   export DEBUG="${DEBUG:-true}"
   export GIN_MODE="${GIN_MODE:-debug}"
 
-  if [[ -z "${DEV_SESSION_SECRET:-}" ]]; then
-    if [[ ! -f "${SESSION_SECRET_FILE}" ]]; then
-      umask 077
-      od -An -N32 -tx1 /dev/urandom | tr -d ' \n' >"${SESSION_SECRET_FILE}"
+  if [[ -z "${SESSION_SECRET:-}" ]]; then
+    if [[ -z "${DEV_SESSION_SECRET:-}" ]]; then
+      if [[ ! -f "${SESSION_SECRET_FILE}" ]]; then
+        umask 077
+        od -An -N32 -tx1 /dev/urandom | tr -d ' \n' >"${SESSION_SECRET_FILE}"
+      fi
+      DEV_SESSION_SECRET="$(<"${SESSION_SECRET_FILE}")"
     fi
-    DEV_SESSION_SECRET="$(<"${SESSION_SECRET_FILE}")"
+    export SESSION_SECRET="${DEV_SESSION_SECRET}"
   fi
-  export SESSION_SECRET="${DEV_SESSION_SECRET}"
 
   # Direct development access uses plain HTTP, so production-only cookie
   # constraints would prevent the browser from storing the 2FA session.

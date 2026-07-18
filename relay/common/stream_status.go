@@ -85,6 +85,24 @@ func (s *StreamStatus) TotalErrorCount() int {
 	return s.ErrorCount
 }
 
+func (s *StreamStatus) FailureError() error {
+	if s == nil {
+		return nil
+	}
+	if s.EndError != nil {
+		return s.EndError
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.Errors) > 0 {
+		return fmt.Errorf("%s", s.Errors[0].Message)
+	}
+	if s.EndReason != StreamEndReasonNone {
+		return fmt.Errorf("stream ended with %s", s.EndReason)
+	}
+	return nil
+}
+
 func (s *StreamStatus) IsNormalEnd() bool {
 	if s == nil {
 		return true

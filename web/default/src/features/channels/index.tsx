@@ -121,7 +121,11 @@ export function Channels() {
               render={
                 <Link
                   to='/system-settings/models/$section'
-                  params={{ section: 'routing-reliability' }}
+                  params={{
+                    section: channelRouteEnabled
+                      ? 'channel-routing'
+                      : 'routing-reliability',
+                  }}
                 />
               }
             />

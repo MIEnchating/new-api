@@ -103,7 +103,32 @@ POSTGRES_DB=new-api
 
 REDIS_PASSWORD=your_redis_password
 REDIS_CONN_STRING=redis://:your_redis_password@redis:6379
+
+# 必须使用固定随机值，容器重建后不能变化
+SESSION_SECRET=replace_with_a_long_random_secret
+# 多域名 HTTPS 登录配置
+SESSION_COOKIE_SECURE=true
+SESSION_COOKIE_TRUSTED_URL=https://yunmian.tech,https://www.yunmian.tech
+SESSION_COOKIE_DOMAIN=yunmian.tech
 ```
+
+系统信息中的“服务器地址/可信站点地址”用于校验 OAuth 和支付完成后的返回来源；上述 `SESSION_COOKIE_*` 环境变量用于控制浏览器会话 Cookie。两者职责不同，多域名登录时必须同时正确配置。
+
+修改会话环境变量后，`docker compose restart` 不会更新已有容器的环境。必须重新创建应用容器：
+
+```bash
+docker compose -f docker-compose.current.yml up -d --force-recreate --no-build new-api
+```
+
+可通过 OAuth state 响应检查配置是否真正生效：
+
+```bash
+curl -sSI https://www.yunmian.tech/api/oauth/state
+```
+
+`Set-Cookie` 必须同时包含 `Domain=yunmian.tech` 和 `Secure`。如果缺少任意一项，说明运行中的容器没有加载对应环境变量。
+
+首次切换到共享域 Cookie 后，需要在浏览器中清除根域名和子域名下已有的同名 `session` Cookie，再重新登录，避免旧的 host-only Cookie 与新的共享 Cookie 同时发送。
 
 应用通过以下容器内地址连接基础服务：
 
@@ -217,7 +242,8 @@ docker compose -f docker-compose.current.yml ps
 - PostgreSQL 和 Redis 只应通过 Docker 内部网络访问。
 - 使用强数据库密码和 Redis 密码。
 - 公网入口使用 HTTPS。
-- 启用安全 Cookie 时配置 `SESSION_COOKIE_SECURE=true` 和可信 HTTPS 地址。
+- 多域名登录必须同时配置固定的 `SESSION_SECRET`、`SESSION_COOKIE_SECURE=true`、全部可信 HTTPS Origin 和共享根域名。
+- `.env` 中的会话变量必须由 Compose 显式注入容器；本项目的 `docker-compose.current.yml` 已包含这些映射。
 - 定期备份 PostgreSQL、`/root/newapi/data` 和 `/root/newapi/logs`。
 
 ---

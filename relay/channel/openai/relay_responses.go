@@ -1,9 +1,11 @@
 package openai
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -12,6 +14,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -79,6 +82,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
+	var matchedStreamError *types.NewAPIError
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -87,6 +91,11 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
 			sr.Error(err)
+			return
+		}
+		if streamErr := newResponsesStreamError(streamResponse); streamErr != nil && operation_setting.HasMatchingCustomErrorResponse(streamErr) {
+			matchedStreamError = streamErr
+			sr.Stop(streamErr)
 			return
 		}
 		sendResponsesStreamData(c, streamResponse, data)
@@ -131,6 +140,9 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
+	if matchedStreamError != nil {
+		return usage, matchedStreamError
+	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量
@@ -149,4 +161,42 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 
 	return usage, nil
+}
+
+func newResponsesStreamError(response dto.ResponsesStreamResponse) *types.NewAPIError {
+	if response.Type != "response.failed" && response.Type != "response.error" && response.Type != "error" {
+		return nil
+	}
+
+	var openAIError *types.OpenAIError
+	if response.Response != nil {
+		openAIError = response.Response.GetOpenAIError()
+	}
+	if openAIError == nil {
+		openAIError = dto.GetOpenAIError(response.Error)
+	}
+	if openAIError == nil || strings.TrimSpace(openAIError.Message) == "" {
+		return types.NewOpenAIError(errors.New("upstream response stream failed"), types.ErrorCodeBadResponse, http.StatusBadGateway)
+	}
+	return types.WithOpenAIError(*openAIError, responsesStreamErrorStatus(openAIError.Code))
+}
+
+func responsesStreamErrorStatus(code any) int {
+	var status int
+	switch value := code.(type) {
+	case int:
+		status = value
+	case int32:
+		status = int(value)
+	case int64:
+		status = int(value)
+	case float64:
+		status = int(value)
+	case string:
+		status, _ = strconv.Atoi(strings.TrimSpace(value))
+	}
+	if status >= 400 && status <= 599 {
+		return status
+	}
+	return http.StatusBadGateway
 }

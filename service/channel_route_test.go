@@ -55,7 +55,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	model.DB = db
 	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Log{}))
 
 	t.Cleanup(func() {
 		common.RedisEnabled = oldRedisEnabled
@@ -458,6 +458,91 @@ func TestChannelExecutionPlanAndTraceFollowActualRoute(t *testing.T) {
 
 	adminInfo := map[string]interface{}{}
 	AppendChannelExecutionTraceAdminInfo(ctx, adminInfo)
-	_, exists := adminInfo["channel_execution_trace"]
-	assert.True(t, exists)
+	summary, exists := adminInfo["channel_execution_trace"].(ChannelExecutionTraceSummary)
+	require.True(t, exists)
+	assert.True(t, summary.Compact)
+	assert.Equal(t, "route", summary.Mode)
+	assert.Equal(t, "success", summary.Status)
+	assert.Equal(t, []int{1, 2}, summary.ChannelIDs)
+	assert.False(t, summary.AffinityHit)
+
+	affinityCtx := newChannelRouteContext()
+	affinityCtx.Set(common.RequestIdKey, "request-trace-affinity")
+	TrackChannelExecutionAffinityHit(affinityCtx, "default", channelRouteTestModel, "/v1/chat/completions", first.Id, "route_affinity")
+	TrackChannelExecutionSelection(affinityCtx, "default", channelRouteTestModel, "/v1/chat/completions", first, 0)
+	MarkChannelExecutionSuccess(affinityCtx)
+	affinityAdminInfo := map[string]interface{}{}
+	AppendChannelExecutionTraceAdminInfo(affinityCtx, affinityAdminInfo)
+	affinitySummary, exists := affinityAdminInfo["channel_execution_trace"].(ChannelExecutionTraceSummary)
+	require.True(t, exists)
+	assert.Equal(t, []int{1}, affinitySummary.ChannelIDs)
+	assert.True(t, affinitySummary.AffinityHit)
+
+	failedCtx := newChannelRouteContext()
+	failedCtx.Set(common.RequestIdKey, "request-trace-failed")
+	TrackChannelExecutionSelection(failedCtx, "default", channelRouteTestModel, "/v1/chat/completions", first, 0)
+	TrackChannelExecutionFailure(failedCtx, first.Id, "upstream failed")
+	errorAdminInfo := map[string]interface{}{}
+	AppendChannelExecutionTraceErrorAdminInfo(failedCtx, errorAdminInfo)
+	errorTrace, exists := errorAdminInfo["channel_execution_trace"].(ChannelExecutionTrace)
+	require.True(t, exists)
+	assert.Equal(t, "failed", errorTrace.Status)
+	runningState, exists := channelExecutionTraceStateFromContext(failedCtx)
+	require.True(t, exists)
+	assert.Equal(t, "running", runningState.trace.Status)
+
+	MarkChannelExecutionFailed(failedCtx, "upstream failed")
+	failedAdminInfo := map[string]interface{}{}
+	AppendChannelExecutionTraceAdminInfo(failedCtx, failedAdminInfo)
+	fullTrace, exists := failedAdminInfo["channel_execution_trace"].(ChannelExecutionTrace)
+	require.True(t, exists)
+	assert.Equal(t, "failed", fullTrace.Status)
+	require.NotEmpty(t, fullTrace.Events)
+	assert.Equal(t, "finished", fullTrace.Events[len(fullTrace.Events)-1].State)
+}
+
+func TestListChannelExecutionTracesFallsBackToPersistedSummary(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	now := common.GetTimestamp()
+	requestID := "persisted-trace-test"
+	other := map[string]interface{}{
+		"request_path": "/v1/responses",
+		"admin_info": map[string]interface{}{
+			"channel_execution_trace": ChannelExecutionTraceSummary{
+				Compact:     true,
+				Mode:        "route",
+				Status:      "success",
+				ChannelIDs:  []int{108, 163},
+				AffinityHit: true,
+			},
+		},
+	}
+	require.NoError(t, db.Create(&model.Log{
+		CreatedAt: now,
+		Type:      model.LogTypeConsume,
+		RequestId: requestID,
+		ModelName: "gpt-persisted-trace",
+		Group:     "persisted-group",
+		ChannelId: 163,
+		Other:     common.MapToJsonStr(other),
+	}).Error)
+
+	traces, err := ListChannelExecutionTraces(0, "persisted-group", 20)
+	require.NoError(t, err)
+	require.Len(t, traces, 1)
+	assert.Equal(t, requestID, traces[0].RequestID)
+	assert.True(t, traces[0].Compact)
+	assert.Equal(t, []int{108, 163}, traces[0].ChannelIDs)
+	assert.True(t, traces[0].AffinityHit)
+	assert.Equal(t, "/v1/responses", traces[0].RequestPath)
+	assert.Equal(t, "gpt-persisted-trace", traces[0].Model)
+
+	filtered, err := ListChannelExecutionTraces(108, "persisted-group", 20)
+	require.NoError(t, err)
+	require.Len(t, filtered, 1)
+	assert.Equal(t, requestID, filtered[0].RequestID)
+
+	filtered, err = ListChannelExecutionTraces(999, "persisted-group", 20)
+	require.NoError(t, err)
+	assert.Empty(t, filtered)
 }

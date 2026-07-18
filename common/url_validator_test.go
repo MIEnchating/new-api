@@ -198,8 +198,10 @@ func TestInitSessionCookieSettingsConfiguresSharedDomain(t *testing.T) {
 	assert.Equal(t, "example.com", SessionCookieDomain)
 	assert.Equal(t, "example.com", SessionDomainForHost("www.example.com"))
 	assert.Equal(t, "example.com", SessionDomainForHost("example.com:443"))
-	assert.Empty(t, SessionDomainForHost("untrusted.example.com"))
+	assert.Equal(t, "example.com", SessionDomainForHost("untrusted.example.com"))
+	assert.Equal(t, "example.com", SessionDomainForHost("WWW.EXAMPLE.COM.:443"))
 	assert.Empty(t, SessionDomainForHost("example.net"))
+	assert.Empty(t, SessionDomainForHost("notexample.com"))
 }
 
 func TestInitSessionCookieSettingsRejectsInvalidSharedDomain(t *testing.T) {

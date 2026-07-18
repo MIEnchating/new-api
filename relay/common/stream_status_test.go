@@ -114,6 +114,22 @@ func TestStreamStatus_RecordError_Concurrent(t *testing.T) {
 	assert.LessOrEqual(t, len(s.Errors), maxStreamErrorEntries)
 }
 
+func TestStreamStatus_FailureErrorPrefersTerminalError(t *testing.T) {
+	status := NewStreamStatus()
+	status.RecordError("first soft error")
+	status.SetEndReason(StreamEndReasonScannerErr, fmt.Errorf("scanner failed"))
+
+	assert.EqualError(t, status.FailureError(), "scanner failed")
+}
+
+func TestStreamStatus_FailureErrorFallsBackToSoftError(t *testing.T) {
+	status := NewStreamStatus()
+	status.RecordError("invalid stream event")
+	status.SetEndReason(StreamEndReasonHandlerStop, nil)
+
+	assert.EqualError(t, status.FailureError(), "invalid stream event")
+}
+
 func TestStreamStatus_HasErrors_Empty(t *testing.T) {
 	t.Parallel()
 	s := NewStreamStatus()

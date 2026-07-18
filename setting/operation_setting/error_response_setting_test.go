@@ -61,6 +61,86 @@ func TestApplyCustomErrorResponse_MessageOnly(t *testing.T) {
 	require.Equal(t, "上游额度不足", apiErr.ToOpenAIError().Message)
 }
 
+func TestApplyCustomErrorResponse_ExactMessageMatch(t *testing.T) {
+	orig := errorResponseSetting
+	t.Cleanup(func() { errorResponseSetting = orig })
+
+	errorResponseSetting = ErrorResponseSetting{
+		Enabled: true,
+		Rules: []CustomErrorResponseRule{
+			{
+				Enabled:            true,
+				MessageContains:    "quota exceeded",
+				MessageMatchMode:   CustomErrorMessageMatchExact,
+				ResponseStatusCode: 402,
+				ResponseMessage:    "精准命中",
+			},
+		},
+	}
+
+	partial := types.NewOpenAIError(errors.New("upstream quota exceeded"), types.ErrorCodeBadResponse, 500)
+	ApplyCustomErrorResponse(partial)
+	require.Equal(t, 500, partial.StatusCode)
+
+	exact := types.NewOpenAIError(errors.New("Quota Exceeded"), types.ErrorCodeBadResponse, 500)
+	require.True(t, ApplyCustomErrorResponse(exact))
+	require.Equal(t, 402, exact.StatusCode)
+	require.Equal(t, "精准命中", exact.ToOpenAIError().Message)
+}
+
+func TestApplyCustomErrorResponse_LegacyEmptyMessageModeUsesContains(t *testing.T) {
+	orig := errorResponseSetting
+	t.Cleanup(func() { errorResponseSetting = orig })
+
+	errorResponseSetting = ErrorResponseSetting{
+		Enabled: true,
+		Rules: []CustomErrorResponseRule{
+			{
+				Enabled:            true,
+				MessageContains:    "quota exceeded",
+				ResponseStatusCode: 402,
+				ResponseMessage:    "旧规则仍然命中",
+			},
+		},
+	}
+
+	apiErr := types.NewOpenAIError(errors.New("upstream quota exceeded temporarily"), types.ErrorCodeBadResponse, 500)
+	require.True(t, ApplyCustomErrorResponse(apiErr))
+	require.Equal(t, "旧规则仍然命中", apiErr.ToOpenAIError().Message)
+}
+
+func TestApplyCustomErrorResponse_UsesLowestPriorityFirst(t *testing.T) {
+	orig := errorResponseSetting
+	t.Cleanup(func() { errorResponseSetting = orig })
+
+	errorResponseSetting = ErrorResponseSetting{
+		Enabled: true,
+		Rules: []CustomErrorResponseRule{
+			{
+				Name:               "fallback",
+				Priority:           100,
+				Enabled:            true,
+				StatusCodes:        "500",
+				ResponseStatusCode: 500,
+				ResponseMessage:    "低优先级规则",
+			},
+			{
+				Name:               "preferred",
+				Priority:           10,
+				Enabled:            true,
+				StatusCodes:        "500",
+				ResponseStatusCode: 503,
+				ResponseMessage:    "高优先级规则",
+			},
+		},
+	}
+
+	apiErr := types.NewOpenAIError(errors.New("upstream error"), types.ErrorCodeBadResponse, 500)
+	require.True(t, ApplyCustomErrorResponse(apiErr))
+	require.Equal(t, 503, apiErr.StatusCode)
+	require.Equal(t, "高优先级规则", apiErr.ToOpenAIError().Message)
+}
+
 func TestApplyCustomErrorResponse_AllModeRequiresBothConditions(t *testing.T) {
 	orig := errorResponseSetting
 	t.Cleanup(func() { errorResponseSetting = orig })
@@ -163,5 +243,6 @@ func TestValidateCustomErrorResponseRulesJSON(t *testing.T) {
 	require.Error(t, ValidateCustomErrorResponseRulesJSON(`[{"enabled":true,"status_codes":"99","response_status_code":429,"response_message":"x"}]`))
 	require.Error(t, ValidateCustomErrorResponseRulesJSON(`[{"enabled":true,"status_codes":"500","response_message":"x"}]`))
 	require.Error(t, ValidateCustomErrorResponseRulesJSON(`[{"enabled":true,"status_codes":"500","response_status_code":429}]`))
+	require.Error(t, ValidateCustomErrorResponseRulesJSON(`[{"enabled":true,"message_contains":"x","message_match_mode":"regex","response_status_code":429,"response_message":"x"}]`))
 	require.NoError(t, ValidateCustomErrorResponseRulesJSON(`[{"enabled":false}]`))
 }

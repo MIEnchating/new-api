@@ -100,6 +100,7 @@ export interface ChannelRouteStickyInfo {
 }
 
 export interface ChannelExecutionTraceInfo {
+  compact?: boolean
   request_id?: string
   mode?: 'route' | 'retry'
   group?: string
@@ -108,6 +109,8 @@ export interface ChannelExecutionTraceInfo {
   status?: 'running' | 'success' | 'failed' | 'cancelled'
   started_at?: number
   updated_at?: number
+  channel_ids?: number[]
+  affinity_hit?: boolean
   events?: Array<{
     sequence?: number
     timestamp?: number

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/QuantumNous/new-api/setting/config"
@@ -13,13 +14,20 @@ import (
 const (
 	CustomErrorResponseMatchAny = "any"
 	CustomErrorResponseMatchAll = "all"
+
+	CustomErrorMessageMatchContains = "contains"
+	CustomErrorMessageMatchExact    = "exact"
 )
 
 type CustomErrorResponseRule struct {
+	Name                  string `json:"name"`
+	Description           string `json:"description"`
+	Priority              int    `json:"priority"`
 	Enabled               bool   `json:"enabled"`
 	MatchMode             string `json:"match_mode"`
 	StatusCodes           string `json:"status_codes"`
 	MessageContains       string `json:"message_contains"`
+	MessageMatchMode      string `json:"message_match_mode"`
 	ResponseStatusCode    int    `json:"response_status_code"`
 	ResponseMessage       string `json:"response_message"`
 	PassThroughStatusCode bool   `json:"pass_through_status_code"`
@@ -64,6 +72,12 @@ func ValidateCustomErrorResponseRules(rules []CustomErrorResponseRule) error {
 		}
 
 		ruleNo := index + 1
+		if len([]rune(strings.TrimSpace(rule.Name))) > 100 {
+			return fmt.Errorf("第 %d 条自定义错误返回规则名称不能超过 100 个字符", ruleNo)
+		}
+		if len([]rune(strings.TrimSpace(rule.Description))) > 500 {
+			return fmt.Errorf("第 %d 条自定义错误返回规则描述不能超过 500 个字符", ruleNo)
+		}
 		matchMode := normalizeCustomErrorResponseMatchMode(rule.MatchMode)
 		if rule.MatchMode != "" && matchMode != rule.MatchMode {
 			return fmt.Errorf("第 %d 条自定义错误返回规则的匹配模式无效", ruleNo)
@@ -80,6 +94,12 @@ func ValidateCustomErrorResponseRules(rules []CustomErrorResponseRule) error {
 				return fmt.Errorf("第 %d 条自定义错误返回规则状态码无效: %w", ruleNo, err)
 			}
 		}
+		if hasMessageCondition {
+			messageMatchMode := normalizeCustomErrorMessageMatchMode(rule.MessageMatchMode)
+			if rule.MessageMatchMode != "" && messageMatchMode != rule.MessageMatchMode {
+				return fmt.Errorf("第 %d 条自定义错误返回规则的错误信息匹配方式无效", ruleNo)
+			}
+		}
 
 		if !rule.PassThroughStatusCode && !isHTTPStatusCode(rule.ResponseStatusCode) {
 			return fmt.Errorf("第 %d 条自定义错误返回规则需要设置 100-599 的返回状态码，或开启透传上游状态码", ruleNo)
@@ -93,27 +113,47 @@ func ValidateCustomErrorResponseRules(rules []CustomErrorResponseRule) error {
 	return nil
 }
 
-func ApplyCustomErrorResponse(err *types.NewAPIError) {
+func ApplyCustomErrorResponse(err *types.NewAPIError) bool {
 	if err == nil || !errorResponseSetting.Enabled {
-		return
+		return false
 	}
 
-	for _, rule := range errorResponseSetting.Rules {
-		if !rule.Enabled || !matchCustomErrorResponseRule(rule, err) {
-			continue
-		}
-
-		if !rule.PassThroughStatusCode && isHTTPStatusCode(rule.ResponseStatusCode) {
-			err.StatusCode = rule.ResponseStatusCode
-		}
-		if !rule.PassThroughMessage {
-			message := strings.TrimSpace(rule.ResponseMessage)
-			if message != "" {
-				err.SetResponseMessage(message)
-			}
-		}
-		return
+	rule, matched := matchingCustomErrorResponseRule(err)
+	if !matched {
+		return false
 	}
+
+	if !rule.PassThroughStatusCode && isHTTPStatusCode(rule.ResponseStatusCode) {
+		err.StatusCode = rule.ResponseStatusCode
+	}
+	if !rule.PassThroughMessage {
+		message := strings.TrimSpace(rule.ResponseMessage)
+		if message != "" {
+			err.SetResponseMessage(message)
+		}
+	}
+	return true
+}
+
+func HasMatchingCustomErrorResponse(err *types.NewAPIError) bool {
+	if err == nil || !errorResponseSetting.Enabled {
+		return false
+	}
+	_, matched := matchingCustomErrorResponseRule(err)
+	return matched
+}
+
+func matchingCustomErrorResponseRule(err *types.NewAPIError) (CustomErrorResponseRule, bool) {
+	rules := append([]CustomErrorResponseRule(nil), errorResponseSetting.Rules...)
+	sort.SliceStable(rules, func(i, j int) bool {
+		return rules[i].Priority < rules[j].Priority
+	})
+	for _, rule := range rules {
+		if rule.Enabled && matchCustomErrorResponseRule(rule, err) {
+			return rule, true
+		}
+	}
+	return CustomErrorResponseRule{}, false
 }
 
 func matchCustomErrorResponseRule(rule CustomErrorResponseRule, err *types.NewAPIError) bool {
@@ -134,7 +174,7 @@ func matchCustomErrorResponseRule(rule CustomErrorResponseRule, err *types.NewAP
 
 	messageMatched := false
 	if hasMessageCondition {
-		messageMatched = containsErrorMessage(err, rule.MessageContains)
+		messageMatched = matchesErrorMessage(err, rule.MessageContains, rule.MessageMatchMode)
 	}
 
 	if normalizeCustomErrorResponseMatchMode(rule.MatchMode) == CustomErrorResponseMatchAll {
@@ -150,14 +190,21 @@ func matchCustomErrorResponseRule(rule CustomErrorResponseRule, err *types.NewAP
 	return statusMatched || messageMatched
 }
 
-func containsErrorMessage(err *types.NewAPIError, keyword string) bool {
+func matchesErrorMessage(err *types.NewAPIError, keyword string, mode string) bool {
 	keyword = strings.ToLower(strings.TrimSpace(keyword))
 	if keyword == "" {
 		return false
 	}
 
 	for _, message := range collectErrorMessages(err) {
-		if strings.Contains(strings.ToLower(message), keyword) {
+		candidate := strings.ToLower(strings.TrimSpace(message))
+		if normalizeCustomErrorMessageMatchMode(mode) == CustomErrorMessageMatchExact {
+			if candidate == keyword {
+				return true
+			}
+			continue
+		}
+		if strings.Contains(candidate, keyword) {
 			return true
 		}
 	}
@@ -196,6 +243,13 @@ func normalizeCustomErrorResponseMatchMode(mode string) string {
 		return CustomErrorResponseMatchAll
 	}
 	return CustomErrorResponseMatchAny
+}
+
+func normalizeCustomErrorMessageMatchMode(mode string) string {
+	if strings.TrimSpace(mode) == CustomErrorMessageMatchExact {
+		return CustomErrorMessageMatchExact
+	}
+	return CustomErrorMessageMatchContains
 }
 
 func isHTTPStatusCode(code int) bool {

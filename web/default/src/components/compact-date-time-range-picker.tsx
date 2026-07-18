@@ -16,17 +16,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CalendarDays } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { CalendarDays, Clock3 } from 'lucide-react'
+import { type ComponentProps, useMemo, useState } from 'react'
+import type { DateRange } from 'react-day-picker'
+import { enUS, fr, ja, ru, vi, zhCN, zhTW } from 'react-day-picker/locale'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Calendar } from '@/components/ui/calendar'
 import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import dayjs from '@/lib/dayjs'
 import { cn } from '@/lib/utils'
 
@@ -37,14 +47,47 @@ interface CompactDateTimeRangePickerProps {
   className?: string
 }
 
-function toInputValue(date?: Date): string {
-  return date ? dayjs(date).format('YYYY-MM-DDTHH:mm') : ''
+const calendarLocales = {
+  en: enUS,
+  fr,
+  ru,
+  ja,
+  vi,
+} as const
+
+function getCalendarLocale(language: string) {
+  const normalized = language.toLowerCase()
+  if (normalized === 'zh-tw' || normalized.startsWith('zh-hant')) {
+    return zhTW
+  }
+  if (normalized.startsWith('zh')) {
+    return zhCN
+  }
+  const baseLanguage = normalized.split('-')[0]
+  return calendarLocales[baseLanguage as keyof typeof calendarLocales] ?? enUS
 }
 
-function fromInputValue(value: string): Date | undefined {
-  if (!value) return undefined
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? undefined : date
+const hourOptions = Array.from({ length: 24 }, (_, index) =>
+  index.toString().padStart(2, '0')
+)
+const minuteOptions = Array.from({ length: 60 }, (_, index) =>
+  index.toString().padStart(2, '0')
+)
+
+function mergeDateAndTime(
+  date: Date,
+  timeSource: Date | undefined,
+  fallbackHour: number,
+  fallbackMinute: number
+) {
+  const next = new Date(date)
+  next.setHours(
+    timeSource?.getHours() ?? fallbackHour,
+    timeSource?.getMinutes() ?? fallbackMinute,
+    0,
+    0
+  )
+  return next
 }
 
 export function CompactDateTimeRangePicker({
@@ -53,10 +96,14 @@ export function CompactDateTimeRangePicker({
   onChange,
   className,
 }: CompactDateTimeRangePickerProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [open, setOpen] = useState(false)
-  const [draftStart, setDraftStart] = useState(toInputValue(start))
-  const [draftEnd, setDraftEnd] = useState(toInputValue(end))
+  const [draftStart, setDraftStart] = useState<Date | undefined>(start)
+  const [draftEnd, setDraftEnd] = useState<Date | undefined>(end)
+
+  const calendarLocale = getCalendarLocale(
+    i18n.resolvedLanguage ?? i18n.language
+  )
 
   const label = useMemo(() => {
     if (!start && !end) return t('Date Range')
@@ -67,18 +114,42 @@ export function CompactDateTimeRangePicker({
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
-      setDraftStart(toInputValue(start))
-      setDraftEnd(toInputValue(end))
+      setDraftStart(start)
+      setDraftEnd(end)
     }
     setOpen(nextOpen)
   }
 
   const applyDraft = () => {
-    onChange({
-      start: fromInputValue(draftStart),
-      end: fromInputValue(draftEnd),
-    })
+    onChange({ start: draftStart, end: draftEnd })
     setOpen(false)
+  }
+
+  const handleDateSelect = (range: DateRange | undefined) => {
+    if (!range?.from) {
+      setDraftStart(undefined)
+      setDraftEnd(undefined)
+      return
+    }
+
+    setDraftStart(mergeDateAndTime(range.from, draftStart, 0, 0))
+    setDraftEnd(
+      range.to ? mergeDateAndTime(range.to, draftEnd, 23, 59) : undefined
+    )
+  }
+
+  const updateTime = (
+    target: 'start' | 'end',
+    unit: 'hour' | 'minute',
+    value: string
+  ) => {
+    const current = target === 'start' ? draftStart : draftEnd
+    if (!current) return
+    const next = new Date(current)
+    if (unit === 'hour') next.setHours(Number(value))
+    else next.setMinutes(Number(value))
+    if (target === 'start') setDraftStart(next)
+    else setDraftEnd(next)
   }
 
   const applyPreset = (kind: 'today' | '7d' | 'week' | '30d' | 'month') => {
@@ -106,11 +177,16 @@ export function CompactDateTimeRangePicker({
       },
     }
     const range = presets[kind]
-    setDraftStart(toInputValue(range.start))
-    setDraftEnd(toInputValue(range.end))
+    setDraftStart(range.start)
+    setDraftEnd(range.end)
     onChange(range)
     setOpen(false)
   }
+
+  const selectedRange =
+    draftStart || draftEnd ? { from: draftStart, to: draftEnd } : undefined
+  const invalidRange =
+    draftStart && draftEnd && draftEnd.getTime() < draftStart.getTime()
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
@@ -132,92 +208,211 @@ export function CompactDateTimeRangePicker({
       </PopoverTrigger>
       <PopoverContent
         align='start'
-        className='w-[min(520px,calc(100vw-2rem))] p-3'
+        collisionAvoidance={{ side: 'shift', align: 'shift' }}
+        collisionPadding={16}
+        className='max-h-[min(680px,calc(100dvh-2rem))] w-[min(600px,calc(100vw-2rem))] overflow-y-auto p-0'
       >
-        <div className='space-y-3'>
-          <div className='grid gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-end'>
-            <div className='space-y-1.5'>
-              <div className='text-muted-foreground text-xs'>
-                {t('Start Time')}
-              </div>
-              <Input
-                type='datetime-local'
-                value={draftStart}
-                onChange={(event) => setDraftStart(event.target.value)}
-                className='h-8 text-sm leading-5 tabular-nums'
-              />
-            </div>
-            <span className='text-muted-foreground hidden pb-2 text-xs sm:block'>
-              ~
-            </span>
-            <div className='space-y-1.5'>
-              <div className='text-muted-foreground text-xs'>
-                {t('End Time')}
-              </div>
-              <Input
-                type='datetime-local'
-                value={draftEnd}
-                onChange={(event) => setDraftEnd(event.target.value)}
-                className='h-8 text-sm leading-5 tabular-nums'
-              />
-            </div>
+        <div className='grid sm:grid-cols-[auto_minmax(0,1fr)]'>
+          <div className='flex justify-center border-b p-2 sm:border-r sm:border-b-0'>
+            <Calendar
+              mode='range'
+              selected={selectedRange}
+              onSelect={handleDateSelect}
+              defaultMonth={draftStart ?? draftEnd}
+              locale={calendarLocale}
+              numberOfMonths={1}
+              classNames={{
+                day_button:
+                  'group-data-[focused=true]/day:border-0 group-data-[focused=true]/day:ring-0 focus-visible:ring-0',
+              }}
+            />
           </div>
 
-          <div className='flex flex-wrap gap-1.5'>
-            <Button
-              type='button'
-              variant='secondary'
-              size='sm'
-              className='h-7 flex-1 px-2 text-xs'
-              onClick={() => applyPreset('today')}
-            >
+          <div className='min-w-0 p-3 sm:flex sm:flex-col sm:justify-center'>
+            <div className='flex items-center gap-2 pb-3'>
+              <Clock3 className='text-muted-foreground size-4' />
+              <span className='text-sm font-medium'>{t('Time')}</span>
+            </div>
+
+            <div className='space-y-3'>
+              <div className='space-y-1.5'>
+                <div className='flex items-center justify-between gap-2'>
+                  <span className='text-muted-foreground text-xs'>
+                    {t('Start Time')}
+                  </span>
+                  <span className='text-xs font-medium tabular-nums'>
+                    {draftStart
+                      ? dayjs(draftStart).format('YYYY-MM-DD')
+                      : t('Select date')}
+                  </span>
+                </div>
+                <TimeSelectRow
+                  value={draftStart}
+                  disabled={!draftStart}
+                  onHourChange={(value) => updateTime('start', 'hour', value)}
+                  onMinuteChange={(value) =>
+                    updateTime('start', 'minute', value)
+                  }
+                />
+              </div>
+
+              <div className='space-y-1.5'>
+                <div className='flex items-center justify-between gap-2'>
+                  <span className='text-muted-foreground text-xs'>
+                    {t('End Time')}
+                  </span>
+                  <span className='text-xs font-medium tabular-nums'>
+                    {draftEnd
+                      ? dayjs(draftEnd).format('YYYY-MM-DD')
+                      : t('Select date')}
+                  </span>
+                </div>
+                <TimeSelectRow
+                  value={draftEnd}
+                  disabled={!draftEnd}
+                  onHourChange={(value) => updateTime('end', 'hour', value)}
+                  onMinuteChange={(value) => updateTime('end', 'minute', value)}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className='border-t px-3 py-2.5'>
+          <div className='text-muted-foreground mb-2 text-xs'>
+            {t('Quick ranges')}
+          </div>
+          <div className='grid grid-cols-2 gap-1.5 sm:grid-cols-5'>
+            <PresetButton onClick={() => applyPreset('today')}>
               {t('Today')}
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='sm'
-              className='h-7 flex-1 px-2 text-xs'
-              onClick={() => applyPreset('7d')}
-            >
+            </PresetButton>
+            <PresetButton onClick={() => applyPreset('7d')}>
               {t('7 Days')}
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='sm'
-              className='h-7 flex-1 px-2 text-xs'
-              onClick={() => applyPreset('week')}
-            >
+            </PresetButton>
+            <PresetButton onClick={() => applyPreset('week')}>
               {t('This week')}
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='sm'
-              className='h-7 flex-1 px-2 text-xs'
-              onClick={() => applyPreset('30d')}
-            >
+            </PresetButton>
+            <PresetButton onClick={() => applyPreset('30d')}>
               {t('30 Days')}
-            </Button>
-            <Button
-              type='button'
-              variant='secondary'
-              size='sm'
-              className='h-7 flex-1 px-2 text-xs'
+            </PresetButton>
+            <PresetButton
+              className='col-span-2 sm:col-span-1'
               onClick={() => applyPreset('month')}
             >
               {t('This month')}
-            </Button>
+            </PresetButton>
           </div>
+        </div>
 
-          <div className='flex justify-end'>
-            <Button size='sm' className='h-8' onClick={applyDraft}>
-              {t('Confirm')}
-            </Button>
-          </div>
+        <div className='flex items-center justify-between border-t px-3 py-2.5'>
+          <Button
+            type='button'
+            variant='ghost'
+            size='sm'
+            className='h-8 px-2'
+            onClick={() => {
+              setDraftStart(undefined)
+              setDraftEnd(undefined)
+            }}
+          >
+            {t('Clear')}
+          </Button>
+          <Button
+            type='button'
+            size='sm'
+            className='h-8'
+            disabled={Boolean(invalidRange)}
+            onClick={applyDraft}
+          >
+            {t('Confirm')}
+          </Button>
         </div>
       </PopoverContent>
     </Popover>
+  )
+}
+
+interface TimeSelectRowProps {
+  value?: Date
+  disabled: boolean
+  onHourChange: (value: string) => void
+  onMinuteChange: (value: string) => void
+}
+
+function TimeSelectRow({
+  value,
+  disabled,
+  onHourChange,
+  onMinuteChange,
+}: TimeSelectRowProps) {
+  const hour = value?.getHours().toString().padStart(2, '0') ?? '00'
+  const minute = value?.getMinutes().toString().padStart(2, '0') ?? '00'
+
+  return (
+    <div className='grid grid-cols-[1fr_auto_1fr] items-center gap-2'>
+      <TimeSelect
+        value={hour}
+        options={hourOptions}
+        disabled={disabled}
+        onValueChange={onHourChange}
+      />
+      <span className='text-muted-foreground font-medium'>:</span>
+      <TimeSelect
+        value={minute}
+        options={minuteOptions}
+        disabled={disabled}
+        onValueChange={onMinuteChange}
+      />
+    </div>
+  )
+}
+
+interface TimeSelectProps {
+  value: string
+  options: string[]
+  disabled: boolean
+  onValueChange: (value: string) => void
+}
+
+function TimeSelect({
+  value,
+  options,
+  disabled,
+  onValueChange,
+}: TimeSelectProps) {
+  return (
+    <Select<string>
+      value={value}
+      items={options.map((option) => ({ value: option, label: option }))}
+      disabled={disabled}
+      onValueChange={(nextValue) =>
+        nextValue !== null && onValueChange(nextValue)
+      }
+    >
+      <SelectTrigger className='h-8 w-full tabular-nums'>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent alignItemWithTrigger={false} className='max-h-56'>
+        <SelectGroup>
+          {options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {option}
+            </SelectItem>
+          ))}
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  )
+}
+
+function PresetButton({ className, ...props }: ComponentProps<typeof Button>) {
+  return (
+    <Button
+      type='button'
+      variant='secondary'
+      size='sm'
+      className={cn('h-7 px-2 text-xs', className)}
+      {...props}
+    />
   )
 }
