@@ -26,6 +26,7 @@ func TestCaptureUpstreamRequestIdFallsBackToProviderHeader(t *testing.T) {
 
 	require.Equal(t, "sub2api-request-id", requestId)
 	require.Equal(t, "sub2api-request-id", c.GetString(common.UpstreamRequestIdKey))
+	require.Equal(t, []string{"sub2api-request-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
 }
 
 func TestCaptureUpstreamRequestIdPrefersOneapiHeader(t *testing.T) {
@@ -41,6 +42,7 @@ func TestCaptureUpstreamRequestIdPrefersOneapiHeader(t *testing.T) {
 
 	require.Equal(t, "oneapi-request-id", requestId)
 	require.Equal(t, "oneapi-request-id", c.GetString(common.UpstreamRequestIdKey))
+	require.Equal(t, []string{"sub2api-request-id", "oneapi-request-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
 }
 
 func TestCaptureUpstreamRequestIdUpdatesAcrossUpstreamAttempts(t *testing.T) {
@@ -55,6 +57,28 @@ func TestCaptureUpstreamRequestIdUpdatesAcrossUpstreamAttempts(t *testing.T) {
 
 	require.Equal(t, "second-sub2api-request-id", requestId)
 	require.Equal(t, "second-sub2api-request-id", c.GetString(common.UpstreamRequestIdKey))
+	require.Equal(t, []string{"first-sub2api-request-id", "second-sub2api-request-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
+}
+
+func TestCaptureUpstreamRequestIdDeduplicatesChain(t *testing.T) {
+	c := newUpstreamRequestIdTestContext()
+	header := http.Header{providerRequestIdHeader: []string{"same-request-id"}}
+
+	CaptureUpstreamRequestId(c, header)
+	CaptureUpstreamRequestId(c, header)
+
+	require.Equal(t, []string{"same-request-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
+}
+
+func TestCaptureUpstreamRequestIdSelectsOneIdPerResponse(t *testing.T) {
+	c := newUpstreamRequestIdTestContext()
+
+	CaptureUpstreamRequestId(c, http.Header{
+		common.RequestIdKey:     []string{"oneapi-request-id"},
+		providerRequestIdHeader: []string{"provider-request-id"},
+	})
+
+	require.Equal(t, []string{"oneapi-request-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
 }
 
 func TestShouldCopyUpstreamHeaderPreservesPriorityAcrossIterationOrder(t *testing.T) {

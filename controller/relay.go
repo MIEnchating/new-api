@@ -176,6 +176,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	relayInfo.LastError = nil
 	var retrySameChannel *model.Channel
 	sameChannelRetriesUsed := 0
+	var lastFailedChannelError *types.NewAPIError
+	finalErrorLogged := false
 
 	for {
 		relayInfo.RetryIndex = retryParam.GetRetry()
@@ -245,10 +247,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					c,
 					*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
 					streamAPIError,
-					relayInfo,
 				)
 				newAPIError = streamAPIError
-				if shouldAttemptNextChannel(c, streamAPIError, common.RetryTimes-retryParam.GetRetry(), channelRouteFailed) {
+				lastFailedChannelError = streamAPIError
+				willRetry := shouldAttemptNextChannel(c, streamAPIError, common.RetryTimes-retryParam.GetRetry(), channelRouteFailed)
+				recordChannelErrorLog(c, streamAPIError, relayInfo, willRetry)
+				finalErrorLogged = !willRetry
+				if willRetry {
 					retryParam.IncreaseRetry()
 					continue
 				}
@@ -279,10 +284,14 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			continue
 		}
 
-		channelRouteFailed := processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
+		channelRouteFailed := processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 		sameChannelRetriesUsed = 0
+		lastFailedChannelError = newAPIError
+		willRetry := shouldAttemptNextChannel(c, newAPIError, common.RetryTimes-retryParam.GetRetry(), channelRouteFailed)
+		recordChannelErrorLog(c, newAPIError, relayInfo, willRetry)
+		finalErrorLogged = !willRetry
 
-		if !shouldAttemptNextChannel(c, newAPIError, common.RetryTimes-retryParam.GetRetry(), channelRouteFailed) {
+		if !willRetry {
 			break
 		}
 		retryParam.IncreaseRetry()
@@ -296,6 +305,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		retryLogStr := fmt.Sprintf("%s：%s", mode, strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
+	}
+	if newAPIError != nil && !finalErrorLogged && lastFailedChannelError != nil {
+		recordChannelErrorLog(c, newAPIError, relayInfo, false)
 	}
 	if newAPIError != nil {
 		service.MarkChannelExecutionFailed(c, newAPIError.Error())
@@ -495,7 +507,7 @@ func shouldAttemptNextChannel(c *gin.Context, openaiErr *types.NewAPIError, retr
 	return shouldRetry(c, openaiErr, retryTimes)
 }
 
-func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo) bool {
+func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) bool {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	channelRouteFrozen := service.MarkChannelRouteFailure(c, err)
 	if !channelRouteFrozen {
@@ -508,7 +520,10 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
 	}
+	return channelRouteFrozen
+}
 
+func recordChannelErrorLog(c *gin.Context, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo, adminOnly bool) {
 	if constant.ErrorLogEnabled && types.IsRecordErrorLog(err) {
 		// 保存错误日志到mysql中
 		userId := c.GetInt("id")
@@ -538,6 +553,10 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		service.AppendChannelAffinityAdminInfo(c, adminInfo)
 		service.AppendChannelRouteStickyAdminInfo(c, adminInfo)
 		service.AppendChannelExecutionTraceErrorAdminInfo(c, adminInfo)
+		if adminOnly {
+			adminInfo["retry_intermediate"] = true
+			model.MarkLogAdminOnly(other)
+		}
 		other["admin_info"] = adminInfo
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
@@ -546,7 +565,6 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		useTimeSeconds := int(time.Since(startTime).Seconds())
 		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, formatRelayErrorLogContent(err), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
-	return channelRouteFrozen
 }
 
 func setRelayResponseRequestId(err *types.NewAPIError, requestId string) {
@@ -688,6 +706,8 @@ func RelayTask(c *gin.Context) {
 	channelLocked = channelLocked && lockedChannel != nil
 	var retrySameChannel *model.Channel
 	sameChannelRetriesUsed := 0
+	var lastFailedTaskChannelError *types.NewAPIError
+	finalTaskErrorLogged := false
 	for {
 		var channel *model.Channel
 
@@ -737,8 +757,9 @@ func RelayTask(c *gin.Context) {
 		}
 
 		channelRouteFailed := false
+		var routeError *types.NewAPIError
 		if !taskErr.LocalError {
-			routeError := types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
+			routeError = types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
 			service.TrackChannelExecutionFailure(c, channel.Id, routeError.ErrorWithStatusCode())
 			if !channelLocked && service.ShouldRetrySameChannelRoute(routeError, sameChannelRetriesUsed) {
 				sameChannelRetriesUsed++
@@ -750,11 +771,17 @@ func RelayTask(c *gin.Context) {
 			channelRouteFailed = processChannelError(c,
 				*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey,
 					common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
-				routeError, relayInfo)
+				routeError)
 		}
 		sameChannelRetriesUsed = 0
+		willRetry := shouldAttemptNextTaskChannel(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry(), channelRouteFailed, !channelLocked)
+		if routeError != nil {
+			lastFailedTaskChannelError = routeError
+			recordChannelErrorLog(c, routeError, relayInfo, willRetry)
+			finalTaskErrorLogged = !willRetry
+		}
 
-		if !shouldAttemptNextTaskChannel(c, channel.Id, taskErr, common.RetryTimes-retryParam.GetRetry(), channelRouteFailed, !channelLocked) {
+		if !willRetry {
 			break
 		}
 		retryParam.IncreaseRetry()
@@ -768,6 +795,9 @@ func RelayTask(c *gin.Context) {
 		}
 		retryLogStr := fmt.Sprintf("%s：%s", mode, strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
+	}
+	if taskErr != nil && !finalTaskErrorLogged && lastFailedTaskChannelError != nil {
+		recordChannelErrorLog(c, lastFailedTaskChannelError, relayInfo, false)
 	}
 
 	// ── 成功：结算 + 日志 + 插入任务 ──

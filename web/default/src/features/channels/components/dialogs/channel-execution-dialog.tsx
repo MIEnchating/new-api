@@ -38,7 +38,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
-import { StatusBadge, type StatusVariant } from '@/components/status-badge'
+import {
+  StatusBadge,
+  textColorMap,
+  type StatusVariant,
+} from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -817,10 +821,10 @@ export function ChannelExecutionDialog({
                           <span
                             className={cn(
                               'bg-background z-10 flex size-7 items-center justify-center rounded-full border',
+                              textColorMap[appearance.variant],
                               event.state === 'active' &&
-                                trace.status === 'running'
-                                ? 'border-info text-info'
-                                : 'text-muted-foreground'
+                                trace.status === 'running' &&
+                                'border-info'
                             )}
                           >
                             <Icon

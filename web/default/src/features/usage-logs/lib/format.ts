@@ -106,6 +106,62 @@ export function parseLogOther(other: string): LogOtherData | null {
   }
 }
 
+export function normalizeLogDiagnosticMessage(message: unknown): string {
+  if (typeof message !== 'string') return ''
+  return message
+    .trim()
+    .replace(
+      /(?:\s*\((?:request[\s_-]?id|requestid)\s*:\s*[^\s()]+\))+\s*$/i,
+      ''
+    )
+    .replace(/^status_code\s*=\s*\d+\s*,?\s*/i, '')
+    .replaceAll(/\s+/g, ' ')
+    .toLowerCase()
+}
+
+export function isDuplicateLogDiagnosticMessage(
+  message: unknown,
+  canonicalMessage: unknown
+): boolean {
+  const normalizedMessage = normalizeLogDiagnosticMessage(message)
+  const normalizedCanonical = normalizeLogDiagnosticMessage(canonicalMessage)
+  return normalizedMessage !== '' && normalizedMessage === normalizedCanonical
+}
+
+export function uniqueLogDiagnosticMessages(
+  messages: unknown,
+  canonicalMessage: unknown
+): string[] {
+  if (!Array.isArray(messages)) return []
+  const canonical = normalizeLogDiagnosticMessage(canonicalMessage)
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const message of messages) {
+    if (typeof message !== 'string') continue
+    const normalized = normalizeLogDiagnosticMessage(message)
+    if (!normalized || normalized === canonical || seen.has(normalized)) {
+      continue
+    }
+    seen.add(normalized)
+    result.push(message.trim())
+  }
+  return result
+}
+
+export function getUpstreamRequestIds(
+  requestIds: string[] | undefined,
+  latestRequestId: string | undefined
+): string[] {
+  return [
+    ...new Set(
+      [...(requestIds ?? []), latestRequestId]
+        .map((requestId) => requestId?.trim())
+        .filter((requestId): requestId is string => Boolean(requestId))
+    ),
+  ]
+}
+
 /**
  * Get time color based on duration (in seconds)
  */

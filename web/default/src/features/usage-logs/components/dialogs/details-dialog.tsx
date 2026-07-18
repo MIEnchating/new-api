@@ -45,7 +45,11 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
-import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
+import {
+  StatusBadge,
+  textColorMap,
+  type StatusBadgeProps,
+} from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Label } from '@/components/ui/label'
@@ -77,6 +81,9 @@ import {
   getAuditParamEntries,
   getLoginMethodLabel,
   getSecondFactorMethodLabel,
+  getUpstreamRequestIds,
+  isDuplicateLogDiagnosticMessage,
+  uniqueLogDiagnosticMessages,
 } from '../../lib/format'
 import {
   getLogTypeConfig,
@@ -613,6 +620,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const adminInfo = other?.admin_info
   const executionTrace = adminInfo?.channel_execution_trace
   const executionEvents = executionTrace?.events ?? []
+  const lastFailedExecutionEventIndex = executionEvents.reduce(
+    (lastIndex, event, index) => (event.state === 'failed' ? index : lastIndex),
+    -1
+  )
   const executionTraceStatus =
     props.log.type === 5 && executionTrace?.status === 'running'
       ? 'failed'
@@ -696,6 +707,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const contentText =
     (isManage || isLogin) && operationText ? operationText : details
   const operationIdentifier = other?.op?.action ?? ''
+  const streamEndErrorIsDuplicate = isDuplicateLogDiagnosticMessage(
+    other?.stream_status?.end_error,
+    details
+  )
+  const uniqueStreamErrors = uniqueLogDiagnosticMessages(
+    other?.stream_status?.errors,
+    details
+  )
   const auditParamEntries =
     isManage || isLogin ? getAuditParamEntries(other, t) : []
   const auditRoute = isManage ? other?.audit_info : undefined
@@ -797,6 +816,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const useChannel = other?.admin_info?.use_channel
   const channelChain =
     useChannel && useChannel.length > 0 ? useChannel.join(' → ') : undefined
+  const upstreamRequestIds = getUpstreamRequestIds(
+    other?.admin_info?.upstream_request_ids,
+    props.log.upstream_request_id
+  )
   let reasoningEffortVariant: StatusBadgeProps['variant'] = 'green'
   if (other?.reasoning_effort === 'high') {
     reasoningEffortVariant = 'orange'
@@ -869,10 +892,28 @@ export function DetailsDialog(props: DetailsDialogProps) {
               mono
             />
           )}
-          {props.isAdmin && props.log.upstream_request_id && (
+          {props.isAdmin && upstreamRequestIds.length === 1 && (
             <DetailRow
               label={t('Upstream Request ID')}
-              value={props.log.upstream_request_id}
+              value={upstreamRequestIds[0]}
+              mono
+            />
+          )}
+          {props.isAdmin && upstreamRequestIds.length > 1 && (
+            <DetailRow
+              label={t('Upstream Request ID Chain')}
+              value={
+                <span className='flex min-w-0 flex-col gap-1'>
+                  {upstreamRequestIds.map((requestId, index) => (
+                    <span key={requestId} className='flex min-w-0 gap-2'>
+                      <span className='text-muted-foreground shrink-0 tabular-nums'>
+                        {index + 1}.
+                      </span>
+                      <span className='min-w-0 break-all'>{requestId}</span>
+                    </span>
+                  ))}
+                </span>
+              }
               mono
             />
           )}
@@ -1061,6 +1102,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   const eventDescription = executionEventDescription(
                     event.state
                   )
+                  const eventReasonIsDuplicate =
+                    event.state === 'failed' &&
+                    index === lastFailedExecutionEventIndex &&
+                    isDuplicateLogDiagnosticMessage(event.reason, details)
                   return (
                     <div
                       key={`${event.sequence ?? index}-${event.timestamp ?? 0}`}
@@ -1069,8 +1114,15 @@ export function DetailsDialog(props: DetailsDialogProps) {
                       {index < events.length - 1 && (
                         <span className='bg-border absolute top-6 bottom-0 left-[11px] w-px' />
                       )}
-                      <span className='bg-background z-10 flex size-6 items-center justify-center rounded-full border'>
-                        <EventIcon className='text-muted-foreground size-3' />
+                      <span
+                        className={cn(
+                          'bg-background z-10 flex size-6 items-center justify-center rounded-full border',
+                          textColorMap[
+                            executionEventVariant(event.state) ?? 'neutral'
+                          ]
+                        )}
+                      >
+                        <EventIcon className='size-3' />
                       </span>
                       <div className='min-w-0'>
                         <div className='flex flex-wrap items-center gap-1.5'>
@@ -1103,7 +1155,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
                             {t(eventDescription)}
                           </p>
                         ) : null}
-                        {event.reason && event.state !== 'affinity_hit' ? (
+                        {event.reason &&
+                        event.state !== 'affinity_hit' &&
+                        !eventReasonIsDuplicate ? (
                           <p className='text-muted-foreground mt-1 text-xs break-all'>
                             {t(executionEventReasonLabel(event.reason))}
                           </p>
@@ -1549,18 +1603,17 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   value={String(other.stream_status.error_count)}
                 />
               )}
-              {other.stream_status.end_error && (
+              {other.stream_status.end_error && !streamEndErrorIsDuplicate && (
                 <DetailRow
                   label={t('End Error')}
                   value={other.stream_status.end_error}
                 />
               )}
-              {Array.isArray(other.stream_status.errors) &&
-                other.stream_status.errors.length > 0 && (
-                  <pre className='bg-background/60 mt-1 max-h-32 overflow-y-auto rounded border p-2 font-mono text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap'>
-                    {other.stream_status.errors.join('\n')}
-                  </pre>
-                )}
+              {uniqueStreamErrors.length > 0 && (
+                <pre className='bg-background/60 mt-1 max-h-32 overflow-y-auto rounded border p-2 font-mono text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap'>
+                  {uniqueStreamErrors.join('\n')}
+                </pre>
+              )}
             </DetailSection>
           )}
 

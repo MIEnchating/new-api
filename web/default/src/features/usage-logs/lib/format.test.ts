@@ -25,8 +25,11 @@ import {
   getLoginMethodLabel,
   getOptionKeyLabel,
   getSecondFactorMethodLabel,
+  getUpstreamRequestIds,
   humanizeAuditIdentifier,
+  isDuplicateLogDiagnosticMessage,
   renderAuditContent,
+  uniqueLogDiagnosticMessages,
 } from './format'
 
 const t = (key: string, opts: Record<string, unknown> = {}) =>
@@ -168,6 +171,66 @@ describe('usage log audit formatting', () => {
         t
       ),
       'Route affinity cleared'
+    )
+  })
+})
+
+describe('usage log diagnostic formatting', () => {
+  test('keeps upstream request IDs ordered and deduplicated', () => {
+    assert.deepEqual(
+      getUpstreamRequestIds(
+        [' upstream-1 ', 'upstream-2', 'upstream-1'],
+        'upstream-2'
+      ),
+      ['upstream-1', 'upstream-2']
+    )
+    assert.deepEqual(getUpstreamRequestIds(undefined, 'legacy-upstream'), [
+      'legacy-upstream',
+    ])
+  })
+
+  test('matches the same error with and without a status-code prefix', () => {
+    assert.equal(
+      isDuplicateLogDiagnosticMessage(
+        'quota exhausted on AmazonQ',
+        'status_code=500, quota exhausted on AmazonQ'
+      ),
+      true
+    )
+  })
+
+  test('ignores an upstream request ID suffix when comparing errors', () => {
+    assert.equal(
+      isDuplicateLogDiagnosticMessage(
+        'status_code=403, 用户额度不足, 剩余额度: ¥0.000000 (request id: 202607181326491410859398268d9d69m06ojET)',
+        'status_code=403, 用户额度不足, 剩余额度: ¥0.000000'
+      ),
+      true
+    )
+  })
+
+  test('removes multiple trailing request ID variants when comparing errors', () => {
+    assert.equal(
+      isDuplicateLogDiagnosticMessage(
+        'status_code=500, upstream failed (request id: upstream-123) (request_id: proxy-456) (request-id: local-789)',
+        'upstream failed'
+      ),
+      true
+    )
+  })
+
+  test('keeps distinct stream errors and removes repeated messages', () => {
+    assert.deepEqual(
+      uniqueLogDiagnosticMessages(
+        [
+          'quota exhausted on AmazonQ',
+          'status_code=500, quota exhausted on AmazonQ',
+          'scanner stopped unexpectedly',
+          'scanner stopped unexpectedly',
+        ],
+        'status_code=500, quota exhausted on AmazonQ'
+      ),
+      ['scanner stopped unexpectedly']
     )
   })
 })

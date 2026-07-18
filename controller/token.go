@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -347,18 +348,39 @@ func GetTokenUsage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"code":    true,
 		"message": "ok",
-		"data": gin.H{
-			"object":               "token_usage",
-			"name":                 token.Name,
-			"total_granted":        token.RemainQuota + token.UsedQuota,
-			"total_used":           token.UsedQuota,
-			"total_available":      token.RemainQuota,
-			"unlimited_quota":      token.UnlimitedQuota,
-			"model_limits":         token.GetModelLimitsMap(),
-			"model_limits_enabled": token.ModelLimitsEnabled,
-			"expires_at":           expiredAt,
-		},
+		"data": buildTokenUsageData(
+			token,
+			common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
+			expiredAt,
+			buildTokenUsageLabels(c),
+		),
 	})
+}
+
+func buildTokenUsageLabels(c *gin.Context) gin.H {
+	return gin.H{
+		"account_balance": i18n.T(c, "usage.account_balance"),
+		"key_quota":       i18n.T(c, "usage.key_quota"),
+		"api_key":         i18n.T(c, "usage.api_key"),
+	}
+}
+
+func buildTokenUsageData(token *model.Token, accountQuota int, expiredAt int64, labels gin.H) gin.H {
+	return gin.H{
+		"object": "token_usage",
+		"labels": labels,
+		"account": gin.H{
+			"total_available": accountQuota,
+		},
+		"name":                 token.Name,
+		"total_granted":        token.RemainQuota + token.UsedQuota,
+		"total_used":           token.UsedQuota,
+		"total_available":      token.RemainQuota,
+		"unlimited_quota":      token.UnlimitedQuota,
+		"model_limits":         token.GetModelLimitsMap(),
+		"model_limits_enabled": token.ModelLimitsEnabled,
+		"expires_at":           expiredAt,
+	}
 }
 
 func AddToken(c *gin.Context) {

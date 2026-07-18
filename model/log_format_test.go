@@ -5,6 +5,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -39,16 +40,110 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 func TestFormatUserLogsStripsUpstreamRequestID(t *testing.T) {
 	logs := []*Log{{
 		Type:              LogTypeError,
+		ChannelId:         17,
+		ChannelName:       "private-channel",
 		RequestId:         "local-request-id",
 		UpstreamRequestId: "upstream-request-id",
 		Content:           "status_code=500, upstream failed (request id: upstream-request-id)",
+		Other: common.MapToJsonStr(map[string]interface{}{
+			"channel_id":   17,
+			"channel_name": "private-channel",
+			"channel_type": 1,
+			"request_path": "/v1/responses",
+			"admin_info": map[string]interface{}{
+				"upstream_request_ids": []string{"upstream-1", "upstream-2"},
+			},
+		}),
 	}}
 
 	formatUserLogs(logs, 0)
 
 	require.Equal(t, "local-request-id", logs[0].RequestId)
+	require.Zero(t, logs[0].ChannelId)
+	require.Empty(t, logs[0].ChannelName)
 	require.Empty(t, logs[0].UpstreamRequestId)
 	require.Equal(t, "status_code=500, upstream failed", logs[0].Content)
+	parsed, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	require.NotContains(t, parsed, "channel_id")
+	require.NotContains(t, parsed, "channel_name")
+	require.NotContains(t, parsed, "channel_type")
+	require.NotContains(t, parsed, "admin_info")
+	require.Equal(t, "/v1/responses", parsed["request_path"])
+}
+
+func TestAppendUpstreamRequestIdsAdminInfo(t *testing.T) {
+	c, _ := gin.CreateTestContext(nil)
+	c.Set(common.UpstreamRequestIdsKey, []string{"upstream-1", "upstream-2"})
+	other := map[string]interface{}{
+		"admin_info": map[string]interface{}{"use_channel": []int{11, 12}},
+	}
+
+	appendUpstreamRequestIdsAdminInfo(c, other)
+
+	adminInfo := other["admin_info"].(map[string]interface{})
+	require.Equal(t, []string{"upstream-1", "upstream-2"}, adminInfo["upstream_request_ids"])
+	require.Equal(t, []int{11, 12}, adminInfo["use_channel"])
+}
+
+func TestUserLogQueriesExcludeAdminOnlyRetryFailures(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+
+	previousLogDB := LOG_DB
+	LOG_DB = db
+	t.Cleanup(func() {
+		LOG_DB = previousLogDB
+	})
+
+	intermediateOther := map[string]interface{}{
+		"admin_info": map[string]interface{}{"retry_intermediate": true},
+	}
+	MarkLogAdminOnly(intermediateOther)
+	require.NoError(t, db.Create(&Log{
+		UserId:    42,
+		Type:      LogTypeError,
+		TokenId:   7,
+		RequestId: "retry-request",
+		Content:   "first channel failed",
+		Other:     common.MapToJsonStr(intermediateOther),
+	}).Error)
+	require.NoError(t, db.Create(&Log{
+		UserId:    42,
+		Type:      LogTypeError,
+		TokenId:   7,
+		RequestId: "retry-request",
+		Content:   "final channel failed",
+		Other:     common.MapToJsonStr(map[string]interface{}{}),
+	}).Error)
+
+	userLogs, total, err := GetUserLogs(42, LogTypeUnknown, 0, 0, "", "", 0, 20, "", "", "")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, userLogs, 1)
+	require.Equal(t, "final channel failed", userLogs[0].Content)
+
+	tokenLogs, err := GetLogByTokenId(7)
+	require.NoError(t, err)
+	require.Len(t, tokenLogs, 1)
+	require.Equal(t, "final channel failed", tokenLogs[0].Content)
+
+	adminLogs, adminTotal, err := GetAllLogs(LogTypeUnknown, 0, 0, "", "", "", 0, 20, 0, "", "", "")
+	require.NoError(t, err)
+	require.EqualValues(t, 2, adminTotal)
+	require.Len(t, adminLogs, 2)
+	intermediateLog := adminLogs[1]
+	if adminLogs[0].Content == "first channel failed" {
+		intermediateLog = adminLogs[0]
+	}
+	require.Equal(t, "first channel failed", intermediateLog.Content)
+	adminOther, err := common.StrToMap(intermediateLog.Other)
+	require.NoError(t, err)
+	require.Equal(t, false, adminOther[logUserVisibleKey])
+	adminInfo, ok := adminOther["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, true, adminInfo["retry_intermediate"])
 }
 
 func TestSanitizeErrorLogContentsPreservesAdminUpstreamField(t *testing.T) {

@@ -15,6 +15,20 @@ import (
 
 const providerRequestIdHeader = "X-Request-Id"
 
+func appendUpstreamRequestId(c *gin.Context, requestId string) {
+	requestId = strings.TrimSpace(requestId)
+	if requestId == "" {
+		return
+	}
+	requestIds := c.GetStringSlice(common.UpstreamRequestIdsKey)
+	for _, existing := range requestIds {
+		if existing == requestId {
+			return
+		}
+	}
+	c.Set(common.UpstreamRequestIdsKey, append(requestIds, requestId))
+}
+
 // CaptureUpstreamRequestId records the best available upstream correlation ID.
 // Native new-api IDs take precedence; X-Request-Id supports providers such as
 // sub2api and is used only as a fallback.
@@ -24,11 +38,13 @@ func CaptureUpstreamRequestId(c *gin.Context, header http.Header) string {
 	}
 	if requestId := strings.TrimSpace(header.Get(common.RequestIdKey)); requestId != "" {
 		c.Set(common.UpstreamRequestIdKey, requestId)
+		appendUpstreamRequestId(c, requestId)
 		return requestId
 	}
 	requestId := strings.TrimSpace(header.Get(providerRequestIdHeader))
 	if requestId != "" {
 		c.Set(common.UpstreamRequestIdKey, requestId)
+		appendUpstreamRequestId(c, requestId)
 	}
 	return requestId
 }

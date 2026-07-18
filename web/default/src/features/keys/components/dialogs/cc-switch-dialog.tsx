@@ -28,6 +28,11 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 
 import { getApiKeyModels } from '../../api'
+import {
+  buildCCSwitchURL,
+  resolveCCSwitchServerAddress,
+  type CCSwitchAppType,
+} from '../../lib/cc-switch'
 
 const APP_CONFIGS = {
   claude: {
@@ -52,44 +57,16 @@ const APP_CONFIGS = {
   },
 } as const
 
-type AppType = keyof typeof APP_CONFIGS
+type AppType = keyof typeof APP_CONFIGS & CCSwitchAppType
 
 function getServerAddress(): string {
-  if (import.meta.env.DEV) {
-    return window.location.origin
-  }
+  let rawStatus: string | null = null
   try {
-    const raw = localStorage.getItem('status')
-    if (raw) {
-      const status = JSON.parse(raw)
-      if (status.server_address) return status.server_address
-    }
+    rawStatus = localStorage.getItem('status')
   } catch {
-    /* empty */
+    // Storage can be unavailable in restricted browser contexts.
   }
-  return window.location.origin
-}
-
-function buildCCSwitchURL(
-  app: string,
-  name: string,
-  models: Record<string, string>,
-  apiKey: string
-): string {
-  const serverAddress = getServerAddress()
-  const endpoint = app === 'codex' ? serverAddress + '/v1' : serverAddress
-  const params = new URLSearchParams()
-  params.set('resource', 'provider')
-  params.set('app', app)
-  params.set('name', name)
-  params.set('endpoint', endpoint)
-  params.set('apiKey', apiKey)
-  for (const [k, v] of Object.entries(models)) {
-    if (v) params.set(k, v)
-  }
-  params.set('homepage', serverAddress)
-  params.set('enabled', 'true')
-  return `ccswitch://v1/import?${params.toString()}`
+  return resolveCCSwitchServerAddress(rawStatus, window.location.origin)
 }
 
 interface Props {
@@ -100,7 +77,7 @@ interface Props {
 }
 
 export function CCSwitchDialog(props: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [app, setApp] = useState<AppType>('claude')
   const [name, setName] = useState<string>(APP_CONFIGS.claude.defaultName)
   const [models, setModels] = useState<Record<string, string>>({})
@@ -145,7 +122,14 @@ export function CCSwitchDialog(props: Props) {
     const key = props.tokenKey.startsWith('sk-')
       ? props.tokenKey
       : `sk-${props.tokenKey}`
-    const url = buildCCSwitchURL(app, name, models, key)
+    const url = buildCCSwitchURL({
+      app,
+      name,
+      models,
+      apiKey: key,
+      serverAddress: getServerAddress(),
+      language: i18n.resolvedLanguage || i18n.language,
+    })
     window.open(url, '_blank')
     props.onOpenChange(false)
   }
@@ -201,7 +185,7 @@ export function CCSwitchDialog(props: Props) {
             onValueChange={setName}
             placeholder={currentConfig.defaultName}
             emptyText=''
-            allowCustomValue={true}
+            allowCustomValue
           />
         </div>
 

@@ -92,6 +92,36 @@ const (
 	LogTypeLogin   = 7
 )
 
+const logUserVisibleKey = "user_visible"
+
+// MarkLogAdminOnly keeps a diagnostic log available to administrators while
+// excluding it from all user-facing log queries.
+func MarkLogAdminOnly(other map[string]interface{}) {
+	if other != nil {
+		other[logUserVisibleKey] = false
+	}
+}
+
+func appendUpstreamRequestIdsAdminInfo(c *gin.Context, other map[string]interface{}) {
+	if c == nil || other == nil {
+		return
+	}
+	requestIds := c.GetStringSlice(common.UpstreamRequestIdsKey)
+	if len(requestIds) == 0 {
+		return
+	}
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	if !ok || adminInfo == nil {
+		adminInfo = make(map[string]interface{})
+		other["admin_info"] = adminInfo
+	}
+	adminInfo["upstream_request_ids"] = append([]string(nil), requestIds...)
+}
+
+func applyUserVisibleLogFilter(tx *gorm.DB, column string) *gorm.DB {
+	return tx.Where("("+column+" IS NULL OR "+column+" NOT LIKE ?)", `%"`+logUserVisibleKey+`":false%`)
+}
+
 func ensureLogRequestId(log *Log) {
 	if log != nil && log.RequestId == "" {
 		log.RequestId = common.NewRequestId()
@@ -124,6 +154,7 @@ func sanitizeErrorLogContents(logs []*Log) {
 func formatUserLogs(logs []*Log, startIdx int) {
 	sanitizeErrorLogContents(logs)
 	for i := range logs {
+		logs[i].ChannelId = 0
 		logs[i].ChannelName = ""
 		logs[i].UpstreamRequestId = ""
 		var otherMap map[string]interface{}
@@ -135,6 +166,10 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			delete(otherMap, "audit_info")
 			// delete(otherMap, "reject_reason")
 			delete(otherMap, "stream_status")
+			delete(otherMap, "channel_id")
+			delete(otherMap, "channel_name")
+			delete(otherMap, "channel_type")
+			delete(otherMap, logUserVisibleKey)
 		}
 		logs[i].Other = common.MapToJsonStr(otherMap)
 	}
@@ -146,7 +181,8 @@ func GetLogByTokenId(tokenId int) (logs []*Log, err error) {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		order = clickHouseLogOrder("")
 	}
-	err = LOG_DB.Model(&Log{}).Where("token_id = ?", tokenId).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
+	tx := applyUserVisibleLogFilter(LOG_DB.Model(&Log{}), "other")
+	err = tx.Where("token_id = ?", tokenId).Order(order).Limit(common.MaxRecentItems).Find(&logs).Error
 	formatUserLogs(logs, 0)
 	return logs, err
 }
@@ -299,6 +335,10 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
+	if other == nil {
+		other = make(map[string]interface{})
+	}
+	appendUpstreamRequestIdsAdminInfo(c, other)
 	otherStr := common.MapToJsonStr(other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -363,6 +403,10 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
+	if params.Other == nil {
+		params.Other = make(map[string]interface{})
+	}
+	appendUpstreamRequestIdsAdminInfo(c, params.Other)
 	otherStr := common.MapToJsonStr(params.Other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -583,6 +627,7 @@ func GetUserLogs(userId int, logType int, startTimestamp int64, endTimestamp int
 	} else {
 		tx = LOG_DB.Where("logs.user_id = ? and logs.type = ?", userId, logType)
 	}
+	tx = applyUserVisibleLogFilter(tx, "logs.other")
 
 	if tx, err = applyExplicitLogTextFilter(tx, "logs.model_name", modelName); err != nil {
 		return nil, 0, err

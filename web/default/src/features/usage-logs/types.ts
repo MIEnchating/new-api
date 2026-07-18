@@ -150,6 +150,7 @@ export interface LogOtherData {
     channel_affinity?: ChannelAffinityInfo
     channel_route_sticky?: ChannelRouteStickyInfo
     channel_execution_trace?: ChannelExecutionTraceInfo
+    upstream_request_ids?: string[]
     // Top-up audit fields (type=1, admin only)
     payment_method?: string
     callback_payment_method?: string
