@@ -203,6 +203,7 @@ func main() {
 		options := baseSessionOptions
 		options.Domain = common.SessionDomainForHost(c.Request.Host)
 		sessions.Default(c).Options(options)
+		common.ClearDuplicateLegacySessionCookie(c)
 		c.Next()
 	})
 

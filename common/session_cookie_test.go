@@ -110,3 +110,39 @@ func TestClearLegacyHostOnlySessionCookieSkipsRootDomain(t *testing.T) {
 
 	assert.Empty(t, response.Header().Values("Set-Cookie"))
 }
+
+func TestClearDuplicateLegacySessionCookie(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	resetSessionCookieSettingsAfterTest(t)
+	SessionCookieSecure = true
+	SessionCookieDomain = "example.com"
+
+	engine := gin.New()
+	engine.GET("/", func(c *gin.Context) {
+		ClearDuplicateLegacySessionCookie(c)
+		c.Status(http.StatusNoContent)
+	})
+
+	duplicateRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	duplicateRequest.Host = "www.example.com"
+	duplicateRequest.Header.Set(
+		"Cookie",
+		"session=legacy-host-session; session=shared-domain-session",
+	)
+	duplicateResponse := httptest.NewRecorder()
+	engine.ServeHTTP(duplicateResponse, duplicateRequest)
+
+	require.Len(t, duplicateResponse.Result().Cookies(), 1)
+	deletionCookie := duplicateResponse.Result().Cookies()[0]
+	assert.Equal(t, "session", deletionCookie.Name)
+	assert.Empty(t, deletionCookie.Domain)
+	assert.Less(t, deletionCookie.MaxAge, 0)
+
+	singleRequest := httptest.NewRequest(http.MethodGet, "/", nil)
+	singleRequest.Host = "www.example.com"
+	singleRequest.Header.Set("Cookie", "session=shared-domain-session")
+	singleResponse := httptest.NewRecorder()
+	engine.ServeHTTP(singleResponse, singleRequest)
+
+	assert.Empty(t, singleResponse.Header().Values("Set-Cookie"))
+}

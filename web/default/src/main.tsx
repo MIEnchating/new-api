@@ -30,6 +30,10 @@ import { toast } from 'sonner'
 
 import { getStatus } from '@/lib/api'
 import { installBuildMetadata } from '@/lib/build-metadata'
+import {
+  installChunkLoadErrorRecovery,
+  recoverFromChunkLoadError,
+} from '@/lib/chunk-load-error'
 import { applyFaviconToDom } from '@/lib/dom-utils'
 import '@/lib/dayjs'
 import { initializeFrontendCache } from '@/lib/frontend-cache'
@@ -50,6 +54,7 @@ import './styles/index.css'
 // VChart theme is driven by our ThemeProvider (html.light/html.dark) via per-chart `theme` prop.
 initializeFrontendCache()
 installBuildMetadata()
+installChunkLoadErrorRecovery()
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -106,6 +111,9 @@ const router = createRouter({
   context: { queryClient },
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,
+  defaultOnCatch: (error) => {
+    recoverFromChunkLoadError(error)
+  },
 })
 
 // Register the router instance for type safety
@@ -116,7 +124,10 @@ declare module '@tanstack/react-router' {
 }
 
 // Render the app
-const rootElement = document.getElementById('root')!
+const rootElement = document.querySelector<HTMLElement>('#root')
+if (!rootElement) {
+  throw new Error('Root element not found')
+}
 // Set document.title and favicon from cached status, then refresh from network
 ;(function initSystemBranding() {
   try {

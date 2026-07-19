@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQueryClient, useIsFetching } from '@tanstack/react-query'
+import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
 import { Eye, EyeOff } from 'lucide-react'
@@ -40,6 +40,7 @@ import {
 } from '@/components/ui/tooltip'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
+import { getUsageLogGroups } from '../group-options-api'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters } from '../types'
@@ -52,6 +53,7 @@ import {
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
+const GROUP_ALL_VALUE = '__all_groups__'
 
 type LogTypeValue = (typeof LOG_TYPE_FILTERS)[number]['value']
 const logTypeValueSet = new Set<string>(
@@ -119,6 +121,11 @@ export function CommonLogsFilterBar<TData>(
   const { isAdminView: isAdmin } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
+  const { data: availableGroups = [], isFetching: groupsLoading } = useQuery({
+    queryKey: ['usage-log-groups', isAdmin],
+    queryFn: () => getUsageLogGroups(isAdmin),
+    staleTime: 60_000,
+  })
 
   const searchState = useMemo<CommonLogDraft>(() => {
     const { start, end } = getDefaultTimeRange()
@@ -262,6 +269,23 @@ export function CommonLogsFilterBar<TData>(
   )
   const logTypeLabel =
     logTypeItems.find((type) => type.value === logType)?.label ?? t('All Types')
+  const groupItems = useMemo(() => {
+    const groups = filters.group
+      ? [filters.group, ...availableGroups]
+      : availableGroups
+    return [
+      { value: GROUP_ALL_VALUE, label: t('All groups') },
+      ...[...new Set(groups)].map((group) => ({
+        value: group,
+        label: group,
+      })),
+    ]
+  }, [availableGroups, filters.group, t])
+  const selectedGroupValue = filters.group || GROUP_ALL_VALUE
+  let selectedGroupLabel = t('All groups')
+  if (filters.group) {
+    selectedGroupLabel = sensitiveVisible ? filters.group : '******'
+  }
 
   const statsBar = (
     <div className='flex flex-wrap items-center gap-2'>
@@ -313,13 +337,30 @@ export function CommonLogsFilterBar<TData>(
   )
   const groupFilter = (
     <LogsFilterField>
-      <LogsFilterInput
-        placeholder={t('Group')}
-        type={sensitiveType}
-        value={filters.group || ''}
-        onChange={(e) => handleChange('group', e.target.value)}
-        onKeyDown={handleKeyDown}
-      />
+      <Select
+        items={groupItems}
+        value={selectedGroupValue}
+        onValueChange={(value) => {
+          handleChange(
+            'group',
+            value && value !== GROUP_ALL_VALUE ? value : undefined
+          )
+        }}
+        disabled={groupsLoading && availableGroups.length === 0}
+      >
+        <SelectTrigger aria-label={t('Group')}>
+          <SelectValue>{selectedGroupLabel}</SelectValue>
+        </SelectTrigger>
+        <SelectContent alignItemWithTrigger={false}>
+          <SelectGroup>
+            {groupItems.map((item) => (
+              <SelectItem key={item.value} value={item.value}>
+                {item.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
     </LogsFilterField>
   )
   const typeFilter = (

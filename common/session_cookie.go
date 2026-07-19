@@ -131,3 +131,20 @@ func ClearLegacyHostOnlySessionCookie(c *gin.Context) {
 		SameSite: http.SameSiteStrictMode,
 	})
 }
+
+// ClearDuplicateLegacySessionCookie removes a stale host-only session cookie
+// when the browser sends it together with the shared-domain session cookie.
+// The deletion cookie has no Domain attribute, so the shared cookie remains.
+func ClearDuplicateLegacySessionCookie(c *gin.Context) {
+	sessionCookieCount := 0
+	for _, cookie := range c.Request.Cookies() {
+		if cookie.Name == "session" {
+			sessionCookieCount++
+		}
+	}
+	if sessionCookieCount < 2 {
+		return
+	}
+
+	ClearLegacyHostOnlySessionCookie(c)
+}

@@ -19,7 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { isChunkLoadError } from './chunk-load-error.ts'
+import {
+  isChunkAssetURL,
+  isChunkLoadError,
+  shouldReloadAfterChunkError,
+} from './chunk-load-error.ts'
 
 describe('isChunkLoadError', () => {
   test('recognizes Rspack chunk load failures', () => {
@@ -47,5 +51,29 @@ describe('isChunkLoadError', () => {
       false
     )
     assert.equal(isChunkLoadError(null), false)
+  })
+
+  test('recognizes async production assets without matching API URLs', () => {
+    assert.equal(
+      isChunkAssetURL('https://example.com/static/js/async/123.js'),
+      true
+    )
+    assert.equal(
+      isChunkAssetURL('https://example.com/static/css/123.css'),
+      true
+    )
+    assert.equal(isChunkAssetURL('https://example.com/api/status'), false)
+  })
+
+  test('reloads stale chunks once within the cooldown window', () => {
+    const error = new Error('Loading chunk sign-in failed')
+
+    assert.equal(shouldReloadAfterChunkError(error, Number.NaN, 100_000), true)
+    assert.equal(shouldReloadAfterChunkError(error, 90_000, 100_000), false)
+    assert.equal(shouldReloadAfterChunkError(error, 60_000, 100_000), true)
+    assert.equal(
+      shouldReloadAfterChunkError(new Error('Request failed'), 0, 100_000),
+      false
+    )
   })
 })

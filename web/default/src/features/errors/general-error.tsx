@@ -21,12 +21,10 @@ import { useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
-import { isChunkLoadError } from '@/lib/chunk-load-error'
+import { recoverFromChunkLoadError } from '@/lib/chunk-load-error'
 import { cn } from '@/lib/utils'
 
 const FEEDBACK_URL = 'https://github.com/QuantumNous/new-api/issues'
-const CHUNK_RELOAD_KEY = 'new-api:chunk-reload-at'
-const CHUNK_RELOAD_COOLDOWN_MS = 30_000
 
 type GeneralErrorProps = React.HTMLAttributes<HTMLDivElement> & {
   minimal?: boolean
@@ -50,27 +48,11 @@ export function GeneralError({
   const navigate = useNavigate()
   const { history } = useRouter()
   const status = getHttpStatus(error)
-  const chunkLoadFailed = isChunkLoadError(error)
   const isRateLimited = status === 429
 
   useEffect(() => {
-    if (!chunkLoadFailed) return
-
-    try {
-      const lastReload = Number(window.sessionStorage.getItem(CHUNK_RELOAD_KEY))
-      const now = Date.now()
-      if (
-        !Number.isFinite(lastReload) ||
-        now - lastReload > CHUNK_RELOAD_COOLDOWN_MS
-      ) {
-        window.sessionStorage.setItem(CHUNK_RELOAD_KEY, String(now))
-        window.location.reload()
-      }
-    } catch {
-      // Storage can be unavailable in hardened browser modes. Keep the error
-      // page instead of risking an unbounded reload loop.
-    }
-  }, [chunkLoadFailed])
+    recoverFromChunkLoadError(error)
+  }, [error])
   const title = isRateLimited
     ? t('Too many requests')
     : `${t('Oops! Something went wrong')} ${`:')`}`
