@@ -50,7 +50,7 @@ describe('login session completion', () => {
       },
     })
 
-    assert.equal(completed, true)
+    assert.deepEqual(completed, { ok: true })
     assert.deepEqual(persisted, validUser)
     assert.equal(cleared, 0)
     assert.equal(navigated, 1)
@@ -74,7 +74,7 @@ describe('login session completion', () => {
       },
     })
 
-    assert.equal(completed, false)
+    assert.deepEqual(completed, { ok: false })
     assert.equal(cleared, 1)
     assert.equal(navigated, 0)
   })
@@ -96,9 +96,52 @@ describe('login session completion', () => {
       },
     })
 
-    assert.equal(completed, false)
+    assert.deepEqual(completed, {
+      ok: false,
+      message: 'session unavailable',
+    })
     assert.equal(cleared, 1)
     assert.equal(navigated, 0)
+  })
+
+  test('preserves a business failure message from self lookup', async () => {
+    const completed = await completeLoginSession({
+      fetchCurrentUser: async () => ({
+        success: false,
+        message: 'Your account is disabled',
+      }),
+      persistUser: () => undefined,
+      clearUser: () => undefined,
+      onSuccess: () => undefined,
+    })
+
+    assert.deepEqual(completed, {
+      ok: false,
+      message: 'Your account is disabled',
+    })
+  })
+
+  test('preserves an HTTP failure status and backend message', async () => {
+    const completed = await completeLoginSession({
+      fetchCurrentUser: async () => {
+        throw {
+          message: 'Request failed with status code 500',
+          response: {
+            status: 500,
+            data: { message: 'Database connection failed' },
+          },
+        }
+      },
+      persistUser: () => undefined,
+      clearUser: () => undefined,
+      onSuccess: () => undefined,
+    })
+
+    assert.deepEqual(completed, {
+      ok: false,
+      message: 'Database connection failed',
+      status: 500,
+    })
   })
 
   test('requires identity fields used by authenticated routes', () => {

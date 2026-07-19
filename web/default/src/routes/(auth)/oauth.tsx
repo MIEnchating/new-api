@@ -23,7 +23,10 @@ import { toast } from 'sonner'
 
 import { wechatLoginByCode } from '@/features/auth/api'
 import { completeLoginSession } from '@/features/auth/lib/login-session'
-import { buildOAuthCallbackKey } from '@/features/auth/lib/oauth-callback'
+import {
+  buildOAuthCallbackKey,
+  resolveOAuthLoginCompletion,
+} from '@/features/auth/lib/oauth-callback'
 import { normalizeOAuthRedirectTarget } from '@/features/auth/lib/oauth-redirect'
 import { saveUserId } from '@/features/auth/lib/storage'
 import { getSelf } from '@/lib/api'
@@ -63,7 +66,11 @@ function OAuthComponent() {
           clearUser: () => useAuthStore.getState().auth.reset(),
           onSuccess: () => undefined,
         })
-        if (completed) {
+        const completion = resolveOAuthLoginCompletion(
+          completed,
+          i18next.t('OAuth failed')
+        )
+        if (completion.ok) {
           const target = normalizeOAuthRedirectTarget(
             search?.redirect,
             window.location.origin
@@ -71,6 +78,9 @@ function OAuthComponent() {
           navigate({ to: target, replace: true })
           return
         }
+        toast.error(completion.message)
+        navigate({ to: '/sign-in', replace: true })
+        return
       } catch {
         /* empty */
       }

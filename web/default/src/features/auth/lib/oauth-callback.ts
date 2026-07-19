@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
+import type { LoginSessionResult } from './login-session'
+
 export interface OAuthCallbackIdentity {
   provider?: string
   code?: string
@@ -36,4 +38,14 @@ export function buildOAuthCallbackKey(identity: OAuthCallbackIdentity): string {
     identity.state ?? '',
     identity.redirect ?? '',
   ])
+}
+
+export type OAuthLoginCompletion = { ok: true } | { ok: false; message: string }
+
+export function resolveOAuthLoginCompletion(
+  result: LoginSessionResult,
+  fallbackMessage: string
+): OAuthLoginCompletion {
+  if (result.ok) return { ok: true }
+  return { ok: false, message: result.message || fallbackMessage }
 }

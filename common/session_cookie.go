@@ -118,9 +118,11 @@ func normalizeSessionCookieHost(hostPort string) string {
 // ClearLegacyHostOnlySessionCookie removes the host-only cookie used before
 // shared-domain sessions were enabled. Browsers may otherwise send both
 // cookies with the same name, causing the server to read stale session data.
+// When issuing a replacement shared cookie, call this before session.Save so
+// the shared cookie is the final Set-Cookie value for this response.
 func ClearLegacyHostOnlySessionCookie(c *gin.Context) {
 	domain := SessionDomainForHost(c.Request.Host)
-	if domain == "" || normalizeSessionCookieHost(c.Request.Host) == domain {
+	if domain == "" {
 		return
 	}
 

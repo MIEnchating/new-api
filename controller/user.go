@@ -83,12 +83,12 @@ func Login(c *gin.Context) {
 		// 设置pending session，等待2FA验证
 		session := sessions.Default(c)
 		setPending2FALogin(session, &user)
+		common.ClearLegacyHostOnlySessionCookie(c)
 		err := session.Save()
 		if err != nil {
 			common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
 			return
 		}
-		common.ClearLegacyHostOnlySessionCookie(c)
 
 		c.JSON(http.StatusOK, gin.H{
 			"message": i18n.T(c, i18n.MsgUserRequire2FA),
@@ -157,12 +157,12 @@ func setupLogin(user *model.User, c *gin.Context) {
 	session.Set("role", user.Role)
 	session.Set("status", user.Status)
 	session.Set("group", user.Group)
+	common.ClearLegacyHostOnlySessionCookie(c)
 	err := session.Save()
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserSessionSaveFailed)
 		return
 	}
-	common.ClearLegacyHostOnlySessionCookie(c)
 	recordLoginAudit(user, c)
 	data := map[string]any{
 		"id":           user.Id,
@@ -185,6 +185,7 @@ func setupLogin(user *model.User, c *gin.Context) {
 func Logout(c *gin.Context) {
 	session := sessions.Default(c)
 	session.Clear()
+	common.ClearLegacyHostOnlySessionCookie(c)
 	err := session.Save()
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -193,7 +194,6 @@ func Logout(c *gin.Context) {
 		})
 		return
 	}
-	common.ClearLegacyHostOnlySessionCookie(c)
 	c.JSON(http.StatusOK, gin.H{
 		"message": "",
 		"success": true,

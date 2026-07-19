@@ -23,7 +23,10 @@ import type { User } from '@/features/users/types'
 import { getSelf } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { completeLoginSession } from '../lib/login-session'
+import {
+  completeLoginSession,
+  type LoginSessionResult,
+} from '../lib/login-session'
 import { saveUserId } from '../lib/storage'
 
 function getSavedLanguage(user: User): string | undefined {
@@ -55,7 +58,9 @@ export function useAuthRedirect() {
    * Handle successful login
    * @param redirectTo - Redirect path after login
    */
-  const handleLoginSuccess = async (redirectTo?: string): Promise<boolean> => {
+  const handleLoginSuccess = async (
+    redirectTo?: string
+  ): Promise<LoginSessionResult> => {
     const targetPath = redirectTo || '/dashboard'
     return completeLoginSession<User>({
       fetchCurrentUser: getSelf,

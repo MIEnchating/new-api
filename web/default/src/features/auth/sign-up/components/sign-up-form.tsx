@@ -211,11 +211,11 @@ export function SignUpForm({
       const res = await wechatLoginByCode(wechatCode)
       if (res?.success) {
         const completed = await handleLoginSuccess()
-        if (completed) {
+        if (completed.ok) {
           toast.success(t('Signed in via WeChat'))
           handleWeChatDialogChange(false)
         } else {
-          toast.error(t('Login failed'))
+          toast.error(completed.message || t('Login failed'))
         }
       } else {
         toast.error(res?.message || t('Login failed'))

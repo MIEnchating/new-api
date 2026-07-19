@@ -168,10 +168,10 @@ export function UserAuthForm({
         }
 
         const completed = await handleLoginSuccess(redirectTo)
-        if (completed) {
+        if (completed.ok) {
           toast.success(t('Welcome back!'))
         } else {
-          toast.error(loginFailedMessage)
+          toast.error(completed.message || loginFailedMessage)
         }
       }
     } catch {
@@ -209,11 +209,11 @@ export function UserAuthForm({
       const res = await wechatLoginByCode(wechatCode)
       if (res?.success) {
         const completed = await handleLoginSuccess(redirectTo)
-        if (completed) {
+        if (completed.ok) {
           toast.success(t('Signed in via WeChat'))
           handleWeChatDialogChange(false)
         } else {
-          toast.error(loginFailedMessage)
+          toast.error(completed.message || loginFailedMessage)
         }
       } else {
         toast.error(res?.message || loginFailedMessage)
@@ -276,8 +276,8 @@ export function UserAuthForm({
       }
 
       const completed = await handleLoginSuccess(redirectTo)
-      if (!completed) {
-        throw new Error(loginFailedMessage)
+      if (!completed.ok) {
+        throw new Error(completed.message || loginFailedMessage)
       }
       toast.success(t('Signed in with Passkey'))
     } catch (error: unknown) {

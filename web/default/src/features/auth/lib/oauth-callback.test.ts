@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { buildOAuthCallbackKey } from './oauth-callback.ts'
+import {
+  buildOAuthCallbackKey,
+  resolveOAuthLoginCompletion,
+} from './oauth-callback.ts'
 
 describe('OAuth callback identity', () => {
   test('is stable for the same callback', () => {
@@ -47,6 +50,31 @@ describe('OAuth callback identity', () => {
     assert.notEqual(
       buildOAuthCallbackKey({ provider: 'a|b', code: 'c' }),
       buildOAuthCallbackKey({ provider: 'a', code: 'b|c' })
+    )
+  })
+})
+
+describe('OAuth callback session completion', () => {
+  test('accepts only an explicitly successful login result', () => {
+    assert.deepEqual(
+      resolveOAuthLoginCompletion({ ok: true }, 'OAuth failed'),
+      {
+        ok: true,
+      }
+    )
+    assert.deepEqual(
+      resolveOAuthLoginCompletion({ ok: false }, 'OAuth failed'),
+      { ok: false, message: 'OAuth failed' }
+    )
+  })
+
+  test('preserves the session validation failure message', () => {
+    assert.deepEqual(
+      resolveOAuthLoginCompletion(
+        { ok: false, message: 'Session cookie is unavailable', status: 401 },
+        'OAuth failed'
+      ),
+      { ok: false, message: 'Session cookie is unavailable' }
     )
   })
 })

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	webauthn "github.com/go-webauthn/webauthn/webauthn"
@@ -15,6 +16,7 @@ func SaveSessionData(c *gin.Context, key string, data *webauthn.SessionData) err
 	session := sessions.Default(c)
 	if data == nil {
 		session.Delete(key)
+		common.ClearLegacyHostOnlySessionCookie(c)
 		return session.Save()
 	}
 	payload, err := json.Marshal(data)
@@ -22,6 +24,7 @@ func SaveSessionData(c *gin.Context, key string, data *webauthn.SessionData) err
 		return err
 	}
 	session.Set(key, string(payload))
+	common.ClearLegacyHostOnlySessionCookie(c)
 	return session.Save()
 }
 
@@ -32,6 +35,7 @@ func PopSessionData(c *gin.Context, key string) (*webauthn.SessionData, error) {
 		return nil, errSessionNotFound
 	}
 	session.Delete(key)
+	common.ClearLegacyHostOnlySessionCookie(c)
 	_ = session.Save()
 	var data webauthn.SessionData
 	switch value := raw.(type) {

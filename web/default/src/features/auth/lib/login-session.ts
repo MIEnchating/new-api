@@ -26,8 +26,13 @@ export interface LoginSessionUser {
 
 export interface LoginSessionResponse {
   success?: boolean
+  message?: unknown
   data?: unknown
 }
+
+export type LoginSessionResult =
+  | { ok: true }
+  | { ok: false; message?: string; status?: number }
 
 export function isValidLoginSessionUser(
   value: unknown
@@ -65,19 +70,51 @@ export async function completeLoginSession<TUser extends LoginSessionUser>({
   persistUser,
   clearUser,
   onSuccess,
-}: CompleteLoginSessionOptions<TUser>): Promise<boolean> {
+}: CompleteLoginSessionOptions<TUser>): Promise<LoginSessionResult> {
   try {
     const response = await fetchCurrentUser()
     if (!response?.success || !isValidLoginSessionUser(response.data)) {
       clearUser()
-      return false
+      const message =
+        typeof response?.message === 'string' && response.message.trim()
+          ? response.message
+          : undefined
+      return message ? { ok: false, message } : { ok: false }
     }
 
     persistUser(response.data as TUser)
     onSuccess()
-    return true
-  } catch {
+    return { ok: true }
+  } catch (error: unknown) {
     clearUser()
-    return false
+    if (!error || typeof error !== 'object') {
+      return { ok: false }
+    }
+
+    const failure = error as {
+      message?: unknown
+      response?: {
+        status?: unknown
+        data?: { message?: unknown }
+      }
+    }
+    const responseMessage = failure.response?.data?.message
+    let message: string | undefined
+    if (typeof responseMessage === 'string' && responseMessage.trim()) {
+      message = responseMessage
+    } else if (typeof failure.message === 'string' && failure.message.trim()) {
+      message = failure.message
+    }
+    const responseStatus = failure.response?.status
+    const status =
+      typeof responseStatus === 'number' && Number.isInteger(responseStatus)
+        ? responseStatus
+        : undefined
+
+    return {
+      ok: false,
+      ...(message ? { message } : {}),
+      ...(status !== undefined ? { status } : {}),
+    }
   }
 }

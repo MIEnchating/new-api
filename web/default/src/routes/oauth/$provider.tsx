@@ -30,7 +30,10 @@ import { toast } from 'sonner'
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
 import { completeLoginSession } from '@/features/auth/lib/login-session'
-import { buildOAuthCallbackKey } from '@/features/auth/lib/oauth-callback'
+import {
+  buildOAuthCallbackKey,
+  resolveOAuthLoginCompletion,
+} from '@/features/auth/lib/oauth-callback'
 import {
   buildOAuthReturnURL,
   normalizeOAuthRedirectTarget,
@@ -185,7 +188,8 @@ function OAuthCallback() {
       }
 
       const handleLoginFailure = async (message: string) => {
-        if (await finalizeLogin()) {
+        const completed = await finalizeLogin()
+        if (completed.ok) {
           redirectAfterLogin()
           return
         }
@@ -226,19 +230,27 @@ function OAuthCallback() {
           // it, otherwise a cross-site cookie failure can look like success.
           if (loginUser) {
             const returnOrigin = loginUser.return_origin
-            if (await finalizeLogin()) {
+            const completed = resolveOAuthLoginCompletion(
+              await finalizeLogin(),
+              i18next.t('OAuth failed')
+            )
+            if (completed.ok) {
               redirectAfterLogin(undefined, returnOrigin)
               return
             }
-            toast.error(i18next.t('OAuth failed'))
+            toast.error(completed.message)
             safeNavigate('/sign-in')
             return
           }
-          if (await finalizeLogin()) {
+          const completed = resolveOAuthLoginCompletion(
+            await finalizeLogin(),
+            res?.data?.message || i18next.t('OAuth failed')
+          )
+          if (completed.ok) {
             redirectAfterLogin()
             return
           }
-          toast.error(res?.data?.message || i18next.t('OAuth failed'))
+          toast.error(completed.message)
           safeNavigate('/sign-in')
           return
         }
@@ -246,10 +258,14 @@ function OAuthCallback() {
         if (!res?.data?.success && !isBindingFlow) {
           // When logging in with an already bound GitHub account, backend may return this message
           if (message === '该 GitHub 账户已被绑定') {
-            if (await finalizeLogin()) {
+            const completed = await finalizeLogin()
+            if (completed.ok) {
               redirectAfterLogin()
               return
             }
+            toast.error(message)
+            safeNavigate('/sign-in')
+            return
           }
         }
         if (isBindingFlow) {

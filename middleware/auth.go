@@ -42,10 +42,10 @@ func clearMalformedAuthSession(c *gin.Context, session sessions.Session) {
 	for _, key := range []string{"id", "username", "role", "status", "group"} {
 		session.Delete(key)
 	}
+	common.ClearLegacyHostOnlySessionCookie(c)
 	if err := session.Save(); err != nil {
 		common.SysLog("failed to clear malformed auth session: " + err.Error())
 	}
-	common.ClearLegacyHostOnlySessionCookie(c)
 }
 
 func abortMalformedAuthSession(c *gin.Context, session sessions.Session) {

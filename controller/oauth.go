@@ -33,12 +33,12 @@ func GenerateOAuthCode(c *gin.Context) {
 	}
 	session.Set("oauth_state", state)
 	session.Set("oauth_return_origin", returnOrigin)
+	common.ClearLegacyHostOnlySessionCookie(c)
 	err := session.Save()
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	common.ClearLegacyHostOnlySessionCookie(c)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -75,11 +75,11 @@ func HandleOAuth(c *gin.Context) {
 	}
 	session.Delete("oauth_state")
 	session.Delete("oauth_return_origin")
+	common.ClearLegacyHostOnlySessionCookie(c)
 	if err := session.Save(); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	common.ClearLegacyHostOnlySessionCookie(c)
 
 	// 2. Check if user is already logged in (bind flow)
 	if userID, ok := oauthBindSessionUserID(session); ok {
