@@ -73,9 +73,18 @@ func getBillingHistory(c *gin.Context, admin bool) {
 		common.ApiError(c, err)
 		return
 	}
+	if !admin {
+		redactUserBillingHistory(items)
+	}
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(items)
 	common.ApiSuccess(c, pageInfo)
+}
+
+func redactUserBillingHistory(items []model.BillingHistoryItem) {
+	for i := range items {
+		items[i].OperatorUserId = 0
+	}
 }
 
 func GetUserBillingHistory(c *gin.Context) {

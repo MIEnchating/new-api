@@ -23,6 +23,7 @@ import type { User } from '@/features/users/types'
 import { getSelf } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { completeLoginSession } from '../lib/login-session'
 import { saveUserId } from '../lib/storage'
 
 function getSavedLanguage(user: User): string | undefined {
@@ -52,44 +53,24 @@ export function useAuthRedirect() {
 
   /**
    * Handle successful login
-   * @param userData - Optional user data from login response
    * @param redirectTo - Redirect path after login
    */
-  const handleLoginSuccess = async (
-    userData?: { id?: number } | null,
-    redirectTo?: string
-  ) => {
-    // Save user ID if available
-    if (userData?.id) {
-      saveUserId(userData.id)
-    }
-
-    // Fetch and set user data
-    try {
-      const self = await getSelf()
-      if (self?.success && self.data) {
-        const user = self.data as User
+  const handleLoginSuccess = async (redirectTo?: string): Promise<boolean> => {
+    const targetPath = redirectTo || '/dashboard'
+    return completeLoginSession<User>({
+      fetchCurrentUser: getSelf,
+      persistUser: (user) => {
         auth.setUser(user)
+        saveUserId(user.id)
 
-        // Update user ID if not already set
-        if (user.id) {
-          saveUserId(user.id)
-        }
-
-        // Restore saved language preference
         const savedLang = getSavedLanguage(user)
         if (savedLang && savedLang !== i18n.language) {
-          i18n.changeLanguage(savedLang)
+          void i18n.changeLanguage(savedLang)
         }
-      }
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to fetch user data:', error)
-    }
-
-    // Navigate to target page
-    const targetPath = redirectTo || '/dashboard'
-    navigate({ to: targetPath, replace: true })
+      },
+      clearUser: auth.reset,
+      onSuccess: () => navigate({ to: targetPath, replace: true }),
+    })
   }
 
   /**

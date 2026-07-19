@@ -1,5 +1,11 @@
 name: Publish Docker image (Multi-arch)
 
+concurrency:
+  # Each run updates the shared latest-* tags and latest manifest. Serialize
+  # runs so an older, slower build cannot move latest backwards.
+  group: docker-publish-latest
+  cancel-in-progress: false
+
 on:
   push:
     tags:
@@ -43,19 +49,29 @@ jobs:
 
       - name: Resolve tag & write VERSION
         id: version
+        env:
+          TAG_INPUT: ${{ github.event.inputs.tag }}
         run: |
-          if [ -n "${{ github.event.inputs.tag }}" ]; then
-            TAG="${{ github.event.inputs.tag }}"
+          if [[ -n "${TAG_INPUT}" ]]; then
+            if [[ ! "${TAG_INPUT}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::Unsupported tag format: ${TAG_INPUT}"
+              exit 1
+            fi
+            TAG="${TAG_INPUT}"
             if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
               echo "::error::Tag '$TAG' does not exist"
               exit 1
             fi
           else
             TAG=${GITHUB_REF#refs/tags/}
+            if [[ ! "${TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+              echo "::error::Unsupported tag format: ${TAG}"
+              exit 1
+            fi
           fi
-          echo "TAG=${TAG}" >> $GITHUB_ENV
-          echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "${TAG}" > VERSION
+          printf 'TAG=%s\n' "${TAG}" >> "$GITHUB_ENV"
+          printf 'tag=%s\n' "${TAG}" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${TAG}" > VERSION
           echo "Building tag: ${TAG} for ${{ matrix.arch }}"
 
       - name: Set up Docker Buildx
@@ -138,7 +154,7 @@ jobs:
             mienvirtuoso/new-api:latest-arm64
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Sign manifests with cosign
         continue-on-error: true

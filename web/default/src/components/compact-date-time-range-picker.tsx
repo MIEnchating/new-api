@@ -210,10 +210,10 @@ export function CompactDateTimeRangePicker({
         align='start'
         collisionAvoidance={{ side: 'shift', align: 'shift' }}
         collisionPadding={16}
-        className='max-h-[min(680px,calc(100dvh-2rem))] w-[min(600px,calc(100vw-2rem))] overflow-y-auto p-0'
+        className='max-h-[min(680px,calc(100dvh-2rem))] w-[min(36rem,calc(100vw-2rem))] overflow-y-auto p-0'
       >
-        <div className='grid sm:grid-cols-[auto_minmax(0,1fr)]'>
-          <div className='flex justify-center border-b p-2 sm:border-r sm:border-b-0'>
+        <div className='grid sm:grid-cols-[16rem_minmax(0,1fr)]'>
+          <div className='flex justify-center border-b p-3 sm:border-r sm:border-b-0'>
             <Calendar
               mode='range'
               selected={selectedRange}
@@ -228,7 +228,7 @@ export function CompactDateTimeRangePicker({
             />
           </div>
 
-          <div className='min-w-0 p-3 sm:flex sm:flex-col sm:justify-center'>
+          <div className='min-w-0 p-4 sm:flex sm:flex-col sm:justify-center'>
             <div className='flex items-center gap-2 pb-3'>
               <Clock3 className='text-muted-foreground size-4' />
               <span className='text-sm font-medium'>{t('Time')}</span>
@@ -278,7 +278,7 @@ export function CompactDateTimeRangePicker({
           </div>
         </div>
 
-        <div className='border-t px-3 py-2.5'>
+        <div className='border-t px-4 py-3'>
           <div className='text-muted-foreground mb-2 text-xs'>
             {t('Quick ranges')}
           </div>
@@ -304,7 +304,7 @@ export function CompactDateTimeRangePicker({
           </div>
         </div>
 
-        <div className='flex items-center justify-between border-t px-3 py-2.5'>
+        <div className='flex items-center justify-between border-t px-4 py-3'>
           <Button
             type='button'
             variant='ghost'

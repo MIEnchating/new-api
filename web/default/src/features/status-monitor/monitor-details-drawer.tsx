@@ -38,6 +38,8 @@ import {
 import type { UptimeHeartbeat, UptimeMonitor } from '@/features/dashboard/types'
 import { useMediaQuery } from '@/hooks'
 
+import { getOrderedHeartbeats } from './monitor-utils'
+
 type MonitorDetailsDrawerProps = {
   monitor: UptimeMonitor | null
   onOpenChange: (open: boolean) => void
@@ -48,16 +50,6 @@ type MonitorChartPoint = {
   fullTime: string
   latency: number | null
   availability: number
-}
-
-export function getOrderedHeartbeats(heartbeats?: UptimeHeartbeat[]) {
-  return [...(heartbeats ?? [])]
-    .sort((left, right) => {
-      const leftTime = left.time ? new Date(left.time).getTime() : 0
-      const rightTime = right.time ? new Date(right.time).getTime() : 0
-      return leftTime - rightTime
-    })
-    .slice(-288)
 }
 
 function formatPercent(value: number | null | undefined) {

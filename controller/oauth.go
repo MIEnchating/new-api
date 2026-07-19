@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
@@ -61,7 +62,8 @@ func HandleOAuth(c *gin.Context) {
 
 	// 1. Validate state (CSRF protection)
 	state := c.Query("state")
-	if state == "" || session.Get("oauth_state") == nil || state != session.Get("oauth_state").(string) {
+	storedState, stateOK := session.Get("oauth_state").(string)
+	if state == "" || !stateOK || storedState == "" || state != storedState {
 		c.JSON(http.StatusForbidden, gin.H{
 			"success": false,
 			"message": i18n.T(c, i18n.MsgOAuthStateInvalid),
@@ -80,9 +82,12 @@ func HandleOAuth(c *gin.Context) {
 	common.ClearLegacyHostOnlySessionCookie(c)
 
 	// 2. Check if user is already logged in (bind flow)
-	username := session.Get("username")
-	if username != nil {
-		handleOAuthBind(c, provider)
+	if userID, ok := oauthBindSessionUserID(session); ok {
+		if _, err := getSessionUser(c); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		handleOAuthBind(c, provider, userID)
 		return
 	}
 
@@ -149,7 +154,21 @@ func HandleOAuth(c *gin.Context) {
 }
 
 // handleOAuthBind handles binding OAuth account to existing user
-func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
+func oauthBindSessionUserID(session sessions.Session) (int, bool) {
+	username, usernameOK := session.Get("username").(string)
+	userID, userIDOK := session.Get("id").(int)
+	role, roleOK := session.Get("role").(int)
+	status, statusOK := session.Get("status").(int)
+	if !usernameOK || strings.TrimSpace(username) == "" || !userIDOK || userID <= 0 {
+		return 0, false
+	}
+	if !roleOK || !common.IsValidateRole(role) || !statusOK || status != common.UserStatusEnabled {
+		return 0, false
+	}
+	return userID, true
+}
+
+func handleOAuthBind(c *gin.Context, provider oauth.Provider, userID int) {
 	if !provider.IsEnabled() {
 		common.ApiErrorI18n(c, i18n.MsgOAuthNotEnabled, providerParams(provider.GetName()))
 		return
@@ -183,13 +202,15 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider) {
 		}
 	}
 
-	// Get current user from session
-	session := sessions.Default(c)
-	id := session.Get("id")
-	user := model.User{Id: id.(int)}
+	// Get current user from the validated bind session.
+	user := model.User{Id: userID}
 	err = user.FillUserById()
 	if err != nil {
 		common.ApiError(c, err)
+		return
+	}
+	if user.Status != common.UserStatusEnabled {
+		common.ApiErrorI18n(c, i18n.MsgOAuthUserBanned)
 		return
 	}
 
@@ -294,10 +315,9 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	user.Status = common.UserStatusEnabled
 
 	// Handle affiliate code
-	affCode := session.Get("aff")
 	inviterId := 0
-	if affCode != nil {
-		inviterId, _ = model.GetUserIdByAffCode(affCode.(string))
+	if affCode, ok := session.Get("aff").(string); ok && affCode != "" {
+		inviterId, _ = model.GetUserIdByAffCode(affCode)
 	}
 
 	// Use transaction to ensure user creation and OAuth binding are atomic

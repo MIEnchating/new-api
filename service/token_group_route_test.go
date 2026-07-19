@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -33,7 +34,9 @@ func setupTokenGroupRouteTest(t *testing.T) *gorm.DB {
 	common.MemoryCacheEnabled = true
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	tokenGroupRouteCooldowns = syncMapForTokenRouteTest()
-	tokenGroupRouteStickyGroups = syncMapForTokenRouteTest()
+	tokenGroupRouteCooldownWrites.Store(0)
+	tokenGroupRouteStickyStoreOnce = sync.Once{}
+	tokenGroupRouteStickyStore = nil
 
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
@@ -45,7 +48,9 @@ func setupTokenGroupRouteTest(t *testing.T) *gorm.DB {
 		common.RedisEnabled = oldRedisEnabled
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
 		tokenGroupRouteCooldowns = syncMapForTokenRouteTest()
-		tokenGroupRouteStickyGroups = syncMapForTokenRouteTest()
+		tokenGroupRouteCooldownWrites.Store(0)
+		tokenGroupRouteStickyStoreOnce = sync.Once{}
+		tokenGroupRouteStickyStore = nil
 		sqlDB, dbErr := db.DB()
 		if dbErr == nil {
 			_ = sqlDB.Close()
@@ -57,6 +62,37 @@ func setupTokenGroupRouteTest(t *testing.T) *gorm.DB {
 
 func syncMapForTokenRouteTest() sync.Map {
 	return sync.Map{}
+}
+
+func TestTokenGroupRouteAffinityMemoryStoreIsBounded(t *testing.T) {
+	setupTokenGroupRouteTest(t)
+	tokenGroupRouteStickyStoreOnce.Do(func() {
+		tokenGroupRouteStickyStore = newTokenGroupStickyStore(2)
+	})
+
+	SetTokenGroupRouteStickyGroup(11, "model-a", tokenRouteTestPath, "group-a")
+	SetTokenGroupRouteStickyGroup(11, "model-b", tokenRouteTestPath, "group-b")
+	assert.Equal(t, "group-a", GetTokenGroupRouteStickyGroup(11, "model-a", tokenRouteTestPath))
+	SetTokenGroupRouteStickyGroup(11, "model-c", tokenRouteTestPath, "group-c")
+
+	assert.Equal(t, "group-a", GetTokenGroupRouteStickyGroup(11, "model-a", tokenRouteTestPath))
+	assert.Empty(t, GetTokenGroupRouteStickyGroup(11, "model-b", tokenRouteTestPath))
+	assert.Equal(t, "group-c", GetTokenGroupRouteStickyGroup(11, "model-c", tokenRouteTestPath))
+}
+
+func TestPruneExpiredTokenGroupRouteCooldownsKeepsActiveEntries(t *testing.T) {
+	setupTokenGroupRouteTest(t)
+	now := time.Now().Unix()
+	expiredKey := tokenGroupRouteCooldownKey(11, "expired", tokenRouteTestModel, tokenRouteTestPath)
+	activeKey := tokenGroupRouteCooldownKey(11, "active", tokenRouteTestModel, tokenRouteTestPath)
+	tokenGroupRouteCooldowns.Store(expiredKey, tokenGroupRouteCooldownState{Until: now - 1})
+	tokenGroupRouteCooldowns.Store(activeKey, tokenGroupRouteCooldownState{Until: now + 60})
+
+	assert.Equal(t, 1, pruneExpiredTokenGroupRouteCooldowns(now))
+	_, expiredExists := tokenGroupRouteCooldowns.Load(expiredKey)
+	_, activeExists := tokenGroupRouteCooldowns.Load(activeKey)
+	assert.False(t, expiredExists)
+	assert.True(t, activeExists)
 }
 
 func seedTokenRouteChannel(t *testing.T, db *gorm.DB, id int, group string) {
@@ -255,6 +291,18 @@ func TestTokenGroupRouteSkipsFrozenGroupAndReturnsAfterCooldownCleared(t *testin
 	assert.Equal(t, "active", traceState.trace.Events[len(traceState.trace.Events)-1].State)
 	assert.Equal(t, "fallback", traceState.trace.Events[len(traceState.trace.Events)-1].Group)
 
+	MarkChannelExecutionSuccess(ctx)
+	adminInfo := map[string]interface{}{}
+	AppendChannelExecutionTraceAdminInfo(ctx, adminInfo)
+	summary, exists := adminInfo["channel_execution_trace"].(ChannelExecutionTraceSummary)
+	require.True(t, exists)
+	assert.Equal(t, "fallback", summary.Group)
+	assert.Equal(t, []string{"premium", "fallback"}, summary.RouteGroups)
+	assert.Equal(t, []ChannelExecutionRouteGroupStatus{
+		{Group: "premium", Status: "skipped", CooldownUntil: summary.RouteGroupStatuses[0].CooldownUntil},
+		{Group: "fallback", Status: "success"},
+	}, summary.RouteGroupStatuses)
+
 	ClearTokenGroupRouteCooldown(11, "premium", tokenRouteTestModel, tokenRouteTestPath)
 	nextCtx := newTokenRouteContext(routes)
 	channel, group, err = CacheGetRandomSatisfiedChannel(newTokenRouteRetryParam(nextCtx))
@@ -342,6 +390,14 @@ func TestTokenGroupRouteStickyRecordsSuccessfulFallback(t *testing.T) {
 	require.NotNil(t, channel)
 	assert.Equal(t, "fallback", group)
 	assert.Equal(t, 1, channel.Id)
+
+	MarkChannelExecutionSuccess(nextCtx)
+	traceState, exists := channelExecutionTraceStateFromContext(nextCtx)
+	require.True(t, exists)
+	require.NotEmpty(t, traceState.trace.Events)
+	successEvent := traceState.trace.Events[len(traceState.trace.Events)-1]
+	assert.Equal(t, "success", successEvent.State)
+	assert.Equal(t, channel.Id, successEvent.ChannelID)
 }
 
 func TestTokenGroupRouteStickyClearsOnFailure(t *testing.T) {

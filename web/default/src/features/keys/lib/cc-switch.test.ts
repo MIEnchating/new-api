@@ -154,6 +154,39 @@ describe('CC Switch provider import', () => {
     assert.equal('remaining' in plans[1], false)
   })
 
+  test('uses the server quota conversion instead of a fixed divisor', () => {
+    const result = getUsageConfig().extractor({
+      code: true,
+      data: {
+        quota_per_unit: 1_000_000,
+        account: { total_available: 8_000_000 },
+        name: 'Custom quota key',
+        total_granted: 4_000_000,
+        total_used: 1_000_000,
+        total_available: 3_000_000,
+        unlimited_quota: false,
+      },
+    })
+
+    assert.deepEqual(structuredClone(result), [
+      {
+        isValid: true,
+        planName: 'Account Balance',
+        remaining: 8,
+        unit: 'USD',
+      },
+      {
+        isValid: true,
+        planName: 'Key Quota',
+        total: 4,
+        used: 1,
+        remaining: 3,
+        unit: 'USD',
+        extra: 'Custom quota key',
+      },
+    ])
+  })
+
   test('does not report a fake zero balance for an older endpoint', () => {
     const result = getUsageConfig().extractor({
       code: true,

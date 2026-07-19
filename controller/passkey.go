@@ -515,11 +515,11 @@ func getSessionUser(c *gin.Context) (*model.User, error) {
 		return nil, errors.New("未登录")
 	}
 	id, ok := idRaw.(int)
-	if !ok {
+	if !ok || id <= 0 {
 		return nil, errors.New("无效的会话信息")
 	}
-	user := &model.User{Id: id}
-	if err := user.FillUserById(); err != nil {
+	user, err := model.GetUserById(id, false)
+	if err != nil {
 		return nil, err
 	}
 	if user.Status != common.UserStatusEnabled {

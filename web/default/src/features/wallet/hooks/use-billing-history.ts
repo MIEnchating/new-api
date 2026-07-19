@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import i18next from 'i18next'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 
 import { useIsAdmin } from '@/hooks/use-admin'
@@ -28,6 +28,7 @@ import {
   completeOrder,
   isApiSuccess,
 } from '../api'
+import { isLatestBillingRequest } from '../lib/billing'
 import type { BillingRecord, BillingRecordType } from '../types'
 
 const ALL_BILLING_TYPES: BillingRecordType[] = [
@@ -70,11 +71,13 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
   const [endTime, setEndTime] = useState<Date | undefined>(() => new Date())
   const [loading, setLoading] = useState(false)
   const [completing, setCompleting] = useState(false)
+  const requestSequenceRef = useRef(0)
 
   /**
    * Fetch billing history
    */
   const fetchBillingHistory = useCallback(async () => {
+    const requestSequence = ++requestSequenceRef.current
     setLoading(true)
     try {
       const params = {
@@ -94,6 +97,12 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
         ? await getAllBillingHistory(params)
         : await getUserBillingHistory(params)
 
+      if (
+        !isLatestBillingRequest(requestSequence, requestSequenceRef.current)
+      ) {
+        return
+      }
+
       if (isApiSuccess(response) && response.data) {
         setRecords(response.data.items || [])
         setTotal(response.data.total || 0)
@@ -105,13 +114,20 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
         setTotal(0)
       }
     } catch (error) {
+      if (
+        !isLatestBillingRequest(requestSequence, requestSequenceRef.current)
+      ) {
+        return
+      }
       // eslint-disable-next-line no-console
       console.error('Failed to fetch billing history:', error)
       toast.error(i18next.t('Failed to load billing history'))
       setRecords([])
       setTotal(0)
     } finally {
-      setLoading(false)
+      if (isLatestBillingRequest(requestSequence, requestSequenceRef.current)) {
+        setLoading(false)
+      }
     }
   }, [isAdmin, page, pageSize, keyword, userKeyword, types, startTime, endTime])
 

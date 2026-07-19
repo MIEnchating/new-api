@@ -8,15 +8,20 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestShouldAttemptNextChannelKeepsRouteAndRetryMutuallyExclusive(t *testing.T) {
@@ -166,6 +171,146 @@ func TestShouldAttemptNextTaskChannelDoesNotRouteLockedChannel(t *testing.T) {
 	assert.True(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 0, true, true))
 	assert.False(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 10, true, false))
 	assert.False(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 10, false, true))
+}
+
+func TestChannelAndTokenGroupRoutesAdvanceTogether(t *testing.T) {
+	const (
+		tokenID       = 71001
+		primaryID     = 71002
+		fallbackID    = 71003
+		primaryGroup  = "relay-route-primary"
+		fallbackGroup = "relay-route-fallback"
+		modelName     = "relay-route-model"
+		requestPath   = "/v1/chat/completions"
+	)
+
+	oldDB := model.DB
+	oldLogDB := model.LOG_DB
+	oldRedisEnabled := common.RedisEnabled
+	oldMemoryCacheEnabled := common.MemoryCacheEnabled
+	oldRouteEnabled := common.ChannelRouteCooldownEnabled
+	oldRouteCooldown := common.ChannelRouteCooldownSeconds
+	oldMainDatabaseType := common.MainDatabaseType()
+	oldLogDatabaseType := common.LogDatabaseType()
+
+	common.RedisEnabled = false
+	common.MemoryCacheEnabled = true
+	common.ChannelRouteCooldownEnabled = true
+	common.ChannelRouteCooldownSeconds = 60
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+
+	db, err := gorm.Open(sqlite.Open("file:relay_route_group_fallback?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	model.DB = db
+	model.LOG_DB = db
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+
+	t.Cleanup(func() {
+		service.ClearChannelRouteCooldown(primaryGroup, primaryID)
+		service.ClearTokenGroupRouteCooldown(tokenID, primaryGroup, modelName, requestPath)
+		service.ClearTokenGroupRouteCooldown(tokenID, fallbackGroup, modelName, requestPath)
+		model.DB = oldDB
+		model.LOG_DB = oldLogDB
+		common.RedisEnabled = oldRedisEnabled
+		common.MemoryCacheEnabled = oldMemoryCacheEnabled
+		common.ChannelRouteCooldownEnabled = oldRouteEnabled
+		common.ChannelRouteCooldownSeconds = oldRouteCooldown
+		common.SetDatabaseTypes(oldMainDatabaseType, oldLogDatabaseType)
+		if oldMemoryCacheEnabled && oldDB != nil {
+			model.InitChannelCache()
+		}
+		sqlDB, dbErr := db.DB()
+		if dbErr == nil {
+			_ = sqlDB.Close()
+		}
+	})
+
+	priority := int64(1)
+	weight := uint(0)
+	for _, candidate := range []struct {
+		id    int
+		group string
+	}{
+		{id: primaryID, group: primaryGroup},
+		{id: fallbackID, group: fallbackGroup},
+	} {
+		require.NoError(t, db.Create(&model.Channel{
+			Id:       candidate.id,
+			Type:     constant.ChannelTypeOpenAI,
+			Key:      "sk-test",
+			Status:   common.ChannelStatusEnabled,
+			Name:     candidate.group,
+			Group:    candidate.group,
+			Models:   modelName,
+			Priority: &priority,
+			Weight:   &weight,
+		}).Error)
+		require.NoError(t, db.Create(&model.Ability{
+			Group:     candidate.group,
+			Model:     modelName,
+			ChannelId: candidate.id,
+			Enabled:   true,
+			Priority:  &priority,
+			Weight:    weight,
+		}).Error)
+	}
+	model.InitChannelCache()
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, requestPath, nil)
+	common.SetContextKey(c, constant.ContextKeyTokenId, tokenID)
+	common.SetContextKey(c, constant.ContextKeyTokenGroupRoutes, []model.TokenGroupRoute{
+		{Group: primaryGroup, Priority: 2, CooldownSeconds: 60},
+		{Group: fallbackGroup, Priority: 1, CooldownSeconds: 60},
+	})
+	retry := 0
+	retryParam := &service.RetryParam{
+		Ctx:         c,
+		TokenGroup:  "default",
+		ModelName:   modelName,
+		RequestPath: requestPath,
+		Retry:       &retry,
+	}
+
+	channel, group, err := service.CacheGetRandomSatisfiedChannel(retryParam)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, primaryID, channel.Id)
+	require.Equal(t, primaryGroup, group)
+
+	routeErr := types.NewErrorWithStatusCode(
+		errors.New("upstream unavailable"),
+		types.ErrorCodeChannelInvalidKey,
+		http.StatusInternalServerError,
+	)
+	routeAdvanced := processChannelError(c, *types.NewChannelError(
+		channel.Id,
+		channel.Type,
+		channel.Name,
+		false,
+		"",
+		false,
+	), routeErr)
+
+	assert.True(t, routeAdvanced)
+	assert.False(t, service.IsChannelRouteFrozen(primaryGroup, primaryID, common.GetTimestamp()))
+	assert.True(t, service.IsTokenGroupRouteFrozen(tokenID, primaryGroup, modelName, requestPath, common.GetTimestamp()))
+	assert.True(t, shouldAttemptNextChannel(c, routeErr, 0, routeAdvanced))
+	assert.True(t, shouldAttemptNextTaskChannel(
+		c,
+		channel.Id,
+		&dto.TaskError{StatusCode: http.StatusInternalServerError},
+		0,
+		routeAdvanced,
+		true,
+	))
+
+	channel, group, err = service.CacheGetRandomSatisfiedChannel(retryParam)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, fallbackID, channel.Id)
+	assert.Equal(t, fallbackGroup, group)
 }
 
 func TestIsStreamTimeoutFailure(t *testing.T) {

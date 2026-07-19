@@ -19,10 +19,12 @@ import (
 )
 
 const (
-	channelExecutionTraceContextKey = "channel_execution_trace"
-	channelExecutionTraceNamespace  = "channel_execution_trace:v1"
-	channelExecutionRecentNamespace = "channel_execution_recent:v1"
-	channelExecutionTraceTTL        = 30 * time.Minute
+	channelExecutionTraceContextKey  = "channel_execution_trace"
+	channelExecutionTraceNamespace   = "channel_execution_trace:v1"
+	channelExecutionRecentNamespace  = "channel_execution_recent:v1"
+	channelExecutionTraceTTL         = 30 * time.Minute
+	channelExecutionIndexRefreshTTL  = channelExecutionTraceTTL / 2
+	channelExecutionRecentPruneEvery = 256
 )
 
 type ChannelExecutionCandidate struct {
@@ -89,6 +91,7 @@ type ChannelExecutionTraceSummary struct {
 	Compact            bool                               `json:"compact"`
 	Mode               string                             `json:"mode"`
 	Status             string                             `json:"status"`
+	Group              string                             `json:"group,omitempty"`
 	RouteGroups        []string                           `json:"route_groups,omitempty"`
 	RouteGroupStatuses []ChannelExecutionRouteGroupStatus `json:"route_group_statuses,omitempty"`
 	ChannelIDs         []int                              `json:"channel_ids,omitempty"`
@@ -96,14 +99,17 @@ type ChannelExecutionTraceSummary struct {
 }
 
 type channelExecutionTraceState struct {
-	mu    sync.Mutex
-	trace ChannelExecutionTrace
+	mu                   sync.Mutex
+	trace                ChannelExecutionTrace
+	indexedKeys          map[string]struct{}
+	lastIndexRefreshTime int64
 }
 
 var channelExecutionTraceCacheOnce sync.Once
 var channelExecutionTraceCache *cachex.HybridCache[ChannelExecutionTrace]
 var channelExecutionRecentMu sync.Mutex
 var channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
+var channelExecutionRecentWrites uint64
 
 func getChannelExecutionTraceCache() *cachex.HybridCache[ChannelExecutionTrace] {
 	channelExecutionTraceCacheOnce.Do(func() {
@@ -133,6 +139,10 @@ func ChannelExecutionMode() string {
 }
 
 func BuildChannelExecutionPlan(group string, modelName string, requestPath string, mode string) (ChannelExecutionPlan, error) {
+	return buildChannelExecutionPlan(group, modelName, requestPath, mode, nil)
+}
+
+func buildChannelExecutionPlan(group string, modelName string, requestPath string, mode string, cooldownSnapshot map[int]int64) (ChannelExecutionPlan, error) {
 	mode = strings.ToLower(strings.TrimSpace(mode))
 	if mode != "route" && mode != "retry" {
 		mode = ChannelExecutionMode()
@@ -145,11 +155,34 @@ func BuildChannelExecutionPlan(group string, modelName string, requestPath strin
 	poolsByPriority := make(map[int64][]ChannelExecutionCandidate)
 	priorities := make([]int64, 0)
 	now := common.GetTimestamp()
+	cooldowns := cooldownSnapshot
+	if mode == "route" {
+		channelIDs := make([]int, 0, len(candidates))
+		for _, candidate := range candidates {
+			if cooldowns == nil {
+				channelIDs = append(channelIDs, candidate.ChannelID)
+				continue
+			}
+			if _, exists := cooldowns[candidate.ChannelID]; !exists {
+				channelIDs = append(channelIDs, candidate.ChannelID)
+			}
+		}
+		if len(channelIDs) > 0 {
+			loaded := getChannelRouteCooldownsUntil(group, channelIDs, now)
+			if cooldowns == nil {
+				cooldowns = loaded
+			} else {
+				for channelID, until := range loaded {
+					cooldowns[channelID] = until
+				}
+			}
+		}
+	}
 	for _, candidate := range candidates {
 		state := "candidate"
 		cooldownUntil := int64(0)
 		if mode == "route" {
-			cooldownUntil = GetChannelRouteCooldownUntil(group, candidate.ChannelID, now)
+			cooldownUntil = cooldowns[candidate.ChannelID]
 			if cooldownUntil > now {
 				state = "cooling"
 			}
@@ -212,20 +245,22 @@ func ensureChannelExecutionTrace(c *gin.Context, group string, modelName string,
 	for _, route := range getTokenGroupRoutes(c) {
 		routeGroups = append(routeGroups, route.Group)
 	}
-	state := &channelExecutionTraceState{trace: ChannelExecutionTrace{
-		RequestID:   c.GetString(common.RequestIdKey),
-		Mode:        ChannelExecutionMode(),
-		Group:       group,
-		RouteGroups: routeGroups,
-		Model:       modelName,
-		RequestPath: requestPath,
-		Status:      "running",
-		StartedAt:   now,
-		UpdatedAt:   now,
-		Events:      make([]ChannelExecutionEvent, 0, 8),
-	}}
+	state := &channelExecutionTraceState{
+		indexedKeys: make(map[string]struct{}),
+		trace: ChannelExecutionTrace{
+			RequestID:   c.GetString(common.RequestIdKey),
+			Mode:        ChannelExecutionMode(),
+			Group:       group,
+			RouteGroups: routeGroups,
+			Model:       modelName,
+			RequestPath: requestPath,
+			Status:      "running",
+			StartedAt:   now,
+			UpdatedAt:   now,
+			Events:      make([]ChannelExecutionEvent, 0, 8),
+		},
+	}
 	c.Set(channelExecutionTraceContextKey, state)
-	publishChannelExecutionTrace(state)
 	return state
 }
 
@@ -239,10 +274,58 @@ func publishChannelExecutionTrace(state *channelExecutionTraceState) {
 	if snapshot.RequestID == "" {
 		return
 	}
+	if common.RedisEnabled && common.RDB != nil {
+		if state.indexedKeys == nil {
+			state.indexedKeys = make(map[string]struct{})
+		}
+		keysToIndex, refreshAll := channelExecutionIndexKeysForPublish(state, snapshot)
+		if err := publishChannelExecutionTraceRedis(snapshot, keysToIndex); err != nil {
+			common.SysLog("failed to publish channel execution trace: " + err.Error())
+			return
+		}
+		for _, key := range keysToIndex {
+			state.indexedKeys[key] = struct{}{}
+		}
+		if refreshAll {
+			state.lastIndexRefreshTime = snapshot.UpdatedAt
+		}
+		return
+	}
 	if err := getChannelExecutionTraceCache().SetWithTTL(snapshot.RequestID, snapshot, channelExecutionTraceTTL); err != nil {
 		common.SysLog("failed to cache channel execution trace: " + err.Error())
 	}
 	indexChannelExecutionTrace(snapshot)
+}
+
+func channelExecutionIndexKeysForPublish(state *channelExecutionTraceState, trace ChannelExecutionTrace) ([]string, bool) {
+	allKeys := channelExecutionTraceIndexKeys(trace)
+	refreshAll := len(allKeys) > 0 && (trace.Status != "running" ||
+		state.lastIndexRefreshTime == 0 ||
+		trace.UpdatedAt-state.lastIndexRefreshTime >= channelExecutionIndexRefreshTTL.Milliseconds())
+	if refreshAll {
+		return allKeys, true
+	}
+	keys := make([]string, 0, len(allKeys))
+	for _, key := range allKeys {
+		if _, exists := state.indexedKeys[key]; !exists {
+			keys = append(keys, key)
+		}
+	}
+	return keys, false
+}
+
+func publishChannelExecutionTraceRedis(trace ChannelExecutionTrace, indexKeys []string) error {
+	raw, err := json.Marshal(trace)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	pipe := common.RDB.Pipeline()
+	pipe.Set(ctx, getChannelExecutionTraceCache().FullKey(trace.RequestID), raw, channelExecutionTraceTTL)
+	queueChannelExecutionTraceIndex(ctx, pipe, trace, indexKeys)
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 func updateChannelExecutionRouteGroupStatuses(trace *ChannelExecutionTrace) {
@@ -336,10 +419,7 @@ func indexChannelExecutionTrace(trace ChannelExecutionTrace) {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		pipe := common.RDB.Pipeline()
-		for _, key := range keys {
-			pipe.ZAdd(ctx, key, &redis.Z{Score: float64(trace.UpdatedAt), Member: trace.RequestID})
-			pipe.Expire(ctx, key, channelExecutionTraceTTL)
-		}
+		queueChannelExecutionTraceIndex(ctx, pipe, trace, keys)
 		if _, err := pipe.Exec(ctx); err != nil {
 			common.SysLog("failed to index channel execution trace: " + err.Error())
 		}
@@ -349,6 +429,7 @@ func indexChannelExecutionTrace(trace ChannelExecutionTrace) {
 	cutoff := time.Now().Add(-channelExecutionTraceTTL).UnixMilli()
 	channelExecutionRecentMu.Lock()
 	defer channelExecutionRecentMu.Unlock()
+	channelExecutionRecentWrites++
 	for _, key := range keys {
 		entries := channelExecutionRecent[key]
 		if entries == nil {
@@ -361,7 +442,46 @@ func indexChannelExecutionTrace(trace ChannelExecutionTrace) {
 				delete(entries, requestID)
 			}
 		}
+		if len(entries) == 0 {
+			delete(channelExecutionRecent, key)
+		}
 	}
+	if channelExecutionRecentWrites%channelExecutionRecentPruneEvery == 0 {
+		pruneChannelExecutionRecentLocked(cutoff)
+	}
+}
+
+func queueChannelExecutionTraceIndex(ctx context.Context, pipe redis.Pipeliner, trace ChannelExecutionTrace, keys []string) {
+	cutoff := time.Now().Add(-channelExecutionTraceTTL).UnixMilli()
+	for _, key := range keys {
+		pipe.ZAdd(ctx, key, &redis.Z{Score: float64(trace.UpdatedAt), Member: trace.RequestID})
+		pipe.ZRemRangeByScore(ctx, key, "-inf", strconv.FormatInt(cutoff-1, 10))
+		pipe.Expire(ctx, key, channelExecutionTraceTTL)
+	}
+}
+
+func pruneChannelExecutionRecentLocked(cutoff int64) (int, int) {
+	deletedKeys := 0
+	deletedTraces := 0
+	for key, entries := range channelExecutionRecent {
+		for requestID, trace := range entries {
+			if trace.UpdatedAt < cutoff {
+				delete(entries, requestID)
+				deletedTraces++
+			}
+		}
+		if len(entries) == 0 {
+			delete(channelExecutionRecent, key)
+			deletedKeys++
+		}
+	}
+	return deletedKeys, deletedTraces
+}
+
+func pruneChannelExecutionRecent(cutoff int64) (int, int) {
+	channelExecutionRecentMu.Lock()
+	defer channelExecutionRecentMu.Unlock()
+	return pruneChannelExecutionRecentLocked(cutoff)
 }
 
 func traceTouchesChannelGroup(trace ChannelExecutionTrace, channelID int, group string) bool {
@@ -541,6 +661,9 @@ func ListChannelExecutionTraces(channelID int, group string, limit int) ([]Chann
 			traces = append(traces, trace)
 		}
 	}
+	if len(entries) == 0 {
+		delete(channelExecutionRecent, key)
+	}
 	channelExecutionRecentMu.Unlock()
 	sort.Slice(traces, func(i, j int) bool { return traces[i].UpdatedAt > traces[j].UpdatedAt })
 	if len(traces) > limit {
@@ -595,10 +718,14 @@ func nextChannelCandidateIDs(plan ChannelExecutionPlan, selectedID int, selected
 }
 
 func TrackChannelExecutionSelection(c *gin.Context, group string, modelName string, requestPath string, channel *model.Channel, retryIndex int) {
+	trackChannelExecutionSelectionWithCooldowns(c, group, modelName, requestPath, channel, retryIndex, nil)
+}
+
+func trackChannelExecutionSelectionWithCooldowns(c *gin.Context, group string, modelName string, requestPath string, channel *model.Channel, retryIndex int, cooldowns map[int]int64) {
 	if channel == nil {
 		return
 	}
-	plan, _ := BuildChannelExecutionPlan(group, modelName, requestPath, ChannelExecutionMode())
+	plan, _ := buildChannelExecutionPlan(group, modelName, requestPath, ChannelExecutionMode(), cooldowns)
 	appendChannelExecutionEvent(c, group, modelName, requestPath, ChannelExecutionEvent{
 		Group:       group,
 		ChannelID:   channel.Id,
@@ -708,9 +835,17 @@ func MarkChannelExecutionSuccess(c *gin.Context) {
 	channelID := 0
 	channelName := ""
 	priority := int64(0)
-	if len(state.trace.Events) > 0 {
-		last := state.trace.Events[len(state.trace.Events)-1]
-		channelID, channelName, priority = last.ChannelID, last.ChannelName, last.Priority
+selectionLoop:
+	for index := len(state.trace.Events) - 1; index >= 0; index-- {
+		event := state.trace.Events[index]
+		if event.ChannelID <= 0 {
+			continue
+		}
+		switch event.State {
+		case "active", "affinity_hit", "same_channel_retry":
+			channelID, channelName, priority = event.ChannelID, event.ChannelName, event.Priority
+			break selectionLoop
+		}
 	}
 	now := time.Now().UnixMilli()
 	state.trace.Events = append(state.trace.Events, ChannelExecutionEvent{
@@ -811,6 +946,7 @@ func appendChannelExecutionTraceAdminInfo(c *gin.Context, adminInfo map[string]i
 			Compact:            true,
 			Mode:               snapshot.Mode,
 			Status:             snapshot.Status,
+			Group:              snapshot.Group,
 			RouteGroups:        append([]string(nil), snapshot.RouteGroups...),
 			RouteGroupStatuses: append([]ChannelExecutionRouteGroupStatus(nil), snapshot.RouteGroupStatuses...),
 			ChannelIDs:         channelIDs,

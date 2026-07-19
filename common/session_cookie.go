@@ -12,6 +12,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// SessionCookieSameSite allows top-level OAuth callbacks to carry the login
+// session while still excluding cookies from cross-site subrequests and POSTs.
+const SessionCookieSameSite http.SameSite = http.SameSiteLaxMode
+
 func InitSessionCookieSettings() error {
 	secureRaw := strings.TrimSpace(os.Getenv("SESSION_COOKIE_SECURE"))
 	trustedURLsRaw := strings.TrimSpace(os.Getenv("SESSION_COOKIE_TRUSTED_URL"))
@@ -128,7 +132,7 @@ func ClearLegacyHostOnlySessionCookie(c *gin.Context) {
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   SessionCookieSecure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: SessionCookieSameSite,
 	})
 }
 

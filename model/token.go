@@ -287,6 +287,11 @@ func ValidateUserToken(key string) (token *Token, err error) {
 	if key == "" {
 		return nil, ErrTokenNotProvided
 	}
+	// Keep the hot authentication path on the token cache. Status-changing
+	// mutations synchronously invalidate that cache (see Update/SelectUpdate),
+	// so normal requests do not pay an extra primary-database round trip.
+	// An in-flight cache fill can still race with a mutation; callers that need
+	// strict revocation should use the authoritative user/session path.
 	token, err = GetTokenByKey(key, false)
 	if err == nil {
 		if token.Status == common.TokenStatusExhausted ||
@@ -382,48 +387,34 @@ func (token *Token) Insert() error {
 
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
-	defer func() {
-		if shouldUpdateRedis(true, err) {
-			gopool.Go(func() {
-				err := cacheSetToken(*token)
-				if err != nil {
-					common.SysLog("failed to update token cache: " + err.Error())
-				}
-			})
-		}
-	}()
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
 		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "group_route_config", "group_route_sticky").Updates(token).Error
+	if err == nil && common.RedisEnabled {
+		if cacheErr := cacheDeleteToken(token.Key); cacheErr != nil {
+			common.SysLog("failed to invalidate token cache after update: " + cacheErr.Error())
+		}
+	}
 	return err
 }
 
 func (token *Token) SelectUpdate() (err error) {
-	defer func() {
-		if shouldUpdateRedis(true, err) {
-			gopool.Go(func() {
-				err := cacheSetToken(*token)
-				if err != nil {
-					common.SysLog("failed to update token cache: " + err.Error())
-				}
-			})
-		}
-	}()
 	// This can update zero values
-	return DB.Model(token).Select("accessed_time", "status").Updates(token).Error
+	err = DB.Model(token).Select("accessed_time", "status").Updates(token).Error
+	if err == nil && common.RedisEnabled {
+		if cacheErr := cacheDeleteToken(token.Key); cacheErr != nil {
+			common.SysLog("failed to invalidate token cache after status update: " + cacheErr.Error())
+		}
+	}
+	return err
 }
 
 func (token *Token) Delete() (err error) {
-	defer func() {
-		if shouldUpdateRedis(true, err) {
-			gopool.Go(func() {
-				err := cacheDeleteToken(token.Key)
-				if err != nil {
-					common.SysLog("failed to delete token cache: " + err.Error())
-				}
-			})
-		}
-	}()
 	err = DB.Delete(token).Error
+	if err == nil && common.RedisEnabled {
+		if cacheErr := cacheDeleteToken(token.Key); cacheErr != nil {
+			common.SysLog("failed to delete token cache: " + cacheErr.Error())
+		}
+	}
 	return err
 }
 
@@ -561,11 +552,11 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 	}
 
 	if common.RedisEnabled {
-		gopool.Go(func() {
-			for _, t := range tokens {
-				_ = cacheDeleteToken(t.Key)
+		for _, t := range tokens {
+			if cacheErr := cacheDeleteToken(t.Key); cacheErr != nil {
+				common.SysLog("failed to delete token cache after batch delete: " + cacheErr.Error())
 			}
-		})
+		}
 	}
 
 	return len(tokens), nil

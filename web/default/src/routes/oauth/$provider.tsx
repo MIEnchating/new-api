@@ -24,15 +24,18 @@ import {
 } from '@tanstack/react-router'
 import type { AxiosRequestConfig } from 'axios'
 import i18next from 'i18next'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { OAuthCallbackScreen } from '@/features/auth/components/oauth-callback-screen'
 import { OAUTH_BIND_STORAGE_KEY } from '@/features/auth/constants'
+import { completeLoginSession } from '@/features/auth/lib/login-session'
+import { buildOAuthCallbackKey } from '@/features/auth/lib/oauth-callback'
 import {
   buildOAuthReturnURL,
   normalizeOAuthRedirectTarget,
 } from '@/features/auth/lib/oauth-redirect'
+import { saveUserId } from '@/features/auth/lib/storage'
 import { api, getSelf } from '@/lib/api'
 import { useAuthStore, type AuthUser } from '@/stores/auth-store'
 
@@ -54,6 +57,7 @@ function OAuthCallback() {
     if (typeof window === 'undefined') return 'login'
     return window.opener ? 'bind' : 'login'
   })
+  const processedCallbackRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -62,6 +66,15 @@ function OAuthCallback() {
   }, [])
 
   useEffect(() => {
+    const callbackKey = buildOAuthCallbackKey({
+      provider,
+      code: search?.code,
+      state: search?.state,
+      redirect: search?.redirect,
+    })
+    if (processedCallbackRef.current === callbackKey) return
+    processedCallbackRef.current = callbackKey
+
     ;(async () => {
       const safeNavigate = (target: string) => {
         navigate({ to: target as never, replace: true })
@@ -136,31 +149,16 @@ function OAuthCallback() {
         }, 200)
       }
 
-      const finalizeLogin = async (): Promise<boolean> => {
-        try {
-          const selfResponse = (await getSelf()) as {
-            success?: boolean
-            data?: AuthUser | null
-          }
-          if (selfResponse?.success && selfResponse.data) {
-            useAuthStore.getState().auth.setUser(selfResponse.data)
-            try {
-              if (
-                typeof window !== 'undefined' &&
-                selfResponse.data?.id != null
-              ) {
-                window.localStorage.setItem('uid', String(selfResponse.data.id))
-              }
-            } catch (_error) {
-              void _error
-            }
-            return true
-          }
-        } catch (_error) {
-          void _error
-        }
-        return false
-      }
+      const finalizeLogin = () =>
+        completeLoginSession<AuthUser & { status: number }>({
+          fetchCurrentUser: getSelf,
+          persistUser: (user) => {
+            useAuthStore.getState().auth.setUser(user)
+            saveUserId(user.id)
+          },
+          clearUser: () => useAuthStore.getState().auth.reset(),
+          onSuccess: () => undefined,
+        })
 
       const redirectAfterLogin = (target?: string, returnOrigin?: string) => {
         const currentOrigin = window.location.origin
@@ -223,18 +221,17 @@ function OAuthCallback() {
             }
             return
           }
-          // Otherwise it's a login, use payload user if available
+          // The callback payload only contains a small identity projection.
+          // Verify the session and fetch the authoritative user before storing
+          // it, otherwise a cross-site cookie failure can look like success.
           if (loginUser) {
-            const { return_origin: returnOrigin, ...user } = loginUser
-            useAuthStore.getState().auth.setUser(user)
-            try {
-              if (typeof window !== 'undefined' && user.id != null) {
-                window.localStorage.setItem('uid', String(user.id))
-              }
-            } catch (_error) {
-              void _error
+            const returnOrigin = loginUser.return_origin
+            if (await finalizeLogin()) {
+              redirectAfterLogin(undefined, returnOrigin)
+              return
             }
-            redirectAfterLogin(undefined, returnOrigin)
+            toast.error(i18next.t('OAuth failed'))
+            safeNavigate('/sign-in')
             return
           }
           if (await finalizeLogin()) {

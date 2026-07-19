@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -15,12 +17,40 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
 const channelRouteTestModel = "gpt-channel-route-test"
+
+type rejectRedisCommandsHook struct {
+	commands  []string
+	pipelines [][]string
+}
+
+func (hook *rejectRedisCommandsHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error) {
+	hook.commands = append(hook.commands, cmd.Name())
+	return ctx, errors.New("redis unavailable in test")
+}
+
+func (hook *rejectRedisCommandsHook) AfterProcess(context.Context, redis.Cmder) error {
+	return nil
+}
+
+func (hook *rejectRedisCommandsHook) BeforeProcessPipeline(ctx context.Context, commands []redis.Cmder) (context.Context, error) {
+	names := make([]string, 0, len(commands))
+	for _, command := range commands {
+		names = append(names, command.Name())
+	}
+	hook.pipelines = append(hook.pipelines, names)
+	return ctx, errors.New("redis unavailable in test")
+}
+
+func (hook *rejectRedisCommandsHook) AfterProcessPipeline(context.Context, []redis.Cmder) error {
+	return nil
+}
 
 func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -44,11 +74,13 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	common.RetryTimes = 0
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	channelRouteCooldowns = sync.Map{}
+	channelRouteCooldownWrites.Store(0)
 	channelRouteAffinityStoreOnce = sync.Once{}
 	channelRouteAffinityStore = nil
 	channelExecutionTraceCacheOnce = sync.Once{}
 	channelExecutionTraceCache = nil
 	channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
+	channelExecutionRecentWrites = 0
 	tokenGroupRouteCooldowns = sync.Map{}
 
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -66,11 +98,13 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 		common.ChannelRouteSameChannelRetries = oldChannelRouteSameChannelRetries
 		common.RetryTimes = oldRetryTimes
 		channelRouteCooldowns = sync.Map{}
+		channelRouteCooldownWrites.Store(0)
 		channelRouteAffinityStoreOnce = sync.Once{}
 		channelRouteAffinityStore = nil
 		channelExecutionTraceCacheOnce = sync.Once{}
 		channelExecutionTraceCache = nil
 		channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
+		channelExecutionRecentWrites = 0
 		tokenGroupRouteCooldowns = sync.Map{}
 		model.DB = oldDB
 		model.LOG_DB = oldLogDB
@@ -109,6 +143,222 @@ func TestShouldRetrySameChannelRouteHonorsLimitAndDisable(t *testing.T) {
 		http.StatusBadRequest,
 	)
 	assert.False(t, ShouldRetrySameChannelRoute(nonRouteErr, 0))
+}
+
+func TestPruneExpiredChannelRouteCooldownsKeepsActiveEntries(t *testing.T) {
+	setupChannelRouteTest(t)
+	now := time.Now().Unix()
+	expiredKey := channelRouteMemoryKey("expired", 1)
+	activeKey := channelRouteMemoryKey("active", 2)
+	channelRouteCooldowns.Store(expiredKey, now-1)
+	channelRouteCooldowns.Store(activeKey, now+60)
+
+	assert.Equal(t, 1, pruneExpiredChannelRouteCooldowns(now))
+	_, expiredExists := channelRouteCooldowns.Load(expiredKey)
+	_, activeExists := channelRouteCooldowns.Load(activeKey)
+	assert.False(t, expiredExists)
+	assert.True(t, activeExists)
+}
+
+func TestGetChannelRouteCooldownsUntilUsesMemoryFallback(t *testing.T) {
+	setupChannelRouteTest(t)
+	now := common.GetTimestamp()
+	channelRouteCooldowns.Store(channelRouteMemoryKey("default", 1), now+60)
+	channelRouteCooldowns.Store(channelRouteMemoryKey("default", 2), now-1)
+
+	cooldowns := getChannelRouteCooldownsUntil("default", []int{1, 2, 1, 0}, now)
+
+	require.Len(t, cooldowns, 2)
+	assert.Equal(t, now+60, cooldowns[1])
+	assert.Zero(t, cooldowns[2])
+}
+
+func TestGetChannelRouteCooldownsUntilUsesSingleRedisMGet(t *testing.T) {
+	setupChannelRouteTest(t)
+	oldRDB := common.RDB
+	client := redis.NewClient(&redis.Options{Addr: "unused:0"})
+	hook := &rejectRedisCommandsHook{}
+	client.AddHook(hook)
+	common.RDB = client
+	common.RedisEnabled = true
+	t.Cleanup(func() {
+		common.RDB = oldRDB
+		_ = client.Close()
+	})
+
+	now := common.GetTimestamp()
+	channelRouteCooldowns.Store(channelRouteMemoryKey("default", 1), now+60)
+	cooldowns := getChannelRouteCooldownsUntil("default", []int{1, 2, 3}, now)
+
+	assert.Equal(t, []string{"mget"}, hook.commands)
+	assert.Equal(t, now+60, cooldowns[1])
+	assert.Zero(t, cooldowns[2])
+	assert.Zero(t, cooldowns[3])
+}
+
+func TestLoadChannelRouteCooldownSnapshotSkipsCandidateQueryWithoutMemoryCache(t *testing.T) {
+	setupChannelRouteTest(t)
+	common.MemoryCacheEnabled = false
+
+	cooldowns, batched, err := loadChannelRouteCooldownSnapshot(
+		"default",
+		channelRouteTestModel,
+		"/v1/chat/completions",
+		common.GetTimestamp(),
+	)
+
+	require.NoError(t, err)
+	assert.False(t, batched)
+	assert.Nil(t, cooldowns)
+}
+
+func TestBuildChannelExecutionPlanMarksBatchedCooldowns(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	seedChannelRouteChannel(t, db, 1, "default", 2)
+	seedChannelRouteChannel(t, db, 2, "default", 1)
+	model.InitChannelCache()
+	until := FreezeChannelRoute("default", 1, 60)
+
+	plan, err := BuildChannelExecutionPlan("default", channelRouteTestModel, "/v1/chat/completions", "route")
+
+	require.NoError(t, err)
+	require.Len(t, plan.Pools, 2)
+	require.Len(t, plan.Pools[0].Candidates, 1)
+	assert.Equal(t, 1, plan.Pools[0].Candidates[0].ChannelID)
+	assert.Equal(t, "cooling", plan.Pools[0].Candidates[0].State)
+	assert.Equal(t, until, plan.Pools[0].Candidates[0].CooldownUntil)
+	assert.Equal(t, "candidate", plan.Pools[1].Candidates[0].State)
+}
+
+func TestChannelExecutionTracePublishesFirstEventWithoutEmptySnapshot(t *testing.T) {
+	setupChannelRouteTest(t)
+	ctx := newChannelRouteContext()
+	ctx.Set(common.RequestIdKey, "first-event-publish")
+
+	state := ensureChannelExecutionTrace(ctx, "default", channelRouteTestModel, "/v1/chat/completions")
+	require.NotNil(t, state)
+	_, found, err := GetChannelExecutionTrace("first-event-publish")
+	require.NoError(t, err)
+	assert.False(t, found)
+
+	appendChannelExecutionEvent(ctx, "default", channelRouteTestModel, "/v1/chat/completions", ChannelExecutionEvent{
+		ChannelID: 1,
+		State:     "active",
+	})
+	trace, found, err := GetChannelExecutionTrace("first-event-publish")
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, trace.Events, 1)
+	assert.Equal(t, "active", trace.Events[0].State)
+}
+
+func TestChannelExecutionIndexOnlyRefreshesForNewKeysAndTerminalState(t *testing.T) {
+	now := time.Now().UnixMilli()
+	trace := ChannelExecutionTrace{
+		RequestID: "index-refresh",
+		Status:    "running",
+		Group:     "default",
+		UpdatedAt: now,
+		Events: []ChannelExecutionEvent{
+			{ChannelID: 1, Group: "default", State: "active"},
+		},
+	}
+	state := &channelExecutionTraceState{indexedKeys: make(map[string]struct{})}
+
+	firstKeys, refreshAll := channelExecutionIndexKeysForPublish(state, trace)
+	require.True(t, refreshAll)
+	require.Len(t, firstKeys, 2)
+	for _, key := range firstKeys {
+		state.indexedKeys[key] = struct{}{}
+	}
+	state.lastIndexRefreshTime = now
+
+	repeatedKeys, refreshAll := channelExecutionIndexKeysForPublish(state, trace)
+	assert.False(t, refreshAll)
+	assert.Empty(t, repeatedKeys)
+
+	trace.Events = append(trace.Events, ChannelExecutionEvent{ChannelID: 2, Group: "default", State: "active"})
+	trace.UpdatedAt++
+	newKeys, refreshAll := channelExecutionIndexKeysForPublish(state, trace)
+	assert.False(t, refreshAll)
+	require.Len(t, newKeys, 1)
+	assert.Contains(t, newKeys[0], ":2:")
+
+	trace.Status = "success"
+	terminalKeys, refreshAll := channelExecutionIndexKeysForPublish(state, trace)
+	assert.True(t, refreshAll)
+	require.Len(t, terminalKeys, 3)
+}
+
+func TestPublishChannelExecutionTraceRedisUsesSinglePipeline(t *testing.T) {
+	setupChannelRouteTest(t)
+	oldRDB := common.RDB
+	client := redis.NewClient(&redis.Options{Addr: "unused:0"})
+	hook := &rejectRedisCommandsHook{}
+	client.AddHook(hook)
+	common.RDB = client
+	common.RedisEnabled = true
+	t.Cleanup(func() {
+		common.RDB = oldRDB
+		_ = client.Close()
+	})
+
+	trace := ChannelExecutionTrace{
+		RequestID: "pipeline-publish",
+		Status:    "running",
+		Group:     "default",
+		UpdatedAt: time.Now().UnixMilli(),
+		Events: []ChannelExecutionEvent{
+			{ChannelID: 1, Group: "default", State: "active"},
+		},
+	}
+	err := publishChannelExecutionTraceRedis(trace, channelExecutionTraceIndexKeys(trace))
+
+	require.Error(t, err)
+	require.Len(t, hook.pipelines, 1)
+	assert.Equal(t, []string{"set", "zadd", "zremrangebyscore", "expire", "zadd", "zremrangebyscore", "expire"}, hook.pipelines[0])
+}
+
+func TestPruneChannelExecutionRecentRemovesColdExpiredAndEmptyKeys(t *testing.T) {
+	setupChannelRouteTest(t)
+	cutoff := time.Now().Add(-channelExecutionTraceTTL).UnixMilli()
+	channelExecutionRecent["expired"] = map[string]ChannelExecutionTrace{
+		"old-request": {RequestID: "old-request", UpdatedAt: cutoff - 1},
+	}
+	channelExecutionRecent["empty"] = map[string]ChannelExecutionTrace{}
+	channelExecutionRecent["active"] = map[string]ChannelExecutionTrace{
+		"active-request": {RequestID: "active-request", UpdatedAt: cutoff},
+	}
+
+	deletedKeys, deletedTraces := pruneChannelExecutionRecent(cutoff)
+
+	assert.Equal(t, 2, deletedKeys)
+	assert.Equal(t, 1, deletedTraces)
+	assert.NotContains(t, channelExecutionRecent, "expired")
+	assert.NotContains(t, channelExecutionRecent, "empty")
+	require.Contains(t, channelExecutionRecent, "active")
+	assert.Contains(t, channelExecutionRecent["active"], "active-request")
+}
+
+func TestIndexChannelExecutionTracePeriodicallyPrunesColdKeys(t *testing.T) {
+	setupChannelRouteTest(t)
+	now := time.Now().UnixMilli()
+	channelExecutionRecent["cold-key"] = map[string]ChannelExecutionTrace{
+		"old-request": {RequestID: "old-request", UpdatedAt: now - channelExecutionTraceTTL.Milliseconds() - 1},
+	}
+	channelExecutionRecentWrites = channelExecutionRecentPruneEvery - 1
+
+	indexChannelExecutionTrace(ChannelExecutionTrace{
+		RequestID: "new-request",
+		Group:     "default",
+		UpdatedAt: now,
+		Events: []ChannelExecutionEvent{
+			{Group: "default", ChannelID: 1},
+		},
+	})
+
+	assert.NotContains(t, channelExecutionRecent, "cold-key")
+	assert.Contains(t, channelExecutionRecent[channelExecutionRecentKey(1, "default")], "new-request")
 }
 
 func seedChannelRouteChannel(t *testing.T, db *gorm.DB, id int, group string, priority int64) {
@@ -463,6 +713,7 @@ func TestChannelExecutionPlanAndTraceFollowActualRoute(t *testing.T) {
 	assert.True(t, summary.Compact)
 	assert.Equal(t, "route", summary.Mode)
 	assert.Equal(t, "success", summary.Status)
+	assert.Equal(t, "default", summary.Group)
 	assert.Equal(t, []int{1, 2}, summary.ChannelIDs)
 	assert.False(t, summary.AffinityHit)
 
@@ -512,6 +763,7 @@ func TestListChannelExecutionTracesFallsBackToPersistedSummary(t *testing.T) {
 				Compact:     true,
 				Mode:        "route",
 				Status:      "success",
+				Group:       "persisted-group",
 				ChannelIDs:  []int{108, 163},
 				AffinityHit: true,
 			},
@@ -532,6 +784,7 @@ func TestListChannelExecutionTracesFallsBackToPersistedSummary(t *testing.T) {
 	require.Len(t, traces, 1)
 	assert.Equal(t, requestID, traces[0].RequestID)
 	assert.True(t, traces[0].Compact)
+	assert.Equal(t, "persisted-group", traces[0].Group)
 	assert.Equal(t, []int{108, 163}, traces[0].ChannelIDs)
 	assert.True(t, traces[0].AffinityHit)
 	assert.Equal(t, "/v1/responses", traces[0].RequestPath)

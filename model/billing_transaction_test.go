@@ -74,6 +74,117 @@ func TestGetBillingHistoryMergesSourcesAndFilters(t *testing.T) {
 	require.Equal(t, userTwoID, items[0].UserId)
 }
 
+func TestGetBillingHistoryUsesStripeCreditedQuota(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+	})
+
+	now := common.GetTimestamp()
+	require.NoError(t, DB.Create(&TopUp{
+		UserId: userOneID, Amount: 5, Money: 2.75, TradeNo: fmt.Sprintf("billing-stripe-quota-%d", now),
+		PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe,
+		CreateTime: now - 10, CompleteTime: now - 5, Status: common.TopUpStatusSuccess,
+	}).Error)
+
+	items, total, err := GetBillingHistory(BillingHistoryFilter{
+		UserId: userOneID, Types: []string{BillingTypeOnlineTopup},
+		StartTime: now - 20, EndTime: now,
+		PageInfo: &common.PageInfo{Page: 1, PageSize: 10},
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, items, 1)
+	require.Equal(t, 2750, items[0].Quota)
+}
+
+func TestCalculateTopUpCreditedQuotaByProvider(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 1000
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+	})
+
+	tests := []struct {
+		name     string
+		provider string
+		amount   int64
+		money    float64
+		want     int
+	}{
+		{name: "stripe uses charged money", provider: PaymentProviderStripe, amount: 5, money: 2.75, want: 2750},
+		{name: "creem amount is already quota", provider: PaymentProviderCreem, amount: 2750, money: 2.75, want: 2750},
+		{name: "epay converts amount to quota", provider: PaymentProviderEpay, amount: 5, money: 2.75, want: 5000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, calculateTopUpCreditedQuota(tt.provider, tt.amount, tt.money))
+		})
+	}
+}
+
+func TestGetBillingHistoryUsesEffectiveTopUpTimeForFilterAndOrder(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	baseTime := common.GetTimestamp()
+	topups := []TopUp{
+		{
+			UserId: userOneID, Amount: 1, Money: 1, TradeNo: fmt.Sprintf("billing-completed-in-range-%d", baseTime),
+			PaymentMethod: "alipay", PaymentProvider: PaymentProviderEpay,
+			CreateTime: baseTime - 200, CompleteTime: baseTime - 50, Status: common.TopUpStatusSuccess,
+		},
+		{
+			UserId: userOneID, Amount: 1, Money: 1, TradeNo: fmt.Sprintf("billing-completed-after-range-%d", baseTime),
+			PaymentMethod: "alipay", PaymentProvider: PaymentProviderEpay,
+			CreateTime: baseTime - 40, CompleteTime: baseTime + 50, Status: common.TopUpStatusSuccess,
+		},
+		{
+			UserId: userOneID, Amount: 1, Money: 1, TradeNo: fmt.Sprintf("billing-pending-in-range-%d", baseTime),
+			PaymentMethod: "alipay", PaymentProvider: PaymentProviderEpay,
+			CreateTime: baseTime - 20, Status: common.TopUpStatusPending,
+		},
+	}
+	require.NoError(t, DB.Create(&topups).Error)
+
+	items, total, err := GetBillingHistory(BillingHistoryFilter{
+		UserId: userOneID, Types: []string{BillingTypeOnlineTopup},
+		StartTime: baseTime - 100, EndTime: baseTime,
+		PageInfo: &common.PageInfo{Page: 1, PageSize: 10},
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	require.Len(t, items, 2)
+	require.Equal(t, topups[2].TradeNo, items[0].Reference)
+	require.Equal(t, baseTime-20, items[0].CreatedAt)
+	require.Equal(t, topups[0].TradeNo, items[1].Reference)
+	require.Equal(t, baseTime-50, items[1].CreatedAt)
+}
+
+func TestGetBillingHistoryNormalizesInvalidPagination(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	pageInfo := &common.PageInfo{Page: -1, PageSize: -10}
+
+	items, total, err := GetBillingHistory(BillingHistoryFilter{
+		UserId:   userOneID,
+		Types:    []string{BillingTypeOnlineTopup},
+		PageInfo: pageInfo,
+	})
+	require.NoError(t, err)
+	require.Empty(t, items)
+	require.Zero(t, total)
+	require.Equal(t, 1, pageInfo.Page)
+	require.Equal(t, defaultBillingHistoryPageSize, pageInfo.PageSize)
+}
+
+func TestGetBillingHistoryRejectsExcessivePaginationWindow(t *testing.T) {
+	_, _, err := GetBillingHistory(BillingHistoryFilter{
+		Types:    []string{BillingTypeOnlineTopup},
+		PageInfo: &common.PageInfo{Page: 101, PageSize: 100},
+	})
+	require.ErrorContains(t, err, "pagination exceeds")
+}
+
 func TestAdjustUserQuotaWithBillingRecordsSignedDelta(t *testing.T) {
 	userOneID, _ := setupBillingHistoryTest(t)
 	oldQuota, newQuota, delta, err := AdjustUserQuotaWithBilling(userOneID, 250, "add", 99, "admin-adjustment:test-add")
@@ -87,6 +198,84 @@ func TestAdjustUserQuotaWithBillingRecordsSignedDelta(t *testing.T) {
 	require.Equal(t, BillingTypeAdminAdjustment, transaction.Type)
 	require.Equal(t, 250, transaction.Quota)
 	require.Equal(t, 99, transaction.OperatorUserId)
+}
+
+func TestAdjustUserQuotaWithBillingIsIdempotentByEventKey(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	const eventKey = "admin-adjustment:test-idempotent"
+
+	_, _, _, err := AdjustUserQuotaWithBilling(userOneID, 250, "add", 99, eventKey)
+	require.NoError(t, err)
+	oldQuota, newQuota, delta, err := AdjustUserQuotaWithBilling(userOneID, 250, "add", 99, eventKey)
+	require.NoError(t, err)
+	require.Equal(t, 1250, oldQuota)
+	require.Equal(t, 1250, newQuota)
+	require.Zero(t, delta)
+
+	var updated User
+	require.NoError(t, DB.First(&updated, userOneID).Error)
+	require.Equal(t, 1250, updated.Quota)
+	var count int64
+	require.NoError(t, DB.Model(&BillingTransaction{}).Where("event_key = ?", eventKey).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
+func TestAdjustUserQuotaWithBillingRejectsEventKeyCollision(t *testing.T) {
+	userOneID, userTwoID := setupBillingHistoryTest(t)
+	const eventKey = "admin-adjustment:test-collision"
+
+	_, _, _, err := AdjustUserQuotaWithBilling(userOneID, 250, "add", 99, eventKey)
+	require.NoError(t, err)
+	_, _, _, err = AdjustUserQuotaWithBilling(userTwoID, 250, "add", 99, eventKey)
+	require.ErrorContains(t, err, "already used by another transaction")
+
+	var updated User
+	require.NoError(t, DB.First(&updated, userTwoID).Error)
+	require.Equal(t, 2000, updated.Quota)
+}
+
+func TestAdjustUserQuotaWithBillingRejectsModeCollision(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	const eventKey = "admin-adjustment:test-mode-collision"
+
+	_, _, _, err := AdjustUserQuotaWithBilling(userOneID, 250, "add", 99, eventKey)
+	require.NoError(t, err)
+	_, _, _, err = AdjustUserQuotaWithBilling(userOneID, 1250, "override", 99, eventKey)
+	require.ErrorContains(t, err, "already used by another transaction")
+
+	var updated User
+	require.NoError(t, DB.First(&updated, userOneID).Error)
+	require.Equal(t, 1250, updated.Quota)
+}
+
+func TestAdjustUserQuotaWithBillingRejectsOperatorCollision(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	const eventKey = "admin-adjustment:test-operator-collision"
+
+	_, _, _, err := AdjustUserQuotaWithBilling(userOneID, 250, "add", 99, eventKey)
+	require.NoError(t, err)
+	_, _, _, err = AdjustUserQuotaWithBilling(userOneID, 250, "add", 100, eventKey)
+	require.ErrorContains(t, err, "already used by another transaction")
+
+	var updated User
+	require.NoError(t, DB.First(&updated, userOneID).Error)
+	require.Equal(t, 1250, updated.Quota)
+}
+
+func TestAdjustUserQuotaWithBillingOverrideReplayAfterAnotherChange(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	const eventKey = "admin-adjustment:test-override-replay"
+
+	_, _, _, err := AdjustUserQuotaWithBilling(userOneID, 500, "override", 99, eventKey)
+	require.NoError(t, err)
+	_, _, _, err = AdjustUserQuotaWithBilling(userOneID, 100, "add", 99, "admin-adjustment:intervening")
+	require.NoError(t, err)
+
+	oldQuota, newQuota, delta, err := AdjustUserQuotaWithBilling(userOneID, 500, "override", 99, eventKey)
+	require.NoError(t, err)
+	require.Equal(t, 600, oldQuota)
+	require.Equal(t, 600, newQuota)
+	require.Zero(t, delta)
 }
 
 func TestTransferAffQuotaToQuotaRecordsBillingTransaction(t *testing.T) {
@@ -106,4 +295,43 @@ func TestTransferAffQuotaToQuotaRecordsBillingTransaction(t *testing.T) {
 	require.NoError(t, DB.First(&updated, userOneID).Error)
 	require.Equal(t, 1000+transferQuota, updated.Quota)
 	require.Equal(t, 100, updated.AffQuota)
+}
+
+func TestTransferAffQuotaToQuotaIsIdempotentByEventKey(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	transferQuota := int(common.QuotaPerUnit)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userOneID).Update("aff_quota", transferQuota*2).Error)
+	user, err := GetUserById(userOneID, true)
+	require.NoError(t, err)
+	const eventKey = "affiliate-transfer:test-idempotent"
+
+	require.NoError(t, user.TransferAffQuotaToQuota(transferQuota, eventKey))
+	require.NoError(t, user.TransferAffQuotaToQuota(transferQuota, eventKey))
+
+	var updated User
+	require.NoError(t, DB.First(&updated, userOneID).Error)
+	require.Equal(t, 1000+transferQuota, updated.Quota)
+	require.Equal(t, transferQuota, updated.AffQuota)
+	var count int64
+	require.NoError(t, DB.Model(&BillingTransaction{}).Where("event_key = ?", eventKey).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
+func TestTransferAffQuotaToQuotaRejectsEventKeyCollision(t *testing.T) {
+	userOneID, userTwoID := setupBillingHistoryTest(t)
+	transferQuota := int(common.QuotaPerUnit)
+	require.NoError(t, DB.Model(&User{}).Where("id IN ?", []int{userOneID, userTwoID}).Update("aff_quota", transferQuota).Error)
+	userOne, err := GetUserById(userOneID, true)
+	require.NoError(t, err)
+	const eventKey = "affiliate-transfer:test-collision"
+	require.NoError(t, userOne.TransferAffQuotaToQuota(transferQuota, eventKey))
+
+	userTwo, err := GetUserById(userTwoID, true)
+	require.NoError(t, err)
+	err = userTwo.TransferAffQuotaToQuota(transferQuota, eventKey)
+	require.ErrorContains(t, err, "already used by another transaction")
+
+	var updated User
+	require.NoError(t, DB.First(&updated, userTwoID).Error)
+	require.Equal(t, 2000, updated.Quota)
 }

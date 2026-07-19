@@ -38,6 +38,10 @@ jobs:
             echo "::error::Branch '$BRANCH_NAME' cannot be converted to a valid Docker tag prefix"
             exit 1
           fi
+          if [[ "$TAG_PREFIX" == "latest" || "$TAG_PREFIX" == "stable" || "$TAG_PREFIX" == "release" || "$TAG_PREFIX" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9._-]+)?$ ]]; then
+            echo "::error::Branch '$BRANCH_NAME' would produce a reserved release tag prefix '$TAG_PREFIX'"
+            exit 1
+          fi
 
           SHA=$(git rev-parse HEAD)
           SHORT_SHA=$(git rev-parse --short HEAD)

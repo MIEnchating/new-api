@@ -1,7 +1,9 @@
 package model
 
 import (
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -9,19 +11,25 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"github.com/bytedance/gopkg/util/gopool"
 )
 
-// UserBase struct remains the same as it represents the cached data structure
+const userCacheSchemaVersion = 2
+
+var errStaleUserCache = errors.New("stale user cache schema")
+
 type UserBase struct {
-	Id       int    `json:"id"`
-	Group    string `json:"group"`
-	Email    string `json:"email"`
-	Quota    int    `json:"quota"`
-	Status   int    `json:"status"`
-	Username string `json:"username"`
-	Setting  string `json:"setting"`
+	Id           int    `json:"id"`
+	Group        string `json:"group"`
+	Email        string `json:"email"`
+	Quota        int    `json:"quota"`
+	Role         int    `json:"role"`
+	Status       int    `json:"status"`
+	Username     string `json:"username"`
+	Setting      string `json:"setting"`
+	CacheVersion int    `json:"-"`
 }
 
 func (user *UserBase) WriteContext(c *gin.Context) {
@@ -91,6 +99,9 @@ func updateUserCache(user User) error {
 	if err := updateUserStatusCache(user.Id, user.Status == common.UserStatusEnabled); err != nil {
 		return err
 	}
+	if err := updateUserRoleCache(user.Id, user.Role); err != nil {
+		return err
+	}
 	if err := updateUserNameCache(user.Id, user.Username); err != nil {
 		return err
 	}
@@ -99,6 +110,32 @@ func updateUserCache(user User) error {
 
 // GetUserCache gets complete user cache from hash
 func GetUserCache(userId int) (userCache *UserBase, err error) {
+	return getUserCache(userId, cacheGetUserBase)
+}
+
+// GetUserAuthState reads the identity fields used for session authorization
+// directly from the primary database. Authorization must not depend on the
+// general user cache because an in-flight asynchronous cache fill can race
+// with a disable or role change and briefly restore stale data.
+func GetUserAuthState(userId int) (*UserBase, error) {
+	if userId <= 0 {
+		return nil, gorm.ErrRecordNotFound
+	}
+	var user User
+	if err := DB.Select("id", "username", "role", "status", "group").First(&user, "id = ?", userId).Error; err != nil {
+		return nil, err
+	}
+	return &UserBase{
+		Id:           user.Id,
+		Username:     user.Username,
+		Role:         user.Role,
+		Status:       user.Status,
+		Group:        user.Group,
+		CacheVersion: userCacheSchemaVersion,
+	}, nil
+}
+
+func getUserCache(userId int, loadCache func(int) (*UserBase, error)) (userCache *UserBase, err error) {
 	var user *User
 	var fromDB bool
 	defer func() {
@@ -113,9 +150,12 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 	}()
 
 	// Try getting from Redis first
-	userCache, err = cacheGetUserBase(userId)
-	if err == nil {
+	userCache, err = loadCache(userId)
+	if err == nil && isCurrentUserCache(userCache, userId) {
 		return userCache, nil
+	}
+	if err == nil {
+		err = errStaleUserCache
 	}
 
 	// If Redis fails, get from DB
@@ -126,17 +166,19 @@ func GetUserCache(userId int) (userCache *UserBase, err error) {
 	}
 
 	// Create cache object from user data
-	userCache = &UserBase{
-		Id:       user.Id,
-		Group:    user.Group,
-		Quota:    user.Quota,
-		Status:   user.Status,
-		Username: user.Username,
-		Setting:  user.Setting,
-		Email:    user.Email,
-	}
+	userCache = user.ToBaseUser()
 
 	return userCache, nil
+}
+
+func isCurrentUserCache(user *UserBase, userId int) bool {
+	if user == nil || user.CacheVersion != userCacheSchemaVersion || user.Id != userId {
+		return false
+	}
+	if strings.TrimSpace(user.Username) == "" || !common.IsValidateRole(user.Role) {
+		return false
+	}
+	return user.Status == common.UserStatusEnabled || user.Status == common.UserStatusDisabled
 }
 
 func cacheGetUserBase(userId int) (*UserBase, error) {
@@ -215,6 +257,13 @@ func updateUserStatusCache(userId int, status bool) error {
 		statusInt = common.UserStatusDisabled
 	}
 	return common.RedisHSetField(getUserCacheKey(userId), "Status", fmt.Sprintf("%d", statusInt))
+}
+
+func updateUserRoleCache(userId int, role int) error {
+	if !common.RedisEnabled {
+		return nil
+	}
+	return common.RedisHSetField(getUserCacheKey(userId), "Role", fmt.Sprintf("%d", role))
 }
 
 func updateUserQuotaCache(userId int, quota int) error {

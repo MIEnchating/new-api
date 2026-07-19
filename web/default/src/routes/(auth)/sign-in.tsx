@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { z } from 'zod'
 
+import { validateCachedSignInSession } from '@/features/auth/lib/sign-in-session'
+import { saveUserId } from '@/features/auth/lib/storage'
 import { SignIn } from '@/features/auth/sign-in'
+import { getSelf } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
 const searchSchema = z.object({
@@ -32,10 +35,17 @@ export const Route = createFileRoute('/(auth)/sign-in')({
   beforeLoad: async ({ search }) => {
     const { auth } = useAuthStore.getState()
 
-    // 如果已经有用户信息，说明已登录
-    if (auth.user) {
-      // 优先使用 redirect 参数（用户之前想去的地方）
-      // 否则跳转到 dashboard
+    const sessionValid = await validateCachedSignInSession({
+      cachedUser: auth.user,
+      fetchCurrentUser: getSelf,
+      persistCurrentUser: (user) => {
+        auth.setUser(user)
+        saveUserId(user.id)
+      },
+      clearCachedUser: auth.reset,
+    })
+
+    if (sessionValid) {
       throw redirect({ to: search?.redirect || '/dashboard' })
     }
   },

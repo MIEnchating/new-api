@@ -167,7 +167,10 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
       : t('Filter by task ID')
   const hasAdditionalFilters = !!filterValue || !!filters.channel
   const dateRangeFilter = (
-    <LogsFilterField wide>
+    <LogsFilterField
+      wide
+      className='w-full sm:w-[340px] lg:w-[420px] xl:w-[460px]'
+    >
       <CompactDateTimeRangePicker
         start={filters.startTime}
         end={filters.endTime}
@@ -179,7 +182,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     </LogsFilterField>
   )
   const taskIdFilter = (
-    <LogsFilterField>
+    <LogsFilterField className='w-full sm:min-w-[220px] sm:flex-1 lg:max-w-[360px]'>
       <LogsFilterInput
         aria-label={t('Task ID')}
         placeholder={placeholder}
@@ -190,7 +193,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     </LogsFilterField>
   )
   const channelFilter = isAdmin ? (
-    <LogsFilterField>
+    <LogsFilterField className='w-full sm:min-w-[170px] sm:flex-1 lg:max-w-[240px]'>
       <LogsFilterInput
         placeholder={t('Channel ID')}
         value={filters.channel || ''}

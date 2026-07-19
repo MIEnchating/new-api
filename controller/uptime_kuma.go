@@ -2,27 +2,56 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/setting/console_setting"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
-	requestTimeout   = 30 * time.Second
-	httpTimeout      = 10 * time.Second
-	uptimeKeySuffix  = "_24"
-	apiStatusPath    = "/api/status-page/"
-	apiHeartbeatPath = "/api/status-page/heartbeat/"
+	requestTimeout         = 30 * time.Second
+	httpTimeout            = 10 * time.Second
+	uptimeStatusCacheTTL   = 15 * time.Second
+	uptimeStatusErrorTTL   = 3 * time.Second
+	uptimeResponseMaxBytes = 8 << 20
+	uptimeKeySuffix        = "_24"
+	apiStatusPath          = "/api/status-page/"
+	apiHeartbeatPath       = "/api/status-page/heartbeat/"
 )
+
+var errUptimeResponseTooLarge = errors.New("uptime response exceeds size limit")
+
+type uptimeStatusSnapshot struct {
+	Results  []UptimeGroupResult
+	Degraded bool
+}
+
+type uptimeStatusCacheEntry struct {
+	key       string
+	expiresAt time.Time
+	snapshot  uptimeStatusSnapshot
+}
+
+type uptimeStatusLoader struct {
+	mu       sync.RWMutex
+	entry    uptimeStatusCacheEntry
+	requests singleflight.Group
+	now      func() time.Time
+}
+
+var defaultUptimeStatusLoader uptimeStatusLoader
 
 type Monitor struct {
 	Name        string      `json:"name"`
@@ -91,11 +120,30 @@ func getAndDecode(ctx context.Context, client *http.Client, url string, dest int
 	if resp.StatusCode != http.StatusOK {
 		return errors.New("non-200 status")
 	}
+	if resp.ContentLength > uptimeResponseMaxBytes {
+		return errUptimeResponseTooLarge
+	}
 
-	return json.NewDecoder(resp.Body).Decode(dest)
+	limited := &io.LimitedReader{R: resp.Body, N: uptimeResponseMaxBytes + 1}
+	decoder := json.NewDecoder(limited)
+	err = decoder.Decode(dest)
+	if err == nil {
+		var trailing interface{}
+		trailingErr := decoder.Decode(&trailing)
+		if trailingErr == nil {
+			return errors.New("response contains trailing JSON data")
+		}
+		if trailingErr != io.EOF {
+			err = trailingErr
+		}
+	}
+	if limited.N <= 0 {
+		return errUptimeResponseTooLarge
+	}
+	return err
 }
 
-func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[string]interface{}) UptimeGroupResult {
+func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[string]interface{}) (UptimeGroupResult, error) {
 	url, _ := groupConfig["url"].(string)
 	slug, _ := groupConfig["slug"].(string)
 	categoryName, _ := groupConfig["categoryName"].(string)
@@ -106,7 +154,7 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 	}
 
 	if url == "" || slug == "" {
-		return result
+		return result, errors.New("invalid uptime group configuration")
 	}
 
 	baseURL := strings.TrimSuffix(url, "/")
@@ -140,8 +188,8 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 		return getAndDecode(gCtx, client, baseURL+apiHeartbeatPath+slug, &heartbeatData)
 	})
 
-	if g.Wait() != nil {
-		return result
+	if err := g.Wait(); err != nil {
+		return result, err
 	}
 
 	for _, pg := range statusData.PublicGroupList {
@@ -182,7 +230,7 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 func float64Ptr(value float64) *float64 {
@@ -198,6 +246,136 @@ func resolveHistoryUptime(uptimeList map[string]float64, monitorID string) (floa
 	return 0, false
 }
 
+func fetchUptimeStatusSnapshot(ctx context.Context, groups []map[string]interface{}) uptimeStatusSnapshot {
+	client := &http.Client{Timeout: httpTimeout}
+	results := make([]UptimeGroupResult, len(groups))
+	errorsByGroup := make([]error, len(groups))
+
+	g, gCtx := errgroup.WithContext(ctx)
+	for i, group := range groups {
+		i, group := i, group
+		g.Go(func() error {
+			results[i], errorsByGroup[i] = fetchGroupData(gCtx, client, group)
+			return nil
+		})
+	}
+
+	_ = g.Wait()
+	degraded := false
+	for _, err := range errorsByGroup {
+		if err != nil {
+			degraded = true
+			break
+		}
+	}
+	return uptimeStatusSnapshot{Results: results, Degraded: degraded}
+}
+
+func cloneUptimeStatusSnapshot(snapshot uptimeStatusSnapshot) uptimeStatusSnapshot {
+	cloned := uptimeStatusSnapshot{
+		Results:  make([]UptimeGroupResult, len(snapshot.Results)),
+		Degraded: snapshot.Degraded,
+	}
+	for groupIndex, group := range snapshot.Results {
+		cloned.Results[groupIndex] = group
+		cloned.Results[groupIndex].Monitors = make([]Monitor, len(group.Monitors))
+		for monitorIndex, monitor := range group.Monitors {
+			cloned.Results[groupIndex].Monitors[monitorIndex] = monitor
+			clonedHeartbeats := make([]Heartbeat, len(monitor.Heartbeats))
+			for heartbeatIndex, heartbeat := range monitor.Heartbeats {
+				clonedHeartbeats[heartbeatIndex] = heartbeat
+				if heartbeat.Ping != nil {
+					ping := *heartbeat.Ping
+					clonedHeartbeats[heartbeatIndex].Ping = &ping
+				}
+			}
+			cloned.Results[groupIndex].Monitors[monitorIndex].Heartbeats = clonedHeartbeats
+			if monitor.Ping != nil {
+				ping := *monitor.Ping
+				cloned.Results[groupIndex].Monitors[monitorIndex].Ping = &ping
+			}
+			if monitor.Uptime7 != nil {
+				uptime7 := *monitor.Uptime7
+				cloned.Results[groupIndex].Monitors[monitorIndex].Uptime7 = &uptime7
+			}
+		}
+	}
+	return cloned
+}
+
+func uptimeStatusCacheKey(groups []map[string]interface{}) string {
+	encoded, err := json.Marshal(groups)
+	if err != nil {
+		return ""
+	}
+	digest := sha256.Sum256(encoded)
+	return string(digest[:])
+}
+
+func (loader *uptimeStatusLoader) currentTime() time.Time {
+	if loader.now != nil {
+		return loader.now()
+	}
+	return time.Now()
+}
+
+func (loader *uptimeStatusLoader) cached(key string, now time.Time) (uptimeStatusSnapshot, bool) {
+	loader.mu.RLock()
+	defer loader.mu.RUnlock()
+	if key == "" || loader.entry.key != key || !now.Before(loader.entry.expiresAt) {
+		return uptimeStatusSnapshot{}, false
+	}
+	return cloneUptimeStatusSnapshot(loader.entry.snapshot), true
+}
+
+func (loader *uptimeStatusLoader) load(
+	ctx context.Context,
+	groups []map[string]interface{},
+	fetch func(context.Context, []map[string]interface{}) uptimeStatusSnapshot,
+) (uptimeStatusSnapshot, error) {
+	key := uptimeStatusCacheKey(groups)
+	if snapshot, ok := loader.cached(key, loader.currentTime()); ok {
+		return snapshot, nil
+	}
+
+	result := loader.requests.DoChan(key, func() (interface{}, error) {
+		if snapshot, ok := loader.cached(key, loader.currentTime()); ok {
+			return snapshot, nil
+		}
+
+		fetchCtx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+		defer cancel()
+		snapshot := fetch(fetchCtx, groups)
+		ttl := uptimeStatusCacheTTL
+		if snapshot.Degraded {
+			ttl = uptimeStatusErrorTTL
+		}
+
+		loader.mu.Lock()
+		loader.entry = uptimeStatusCacheEntry{
+			key:       key,
+			expiresAt: loader.currentTime().Add(ttl),
+			snapshot:  cloneUptimeStatusSnapshot(snapshot),
+		}
+		loader.mu.Unlock()
+		return cloneUptimeStatusSnapshot(snapshot), nil
+	})
+
+	select {
+	case <-ctx.Done():
+		return uptimeStatusSnapshot{}, ctx.Err()
+	case loaded := <-result:
+		if loaded.Err != nil {
+			return uptimeStatusSnapshot{}, loaded.Err
+		}
+		snapshot, ok := loaded.Val.(uptimeStatusSnapshot)
+		if !ok {
+			return uptimeStatusSnapshot{}, errors.New("invalid uptime cache result")
+		}
+		return cloneUptimeStatusSnapshot(snapshot), nil
+	}
+}
+
 func GetUptimeKumaStatus(c *gin.Context) {
 	groups := console_setting.GetUptimeKumaGroups()
 	if len(groups) == 0 {
@@ -205,21 +383,9 @@ func GetUptimeKumaStatus(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), requestTimeout)
-	defer cancel()
-
-	client := &http.Client{Timeout: httpTimeout}
-	results := make([]UptimeGroupResult, len(groups))
-
-	g, gCtx := errgroup.WithContext(ctx)
-	for i, group := range groups {
-		i, group := i, group
-		g.Go(func() error {
-			results[i] = fetchGroupData(gCtx, client, group)
-			return nil
-		})
+	snapshot, err := defaultUptimeStatusLoader.load(c.Request.Context(), groups, fetchUptimeStatusSnapshot)
+	if err != nil {
+		return
 	}
-
-	g.Wait()
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": results})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": snapshot.Results})
 }

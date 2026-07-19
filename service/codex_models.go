@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,13 +10,12 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/QuantumNous/new-api/common"
 )
 
 const (
 	codexLatestReleaseURL      = "https://api.github.com/repos/openai/codex/releases/latest"
 	codexClientVersionCacheTTL = time.Hour
+	codexJSONResponseMaxBytes  = 8 << 20
 )
 
 type codexClientVersionCache struct {
@@ -25,6 +25,28 @@ type codexClientVersionCache struct {
 }
 
 var latestCodexClientVersion codexClientVersionCache
+
+func decodeBoundedCodexJSON(body io.Reader, destination interface{}) error {
+	limited := &io.LimitedReader{R: body, N: codexJSONResponseMaxBytes + 1}
+	decoder := json.NewDecoder(limited)
+	err := decoder.Decode(destination)
+	if err == nil {
+		// Decode once more so a valid value followed by a large trailing
+		// payload cannot bypass the bounded-reader check.
+		var trailing interface{}
+		trailingErr := decoder.Decode(&trailing)
+		if trailingErr == nil {
+			return fmt.Errorf("Codex response contains trailing JSON data")
+		}
+		if trailingErr != io.EOF {
+			err = trailingErr
+		}
+	}
+	if limited.N <= 0 {
+		return fmt.Errorf("Codex response exceeds %d bytes", codexJSONResponseMaxBytes)
+	}
+	return err
+}
 
 func GetLatestCodexClientVersion(ctx context.Context, client *http.Client) (string, error) {
 	return latestCodexClientVersion.get(ctx, client, codexLatestReleaseURL, time.Now())
@@ -79,7 +101,7 @@ func fetchLatestCodexClientVersion(ctx context.Context, client *http.Client, rel
 		Draft      bool   `json:"draft"`
 		Prerelease bool   `json:"prerelease"`
 	}
-	if err := common.DecodeJson(resp.Body, &release); err != nil {
+	if err := decodeBoundedCodexJSON(resp.Body, &release); err != nil {
 		return "", err
 	}
 	if release.Draft || release.Prerelease {
@@ -146,10 +168,6 @@ func FetchCodexModels(
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return resp.StatusCode, nil, err
-	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		return resp.StatusCode, nil, nil
 	}
@@ -159,7 +177,7 @@ func FetchCodexModels(
 			Slug string `json:"slug"`
 		} `json:"models"`
 	}
-	if err := common.Unmarshal(body, &result); err != nil {
+	if err := decodeBoundedCodexJSON(resp.Body, &result); err != nil {
 		return resp.StatusCode, nil, err
 	}
 

@@ -16,10 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import {
   Copy,
   Check,
+  ChevronRight,
   Route,
   Settings2,
   AlertTriangle,
@@ -31,6 +33,7 @@ import {
   UserCog,
   Info,
   LogIn,
+  LoaderCircle,
   Activity,
   CheckCircle2,
   CircleDot,
@@ -51,6 +54,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Label } from '@/components/ui/label'
+import { getChannelExecutionTrace } from '@/features/channels/api'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
@@ -64,6 +68,7 @@ import { getRoleLabelKey } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 
 import type { UsageLog } from '../../data/schema'
+import { mergeExecutionTrace } from '../../lib/execution-trace'
 import {
   parseLogOther,
   getParamOverrideActionLabel,
@@ -88,7 +93,11 @@ import {
   isPerCallBilling,
   isTimingLogType,
 } from '../../lib/utils'
-import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
+import {
+  USAGE_BILLING_PATH,
+  type ChannelExecutionTraceInfo,
+  type LogOtherData,
+} from '../../types'
 
 function timingTextColorClass(
   variant: 'success' | 'warning' | 'danger'
@@ -286,6 +295,68 @@ function executionTraceStatusLabel(status?: string) {
   }
 }
 
+type ChannelExecutionStatus =
+  | 'running'
+  | 'success'
+  | 'failed'
+  | 'cooling'
+  | 'skipped'
+
+function channelExecutionStatusFromEvent(
+  state?: string
+): ChannelExecutionStatus | undefined {
+  switch (state) {
+    case 'active':
+    case 'affinity_hit':
+    case 'same_channel_retry':
+      return 'running'
+    case 'success':
+      return 'success'
+    case 'failed':
+      return 'failed'
+    case 'cooling':
+      return 'cooling'
+    case 'skipped':
+      return 'skipped'
+    default:
+      return undefined
+  }
+}
+
+function channelExecutionStatusLabel(status?: ChannelExecutionStatus) {
+  switch (status) {
+    case 'running':
+      return 'Running'
+    case 'success':
+      return 'Succeeded'
+    case 'failed':
+      return 'Failed'
+    case 'cooling':
+      return 'Cooling'
+    case 'skipped':
+      return 'Skipped'
+    default:
+      return 'Unknown'
+  }
+}
+
+function channelExecutionStatusVariant(
+  status?: ChannelExecutionStatus
+): StatusBadgeProps['variant'] {
+  switch (status) {
+    case 'running':
+      return 'info'
+    case 'success':
+      return 'success'
+    case 'failed':
+      return 'danger'
+    case 'cooling':
+      return 'warning'
+    default:
+      return 'neutral'
+  }
+}
+
 function routeGroupStatusLabel(status?: string) {
   switch (status) {
     case 'active':
@@ -316,6 +387,55 @@ function routeGroupStatusVariant(status?: string): StatusBadgeProps['variant'] {
     default:
       return 'neutral'
   }
+}
+
+type RouteGroupStatus = NonNullable<
+  ChannelExecutionTraceInfo['route_group_statuses']
+>[number]
+
+function RouteGroupChain(props: {
+  groups: string[]
+  statuses?: RouteGroupStatus[]
+  actualGroup?: string
+  traceStatus?: ChannelExecutionTraceInfo['status']
+  t: TFunction
+}) {
+  const statusByGroup = new Map(
+    props.statuses?.map((item) => [item.group, item.status]) ?? []
+  )
+
+  return (
+    <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
+      {props.groups.map((group, index) => {
+        let status = statusByGroup.get(group)
+        if (!status && group === props.actualGroup) {
+          status = props.traceStatus === 'success' ? 'success' : 'active'
+        }
+        return (
+          <span key={group} className='contents'>
+            {index > 0 ? (
+              <ChevronRight
+                className='text-muted-foreground size-3 shrink-0'
+                aria-hidden='true'
+              />
+            ) : null}
+            <span className='inline-flex min-w-0 items-center gap-1'>
+              <span className='font-mono text-xs font-medium break-all'>
+                {group}
+              </span>
+              <StatusBadge
+                variant={routeGroupStatusVariant(status)}
+                size='sm'
+                copyable={false}
+              >
+                {props.t(routeGroupStatusLabel(status))}
+              </StatusBadge>
+            </span>
+          </span>
+        )
+      })}
+    </span>
+  )
 }
 
 function executionTraceVariant(status?: string): StatusBadgeProps['variant'] {
@@ -660,33 +780,142 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showAdminIp =
     !!props.log.ip && (showTiming || isManage || (props.isAdmin && isTopup))
   const adminInfo = other?.admin_info
-  const executionTrace = adminInfo?.channel_execution_trace
+  const storedExecutionTrace = adminInfo?.channel_execution_trace
+  const fullExecutionTraceQuery = useQuery({
+    queryKey: ['channel-execution-trace', props.log.request_id],
+    queryFn: () => getChannelExecutionTrace(props.log.request_id),
+    enabled:
+      props.open &&
+      props.isAdmin &&
+      storedExecutionTrace?.compact === true &&
+      Boolean(props.log.request_id),
+    staleTime: 30_000,
+    retry: false,
+  })
+  const fetchedExecutionTrace = fullExecutionTraceQuery.data?.success
+    ? fullExecutionTraceQuery.data.data
+    : undefined
+  const executionTrace = mergeExecutionTrace(
+    storedExecutionTrace,
+    fetchedExecutionTrace
+  )
   const executionEvents = executionTrace?.events ?? []
   const lastFailedExecutionEventIndex = executionEvents.reduce(
     (lastIndex, event, index) => (event.state === 'failed' ? index : lastIndex),
     -1
   )
-  const executionTraceStatus =
-    props.log.type === 5 && executionTrace?.status === 'running'
-      ? 'failed'
-      : executionTrace?.status
-  const isLegacySuccessfulTrace =
-    !executionTrace?.compact &&
-    executionTraceStatus === 'success' &&
-    executionEvents.length > 0
-  const showExecutionSummary =
-    executionTrace?.compact === true || isLegacySuccessfulTrace
+  let executionTraceStatus = executionTrace?.status
+  if (executionTraceStatus === 'running') {
+    // A persisted consume log is created only after the upstream response is
+    // complete. Use that terminal log type when the Redis trace is stale.
+    if (props.log.type === 2) {
+      executionTraceStatus = 'success'
+    } else if (props.log.type === 5) {
+      executionTraceStatus = 'failed'
+    }
+  }
+  const showExecutionSummary = executionTrace?.compact === true
   const executionSummaryChannelIDs =
     executionTrace?.channel_ids ??
     executionEvents
       .filter((event) => event.state === 'active' && event.channel_id)
       .map((event) => event.channel_id as number)
-  const executionChannelChain = executionSummaryChannelIDs
-    ?.map((channelID) => `#${channelID}`)
-    .join(' → ')
-  const executionAffinityHit =
-    executionTrace?.affinity_hit === true ||
-    executionEvents.some((event) => event.state === 'affinity_hit')
+  const channelStatusByID = new Map<number, ChannelExecutionStatus>()
+  const channelStatusEventIndexByID = new Map<number, number>()
+  const channelSelectionEventIndexByID = new Map<number, number>()
+  executionEvents.forEach((event, index) => {
+    if (!event.channel_id) return
+    const status = channelExecutionStatusFromEvent(event.state)
+    if (!status) return
+    channelStatusByID.set(event.channel_id, status)
+    // Attach the status badge to the latest state event, including terminal
+    // success/failed events rather than the preceding request-start event.
+    channelStatusEventIndexByID.set(event.channel_id, index)
+    if (
+      event.state === 'active' ||
+      event.state === 'affinity_hit' ||
+      event.state === 'same_channel_retry'
+    ) {
+      channelSelectionEventIndexByID.set(event.channel_id, index)
+    }
+  })
+
+  if (executionEvents.length === 0) {
+    const summaryChannelIDs = [...new Set(executionSummaryChannelIDs ?? [])]
+    summaryChannelIDs.forEach((channelID, index) => {
+      const isLastChannel = index === summaryChannelIDs.length - 1
+      let status: ChannelExecutionStatus = 'failed'
+      if (isLastChannel && executionTraceStatus === 'success') {
+        status = 'success'
+      } else if (executionTraceStatus === 'running') {
+        status = 'running'
+      }
+      channelStatusByID.set(channelID, status)
+    })
+  } else if (executionTraceStatus === 'success') {
+    // A compact SQL summary can already be terminal while the cached event
+    // list is one update behind. Treat the latest selected channel as the
+    // successful one and earlier still-active selections as failed attempts.
+    const latestSelectionIndex = Math.max(
+      ...channelSelectionEventIndexByID.values(),
+      -1
+    )
+    for (const [channelID, status] of channelStatusByID) {
+      if (status !== 'running') continue
+      channelStatusByID.set(
+        channelID,
+        channelSelectionEventIndexByID.get(channelID) === latestSelectionIndex
+          ? 'success'
+          : 'failed'
+      )
+    }
+  } else if (
+    executionTraceStatus === 'failed' ||
+    executionTraceStatus === 'cancelled'
+  ) {
+    // A failed/cancelled request can end before a separate terminal event is
+    // published. Mark any still-active channel as failed in that case.
+    for (const [channelID, status] of channelStatusByID) {
+      if (status === 'running') channelStatusByID.set(channelID, 'failed')
+    }
+  }
+  const executionRouteGroups = executionTrace?.route_groups ?? []
+  const actualExecutionGroup =
+    executionTrace?.group || props.log.group || other?.group || ''
+  let groupDetails: React.ReactNode = null
+  if (executionRouteGroups.length > 0) {
+    groupDetails = (
+      <>
+        <DetailRow
+          label={t('Group route chain')}
+          value={
+            <RouteGroupChain
+              groups={executionRouteGroups}
+              statuses={executionTrace?.route_group_statuses}
+              actualGroup={actualExecutionGroup}
+              traceStatus={executionTraceStatus}
+              t={t}
+            />
+          }
+        />
+        {actualExecutionGroup ? (
+          <DetailRow
+            label={t('Actual execution group')}
+            value={actualExecutionGroup}
+            mono
+          />
+        ) : null}
+      </>
+    )
+  } else if (props.log.group || other?.group) {
+    groupDetails = (
+      <DetailRow
+        label={t('Group')}
+        value={props.log.group || other?.group || ''}
+        mono
+      />
+    )
+  }
   const hasUsageBillingPath =
     adminInfo?.usage_billing_path != null ||
     adminInfo?.local_count_tokens != null
@@ -1000,13 +1229,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
             <DetailRow label={t('Token')} value={props.log.token_name} mono />
           )}
 
-          {(props.log.group || other?.group) && (
-            <DetailRow
-              label={t('Group')}
-              value={props.log.group || other?.group || ''}
-              mono
-            />
-          )}
+          {groupDetails}
 
           {showAdminIp && (
             <DetailRow
@@ -1080,82 +1303,58 @@ export function DetailsDialog(props: DetailsDialogProps) {
                     : 'Traditional retry'
                 )}
               </span>
-              {executionTrace.group ? (
+              {actualExecutionGroup ? (
                 <StatusBadge variant='neutral' size='sm' copyable={false}>
-                  {t('Actual execution group')}: {executionTrace.group}
+                  {t('Actual execution group')}: {actualExecutionGroup}
                 </StatusBadge>
-              ) : null}
-              {executionTrace.route_groups &&
-              executionTrace.route_groups.length > 1 ? (
-                <StatusBadge
-                  variant='neutral'
-                  size='sm'
-                  copyable={false}
-                  className='max-w-full'
-                >
-                  <span className='truncate'>
-                    {t('Group route chain')}:{' '}
-                    {executionTrace.route_groups.join(' → ')}
-                  </span>
-                </StatusBadge>
-              ) : null}
-              {executionTrace.route_group_statuses?.length ? (
-                <div className='flex max-w-full flex-wrap items-center gap-1.5 text-xs'>
-                  <span className='text-muted-foreground'>
-                    {t('Group route status')}:
-                  </span>
-                  {executionTrace.route_group_statuses.map((item) => (
-                    <StatusBadge
-                      key={item.group}
-                      variant={routeGroupStatusVariant(item.status)}
-                      size='sm'
-                      copyable={false}
-                    >
-                      <span className='font-mono'>{item.group}</span>
-                      <span className='text-[11px]'>
-                        {t(routeGroupStatusLabel(item.status))}
-                      </span>
-                    </StatusBadge>
-                  ))}
-                </div>
               ) : null}
               {showExecutionSummary ? (
                 <StatusBadge variant='neutral' size='sm' copyable={false}>
                   {t('Execution summary')}
                 </StatusBadge>
               ) : null}
-            </div>
-            {showExecutionSummary ? (
-              <div className='space-y-2'>
-                <DetailRow
-                  label={t('Channel chain')}
-                  value={executionChannelChain || '-'}
-                  mono
-                />
-                {executionTrace.mode === 'route' ? (
-                  <DetailRow
-                    label={t('Route affinity')}
-                    value={
-                      <StatusBadge
-                        variant={executionAffinityHit ? 'purple' : 'neutral'}
-                        size='sm'
-                        copyable={false}
-                      >
-                        {t(
-                          executionAffinityHit
-                            ? 'Affinity hit'
-                            : 'No affinity hit'
-                        )}
-                      </StatusBadge>
-                    }
+              {fullExecutionTraceQuery.isFetching ? (
+                <span className='text-muted-foreground inline-flex items-center gap-1 text-xs'>
+                  <LoaderCircle
+                    className='size-3 animate-spin'
+                    aria-hidden='true'
                   />
-                ) : null}
-              </div>
-            ) : null}
-            {!showExecutionSummary ? (
-              <div
-                className={cn(isLegacySuccessfulTrace && 'mt-2 border-t pt-3')}
-              >
+                  {t('Loading')}
+                </span>
+              ) : null}
+            </div>
+            <div className='space-y-2'>
+              {executionEvents.length === 0 &&
+              executionSummaryChannelIDs?.length ? (
+                <DetailRow
+                  label={t('Status')}
+                  value={
+                    <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
+                      {[...new Set(executionSummaryChannelIDs)].map(
+                        (channelID) => {
+                          const status = channelStatusByID.get(channelID)
+                          return (
+                            <StatusBadge
+                              key={channelID}
+                              variant={channelExecutionStatusVariant(status)}
+                              size='sm'
+                              copyable={false}
+                            >
+                              <span className='font-mono'>#{channelID}</span>
+                              <span>
+                                {t(channelExecutionStatusLabel(status))}
+                              </span>
+                            </StatusBadge>
+                          )
+                        }
+                      )}
+                    </span>
+                  }
+                />
+              ) : null}
+            </div>
+            {executionEvents.length > 0 ? (
+              <div className='mt-3 border-t pt-3'>
                 {executionEvents.map((event, index, events) => {
                   const EventIcon = executionEventIcon(event.state)
                   const isGroupEvent = Boolean(event.group && !event.channel_id)
@@ -1205,8 +1404,27 @@ export function DetailsDialog(props: DetailsDialogProps) {
                               </span>
                             )}
                           {event.channel_id ? (
-                            <span className='text-xs font-medium'>
-                              #{event.channel_id} {event.channel_name}
+                            <span className='inline-flex min-w-0 items-center gap-1.5'>
+                              <span className='text-xs font-medium'>
+                                #{event.channel_id} {event.channel_name}
+                              </span>
+                              {channelStatusEventIndexByID.get(
+                                event.channel_id
+                              ) === index ? (
+                                <StatusBadge
+                                  variant={channelExecutionStatusVariant(
+                                    channelStatusByID.get(event.channel_id)
+                                  )}
+                                  size='sm'
+                                  copyable={false}
+                                >
+                                  {t(
+                                    channelExecutionStatusLabel(
+                                      channelStatusByID.get(event.channel_id)
+                                    )
+                                  )}
+                                </StatusBadge>
+                              ) : null}
                             </span>
                           ) : null}
                           {event.timestamp ? (
@@ -1226,6 +1444,29 @@ export function DetailsDialog(props: DetailsDialogProps) {
                           <p className='text-muted-foreground mt-1 text-xs break-all'>
                             {t(executionEventReasonLabel(event.reason))}
                           </p>
+                        ) : null}
+                        {event.priority != null ||
+                        (event.retry_index != null && event.retry_index > 0) ||
+                        event.cooldown_until ? (
+                          <div className='text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]'>
+                            {event.priority != null ? (
+                              <span>
+                                {t('Priority')}: {event.priority}
+                              </span>
+                            ) : null}
+                            {event.retry_index != null &&
+                            event.retry_index > 0 ? (
+                              <span>
+                                {t('Retry')}: {event.retry_index}
+                              </span>
+                            ) : null}
+                            {event.cooldown_until ? (
+                              <span>
+                                {t('Cooldown')}:{' '}
+                                {formatTimestampToDate(event.cooldown_until)}
+                              </span>
+                            ) : null}
+                          </div>
                         ) : null}
                         {event.next_ids?.length ? (
                           <div className='mt-1.5 flex flex-wrap items-center gap-1.5'>

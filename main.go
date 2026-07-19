@@ -195,7 +195,7 @@ func main() {
 		MaxAge:   2592000, // 30 days
 		HttpOnly: true,
 		Secure:   common.SessionCookieSecure,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: common.SessionCookieSameSite,
 	}
 	store.Options(baseSessionOptions)
 	server.Use(sessions.Sessions("session", store))

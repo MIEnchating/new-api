@@ -37,6 +37,8 @@ const (
 	channelUpstreamModelUpdateNotifyMaxChannelDetails     = 8
 	channelUpstreamModelUpdateNotifyMaxModelDetails       = 12
 	channelUpstreamModelUpdateNotifyMaxFailedChannelIDs   = 10
+	channelUpstreamModelResponseMaxBytes                  = 8 << 20
+	channelUpstreamModelRequestTimeout                    = 20 * time.Second
 )
 
 var channelUpstreamModelUpdateSelectFields = []string{
@@ -304,8 +306,22 @@ func sanitizeFetchModelsError(err error, key string) error {
 	return errors.New(message)
 }
 
+func readUpstreamModelResponse(body io.Reader) ([]byte, error) {
+	limited := &io.LimitedReader{R: body, N: channelUpstreamModelResponseMaxBytes + 1}
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if limited.N <= 0 {
+		return nil, fmt.Errorf("upstream model response exceeds %d bytes", channelUpstreamModelResponseMaxBytes)
+	}
+	return data, nil
+}
+
 func getFetchModelsResponseBody(method string, requestURL string, channel *model.Channel, headers http.Header) ([]byte, error) {
-	request, err := http.NewRequest(method, requestURL, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), channelUpstreamModelRequestTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, method, requestURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +345,7 @@ func getFetchModelsResponseBody(method string, requestURL string, channel *model
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status code: %d", response.StatusCode)
 	}
-	return io.ReadAll(response.Body)
+	return readUpstreamModelResponse(response.Body)
 }
 
 func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {

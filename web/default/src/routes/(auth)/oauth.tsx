@@ -18,10 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { createFileRoute, useNavigate, useSearch } from '@tanstack/react-router'
 import i18next from 'i18next'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { toast } from 'sonner'
 
 import { wechatLoginByCode } from '@/features/auth/api'
+import { completeLoginSession } from '@/features/auth/lib/login-session'
+import { buildOAuthCallbackKey } from '@/features/auth/lib/oauth-callback'
 import { normalizeOAuthRedirectTarget } from '@/features/auth/lib/oauth-redirect'
 import { saveUserId } from '@/features/auth/lib/storage'
 import { getSelf } from '@/lib/api'
@@ -35,20 +37,33 @@ function OAuthComponent() {
     code?: string
     state?: string
   }
+  const processedCallbackRef = useRef<string | null>(null)
 
   useEffect(() => {
+    const callbackKey = buildOAuthCallbackKey(search)
+    if (processedCallbackRef.current === callbackKey) return
+    processedCallbackRef.current = callbackKey
+
     ;(async () => {
       try {
         if (search?.provider === 'wechat' && search.code) {
-          await wechatLoginByCode(search.code)
-        }
-        const res = await getSelf()
-        if (res?.success && res.data) {
-          const user = res.data as AuthUser
-          useAuthStore.getState().auth.setUser(user)
-          if (user.id != null) {
-            saveUserId(user.id)
+          const wechatResponse = await wechatLoginByCode(search.code)
+          if (!wechatResponse?.success) {
+            throw new Error(wechatResponse?.message || 'OAuth failed')
           }
+        }
+        const completed = await completeLoginSession<
+          AuthUser & { status: number }
+        >({
+          fetchCurrentUser: getSelf,
+          persistUser: (user) => {
+            useAuthStore.getState().auth.setUser(user)
+            saveUserId(user.id)
+          },
+          clearUser: () => useAuthStore.getState().auth.reset(),
+          onSuccess: () => undefined,
+        })
+        if (completed) {
           const target = normalizeOAuthRedirectTarget(
             search?.redirect,
             window.location.origin

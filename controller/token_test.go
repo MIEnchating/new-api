@@ -520,9 +520,9 @@ func TestGetTokenModelsUsesRouteGroupsAndModelLimits(t *testing.T) {
 	db := setupTokenModelsControllerTestDB(t)
 	token := seedToken(t, db, 1, "route-token", "route1234token5678")
 	updates := map[string]any{
-		"group_route_config":   `[{"group":"group-a","priority":2,"cooldown_seconds":60},{"group":"group-b","priority":1,"cooldown_seconds":60}]`,
+		"group_route_config":   `[{"group":"group-a","priority":2,"cooldown_seconds":60},{"group":"group-b","priority":1,"cooldown_seconds":60},{"group":"group-disabled","priority":0,"cooldown_seconds":60,"enabled":false}]`,
 		"model_limits_enabled": true,
-		"model_limits":         "model-b,missing-model",
+		"model_limits":         "model-b,model-disabled,missing-model",
 	}
 	if err := db.Model(token).Updates(updates).Error; err != nil {
 		t.Fatalf("failed to update token routing settings: %v", err)
@@ -530,7 +530,8 @@ func TestGetTokenModelsUsesRouteGroupsAndModelLimits(t *testing.T) {
 	if err := db.Create(&[]model.Ability{
 		{Group: "group-a", Model: "model-a", ChannelId: 1, Enabled: true},
 		{Group: "group-b", Model: "model-b", ChannelId: 2, Enabled: true},
-		{Group: "unrelated", Model: "missing-model", ChannelId: 3, Enabled: true},
+		{Group: "group-disabled", Model: "model-disabled", ChannelId: 3, Enabled: true},
+		{Group: "unrelated", Model: "missing-model", ChannelId: 4, Enabled: true},
 	}).Error; err != nil {
 		t.Fatalf("failed to seed abilities: %v", err)
 	}
@@ -542,6 +543,31 @@ func TestGetTokenModelsUsesRouteGroupsAndModelLimits(t *testing.T) {
 	models := decodeTokenModelsResponse(t, recorder)
 	if len(models) != 1 || models[0] != "model-b" {
 		t.Fatalf("expected route-group/model-limit intersection, got %v", models)
+	}
+}
+
+func TestGetTokenModelsDoesNotFallbackWhenAllRouteGroupsDisabled(t *testing.T) {
+	db := setupTokenModelsControllerTestDB(t)
+	token := seedToken(t, db, 1, "disabled-route-token", "disabled1234token5678")
+	if err := db.Model(token).Update(
+		"group_route_config",
+		`[{"group":"group-disabled","priority":0,"cooldown_seconds":60,"enabled":false}]`,
+	).Error; err != nil {
+		t.Fatalf("failed to update token routing settings: %v", err)
+	}
+	if err := db.Create(&[]model.Ability{
+		{Group: "default", Model: "default-model", ChannelId: 1, Enabled: true},
+		{Group: "group-disabled", Model: "disabled-model", ChannelId: 2, Enabled: true},
+	}).Error; err != nil {
+		t.Fatalf("failed to seed abilities: %v", err)
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/"+strconv.Itoa(token.Id)+"/models", nil, 1)
+	ctx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
+	GetTokenModels(ctx)
+
+	if models := decodeTokenModelsResponse(t, recorder); len(models) != 0 {
+		t.Fatalf("expected no models when every route is disabled, got %v", models)
 	}
 }
 

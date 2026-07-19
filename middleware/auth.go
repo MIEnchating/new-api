@@ -38,14 +38,51 @@ func authHelper(c *gin.Context, minRole int) {
 	authHelperWithOptions(c, minRole, false)
 }
 
+func clearMalformedAuthSession(c *gin.Context, session sessions.Session) {
+	for _, key := range []string{"id", "username", "role", "status", "group"} {
+		session.Delete(key)
+	}
+	if err := session.Save(); err != nil {
+		common.SysLog("failed to clear malformed auth session: " + err.Error())
+	}
+	common.ClearLegacyHostOnlySessionCookie(c)
+}
+
+func abortMalformedAuthSession(c *gin.Context, session sessions.Session) {
+	clearMalformedAuthSession(c, session)
+	c.JSON(http.StatusUnauthorized, gin.H{
+		"success": false,
+		"message": common.TranslateMessage(c, i18n.MsgAuthNotLoggedIn),
+	})
+	c.Abort()
+}
+
+func syncAuthSession(session sessions.Session, user *model.UserBase) {
+	if session.Get("username") == user.Username &&
+		session.Get("role") == user.Role &&
+		session.Get("status") == user.Status &&
+		session.Get("group") == user.Group {
+		return
+	}
+	session.Set("username", user.Username)
+	session.Set("role", user.Role)
+	session.Set("status", user.Status)
+	session.Set("group", user.Group)
+	if err := session.Save(); err != nil {
+		common.SysLog("failed to refresh auth session: " + err.Error())
+	}
+}
+
 func authHelperWithOptions(c *gin.Context, minRole int, allowMissingUserID bool) {
 	session := sessions.Default(c)
-	username := session.Get("username")
-	role := session.Get("role")
-	id := session.Get("id")
-	status := session.Get("status")
+	var username string
+	var role int
+	var id int
+	var status int
+	var group string
 	useAccessToken := false
-	if username == nil {
+	rawUsername := session.Get("username")
+	if rawUsername == nil {
 		// Check access token
 		accessToken := c.Request.Header.Get("Authorization")
 		if accessToken == "" {
@@ -87,6 +124,7 @@ func authHelperWithOptions(c *gin.Context, minRole int, allowMissingUserID bool)
 			role = user.Role
 			id = user.Id
 			status = user.Status
+			group = user.Group
 			useAccessToken = true
 		} else {
 			c.JSON(http.StatusOK, gin.H{
@@ -96,6 +134,54 @@ func authHelperWithOptions(c *gin.Context, minRole int, allowMissingUserID bool)
 			c.Abort()
 			return
 		}
+	} else {
+		var ok bool
+		username, ok = rawUsername.(string)
+		if !ok || strings.TrimSpace(username) == "" {
+			abortMalformedAuthSession(c, session)
+			return
+		}
+		role, ok = session.Get("role").(int)
+		if !ok || !common.IsValidateRole(role) {
+			abortMalformedAuthSession(c, session)
+			return
+		}
+		id, ok = session.Get("id").(int)
+		if !ok || id <= 0 {
+			abortMalformedAuthSession(c, session)
+			return
+		}
+		status, ok = session.Get("status").(int)
+		if !ok || status != common.UserStatusEnabled && status != common.UserStatusDisabled {
+			abortMalformedAuthSession(c, session)
+			return
+		}
+
+		currentUser, err := model.GetUserAuthState(id)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				abortMalformedAuthSession(c, session)
+				return
+			}
+			common.SysLog(fmt.Sprintf("GetUserAuthState failed during session authentication for user %d: %v", id, err))
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"success": false,
+				"message": common.TranslateMessage(c, i18n.MsgDatabaseError),
+			})
+			c.Abort()
+			return
+		}
+		if currentUser.Id != id || !validUserInfo(currentUser.Username, currentUser.Role) ||
+			(currentUser.Status != common.UserStatusEnabled && currentUser.Status != common.UserStatusDisabled) {
+			abortMalformedAuthSession(c, session)
+			return
+		}
+
+		username = currentUser.Username
+		role = currentUser.Role
+		status = currentUser.Status
+		group = currentUser.Group
+		syncAuthSession(session, currentUser)
 	}
 	// get header New-Api-User
 	apiUserIdStr := c.Request.Header.Get("New-Api-User")
@@ -128,7 +214,7 @@ func authHelperWithOptions(c *gin.Context, minRole int, allowMissingUserID bool)
 		c.Abort()
 		return
 	}
-	if status.(int) == common.UserStatusDisabled {
+	if status == common.UserStatusDisabled {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": common.TranslateMessage(c, i18n.MsgAuthUserBanned),
@@ -136,7 +222,7 @@ func authHelperWithOptions(c *gin.Context, minRole int, allowMissingUserID bool)
 		c.Abort()
 		return
 	}
-	if role.(int) < minRole {
+	if role < minRole {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": common.TranslateMessage(c, i18n.MsgAuthInsufficientPrivilege),
@@ -144,7 +230,7 @@ func authHelperWithOptions(c *gin.Context, minRole int, allowMissingUserID bool)
 		c.Abort()
 		return
 	}
-	if !validUserInfo(username.(string), role.(int)) {
+	if !validUserInfo(username, role) {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": common.TranslateMessage(c, i18n.MsgAuthUserInfoInvalid),
@@ -157,8 +243,8 @@ func authHelperWithOptions(c *gin.Context, minRole int, allowMissingUserID bool)
 	c.Set("username", username)
 	c.Set("role", role)
 	c.Set("id", id)
-	c.Set("group", session.Get("group"))
-	c.Set("user_group", session.Get("group"))
+	c.Set("group", group)
+	c.Set("user_group", group)
 	c.Set("use_access_token", useAccessToken)
 
 	// 管理/root 写操作审计兜底：内聚在鉴权链路里，保证任何经过 AdminAuth/RootAuth
@@ -177,9 +263,12 @@ func authHelperWithOptions(c *gin.Context, minRole int, allowMissingUserID bool)
 func TryUserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		session := sessions.Default(c)
-		id := session.Get("id")
-		if id != nil {
-			c.Set("id", id)
+		id, ok := session.Get("id").(int)
+		if ok && id > 0 {
+			user, err := model.GetUserAuthState(id)
+			if err == nil && user.Status == common.UserStatusEnabled && validUserInfo(user.Username, user.Role) {
+				c.Set("id", id)
+			}
 		}
 		c.Next()
 	}
@@ -236,16 +325,11 @@ func WssAuth(c *gin.Context) {
 // Used for endpoints that need to be accessible from both the dashboard and API clients.
 func TokenOrUserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		// Try session auth first (dashboard users)
 		session := sessions.Default(c)
-		if id := session.Get("id"); id != nil {
-			if status, ok := session.Get("status").(int); ok && status == common.UserStatusEnabled {
-				c.Set("id", id)
-				c.Next()
-				return
-			}
+		if session.Get("username") != nil || session.Get("id") != nil {
+			authHelperWithOptions(c, common.RoleCommonUser, true)
+			return
 		}
-		// Fall back to token auth (API clients)
 		TokenAuth()(c)
 	}
 }

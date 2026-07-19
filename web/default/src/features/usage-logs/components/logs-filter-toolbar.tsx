@@ -65,7 +65,7 @@ export function LogsFilterField(props: LogsFilterFieldProps) {
   return (
     <div
       className={cn(
-        'min-w-0 [&_[data-slot=select-trigger]]:w-full [&_[data-slot=select-trigger]]:text-sm [&_[data-slot=select-value]]:leading-5',
+        'min-w-0 [&_[data-slot=popover-trigger]]:text-sm [&_[data-slot=popover-trigger]]:w-full [&_[data-slot=select-trigger]]:text-sm [&_[data-slot=select-trigger]]:w-full [&_[data-slot=select-value]]:leading-5',
         props.wide && 'sm:col-span-2',
         props.className
       )}
@@ -244,31 +244,21 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
 
   return (
     <div
-      className={cn(
-        'bg-card/50 rounded-lg border p-2.5 sm:p-3',
-        props.className
-      )}
+      className={cn('flex min-w-0 flex-col gap-2', props.className)}
     >
-      <div className='flex flex-wrap items-start gap-2'>
-        <div className='grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'>
-          {props.primaryFilters}
-        </div>
-        {advancedToggle && (
-          <div className='flex shrink-0 items-center justify-end'>
-            {advancedToggle}
-          </div>
-        )}
+      <div className='flex min-w-0 flex-wrap items-center gap-2 sm:gap-3'>
+        {props.primaryFilters}
       </div>
 
       {advancedOpen && props.advancedFilters && (
-        <div className='mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fit,minmax(10rem,1fr))]'>
+        <div className='flex min-w-0 flex-wrap items-center gap-2 sm:gap-3'>
           {props.advancedFilters}
         </div>
       )}
 
-      <div className='mt-2 flex flex-wrap items-center gap-2'>
-        {props.stats}
-        <div className='ms-auto flex flex-wrap items-center justify-end gap-1.5 sm:gap-2'>
+      <div className='flex min-w-0 flex-wrap items-center gap-2 sm:gap-3'>
+        {props.stats != null && <div className='min-w-0'>{props.stats}</div>}
+        <div className='ms-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5 sm:flex-nowrap sm:gap-2'>
           {props.actionStart}
           <Button
             type='button'
@@ -287,6 +277,7 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
             {t('Search')}
           </Button>
           <DataTableViewOptions table={props.table} />
+          {advancedToggle}
         </div>
       </div>
     </div>

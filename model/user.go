@@ -113,13 +113,15 @@ type User struct {
 
 func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
-		Id:       user.Id,
-		Group:    user.Group,
-		Quota:    user.Quota,
-		Status:   user.Status,
-		Username: user.Username,
-		Setting:  user.Setting,
-		Email:    user.Email,
+		Id:           user.Id,
+		Group:        user.Group,
+		Quota:        user.Quota,
+		Role:         user.Role,
+		Status:       user.Status,
+		Username:     user.Username,
+		Setting:      user.Setting,
+		Email:        user.Email,
+		CacheVersion: userCacheSchemaVersion,
 	}
 	return cache
 }
@@ -512,6 +514,12 @@ func (user *User) TransferAffQuotaToQuota(quota int, reference string) error {
 		return fmt.Errorf("转移额度最小为%s！", logger.LogQuota(int(common.QuotaPerUnit)))
 	}
 
+	if reference == "" || strings.HasSuffix(reference, ":") {
+		// Do not use second-resolution timestamps here: two transfers in the
+		// same second must remain distinct when no request key is provided.
+		reference = fmt.Sprintf("affiliate-transfer:%d:%s", user.Id, common.GetUUID())
+	}
+
 	// 开始数据库事务
 	tx := DB.Begin()
 	if tx.Error != nil {
@@ -523,6 +531,26 @@ func (user *User) TransferAffQuotaToQuota(quota int, reference string) error {
 	err := lockForUpdate(tx).First(&user, user.Id).Error
 	if err != nil {
 		return err
+	}
+
+	created, err := createBillingTransactionIfAbsent(tx, &BillingTransaction{
+		EventKey:      reference,
+		UserId:        user.Id,
+		Type:          BillingTypeAffiliate,
+		Quota:         quota,
+		Reference:     reference,
+		PaymentMethod: "affiliate",
+		Status:        "success",
+		CreatedAt:     common.GetTimestamp(),
+	})
+	if err != nil {
+		return err
+	}
+	if !created {
+		if err := ensureBillingEventCompatible(tx, reference, user.Id, BillingTypeAffiliate, "", 0, quota, true); err != nil {
+			return err
+		}
+		return tx.Commit().Error
 	}
 
 	// 再次检查用户的AffQuota是否足够
@@ -538,27 +566,14 @@ func (user *User) TransferAffQuotaToQuota(quota int, reference string) error {
 	if err := tx.Save(user).Error; err != nil {
 		return err
 	}
-	if reference == "" || strings.HasSuffix(reference, ":") {
-		reference = fmt.Sprintf("affiliate-transfer:%d:%d", user.Id, common.GetTimestamp())
-	}
-	if err := CreateBillingTransaction(tx, &BillingTransaction{
-		EventKey:      reference,
-		UserId:        user.Id,
-		Type:          BillingTypeAffiliate,
-		Quota:         quota,
-		Reference:     reference,
-		PaymentMethod: "affiliate",
-		Status:        "success",
-		CreatedAt:     common.GetTimestamp(),
-	}); err != nil {
-		return err
-	}
-
 	// 提交事务
 	if err := tx.Commit().Error; err != nil {
 		return err
 	}
-	return updateUserCache(*user)
+	if err := invalidateUserCache(user.Id); err != nil {
+		common.SysLog("failed to invalidate user cache after affiliate transfer: " + err.Error())
+	}
+	return nil
 }
 
 func (user *User) prepareForInsert(tx *gorm.DB) error {

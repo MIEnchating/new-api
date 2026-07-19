@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -21,9 +23,11 @@ const (
 	ginKeyChannelRouteRequestPath   = "channel_route_request_path"
 	ginKeyChannelRouteStickyLogInfo = "channel_route_sticky_log_info"
 	channelRouteAffinityNamespace   = "channel_route_sticky"
+	channelRouteCooldownPruneEvery  = 256
 )
 
 var channelRouteCooldowns sync.Map
+var channelRouteCooldownWrites atomic.Uint64
 var channelRouteAffinityStoreOnce sync.Once
 var channelRouteAffinityStore *stickyChannelStore
 
@@ -151,6 +155,25 @@ func GetChannelRouteCooldownUntilInMemory(group string, channelID int, now int64
 	return until
 }
 
+func pruneExpiredChannelRouteCooldowns(now int64) int {
+	deleted := 0
+	channelRouteCooldowns.Range(func(key, value any) bool {
+		until, ok := value.(int64)
+		if !ok || until <= now {
+			channelRouteCooldowns.Delete(key)
+			deleted++
+		}
+		return true
+	})
+	return deleted
+}
+
+func maybePruneExpiredChannelRouteCooldowns(now int64) {
+	if channelRouteCooldownWrites.Add(1)%channelRouteCooldownPruneEvery == 0 {
+		pruneExpiredChannelRouteCooldowns(now)
+	}
+}
+
 func IsChannelRouteFrozen(group string, channelID int, now int64) bool {
 	return GetChannelRouteCooldownUntil(group, channelID, now) > now
 }
@@ -171,12 +194,94 @@ func GetChannelRouteCooldownUntil(group string, channelID int, now int64) int64 
 	return GetChannelRouteCooldownUntilInMemory(group, channelID, now)
 }
 
+// getChannelRouteCooldownsUntil returns the same effective cooldown values as
+// GetChannelRouteCooldownUntil while batching Redis reads into one round trip.
+// Missing, invalid, or expired Redis values retain the existing in-memory
+// fallback semantics on a per-channel basis.
+func getChannelRouteCooldownsUntil(group string, channelIDs []int, now int64) map[int]int64 {
+	cooldowns := make(map[int]int64, len(channelIDs))
+	if group == "" || len(channelIDs) == 0 {
+		return cooldowns
+	}
+
+	uniqueIDs := make([]int, 0, len(channelIDs))
+	keys := make([]string, 0, len(channelIDs))
+	seen := make(map[int]struct{}, len(channelIDs))
+	for _, channelID := range channelIDs {
+		if channelID <= 0 {
+			continue
+		}
+		if _, exists := seen[channelID]; exists {
+			continue
+		}
+		seen[channelID] = struct{}{}
+		uniqueIDs = append(uniqueIDs, channelID)
+		keys = append(keys, channelRouteCooldownKey(group, channelID))
+		cooldowns[channelID] = 0
+	}
+
+	if common.RedisEnabled && common.RDB != nil && len(keys) > 0 {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		values, err := common.RDB.MGet(ctx, keys...).Result()
+		if err == nil {
+			for index, channelID := range uniqueIDs {
+				if index < len(values) && values[index] != nil {
+					if until, parseErr := strconv.ParseInt(fmt.Sprint(values[index]), 10, 64); parseErr == nil && until > now {
+						cooldowns[channelID] = until
+						continue
+					}
+				}
+				if until := GetChannelRouteCooldownUntilInMemory(group, channelID, now); until > now {
+					cooldowns[channelID] = until
+				}
+			}
+			return cooldowns
+		}
+	}
+
+	for _, channelID := range uniqueIDs {
+		if until := GetChannelRouteCooldownUntilInMemory(group, channelID, now); until > now {
+			cooldowns[channelID] = until
+		}
+	}
+	return cooldowns
+}
+
+// loadChannelRouteCooldownSnapshot batches cooldown reads for the in-memory
+// channel-selection path. When channel caching is disabled, callers keep the
+// existing per-candidate lookup so this helper does not add a duplicate DB
+// query just to discover candidate IDs.
+func loadChannelRouteCooldownSnapshot(group string, modelName string, requestPath string, now int64, extraChannelIDs ...int) (map[int]int64, bool, error) {
+	if !common.MemoryCacheEnabled {
+		return nil, false, nil
+	}
+	candidates, err := model.ListSatisfiedChannelCandidates(group, modelName, requestPath)
+	if err != nil {
+		return nil, false, err
+	}
+	channelIDs := make([]int, 0, len(candidates)+len(extraChannelIDs))
+	for _, candidate := range candidates {
+		channelIDs = append(channelIDs, candidate.ChannelID)
+	}
+	channelIDs = append(channelIDs, extraChannelIDs...)
+	return getChannelRouteCooldownsUntil(group, channelIDs, now), true, nil
+}
+
+func channelRouteCooldownFromSnapshot(cooldowns map[int]int64, batched bool, group string, channelID int, now int64) int64 {
+	if batched {
+		return cooldowns[channelID]
+	}
+	return GetChannelRouteCooldownUntil(group, channelID, now)
+}
+
 func FreezeChannelRoute(group string, channelID int, cooldownSeconds int) int64 {
 	if group == "" || channelID <= 0 || cooldownSeconds <= 0 {
 		return 0
 	}
 	duration := time.Duration(cooldownSeconds) * time.Second
 	until := time.Now().Add(duration).Unix()
+	maybePruneExpiredChannelRouteCooldowns(time.Now().Unix())
 	if common.RedisEnabled && common.RDB != nil {
 		err := common.RedisSet(channelRouteCooldownKey(group, channelID), strconv.FormatInt(until, 10), duration)
 		if err != nil {
@@ -265,6 +370,10 @@ func AppendChannelRouteStickyAdminInfo(c *gin.Context, adminInfo map[string]inte
 }
 
 func hasAvailableChannelRouteAlternative(group string, modelName string, requestPath string, channelID int, now int64) (bool, error) {
+	cooldowns, batched, err := loadChannelRouteCooldownSnapshot(group, modelName, requestPath, now)
+	if err != nil {
+		return false, err
+	}
 	channel, err := model.GetRandomSatisfiedChannelWithFilter(
 		group,
 		modelName,
@@ -273,7 +382,7 @@ func hasAvailableChannelRouteAlternative(group string, modelName string, request
 		func(candidate *model.Channel) bool {
 			return candidate.Id != channelID &&
 				candidate.Status == common.ChannelStatusEnabled &&
-				!IsChannelRouteFrozen(group, candidate.Id, now)
+				channelRouteCooldownFromSnapshot(cooldowns, batched, group, candidate.Id, now) <= now
 		},
 	)
 	return channel != nil, err
@@ -292,12 +401,30 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 	}
 
 	now := common.GetTimestamp()
+	stickyChannelID := 0
 	if IsChannelRouteStickyEnabled() {
-		stickyChannelID := GetChannelRouteStickyChannel(group, param.ModelName, param.RequestPath)
+		stickyChannelID = GetChannelRouteStickyChannel(group, param.ModelName, param.RequestPath)
+	}
+	cooldowns, batchedCooldowns, snapshotErr := loadChannelRouteCooldownSnapshot(
+		group,
+		param.ModelName,
+		param.RequestPath,
+		now,
+		stickyChannelID,
+	)
+	if snapshotErr != nil {
+		return nil, snapshotErr
+	}
+	cooldownUntil := func(channelID int) int64 {
+		return channelRouteCooldownFromSnapshot(cooldowns, batchedCooldowns, group, channelID, now)
+	}
+
+	if IsChannelRouteStickyEnabled() {
 		if stickyChannelID > 0 {
-			if IsChannelRouteFrozen(group, stickyChannelID, now) {
+			stickyCooldownUntil := cooldownUntil(stickyChannelID)
+			if stickyCooldownUntil > now {
 				if stickyChannel, _ := model.CacheGetChannel(stickyChannelID); stickyChannel != nil {
-					TrackChannelExecutionSkipped(param.Ctx, group, param.ModelName, param.RequestPath, stickyChannel, "affinity_cooling", GetChannelRouteCooldownUntil(group, stickyChannelID, now))
+					TrackChannelExecutionSkipped(param.Ctx, group, param.ModelName, param.RequestPath, stickyChannel, "affinity_cooling", stickyCooldownUntil)
 				}
 				ClearChannelRouteStickyChannel(group, param.ModelName, param.RequestPath)
 			} else {
@@ -317,7 +444,7 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 					TrackChannelRouteSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
 					markChannelRouteStickyHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
 					TrackChannelExecutionAffinityHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id, "route_affinity")
-					TrackChannelExecutionSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry)
+					trackChannelExecutionSelectionWithCooldowns(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, cooldowns)
 					logger.LogDebug(param.Ctx, "channel route selected sticky channel: group=%s channel=%d", group, channel.Id)
 					return channel, nil
 				}
@@ -332,17 +459,18 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 		0,
 		param.RequestPath,
 		func(channel *model.Channel) bool {
-			frozen := IsChannelRouteFrozen(group, channel.Id, now)
+			until := cooldownUntil(channel.Id)
+			frozen := until > now
 			if frozen {
 				logger.LogDebug(param.Ctx, "channel route skipped cooldown channel: group=%s channel=%d", group, channel.Id)
-				TrackChannelExecutionSkipped(param.Ctx, group, param.ModelName, param.RequestPath, channel, "cooling", GetChannelRouteCooldownUntil(group, channel.Id, now))
+				TrackChannelExecutionSkipped(param.Ctx, group, param.ModelName, param.RequestPath, channel, "cooling", until)
 			}
 			return !frozen
 		},
 	)
 	if err == nil && channel != nil {
 		TrackChannelRouteSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
-		TrackChannelExecutionSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry)
+		trackChannelExecutionSelectionWithCooldowns(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, cooldowns)
 	}
 	return channel, err
 }

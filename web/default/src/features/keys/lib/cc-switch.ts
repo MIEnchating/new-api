@@ -34,9 +34,13 @@ export const CC_SWITCH_USAGE_SCRIPT = `({
   extractor: function (response) {
     var data = response && response.data;
     if (response && response.code === true && data) {
+	  var quotaPerUnit = Number(data.quota_per_unit);
+	  if (!Number.isFinite(quotaPerUnit) || quotaPerUnit <= 0) {
+	    quotaPerUnit = 500000;
+	  }
       var toQuota = function (value) {
         var amount = Number(value);
-        return Number.isFinite(amount) ? amount / 500000 : 0;
+		return Number.isFinite(amount) ? amount / quotaPerUnit : 0;
       };
       var labels = data.labels || {};
       var results = [];

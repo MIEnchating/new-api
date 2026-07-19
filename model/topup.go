@@ -63,6 +63,17 @@ const (
 	PaymentProviderBalance      = "balance"
 )
 
+func calculateTopUpCreditedQuota(paymentProvider string, amount int64, money float64) int {
+	switch paymentProvider {
+	case PaymentProviderCreem:
+		return int(amount)
+	case PaymentProviderStripe:
+		return int(decimal.NewFromFloat(money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())
+	default:
+		return int(decimal.NewFromInt(amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())
+	}
+}
+
 var (
 	ErrPaymentMethodMismatch = errors.New("payment method mismatch")
 	ErrTopUpNotFound         = errors.New("topup not found")
@@ -161,6 +172,15 @@ func recordInviteRechargeRebateLog(result *inviteRechargeRebateResult, quotaToAd
 	)
 }
 
+func invalidateTopUpUserCache(userId int) {
+	if userId <= 0 {
+		return
+	}
+	if err := invalidateUserCache(userId); err != nil {
+		common.SysLog(fmt.Sprintf("failed to invalidate user cache after topup: user=%d error=%s", userId, err.Error()))
+	}
+}
+
 func (topUp *TopUp) Insert() error {
 	var err error
 	err = DB.Create(topUp).Error
@@ -244,11 +264,15 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 			return ErrPaymentMethodMismatch
 		}
 
+		if topUp.Status == common.TopUpStatusSuccess {
+			return nil
+		}
+
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
 		}
 
-		quotaToAdd = int(decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())
+		quotaToAdd = calculateTopUpCreditedQuota(topUp.PaymentProvider, topUp.Amount, topUp.Money)
 		rebateResult, err = completePendingTopUpTx(tx, topUp, quotaToAdd, map[string]interface{}{
 			"stripe_customer": customerId,
 		})
@@ -260,8 +284,11 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		return errors.New("充值失败，请稍后重试")
 	}
 
-	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(quotaToAdd), topUp.Amount), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
-	recordInviteRechargeRebateLog(rebateResult, quotaToAdd, topUp.Money)
+	if quotaToAdd > 0 {
+		invalidateTopUpUserCache(topUp.UserId)
+		RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(quotaToAdd), topUp.Amount), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
+		recordInviteRechargeRebateLog(rebateResult, quotaToAdd, topUp.Money)
+	}
 
 	return nil
 }
@@ -521,17 +548,8 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 			return errors.New("订单状态不是待支付，无法补单")
 		}
 
-		// 计算应充值额度：
-		// - Stripe 订单：Money 代表经分组倍率换算后的美元数量，直接 * QuotaPerUnit
-		// - 其他订单（如易支付）：Amount 为美元数量，* QuotaPerUnit
-		if topUp.PaymentProvider == PaymentProviderStripe {
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd = int(decimal.NewFromFloat(topUp.Money).Mul(dQuotaPerUnit).IntPart())
-		} else {
-			dAmount := decimal.NewFromInt(topUp.Amount)
-			dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-			quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
-		}
+		// 按支付渠道保持与自动回调相同的入账口径。
+		quotaToAdd = calculateTopUpCreditedQuota(topUp.PaymentProvider, topUp.Amount, topUp.Money)
 		if quotaToAdd <= 0 {
 			return errors.New("无效的充值额度")
 		}
@@ -557,6 +575,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 		return nil
 	}
 
+	invalidateTopUpUserCache(userId)
 	// 事务外记录日志，避免阻塞
 	RecordTopupLog(userId, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, "admin")
 	recordInviteRechargeRebateLog(rebateResult, quotaToAdd, payMoney)
@@ -599,9 +618,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 			topUp.PaymentMethod = actualPaymentMethod
 		}
 
-		dAmount := decimal.NewFromInt(topUp.Amount)
-		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-		quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
+		quotaToAdd = calculateTopUpCreditedQuota(topUp.PaymentProvider, topUp.Amount, topUp.Money)
 		if quotaToAdd <= 0 {
 			return errors.New("无效的充值额度")
 		}
@@ -616,6 +633,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 	}
 
 	if quotaToAdd > 0 {
+		invalidateTopUpUserCache(topUp.UserId)
 		RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentProviderEpay)
 		recordInviteRechargeRebateLog(rebateResult, quotaToAdd, topUp.Money)
 	}
@@ -647,12 +665,15 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			return ErrPaymentMethodMismatch
 		}
 
+		if topUp.Status == common.TopUpStatusSuccess {
+			return nil
+		}
+
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
 		}
 
-		// Creem 直接使用 Amount 作为充值额度（整数）
-		quotaToAdd = int(topUp.Amount)
+		quotaToAdd = calculateTopUpCreditedQuota(topUp.PaymentProvider, topUp.Amount, topUp.Money)
 
 		// 构建更新字段，优先使用邮箱，如果邮箱为空则使用用户名
 		updateFields := map[string]interface{}{}
@@ -681,8 +702,11 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		return errors.New("充值失败，请稍后重试")
 	}
 
-	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quotaToAdd, topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodCreem)
-	recordInviteRechargeRebateLog(rebateResult, quotaToAdd, topUp.Money)
+	if quotaToAdd > 0 {
+		invalidateTopUpUserCache(topUp.UserId)
+		RecordTopupLog(topUp.UserId, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quotaToAdd, topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodCreem)
+		recordInviteRechargeRebateLog(rebateResult, quotaToAdd, topUp.Money)
+	}
 
 	return nil
 }
@@ -719,9 +743,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 			return errors.New("充值订单状态错误")
 		}
 
-		dAmount := decimal.NewFromInt(topUp.Amount)
-		dQuotaPerUnit := decimal.NewFromFloat(common.QuotaPerUnit)
-		quotaToAdd = int(dAmount.Mul(dQuotaPerUnit).IntPart())
+		quotaToAdd = calculateTopUpCreditedQuota(topUp.PaymentProvider, topUp.Amount, topUp.Money)
 		if quotaToAdd <= 0 {
 			return errors.New("无效的充值额度")
 		}
@@ -736,6 +758,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 	}
 
 	if quotaToAdd > 0 {
+		invalidateTopUpUserCache(topUp.UserId)
 		RecordTopupLog(topUp.UserId, fmt.Sprintf("Waffo充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodWaffo)
 		recordInviteRechargeRebateLog(rebateResult, quotaToAdd, topUp.Money)
 	}
@@ -775,7 +798,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 			return errors.New("充值订单状态错误")
 		}
 
-		quotaToAdd = int(decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)).IntPart())
+		quotaToAdd = calculateTopUpCreditedQuota(topUp.PaymentProvider, topUp.Amount, topUp.Money)
 		if quotaToAdd <= 0 {
 			return errors.New("无效的充值额度")
 		}
@@ -790,6 +813,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 	}
 
 	if quotaToAdd > 0 {
+		invalidateTopUpUserCache(topUp.UserId)
 		RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("Waffo Pancake充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money))
 		recordInviteRechargeRebateLog(rebateResult, quotaToAdd, topUp.Money)
 	}

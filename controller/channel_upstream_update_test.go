@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -15,6 +16,15 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
+
+func TestReadUpstreamModelResponseRejectsOversizedBody(t *testing.T) {
+	body := strings.NewReader(strings.Repeat("x", channelUpstreamModelResponseMaxBytes+1))
+
+	result, err := readUpstreamModelResponse(body)
+
+	require.ErrorContains(t, err, "upstream model response exceeds")
+	require.Nil(t, result)
+}
 
 func newAdvancedCustomModelListChannel(baseURL string, key string, upstreamPath string, auth *dto.AdvancedCustomRouteAuth) *model.Channel {
 	config := &dto.AdvancedCustomConfig{

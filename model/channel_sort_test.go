@@ -24,6 +24,12 @@ func TestChannelSortOptionsCombinesPriorityAndID(t *testing.T) {
 	assert.Contains(t, sql, "ORDER BY `priority` DESC,`id` DESC")
 }
 
+func TestChannelSortOptionsUsesStableIDTieBreaker(t *testing.T) {
+	sql := buildChannelSortSQL(t, NewChannelSortOptions("priority", "desc", false))
+
+	assert.Contains(t, sql, "ORDER BY `priority` DESC,`id` DESC")
+}
+
 func TestChannelSortOptionsDoesNotDuplicateID(t *testing.T) {
 	sql := buildChannelSortSQL(t, NewChannelSortOptions("id", "asc", true))
 

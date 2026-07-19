@@ -20,8 +20,11 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import {
+  buildChunkRecoveryURL,
+  getChunkErrorSignature,
   isChunkAssetURL,
   isChunkLoadError,
+  readChunkRecoveryAttempt,
   shouldReloadAfterChunkError,
 } from './chunk-load-error.ts'
 
@@ -62,18 +65,109 @@ describe('isChunkLoadError', () => {
       isChunkAssetURL('https://example.com/static/css/123.css'),
       true
     )
+    assert.equal(
+      isChunkAssetURL('https://example.com/static/js/vendor-react.js'),
+      true
+    )
     assert.equal(isChunkAssetURL('https://example.com/api/status'), false)
   })
 
-  test('reloads stale chunks once within the cooldown window', () => {
-    const error = new Error('Loading chunk sign-in failed')
+  test('isolates recovery attempts by build and failed asset', () => {
+    const firstError = new Error(
+      'Loading chunk https://example.com/static/js/async/sign-in.js failed'
+    )
+    const otherError = new Error(
+      'Loading chunk https://example.com/static/js/async/dashboard.js failed'
+    )
+    const firstSignature = getChunkErrorSignature(firstError)
+    assert.ok(firstSignature)
+    const previous = {
+      buildRevision: 'build-a',
+      signature: firstSignature,
+      attemptedAt: 90_000,
+    }
 
-    assert.equal(shouldReloadAfterChunkError(error, Number.NaN, 100_000), true)
-    assert.equal(shouldReloadAfterChunkError(error, 90_000, 100_000), false)
-    assert.equal(shouldReloadAfterChunkError(error, 60_000, 100_000), true)
     assert.equal(
-      shouldReloadAfterChunkError(new Error('Request failed'), 0, 100_000),
+      shouldReloadAfterChunkError(firstError, previous, 'build-a', 100_000),
       false
+    )
+    assert.equal(
+      shouldReloadAfterChunkError(otherError, previous, 'build-a', 100_000),
+      true
+    )
+    assert.equal(
+      shouldReloadAfterChunkError(
+        otherError,
+        { ...previous, attemptCount: 2 },
+        'build-a',
+        100_000
+      ),
+      false
+    )
+    assert.equal(
+      shouldReloadAfterChunkError(firstError, previous, 'build-b', 100_000),
+      true
+    )
+    assert.equal(
+      shouldReloadAfterChunkError(firstError, previous, 'build-a', 130_001),
+      true
+    )
+    assert.equal(
+      shouldReloadAfterChunkError(
+        firstError,
+        { ...previous, attemptedAt: 110_000 },
+        'build-a',
+        100_000
+      ),
+      true
+    )
+    assert.equal(
+      shouldReloadAfterChunkError(
+        new Error('Request failed'),
+        previous,
+        'build-a',
+        100_000
+      ),
+      false
+    )
+  })
+
+  test('ignores the legacy timestamp and malformed recovery state', () => {
+    assert.equal(readChunkRecoveryAttempt('100000'), null)
+    assert.equal(readChunkRecoveryAttempt('{not-json'), null)
+    assert.equal(readChunkRecoveryAttempt(null), null)
+
+    assert.deepEqual(
+      readChunkRecoveryAttempt(
+        JSON.stringify({
+          buildRevision: 'build-a',
+          signature: '/static/js/async/sign-in.js',
+          attemptedAt: 100_000,
+        })
+      ),
+      {
+        buildRevision: 'build-a',
+        signature: '/static/js/async/sign-in.js',
+        attemptedAt: 100_000,
+      }
+    )
+    assert.deepEqual(
+      readChunkRecoveryAttempt(
+        JSON.stringify({
+          buildRevision: 'build-a',
+          signature: '/static/js/async/sign-in.js',
+          attemptedAt: 100_000,
+          attemptCount: 2,
+        })
+      )?.attemptCount,
+      2
+    )
+  })
+
+  test('adds a cache buster without dropping the current location', () => {
+    assert.equal(
+      buildChunkRecoveryURL('https://example.com/?from=home#section', 1234),
+      'https://example.com/?from=home&__newapi_reload=1234#section'
     )
   })
 })

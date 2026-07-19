@@ -100,9 +100,9 @@ func containsBillingType(types []string, target string) bool {
 	return false
 }
 
-func CreateBillingTransaction(tx *gorm.DB, transaction *BillingTransaction) error {
+func createBillingTransactionIfAbsent(tx *gorm.DB, transaction *BillingTransaction) (bool, error) {
 	if transaction == nil || transaction.UserId <= 0 || transaction.EventKey == "" {
-		return fmt.Errorf("invalid billing transaction")
+		return false, fmt.Errorf("invalid billing transaction")
 	}
 	if tx == nil {
 		tx = DB
@@ -113,7 +113,37 @@ func CreateBillingTransaction(tx *gorm.DB, transaction *BillingTransaction) erro
 	if transaction.Status == "" {
 		transaction.Status = "success"
 	}
-	return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "event_key"}}, DoNothing: true}).Create(transaction).Error
+	result := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "event_key"}}, DoNothing: true}).Create(transaction)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected > 0, nil
+}
+
+func CreateBillingTransaction(tx *gorm.DB, transaction *BillingTransaction) error {
+	_, err := createBillingTransactionIfAbsent(tx, transaction)
+	return err
+}
+
+// ensureBillingEventCompatible prevents an accidental event-key collision
+// from being treated as a successful replay. Idempotent retries are accepted
+// only when they describe the same user, operation, and operator. Stable-delta
+// operations also require the same signed quota; override retries cannot use
+// that comparison because later legitimate adjustments may change the delta.
+func ensureBillingEventCompatible(tx *gorm.DB, eventKey string, userId int, transactionType string, detail string, operatorUserId int, quota int, checkQuota bool) error {
+	if tx == nil {
+		tx = DB
+	}
+	var existing BillingTransaction
+	if err := tx.Where("event_key = ?", eventKey).First(&existing).Error; err != nil {
+		return err
+	}
+	if existing.UserId != userId || existing.Type != transactionType ||
+		existing.Detail != detail || existing.OperatorUserId != operatorUserId ||
+		(checkQuota && existing.Quota != quota) {
+		return fmt.Errorf("billing event key %q is already used by another transaction", eventKey)
+	}
+	return nil
 }
 
 func AdjustUserQuotaWithBilling(userId int, value int, mode string, operatorUserId int, reference string) (oldQuota int, newQuota int, delta int, err error) {
@@ -121,9 +151,13 @@ func AdjustUserQuotaWithBilling(userId int, value int, mode string, operatorUser
 		return 0, 0, 0, fmt.Errorf("invalid quota adjustment")
 	}
 	if reference == "" || strings.HasSuffix(reference, ":") {
-		reference = fmt.Sprintf("admin-adjustment:%d:%d", userId, common.GetTimestamp())
+		// A timestamp in seconds is not unique enough for two legitimate
+		// adjustments made in the same second. Keep the fallback idempotency
+		// key unique unless the caller supplies its own request-scoped key.
+		reference = fmt.Sprintf("admin-adjustment:%d:%s", userId, common.GetUUID())
 	}
 	var user User
+	applied := false
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockForUpdate(tx).First(&user, userId).Error; err != nil {
 			return err
@@ -140,10 +174,7 @@ func AdjustUserQuotaWithBilling(userId int, value int, mode string, operatorUser
 			return fmt.Errorf("invalid quota adjustment mode")
 		}
 		delta = newQuota - oldQuota
-		if err := tx.Model(&User{}).Where("id = ?", userId).Update("quota", newQuota).Error; err != nil {
-			return err
-		}
-		return CreateBillingTransaction(tx, &BillingTransaction{
+		created, err := createBillingTransactionIfAbsent(tx, &BillingTransaction{
 			EventKey:       reference,
 			UserId:         userId,
 			Type:           BillingTypeAdminAdjustment,
@@ -155,13 +186,30 @@ func AdjustUserQuotaWithBilling(userId int, value int, mode string, operatorUser
 			CreatedAt:      common.GetTimestamp(),
 			Detail:         mode,
 		})
+		if err != nil {
+			return err
+		}
+		if !created {
+			if err := ensureBillingEventCompatible(tx, reference, userId, BillingTypeAdminAdjustment, mode, operatorUserId, delta, mode != "override"); err != nil {
+				return err
+			}
+			newQuota = oldQuota
+			delta = 0
+			return nil
+		}
+		if err := tx.Model(&User{}).Where("id = ?", userId).Update("quota", newQuota).Error; err != nil {
+			return err
+		}
+		applied = true
+		return nil
 	})
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	user.Quota = newQuota
-	if cacheErr := updateUserCache(user); cacheErr != nil {
-		common.SysLog(fmt.Sprintf("failed to update user cache after quota adjustment: %s", cacheErr.Error()))
+	if applied {
+		if cacheErr := invalidateUserCache(userId); cacheErr != nil {
+			common.SysLog(fmt.Sprintf("failed to invalidate user cache after quota adjustment: %s", cacheErr.Error()))
+		}
 	}
 	return oldQuota, newQuota, delta, nil
 }
@@ -194,16 +242,40 @@ func applyBillingUserFilter(query *gorm.DB, userColumn string, filter BillingHis
 	return query.Where("(LOWER(COALESCE(u.username, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(u.display_name, '')) LIKE ? ESCAPE '!')", pattern, pattern), nil
 }
 
-func billingFetchLimit(pageInfo *common.PageInfo) int {
-	if pageInfo == nil {
-		return 20
+const (
+	defaultBillingHistoryPageSize = 20
+	maxBillingHistoryPageSize     = 100
+	maxBillingHistoryFetchLimit   = 10000
+)
+
+func billingPageWindow(pageInfo *common.PageInfo) (offset int, pageSize int, limit int, err error) {
+	page := 1
+	pageSize = defaultBillingHistoryPageSize
+	if pageInfo != nil {
+		page = pageInfo.GetPage()
+		pageSize = pageInfo.GetPageSize()
 	}
-	limit := pageInfo.GetStartIdx() + pageInfo.GetPageSize()
-	if limit <= 0 {
-		return 20
+	if page < 1 {
+		page = 1
 	}
-	return limit
+	if pageSize < 1 {
+		pageSize = defaultBillingHistoryPageSize
+	} else if pageSize > maxBillingHistoryPageSize {
+		pageSize = maxBillingHistoryPageSize
+	}
+	if page-1 > (maxBillingHistoryFetchLimit-pageSize)/pageSize {
+		return 0, 0, 0, fmt.Errorf("billing history pagination exceeds the %d-record window", maxBillingHistoryFetchLimit)
+	}
+	offset = (page - 1) * pageSize
+	limit = offset + pageSize
+	if pageInfo != nil {
+		pageInfo.Page = page
+		pageInfo.PageSize = pageSize
+	}
+	return offset, pageSize, limit, nil
 }
+
+const onlineTopUpBillingTime = "CASE WHEN t.complete_time > 0 THEN t.complete_time ELSE t.create_time END"
 
 func queryOnlineTopups(filter BillingHistoryFilter, limit int) ([]BillingHistoryItem, int64, error) {
 	query := DB.Table("top_ups AS t").Joins("LEFT JOIN users AS u ON u.id = t.user_id")
@@ -212,7 +284,7 @@ func queryOnlineTopups(filter BillingHistoryFilter, limit int) ([]BillingHistory
 	if err != nil {
 		return nil, 0, err
 	}
-	query = applyBillingTimeRange(query, "t.create_time", filter.StartTime, filter.EndTime)
+	query = applyBillingTimeRange(query, onlineTopUpBillingTime, filter.StartTime, filter.EndTime)
 	if reference := strings.TrimSpace(filter.Reference); reference != "" {
 		pattern, patternErr := sanitizeLikePattern("%" + reference + "%")
 		if patternErr != nil {
@@ -241,15 +313,12 @@ func queryOnlineTopups(filter BillingHistoryFilter, limit int) ([]BillingHistory
 	rows := make([]row, 0)
 	if err := query.Session(&gorm.Session{}).
 		Select("t.id, t.user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, t.amount, t.money, t.trade_no, t.payment_method, t.payment_provider, t.create_time, t.complete_time, t.status").
-		Order("t.create_time DESC, t.id DESC").Limit(limit).Scan(&rows).Error; err != nil {
+		Order(onlineTopUpBillingTime + " DESC, t.id DESC").Limit(limit).Scan(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 	items := make([]BillingHistoryItem, 0, len(rows))
 	for _, topup := range rows {
-		quota := int(topup.Amount)
-		if topup.PaymentProvider != PaymentProviderCreem {
-			quota = int(float64(topup.Amount) * common.QuotaPerUnit)
-		}
+		quota := calculateTopUpCreditedQuota(topup.PaymentProvider, topup.Amount, topup.Money)
 		createdAt := topup.CreateTime
 		if topup.CompleteTime > 0 {
 			createdAt = topup.CompleteTime
@@ -375,7 +444,10 @@ func GetBillingHistory(filter BillingHistoryFilter) ([]BillingHistoryItem, int64
 	if len(filter.Types) == 0 {
 		return []BillingHistoryItem{}, 0, nil
 	}
-	limit := billingFetchLimit(filter.PageInfo)
+	offset, pageSize, limit, err := billingPageWindow(filter.PageInfo)
+	if err != nil {
+		return nil, 0, err
+	}
 	items := make([]BillingHistoryItem, 0, limit*2)
 	var total int64
 	if containsBillingType(filter.Types, BillingTypeOnlineTopup) {
@@ -414,12 +486,6 @@ func GetBillingHistory(filter BillingHistoryFilter) ([]BillingHistoryItem, int64
 		}
 		return items[i].Id > items[j].Id
 	})
-	offset := 0
-	pageSize := limit
-	if filter.PageInfo != nil {
-		offset = filter.PageInfo.GetStartIdx()
-		pageSize = filter.PageInfo.GetPageSize()
-	}
 	if offset >= len(items) {
 		return []BillingHistoryItem{}, total, nil
 	}

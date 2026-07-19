@@ -82,3 +82,11 @@ export function getPaymentMethodName(
 export function formatTimestamp(timestamp: number): string {
   return formatTimestampToDate(timestamp)
 }
+
+/** Return true only for the response belonging to the latest filter request. */
+export function isLatestBillingRequest(
+  requestSequence: number,
+  latestSequence: number
+): boolean {
+  return requestSequence === latestSequence
+}

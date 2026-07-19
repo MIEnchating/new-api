@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -15,7 +14,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 
-	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
@@ -32,6 +30,11 @@ func TelegramBind(c *gin.Context) {
 			"message": "管理员未开启通过 Telegram 登录以及注册",
 			"success": false,
 		})
+		return
+	}
+	user, err := getSessionUser(c)
+	if err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	params := c.Request.URL.Query()
@@ -52,23 +55,6 @@ func TelegramBind(c *gin.Context) {
 		return
 	}
 
-	session := sessions.Default(c)
-	id := session.Get("id")
-	user := model.User{Id: id.(int)}
-	if err := user.FillUserById(); err != nil {
-		c.JSON(200, gin.H{
-			"message": err.Error(),
-			"success": false,
-		})
-		return
-	}
-	if user.Id == 0 {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "用户已注销",
-		})
-		return
-	}
 	user.TelegramId = telegramId
 	if err := user.Update(false); err != nil {
 		c.JSON(200, gin.H{
@@ -104,6 +90,13 @@ func TelegramLogin(c *gin.Context) {
 	if err := user.FillUserByTelegramId(); err != nil {
 		c.JSON(200, gin.H{
 			"message": err.Error(),
+			"success": false,
+		})
+		return
+	}
+	if user.Status != common.UserStatusEnabled {
+		c.JSON(200, gin.H{
+			"message": "用户已被封禁",
 			"success": false,
 		})
 		return

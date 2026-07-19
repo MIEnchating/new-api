@@ -124,7 +124,10 @@ func (options ChannelSortOptions) Apply(query *gorm.DB) *gorm.DB {
 			Column: clause.Column{Name: columnName},
 			Desc:   options.SortOrder != "asc",
 		})
-		if options.IDSort && options.SortBy != "id" {
+		// A stable tie-breaker is required for offset pagination. The visible ID
+		// sort switch selects ID as the primary order; it must not control whether
+		// equal values from another primary sort receive deterministic ordering.
+		if options.SortBy != "id" {
 			query = query.Order(clause.OrderByColumn{
 				Column: clause.Column{Name: "id"},
 				Desc:   true,

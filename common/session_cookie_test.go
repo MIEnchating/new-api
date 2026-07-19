@@ -71,6 +71,10 @@ func TestClearLegacyHostOnlySessionCookiePreservesSharedSession(t *testing.T) {
 	assert.Equal(t, "/", deletionCookie.Path)
 }
 
+func TestSessionCookieSameSiteAllowsOAuthTopLevelCallback(t *testing.T) {
+	assert.Equal(t, http.SameSiteLaxMode, SessionCookieSameSite)
+}
+
 func TestClearLegacyHostOnlySessionCookieSkipsUnrelatedHost(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	resetSessionCookieSettingsAfterTest(t)

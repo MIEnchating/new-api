@@ -26,6 +26,7 @@ declare module 'axios' {
   export interface AxiosRequestConfig {
     skipBusinessError?: boolean
     skipErrorHandler?: boolean
+    skipUserHeader?: boolean
     disableDuplicate?: boolean
   }
 }
@@ -57,15 +58,77 @@ export const api = axios.create({
 const inFlightGet = new Map<string, Promise<unknown>>()
 const originalGet = api.get.bind(api)
 
-api.get = ((url: string, config: ApiRequestConfig = {}) => {
-  const disableDuplicate = config.disableDuplicate
-  if (disableDuplicate) return originalGet(url, config)
+function getHeaderValue(config: ApiRequestConfig, name: string): string | null {
+  const headers = config.headers as
+    | (Record<string, unknown> & {
+        get?: (headerName: string) => unknown
+      })
+    | undefined
+  if (!headers) return null
+
+  const getterValue = headers.get?.(name)
+  if (typeof getterValue === 'string' && getterValue) return getterValue
+
+  const key = Object.keys(headers).find(
+    (headerName) => headerName.toLowerCase() === name.toLowerCase()
+  )
+  const value = key ? headers[key] : undefined
+  return typeof value === 'string' && value ? value : null
+}
+
+function getCachedUserIdentity(): string | null {
+  const uid = getUserId()
+  if (uid) return `uid:${uid}`
+
+  try {
+    const rawUser =
+      typeof window !== 'undefined' ? window.localStorage.getItem('user') : null
+    if (!rawUser) return null
+    const user = JSON.parse(rawUser) as {
+      id?: unknown
+      username?: unknown
+    }
+    if (typeof user.id === 'number' && Number.isSafeInteger(user.id)) {
+      return `id:${user.id}`
+    }
+    if (typeof user.username === 'string' && user.username) {
+      return `username:${user.username}`
+    }
+  } catch {
+    // Ignore malformed/unavailable storage and treat the request as anonymous.
+  }
+  return null
+}
+
+/**
+ * Build a safe in-flight GET key. Requests with an explicit bearer token are
+ * never shared because the token is the authoritative identity and should not
+ * be copied into an in-memory deduplication key.
+ */
+export function getGetRequestKey(
+  url: string,
+  config: ApiRequestConfig = {},
+  userIdentity: string | null | undefined = undefined
+): string | null {
+  if (config.disableDuplicate || getHeaderValue(config, 'Authorization')) {
+    return null
+  }
 
   const params = config.params ? JSON.stringify(config.params) : '{}'
-  const key = `${url}?${params}`
+  const identity = userIdentity ?? getCachedUserIdentity() ?? 'anonymous'
+  const userHeaderMode = config.skipUserHeader
+    ? 'cookie-only'
+    : 'identity-header'
+  return `${url}?${params}#${identity}:${userHeaderMode}`
+}
+
+api.get = ((url: string, config: ApiRequestConfig = {}) => {
+  const key = getGetRequestKey(url, config)
+  if (!key) return originalGet(url, config)
 
   // Return existing in-flight request if available
-  if (inFlightGet.has(key)) return inFlightGet.get(key)!
+  const existing = inFlightGet.get(key)
+  if (existing) return existing
 
   // Create new request and clean up after completion
   const req = originalGet(url, config).finally(() => inFlightGet.delete(key))
@@ -159,15 +222,39 @@ export function getCommonHeaders(): Record<string, string> {
 // Request Interceptor
 // ============================================================================
 
-// Attach user ID header for all requests
-api.interceptors.request.use((config) => {
-  const uid = getUserId()
-  if (uid) {
-    // Custom header for user identification
-    ;(config.headers as Record<string, string>)['New-Api-User'] = uid
+/**
+ * Apply the browser's cached user identity header unless a request explicitly
+ * needs to authenticate from its session cookie alone (for example, `/self`
+ * during sign-in recovery).
+ */
+export function applyUserHeader<T extends ApiRequestConfig>(
+  config: T,
+  userId: string | null = getUserId()
+): T {
+  const headers = config.headers as
+    | (Record<string, unknown> & {
+        delete?: (name: string) => void
+      })
+    | undefined
+
+  if (config.skipUserHeader) {
+    if (headers?.delete) {
+      headers.delete('New-Api-User')
+    } else if (headers) {
+      delete headers['New-Api-User']
+      delete headers['new-api-user']
+    }
+    return config
+  }
+
+  if (userId && headers) {
+    headers['New-Api-User'] = userId
   }
   return config
-})
+}
+
+// Attach user ID header for all requests
+api.interceptors.request.use((config) => applyUserHeader(config))
 
 // ============================================================================
 // Common API Functions
@@ -182,6 +269,15 @@ export async function getSelf() {
   const res = await api.get('/api/user/self', {
     // Avoid global 401 toast during guards/preloads
     skipErrorHandler: true,
+    // A failed self check is handled by the caller so it does not emit a
+    // duplicate business-error toast while the login flow is recovering.
+    skipBusinessError: true,
+    // Resolve the authoritative cookie session even when localStorage.uid is
+    // stale or belongs to a different account.
+    skipUserHeader: true,
+    // Do not reuse an in-flight self request that may have been created with
+    // a stale identity header before this guard ran.
+    disableDuplicate: true,
   })
   return res.data
 }

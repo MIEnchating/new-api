@@ -1247,6 +1247,11 @@ func EmailBind(c *gin.Context) {
 		common.ApiError(c, errors.New("invalid request body"))
 		return
 	}
+	user, err := getSessionUser(c)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	email := req.Email
 	email = model.NormalizeEmail(email)
 	code := req.Code
@@ -1254,17 +1259,7 @@ func EmailBind(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserVerificationCodeError)
 		return
 	}
-	session := sessions.Default(c)
-	id := session.Get("id")
-	user := model.User{
-		Id: id.(int),
-	}
-	err := user.FillUserById()
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	if err := model.BindEmailToUser(&user, email); err != nil {
+	if err := model.BindEmailToUser(user, email); err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
 			return

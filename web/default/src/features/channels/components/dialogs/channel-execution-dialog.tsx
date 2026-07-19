@@ -64,6 +64,7 @@ import {
   type ChannelExecutionEvent,
   type ChannelExecutionRouteGroupStatus,
 } from '../../api'
+import { selectExecutionTrace } from '../../lib/channel-execution-trace'
 
 type ChannelExecutionDialogProps = {
   open: boolean
@@ -205,6 +206,21 @@ function eventReasonLabel(reason?: string) {
   }
 }
 
+function queryErrorMessage(error: unknown, fallback: string) {
+  if (error && typeof error === 'object') {
+    const responseMessage = (
+      error as { response?: { data?: { message?: unknown } } }
+    ).response?.data?.message
+    if (typeof responseMessage === 'string' && responseMessage.trim()) {
+      return responseMessage
+    }
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+  return fallback
+}
+
 function eventAppearanceForEvent(event: ChannelExecutionEvent) {
   const isGroupEvent = Boolean(event.group && !event.channel_id)
   if (!isGroupEvent) return eventAppearance[event.state]
@@ -294,6 +310,7 @@ export function ChannelExecutionDialog({
         mode,
       }),
     enabled: open && group !== '' && model !== '',
+    retry: false,
   })
 
   const recentQuery = useQuery({
@@ -337,13 +354,29 @@ export function ChannelExecutionDialog({
   const selectedRecentTrace = recentTraces.find(
     (item) => item.request_id === selectedRequestID
   )
-  const trace = traceQuery.data?.data ?? selectedRecentTrace
+  const trace = selectExecutionTrace(
+    searchedRequestID,
+    traceQuery.data,
+    selectedRecentTrace
+  )
   const traceEvents = trace?.events ?? []
   const submitRequestID = () => {
     const nextRequestID = requestID.trim()
+    if (!nextRequestID) return
+    if (nextRequestID === searchedRequestID) {
+      void traceQuery.refetch()
+      return
+    }
     setSearchedRequestID(nextRequestID)
     setSelectedRequestID(nextRequestID)
   }
+  const traceSearchError = searchedRequestID
+    ? traceQuery.isError
+      ? queryErrorMessage(traceQuery.error, t('Execution trace not found'))
+      : traceQuery.data && !traceQuery.data.success
+        ? traceQuery.data.message || t('Execution trace not found')
+        : ''
+    : ''
 
   useEffect(() => {
     setSearchedRequestID('')
@@ -471,6 +504,30 @@ export function ChannelExecutionDialog({
           <div className='text-muted-foreground flex h-20 items-center justify-center gap-2 text-sm'>
             <Loader2 className='size-4 animate-spin' />
             {t('Calculating execution plan...')}
+          </div>
+        ) : planQuery.isError ? (
+          <div className='flex flex-wrap items-center justify-between gap-3 py-4'>
+            <p className='text-destructive text-sm'>
+              {queryErrorMessage(
+                planQuery.error,
+                t('Failed to load execution plan')
+              )}
+            </p>
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              onClick={() => void planQuery.refetch()}
+              disabled={planQuery.isFetching}
+            >
+              <RefreshCcw
+                className={cn(
+                  'size-3.5',
+                  planQuery.isFetching && 'animate-spin'
+                )}
+              />
+              {t('Retry')}
+            </Button>
           </div>
         ) : planQuery.data && !planQuery.data.success ? (
           <p className='text-destructive py-4 text-sm'>
@@ -728,6 +785,31 @@ export function ChannelExecutionDialog({
                   <Loader2 className='size-3.5 animate-spin' />
                   {t('Loading recent requests...')}
                 </div>
+              ) : recentQuery.isError ? (
+                <div className='space-y-2 p-3'>
+                  <p className='text-destructive text-xs'>
+                    {queryErrorMessage(
+                      recentQuery.error,
+                      t('Failed to load recent requests')
+                    )}
+                  </p>
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant='outline'
+                    className='h-7 text-xs'
+                    onClick={() => void recentQuery.refetch()}
+                    disabled={recentQuery.isFetching}
+                  >
+                    <RefreshCcw
+                      className={cn(
+                        'size-3',
+                        recentQuery.isFetching && 'animate-spin'
+                      )}
+                    />
+                    {t('Retry')}
+                  </Button>
+                </div>
               ) : recentQuery.data && !recentQuery.data.success ? (
                 <p className='text-destructive p-3 text-xs'>
                   {recentQuery.data.message ||
@@ -782,9 +864,14 @@ export function ChannelExecutionDialog({
           </div>
 
           <div className='min-w-0 p-3 sm:p-4'>
-            {traceQuery.data && !traceQuery.data.success ? (
+            {searchedRequestID && traceQuery.isFetching ? (
+              <div className='text-muted-foreground flex items-center justify-center gap-2 py-8 text-sm'>
+                <Loader2 className='size-4 animate-spin' />
+                {t('Loading execution trace...')}
+              </div>
+            ) : traceSearchError ? (
               <p className='text-destructive py-3 text-sm'>
-                {traceQuery.data.message || t('Execution trace not found')}
+                {traceSearchError}
               </p>
             ) : trace ? (
               <div className='space-y-3'>

@@ -137,12 +137,17 @@ func getTokenModelGroups(token *model.Token) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	hasConfiguredRoutes := len(routes) > 0
+	routes = model.EnabledTokenGroupRoutes(routes)
 	if len(routes) > 0 {
 		groups := make([]string, 0, len(routes))
 		for _, route := range routes {
 			groups = append(groups, route.Group)
 		}
 		return groups, nil
+	}
+	if hasConfiguredRoutes {
+		return []string{}, nil
 	}
 
 	if token.Group != "" && token.Group != "auto" {
@@ -314,26 +319,18 @@ func GetTokenStatus(c *gin.Context) {
 }
 
 func GetTokenUsage(c *gin.Context) {
-	authHeader := c.GetHeader("Authorization")
-	if authHeader == "" {
+	tokenID := c.GetInt("token_id")
+	if tokenID <= 0 {
 		c.JSON(http.StatusUnauthorized, gin.H{
 			"success": false,
-			"message": "No Authorization header",
+			"message": common.TranslateMessage(c, i18n.MsgTokenInvalid),
 		})
 		return
 	}
 
-	parts := strings.Split(authHeader, " ")
-	if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-		c.JSON(http.StatusUnauthorized, gin.H{
-			"success": false,
-			"message": "Invalid Bearer token",
-		})
-		return
-	}
-	tokenKey := parts[1]
-
-	token, err := model.GetTokenByKey(strings.TrimPrefix(tokenKey, "sk-"), false)
+	// TokenAuthReadOnly already normalizes API-key suffixes and authenticates the
+	// token. Resolve by that authenticated ID instead of parsing the header again.
+	token, err := model.GetTokenById(tokenID)
 	if err != nil {
 		common.SysError("failed to get token by key: " + err.Error())
 		common.ApiErrorI18n(c, i18n.MsgTokenGetInfoFailed)
@@ -367,8 +364,9 @@ func buildTokenUsageLabels(c *gin.Context) gin.H {
 
 func buildTokenUsageData(token *model.Token, accountQuota int, expiredAt int64, labels gin.H) gin.H {
 	return gin.H{
-		"object": "token_usage",
-		"labels": labels,
+		"object":         "token_usage",
+		"labels":         labels,
+		"quota_per_unit": common.QuotaPerUnit,
 		"account": gin.H{
 			"total_available": accountQuota,
 		},

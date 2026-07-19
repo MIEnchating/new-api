@@ -87,6 +87,68 @@ func getUserQuotaForPaymentGuardTest(t *testing.T, userID int) int {
 	return user.Quota
 }
 
+func TestRechargeCallbacksAreIdempotent(t *testing.T) {
+	originalQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 100
+	t.Cleanup(func() {
+		common.QuotaPerUnit = originalQuotaPerUnit
+	})
+
+	tests := []struct {
+		name       string
+		provider   string
+		amount     int64
+		money      float64
+		wantQuota  int
+		completeFn func(string) error
+	}{
+		{
+			name: "stripe", provider: PaymentProviderStripe, amount: 5, money: 2.5, wantQuota: 250,
+			completeFn: func(tradeNo string) error { return Recharge(tradeNo, "cus_test", "127.0.0.1") },
+		},
+		{
+			name: "epay", provider: PaymentProviderEpay, amount: 5, money: 2.5, wantQuota: 500,
+			completeFn: func(tradeNo string) error { return RechargeEpay(tradeNo, "alipay", "127.0.0.1") },
+		},
+		{
+			name: "creem", provider: PaymentProviderCreem, amount: 250, money: 2.5, wantQuota: 250,
+			completeFn: func(tradeNo string) error { return RechargeCreem(tradeNo, "", "", "127.0.0.1") },
+		},
+		{
+			name: "waffo", provider: PaymentProviderWaffo, amount: 5, money: 2.5, wantQuota: 500,
+			completeFn: func(tradeNo string) error { return RechargeWaffo(tradeNo, "127.0.0.1") },
+		},
+		{
+			name: "waffo pancake", provider: PaymentProviderWaffoPancake, amount: 5, money: 2.5, wantQuota: 500,
+			completeFn: func(tradeNo string) error { return RechargeWaffoPancake(tradeNo) },
+		},
+	}
+
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			truncateTables(t)
+			userID := 400 + index
+			tradeNo := "idempotent-" + test.provider
+			insertUserForPaymentGuardTest(t, userID, 0)
+			require.NoError(t, DB.Create(&TopUp{
+				UserId:          userID,
+				Amount:          test.amount,
+				Money:           test.money,
+				TradeNo:         tradeNo,
+				PaymentMethod:   test.provider,
+				PaymentProvider: test.provider,
+				Status:          common.TopUpStatusPending,
+				CreateTime:      time.Now().Unix(),
+			}).Error)
+
+			require.NoError(t, test.completeFn(tradeNo))
+			require.NoError(t, test.completeFn(tradeNo))
+			assert.Equal(t, test.wantQuota, getUserQuotaForPaymentGuardTest(t, userID))
+			assert.Equal(t, common.TopUpStatusSuccess, getTopUpStatusForPaymentGuardTest(t, tradeNo))
+		})
+	}
+}
+
 func TestRechargeWaffoPancake_RejectsMismatchedPaymentMethod(t *testing.T) {
 	truncateTables(t)
 
