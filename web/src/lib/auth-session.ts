@@ -312,16 +312,27 @@ function runRefresh(refreshEpoch: number): Promise<RefreshOutcome> {
   })()
 }
 
+export function runWithOptionalAuthRefreshLock<T>(
+  locks: LockManager | undefined,
+  refresh: () => Promise<T>
+): Promise<T> {
+  if (!locks) return refresh()
+
+  // The backend already recovers concurrent refresh races. Never let a stale
+  // browser tab hold application startup behind an unbounded Web Lock wait.
+  return locks.request(
+    'new-api:auth-refresh',
+    { mode: 'exclusive', ifAvailable: true },
+    () => refresh()
+  )
+}
+
 async function performRefreshWithBrowserLock(
   refreshEpoch: number
 ): Promise<RefreshOutcome> {
   try {
-    if (typeof navigator === 'undefined' || !navigator.locks) {
-      return runRefresh(refreshEpoch)
-    }
-    return navigator.locks.request(
-      'new-api:auth-refresh',
-      { mode: 'exclusive' },
+    return runWithOptionalAuthRefreshLock(
+      typeof navigator === 'undefined' ? undefined : navigator.locks,
       () => runRefresh(refreshEpoch)
     )
   } catch (error: unknown) {
