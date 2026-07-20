@@ -28,7 +28,6 @@ import {
   clearAuthenticatedClientState,
   createRefreshRunner,
   isAuthBundle,
-  runWithOptionalAuthRefreshLock,
   type AuthRefreshRuntime,
 } from './auth-session'
 
@@ -58,31 +57,6 @@ afterEach(() => {
 })
 
 describe('authentication session coordination', () => {
-  test('an unavailable browser lock cannot block authentication refresh', async () => {
-    const lockRequests: LockOptions[] = []
-    const locks = {
-      request: async <T>(
-        _name: string,
-        options: LockOptions,
-        callback: (lock: Lock | null) => Promise<T>
-      ) => {
-        lockRequests.push(options)
-        return callback(null)
-      },
-    } as LockManager
-    let refreshCount = 0
-
-    const result = await runWithOptionalAuthRefreshLock(locks, async () => {
-      refreshCount += 1
-      return 'refreshed'
-    })
-
-    assert.equal(result, 'refreshed')
-    assert.equal(refreshCount, 1)
-    assert.equal(lockRequests[0]?.ifAvailable, true)
-    assert.equal(lockRequests[0]?.mode, 'exclusive')
-  })
-
   test('bootstrap distinguishes a completed anonymous check from an active session', async () => {
     useAuthStore.getState().auth.reset('complete')
     assert.deepEqual(await bootstrapAuthentication(), { kind: 'anonymous' })

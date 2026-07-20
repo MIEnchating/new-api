@@ -29,6 +29,7 @@ import ReactDOM from 'react-dom/client'
 import { toast } from 'sonner'
 
 import { getStatus } from '@/lib/api'
+import { replaceBootstrapAndMount } from '@/lib/application-root'
 import { installBuildMetadata } from '@/lib/build-metadata'
 import { applyFaviconToDom } from '@/lib/dom-utils'
 import '@/lib/dayjs'
@@ -155,8 +156,8 @@ if (!rootElement) {
     /* empty */
   }
 })()
-if (!rootElement.innerHTML) {
-  const root = ReactDOM.createRoot(rootElement)
+replaceBootstrapAndMount(rootElement, (applicationRoot) => {
+  const root = ReactDOM.createRoot(applicationRoot)
   root.render(
     <StrictMode>
       <QueryClientProvider client={queryClient}>
@@ -170,4 +171,4 @@ if (!rootElement.innerHTML) {
       </QueryClientProvider>
     </StrictMode>
   )
-}
+})
