@@ -14,10 +14,7 @@ docs
 .playwright-cli
 dev-logs
 /web/node_modules
-/web/default/node_modules
-/web/default/dist
-/web/default/.playwright-cli
-/web/default/output
-/web/classic/node_modules
-/web/classic/dist
+/web/dist
+/web/.playwright-cli
+/web/output
 !THIRD-PARTY-LICENSES.md

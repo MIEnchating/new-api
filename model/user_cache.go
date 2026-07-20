@@ -1,65 +1,29 @@
 package model
 
 import (
-	"context"
 	"errors"
 	"fmt"
-	"strings"
-	"sync"
-	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 
 	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
-
-	"github.com/bytedance/gopkg/util/gopool"
-	"golang.org/x/sync/singleflight"
 )
 
 const userCacheSchemaVersion = 2
 
-const userAuthStateLoadTimeout = 3 * time.Second
-const userAuthStateGenerationRetention = time.Minute
-
-var errStaleUserCache = errors.New("stale user cache schema")
-
-type userAuthStateCacheEntry struct {
-	user      UserBase
-	expiresAt time.Time
-}
-
-type userAuthStateLoadResult struct {
-	user       UserBase
-	generation uint64
-}
-
-var userAuthStateCache = struct {
-	sync.RWMutex
-	entries             map[int]userAuthStateCacheEntry
-	generations         map[int]uint64
-	generationUpdatedAt map[int]time.Time
-	lastCleanup         time.Time
-}{
-	entries:             make(map[int]userAuthStateCacheEntry),
-	generations:         make(map[int]uint64),
-	generationUpdatedAt: make(map[int]time.Time),
-}
-
-var userAuthStateLoadGroup singleflight.Group
-
 type UserBase struct {
-	Id           int    `json:"id"`
-	Group        string `json:"group"`
-	Email        string `json:"email"`
-	Quota        int    `json:"quota"`
-	Role         int    `json:"role"`
-	Status       int    `json:"status"`
-	Username     string `json:"username"`
-	Setting      string `json:"setting"`
-	CacheVersion int    `json:"-"`
+	Id          int    `json:"id"`
+	Group       string `json:"group"`
+	Email       string `json:"email"`
+	Quota       int    `json:"quota"`
+	Status      int    `json:"status"`
+	Role        int    `json:"role"`
+	Username    string `json:"username"`
+	Setting     string `json:"setting"`
+	AuthVersion int64  `json:"-"`
+	CacheSchema int    `json:"-"`
 }
 
 func (user *UserBase) WriteContext(c *gin.Context) {
@@ -87,10 +51,16 @@ func getUserCacheKey(userId int) string {
 	return fmt.Sprintf("user:%d", userId)
 }
 
+func userCacheTTLSeconds() int {
+	ttl := common.RedisKeyCacheSeconds()
+	if ttl <= 0 {
+		return 60
+	}
+	return ttl
+}
+
 // invalidateUserCache clears user cache
 func invalidateUserCache(userId int) error {
-	invalidateUserAuthStateCache(userId)
-	notifyUserAuthStateChanged(userId)
 	if !common.RedisEnabled {
 		return nil
 	}
@@ -107,286 +77,47 @@ func populateUserCache(user User) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-
-	return common.RedisHSetObj(
-		getUserCacheKey(user.Id),
-		user.ToBaseUser(),
-		time.Duration(common.RedisKeyCacheSeconds())*time.Second,
-	)
+	return writeUserCache(user.ToBaseUser(), true)
 }
 
 // updateUserCache refreshes non-quota user cache fields.
 // Quota is maintained by atomic quota delta paths and must not be overwritten
 // by stale user snapshots from profile/settings updates.
 func updateUserCache(user User) error {
-	storeUserAuthStateCache(user.ToBaseUser())
-	notifyUserAuthStateChanged(user.Id)
 	if !common.RedisEnabled {
 		return nil
 	}
-	if err := updateUserGroupCache(user.Id, user.Group); err != nil {
-		return err
-	}
-	if err := updateUserEmailCache(user.Id, user.Email); err != nil {
-		return err
-	}
-	if err := updateUserStatusCache(user.Id, user.Status == common.UserStatusEnabled); err != nil {
-		return err
-	}
-	if err := updateUserRoleCache(user.Id, user.Role); err != nil {
-		return err
-	}
-	if err := updateUserNameCache(user.Id, user.Username); err != nil {
-		return err
-	}
-	return updateUserSettingCache(user.Id, user.Setting)
+	return writeUserCache(user.ToBaseUser(), false)
 }
 
 // GetUserCache gets complete user cache from hash
-func GetUserCache(userId int) (userCache *UserBase, err error) {
-	return getUserCache(userId, cacheGetUserBase)
-}
-
-// GetUserAuthState returns the identity fields used for session authorization.
-// A short-lived, process-local cache avoids querying the primary database for
-// every browser API request. Application-side user mutations synchronously
-// invalidate or replace this cache and notify other instances through Redis,
-// while the generation check prevents an in-flight database read from
-// restoring stale authorization data.
-func GetUserAuthState(userId int) (*UserBase, error) {
-	return GetUserAuthStateWithContext(context.Background(), userId)
-}
-
-func GetUserAuthStateWithContext(ctx context.Context, userId int) (*UserBase, error) {
-	if userId <= 0 {
-		return nil, gorm.ErrRecordNotFound
-	}
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if common.UserAuthCacheTTLSeconds <= 0 {
-		return loadUserAuthStateFromDatabase(ctx, userId)
-	}
-	key := fmt.Sprint(userId)
-	for {
-		if user := loadUserAuthStateCache(userId); user != nil {
-			return user, nil
-		}
-
-		resultChannel := userAuthStateLoadGroup.DoChan(key, func() (interface{}, error) {
-			if user, generation := loadVersionedUserAuthStateCache(userId); user != nil {
-				return &userAuthStateLoadResult{user: *user, generation: generation}, nil
-			}
-
-			generation := userAuthStateGeneration(userId)
-			loadContext, cancel := context.WithTimeout(context.Background(), userAuthStateLoadTimeout)
-			defer cancel()
-			var user User
-			if err := DB.WithContext(loadContext).
-				Select("id", "username", "role", "status", "group").
-				First(&user, "id = ?", userId).Error; err != nil {
-				return nil, err
-			}
-			userBase := UserBase{
-				Id:           user.Id,
-				Username:     user.Username,
-				Role:         user.Role,
-				Status:       user.Status,
-				Group:        user.Group,
-				CacheVersion: userCacheSchemaVersion,
-			}
-			storeLoadedUserAuthStateCache(&userBase, generation)
-			return &userAuthStateLoadResult{user: userBase, generation: generation}, nil
-		})
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case result := <-resultChannel:
-			if result.Err != nil {
-				return nil, result.Err
-			}
-			loaded, _ := result.Val.(*userAuthStateLoadResult)
-			if loaded == nil {
-				return nil, gorm.ErrRecordNotFound
-			}
-			if userAuthStateGeneration(userId) != loaded.generation {
-				userAuthStateLoadGroup.Forget(key)
-				continue
-			}
-			copy := loaded.user
-			return &copy, nil
-		}
-	}
-}
-
-func loadUserAuthStateFromDatabase(ctx context.Context, userId int) (*UserBase, error) {
-	loadContext, cancel := context.WithTimeout(ctx, userAuthStateLoadTimeout)
-	defer cancel()
-	var user User
-	if err := DB.WithContext(loadContext).
-		Select("id", "username", "role", "status", "group").
-		First(&user, "id = ?", userId).Error; err != nil {
-		return nil, err
-	}
-	return &UserBase{
-		Id:           user.Id,
-		Username:     user.Username,
-		Role:         user.Role,
-		Status:       user.Status,
-		Group:        user.Group,
-		CacheVersion: userCacheSchemaVersion,
-	}, nil
-}
-
-func loadUserAuthStateCache(userId int) *UserBase {
-	user, _ := loadVersionedUserAuthStateCache(userId)
-	return user
-}
-
-func loadVersionedUserAuthStateCache(userId int) (*UserBase, uint64) {
-	if common.UserAuthCacheTTLSeconds <= 0 {
-		return nil, 0
-	}
-
-	userAuthStateCache.RLock()
-	entry, ok := userAuthStateCache.entries[userId]
-	generation := userAuthStateCache.generations[userId]
-	userAuthStateCache.RUnlock()
-	if !ok {
-		return nil, generation
-	}
-	if !time.Now().Before(entry.expiresAt) {
-		userAuthStateCache.Lock()
-		if current, exists := userAuthStateCache.entries[userId]; exists && current.expiresAt.Equal(entry.expiresAt) {
-			delete(userAuthStateCache.entries, userId)
-		}
-		userAuthStateCache.Unlock()
-		return nil, generation
-	}
-	copy := entry.user
-	return &copy, generation
-}
-
-func userAuthStateGeneration(userId int) uint64 {
-	userAuthStateCache.RLock()
-	generation := userAuthStateCache.generations[userId]
-	userAuthStateCache.RUnlock()
-	return generation
-}
-
-func storeLoadedUserAuthStateCache(user *UserBase, generation uint64) {
-	if user == nil || common.UserAuthCacheTTLSeconds <= 0 {
-		return
-	}
-	copy := *user
-	now := time.Now()
-	userAuthStateCache.Lock()
-	defer userAuthStateCache.Unlock()
-	pruneExpiredUserAuthStateCacheLocked(now)
-	if userAuthStateCache.generations[user.Id] != generation {
-		return
-	}
-	userAuthStateCache.entries[user.Id] = userAuthStateCacheEntry{
-		user:      copy,
-		expiresAt: now.Add(time.Duration(common.UserAuthCacheTTLSeconds) * time.Second),
-	}
-}
-
-func storeUserAuthStateCache(user *UserBase) {
-	if user == nil || user.Id <= 0 || common.UserAuthCacheTTLSeconds <= 0 {
-		return
-	}
-	copy := *user
-	now := time.Now()
-	userAuthStateCache.Lock()
-	defer userAuthStateCache.Unlock()
-	pruneExpiredUserAuthStateCacheLocked(now)
-	userAuthStateCache.generations[user.Id]++
-	userAuthStateCache.generationUpdatedAt[user.Id] = now
-	userAuthStateLoadGroup.Forget(fmt.Sprint(user.Id))
-	userAuthStateCache.entries[user.Id] = userAuthStateCacheEntry{
-		user:      copy,
-		expiresAt: now.Add(time.Duration(common.UserAuthCacheTTLSeconds) * time.Second),
-	}
-}
-
-func pruneExpiredUserAuthStateCacheLocked(now time.Time) {
-	if !userAuthStateCache.lastCleanup.IsZero() && now.Sub(userAuthStateCache.lastCleanup) < time.Minute {
-		return
-	}
-	for userId, entry := range userAuthStateCache.entries {
-		if !now.Before(entry.expiresAt) {
-			delete(userAuthStateCache.entries, userId)
-		}
-	}
-	for userId, updatedAt := range userAuthStateCache.generationUpdatedAt {
-		if now.Sub(updatedAt) >= userAuthStateGenerationRetention {
-			delete(userAuthStateCache.generations, userId)
-			delete(userAuthStateCache.generationUpdatedAt, userId)
-		}
-	}
-	userAuthStateCache.lastCleanup = now
-}
-
-func invalidateUserAuthStateCache(userId int) {
-	if userId <= 0 || common.UserAuthCacheTTLSeconds <= 0 {
-		return
-	}
-	now := time.Now()
-	userAuthStateCache.Lock()
-	pruneExpiredUserAuthStateCacheLocked(now)
-	userAuthStateCache.generations[userId]++
-	userAuthStateCache.generationUpdatedAt[userId] = now
-	delete(userAuthStateCache.entries, userId)
-	userAuthStateCache.Unlock()
-	userAuthStateLoadGroup.Forget(fmt.Sprint(userId))
-}
-
-func getUserCache(userId int, loadCache func(int) (*UserBase, error)) (userCache *UserBase, err error) {
-	var user *User
-	var fromDB bool
-	defer func() {
-		// Update Redis cache asynchronously on successful DB read
-		if shouldUpdateRedis(fromDB, err) && user != nil {
-			gopool.Go(func() {
-				if err := populateUserCache(*user); err != nil {
-					common.SysLog("failed to update user status cache: " + err.Error())
-				}
-			})
-		}
-	}()
-
+func GetUserCache(userId int) (*UserBase, error) {
 	// Try getting from Redis first
-	userCache, err = loadCache(userId)
-	if err == nil && isCurrentUserCache(userCache, userId) {
+	userCache, err := cacheGetUserBase(userId)
+	if err == nil {
 		return userCache, nil
 	}
-	if err == nil {
-		err = errStaleUserCache
-	}
 
-	// If Redis fails, get from DB
-	fromDB = true
-	user, err = GetUserById(userId, false)
+	// Redis misses and read failures both fall back to the shared database. A
+	// version fence newer than the database is the one exception: allowing that
+	// snapshot would re-authorize a user while a restrictive update is pending.
+	user, err := GetUserById(userId, false)
 	if err != nil {
-		return nil, err // Return nil and error if DB lookup fails
+		return nil, err
 	}
-
-	// Create cache object from user data
-	userCache = user.ToBaseUser()
-
-	return userCache, nil
-}
-
-func isCurrentUserCache(user *UserBase, userId int) bool {
-	if user == nil || user.CacheVersion != userCacheSchemaVersion || user.Id != userId {
-		return false
+	if common.RedisEnabled {
+		floor, floorErr := getUserAuthVersionFloor(userId)
+		if floorErr == nil && floor > user.AuthVersion {
+			return nil, ErrUserAuthCachePending
+		}
+		if err := populateUserCache(*user); err != nil {
+			if errors.Is(err, ErrUserAuthCachePending) {
+				return nil, err
+			}
+			common.SysLog("failed to synchronously populate user cache: " + err.Error())
+		}
 	}
-	if strings.TrimSpace(user.Username) == "" || !common.IsValidateRole(user.Role) {
-		return false
-	}
-	return user.Status == common.UserStatusEnabled || user.Status == common.UserStatusDisabled
+	return user.ToBaseUser(), nil
 }
 
 func cacheGetUserBase(userId int) (*UserBase, error) {
@@ -398,6 +129,16 @@ func cacheGetUserBase(userId int) (*UserBase, error) {
 	err := common.RedisHGetObj(getUserCacheKey(userId), &userCache)
 	if err != nil {
 		return nil, err
+	}
+	if userCache.Id != userId || userCache.CacheSchema != userCacheSchemaVersion || userCache.AuthVersion <= 0 {
+		return nil, fmt.Errorf("user cache schema is stale")
+	}
+	floor, err := getUserAuthVersionFloor(userId)
+	if err != nil {
+		return nil, err
+	}
+	if floor > userCache.AuthVersion {
+		return nil, ErrUserAuthCachePending
 	}
 	return &userCache, nil
 }
@@ -457,21 +198,11 @@ func getUserSettingCache(userId int) (dto.UserSetting, error) {
 
 // New functions for individual field updates
 func updateUserStatusCache(userId int, status bool) error {
-	if !common.RedisEnabled {
-		return nil
-	}
 	statusInt := common.UserStatusEnabled
 	if !status {
 		statusInt = common.UserStatusDisabled
 	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Status", fmt.Sprintf("%d", statusInt))
-}
-
-func updateUserRoleCache(userId int, role int) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Role", fmt.Sprintf("%d", role))
+	return updateUserCacheField(userId, "Status", statusInt)
 }
 
 func updateUserQuotaCache(userId int, quota int) error {
@@ -481,38 +212,74 @@ func updateUserQuotaCache(userId int, quota int) error {
 	return common.RedisHSetField(getUserCacheKey(userId), "Quota", fmt.Sprintf("%d", quota))
 }
 
-func updateUserGroupCache(userId int, group string) error {
+// RefreshUserGroupCache writes the database-authoritative group into an
+// existing user hash without changing the user's authentication version.
+func RefreshUserGroupCache(userId int) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Group", group)
-}
+	if userId <= 0 {
+		return fmt.Errorf("invalid user id")
+	}
+	var authoritative User
+	if err := DB.Select("id", "auth_version", commonGroupCol).Where("id = ?", userId).First(&authoritative).Error; err != nil {
+		return err
+	}
+	// Group transitions intentionally keep the same authentication version. A
+	// refresh that read the previous group can therefore arrive after a newer
+	// refresh and still pass the auth-version fence. Re-read after every write
+	// and repair the cache when the authoritative group changed in between.
+	for range 3 {
+		if err := updateUserCacheFieldAtVersion(userId, "Group", authoritative.Group, authoritative.AuthVersion); err != nil {
+			return err
+		}
 
-func UpdateUserGroupCache(userId int, group string) error {
-	invalidateUserAuthStateCache(userId)
-	notifyUserAuthStateChanged(userId)
-	return updateUserGroupCache(userId, group)
+		var verified User
+		if err := DB.Select("id", "auth_version", commonGroupCol).Where("id = ?", userId).First(&verified).Error; err != nil {
+			return err
+		}
+		if verified.AuthVersion == authoritative.AuthVersion && verified.Group == authoritative.Group {
+			return nil
+		}
+		authoritative = verified
+	}
+
+	// Preserve the freshest snapshot observed even when the row was too busy to
+	// stabilize within the bounded retries. Returning an error lets best-effort
+	// callers emit an operation-specific warning.
+	if err := updateUserCacheFieldAtVersion(userId, "Group", authoritative.Group, authoritative.AuthVersion); err != nil {
+		return err
+	}
+	return fmt.Errorf("user group changed repeatedly during cache refresh")
 }
 
 func updateUserEmailCache(userId int, email string) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Email", email)
+	return updateUserCacheField(userId, "Email", email)
 }
 
 func updateUserNameCache(userId int, username string) error {
-	if !common.RedisEnabled {
-		return nil
-	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Username", username)
+	return updateUserCacheField(userId, "Username", username)
 }
 
 func updateUserSettingCache(userId int, setting string) error {
+	return updateUserCacheField(userId, "Setting", setting)
+}
+
+// updateUserCacheField prevents individual cache refreshes from bypassing the
+// auth-version fence. It intentionally does nothing when the complete hash is
+// absent; the next GetUserCache call will repopulate it from the database.
+func updateUserCacheField(userId int, field string, value interface{}) error {
 	if !common.RedisEnabled {
 		return nil
 	}
-	return common.RedisHSetField(getUserCacheKey(userId), "Setting", setting)
+	var user User
+	if err := DB.Select("id", "auth_version").Where("id = ?", userId).First(&user).Error; err != nil {
+		return err
+	}
+	if user.AuthVersion <= 0 {
+		return fmt.Errorf("invalid user auth version")
+	}
+	return updateUserCacheFieldAtVersion(userId, field, value, user.AuthVersion)
 }
 
 // GetUserLanguage returns the user's language preference from cache

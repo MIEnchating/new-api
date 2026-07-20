@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -64,6 +65,7 @@ func InitEnv() {
 	if err := InitSessionCookieSettings(); err != nil {
 		log.Fatal(err)
 	}
+	initUserSessionSettings()
 	if os.Getenv("SQLITE_PATH") != "" {
 		SQLitePath = os.Getenv("SQLITE_PATH")
 	}
@@ -106,11 +108,6 @@ func InitEnv() {
 	// Initialize variables with GetEnvOrDefault
 	SyncFrequency = GetEnvOrDefault("SYNC_FREQUENCY", 60)
 	BatchUpdateInterval = GetEnvOrDefault("BATCH_UPDATE_INTERVAL", 5)
-	UserAuthCacheTTLSeconds = GetEnvOrDefault("USER_AUTH_CACHE_TTL_SECONDS", 3)
-	if UserAuthCacheTTLSeconds < 0 || UserAuthCacheTTLSeconds > 30 {
-		SysError("USER_AUTH_CACHE_TTL_SECONDS must be between 0 and 30, using default value: 3")
-		UserAuthCacheTTLSeconds = 3
-	}
 	RelayTimeout = GetEnvOrDefault("RELAY_TIMEOUT", 0)
 	RelayIdleConnTimeout = GetEnvOrDefault("RELAY_IDLE_CONN_TIMEOUT", 90)
 	RelayMaxIdleConns = GetEnvOrDefault("RELAY_MAX_IDLE_CONNS", 500)
@@ -137,6 +134,43 @@ func InitEnv() {
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
 	initConstantEnv()
+}
+
+func initUserSessionSettings() {
+	UserSessionActiveLimit = positiveUserSessionEnv("USER_SESSION_ACTIVE_LIMIT", DefaultUserSessionActiveLimit)
+	UserSessionIssuanceLimit = positiveUserSessionEnv("USER_SESSION_ISSUANCE_LIMIT", DefaultUserSessionIssuanceLimit)
+	UserSessionIssuanceWindowSeconds = int64(positiveUserSessionEnv("USER_SESSION_ISSUANCE_WINDOW_SECONDS", DefaultUserSessionIssuanceWindowSeconds))
+	UserSessionRevokedRetentionDays = positiveUserSessionEnv("USER_SESSION_REVOKED_RETENTION_DAYS", DefaultUserSessionRevokedRetentionDays)
+	UserSessionHourlyAlertThreshold = positiveUserSessionEnv("USER_SESSION_HOURLY_ALERT_THRESHOLD", DefaultUserSessionHourlyAlertThreshold)
+
+	const secondsPerDay = 24 * 60 * 60
+	if int64(UserSessionRevokedRetentionDays) > math.MaxInt64/secondsPerDay {
+		SysError(fmt.Sprintf(
+			"USER_SESSION_REVOKED_RETENTION_DAYS is too large, using default value: %d",
+			DefaultUserSessionRevokedRetentionDays,
+		))
+		UserSessionRevokedRetentionDays = DefaultUserSessionRevokedRetentionDays
+	}
+	retentionSeconds := int64(UserSessionRevokedRetentionDays) * secondsPerDay
+	if UserSessionIssuanceWindowSeconds > retentionSeconds {
+		configuredWindow := UserSessionIssuanceWindowSeconds
+		UserSessionIssuanceWindowSeconds = retentionSeconds
+		SysError(fmt.Sprintf(
+			"USER_SESSION_ISSUANCE_WINDOW_SECONDS exceeds revoked retention; configured_window_seconds=%d revoked_retention_seconds=%d effective_window_seconds=%d",
+			configuredWindow,
+			retentionSeconds,
+			UserSessionIssuanceWindowSeconds,
+		))
+	}
+}
+
+func positiveUserSessionEnv(name string, fallback int) int {
+	value := GetEnvOrDefault(name, fallback)
+	if value <= 0 {
+		SysError(fmt.Sprintf("%s must be positive, using default value: %d", name, fallback))
+		return fallback
+	}
+	return value
 }
 
 func initConstantEnv() {

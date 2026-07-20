@@ -9,23 +9,25 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestPaymentReturnPathUsesOnlyTrustedRequestOrigin(t *testing.T) {
-	originalServerAddress := system_setting.ServerAddress
-	originalTrustedOrigins := system_setting.TrustedSiteOrigins
-	t.Cleanup(func() {
-		system_setting.ServerAddress = originalServerAddress
-		system_setting.TrustedSiteOrigins = originalTrustedOrigins
-	})
-	system_setting.ServerAddress = "https://example.com"
+func TestPaymentReturnPathUsesTrustedRequestOriginAndDefaultRoutes(t *testing.T) {
+	previousAddress := system_setting.ServerAddress
+	previousTrustedOrigins := system_setting.TrustedSiteOrigins
+	system_setting.ServerAddress = "https://dashboard.example.com/"
 	system_setting.TrustedSiteOrigins = "https://www.example.com"
+	t.Cleanup(func() {
+		system_setting.ServerAddress = previousAddress
+		system_setting.TrustedSiteOrigins = previousTrustedOrigins
+	})
 
 	gin.SetMode(gin.TestMode)
 	context, _ := gin.CreateTestContext(httptest.NewRecorder())
 	context.Request = httptest.NewRequest("GET", "http://www.example.com", nil)
 	context.Request.Host = "www.example.com"
 	context.Request.Header.Set("X-Forwarded-Proto", "https")
-	assert.Equal(t, "https://www.example.com/console/log", paymentReturnPath(context, "/console/log"))
+
+	assert.Equal(t, "https://www.example.com/wallet?pay=success", paymentReturnPath(context, "/console/topup?pay=success"))
+	assert.Equal(t, "https://www.example.com/usage-logs", paymentReturnPath(context, "/console/log"))
 
 	context.Request.Host = "attacker.example"
-	assert.Equal(t, "https://example.com/console/log", paymentReturnPath(context, "/console/log"))
+	assert.Equal(t, "https://dashboard.example.com/wallet", paymentReturnPath(context, "/console/topup"))
 }

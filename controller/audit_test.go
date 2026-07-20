@@ -98,9 +98,3 @@ func TestBuildOptionAuditParamsOnlyIncludesAllowlistedValues(t *testing.T) {
 		"key": "GitHubClientSecret",
 	}, sensitive)
 }
-
-func TestResolveLoginSecondFactorMethod(t *testing.T) {
-	require.Equal(t, "totp", resolveLoginSecondFactorMethod(true, false))
-	require.Equal(t, "backup_code", resolveLoginSecondFactorMethod(false, true))
-	require.Empty(t, resolveLoginSecondFactorMethod(false, false))
-}

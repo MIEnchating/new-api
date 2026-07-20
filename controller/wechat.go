@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -39,7 +38,7 @@ func getWeChatIdByCode(code string) (string, error) {
 	}
 	defer httpResponse.Body.Close()
 	var res wechatLoginResponse
-	err = json.NewDecoder(httpResponse.Body).Decode(&res)
+	err = common.DecodeJson(httpResponse.Body, &res)
 	if err != nil {
 		return "", err
 	}
@@ -141,11 +140,6 @@ func WeChatBind(c *gin.Context) {
 		})
 		return
 	}
-	user, err := getSessionUser(c)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
 	code := req.Code
 	wechatId, err := getWeChatIdByCode(code)
 	if err != nil {
@@ -160,6 +154,18 @@ func WeChatBind(c *gin.Context) {
 			"success": false,
 			"message": "该微信账号已被绑定",
 		})
+		return
+	}
+	user := model.User{
+		Id: c.GetInt("id"),
+	}
+	if user.Id == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "未登录"})
+		return
+	}
+	err = user.FillUserById()
+	if err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	user.WeChatId = wechatId

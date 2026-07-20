@@ -1,297 +1,251 @@
 package middleware
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-contrib/sessions/cookie"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
-func setupAuthTestDatabase(t *testing.T) {
+func setupDashboardAuthMiddlewareTest(t *testing.T) {
 	t.Helper()
 	previousDB := model.DB
-	previousRedisEnabled := common.RedisEnabled
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	previousType := common.MainDatabaseType()
+	previousRedis := common.RedisEnabled
+	previousSecret := common.SessionSecret
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
 	model.DB = db
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
 	common.RedisEnabled = false
+	common.SessionSecret = "middleware-auth-test-secret"
 	t.Cleanup(func() {
 		model.DB = previousDB
-		common.RedisEnabled = previousRedisEnabled
-		if sqlDB, dbErr := db.DB(); dbErr == nil {
-			_ = sqlDB.Close()
-		}
+		common.SetMainDatabaseType(previousType)
+		common.RedisEnabled = previousRedis
+		common.SessionSecret = previousSecret
 	})
 }
 
-func TestUserSelfAuthRestoresIdentityFromSession(t *testing.T) {
-	setupAuthTestDatabase(t)
-	require.NoError(t, model.DB.Create(&model.User{
-		Id:       42,
-		Username: "oauth-user",
-		Role:     common.RoleCommonUser,
-		Status:   common.UserStatusEnabled,
-		Group:    "default",
-	}).Error)
-	gin.SetMode(gin.TestMode)
-	engine := gin.New()
-	engine.Use(sessions.Sessions("session", cookie.NewStore([]byte("user-self-auth-test-secret"))))
-	engine.GET("/seed", func(c *gin.Context) {
-		session := sessions.Default(c)
-		session.Set("id", 42)
-		session.Set("username", "oauth-user")
-		session.Set("role", common.RoleCommonUser)
-		session.Set("status", common.UserStatusEnabled)
-		session.Set("group", "default")
-		require.NoError(t, session.Save())
-		c.Status(http.StatusNoContent)
-	})
-	engine.GET("/self", UserSelfAuth(), func(c *gin.Context) {
+func issueExpiredDashboardAccessToken(t *testing.T, identity service.AuthIdentity) string {
+	t.Helper()
+	claims := jwt.MapClaims{
+		"iss":       "new-api",
+		"aud":       []string{"new-api-dashboard"},
+		"sub":       fmt.Sprintf("%d", identity.UserID),
+		"token_use": "access",
+		"sid":       identity.SessionID,
+		"uv":        identity.UserAuthVersion,
+		"sv":        identity.SessionVersion,
+		"exp":       time.Now().Add(-time.Minute).Unix(),
+		"nbf":       time.Now().Add(-2 * time.Minute).Unix(),
+		"iat":       time.Now().Add(-2 * time.Minute).Unix(),
+	}
+	mac := hmac.New(sha256.New, []byte(common.SessionSecret))
+	_, err := mac.Write([]byte("new-api/auth/access/v1"))
+	require.NoError(t, err)
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(mac.Sum(nil))
+	require.NoError(t, err)
+	return token
+}
+
+func tamperDashboardToken(token string) string {
+	tamperAt := len(token) - 2
+	replacement := "x"
+	if token[tamperAt] == 'x' {
+		replacement = "y"
+	}
+	return token[:tamperAt] + replacement + token[tamperAt+1:]
+}
+
+func createMiddlewarePATUser(t *testing.T, username, token string) *model.User {
+	t.Helper()
+	user := &model.User{
+		Username: username, Password: "password-placeholder", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AccessToken: &token, AuthVersion: 1,
+		AffCode: "middleware-aff-" + username,
+	}
+	require.NoError(t, model.DB.Create(user).Error)
+	return user
+}
+
+func TestUserAuthAllowsOpaqueDottedPAT(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	user := createMiddlewarePATUser(t, "dotted-pat-user", "opaque.key.with-dots")
+	router := gin.New()
+	router.GET("/protected", UserAuth(), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"id": c.GetInt("id")})
 	})
-	engine.GET("/protected", UserAuth(), func(c *gin.Context) {
-		c.Status(http.StatusNoContent)
-	})
-
-	seedResponse := httptest.NewRecorder()
-	engine.ServeHTTP(seedResponse, httptest.NewRequest(http.MethodGet, "/seed", nil))
-	require.Len(t, seedResponse.Result().Cookies(), 1)
-	sessionCookie := seedResponse.Result().Cookies()[0]
-
-	request := func(path string, userID string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		req.AddCookie(sessionCookie)
-		if userID != "" {
-			req.Header.Set("New-Api-User", userID)
-		}
-		response := httptest.NewRecorder()
-		engine.ServeHTTP(response, req)
-		return response
-	}
-
-	selfWithoutHeader := request("/self", "")
-	require.Equal(t, http.StatusOK, selfWithoutHeader.Code)
-	assert.JSONEq(t, `{"id":42}`, selfWithoutHeader.Body.String())
-
-	assert.Equal(t, http.StatusOK, request("/self", "42").Code)
-	assert.Equal(t, http.StatusUnauthorized, request("/self", "41").Code)
-	assert.Equal(t, http.StatusUnauthorized, request("/protected", "").Code)
-}
-
-func TestSessionAuthUsesCurrentStatusAndRole(t *testing.T) {
-	tests := []struct {
-		name           string
-		middleware     gin.HandlerFunc
-		update         map[string]any
-		expectedStatus int
-	}{
-		{
-			name:           "disabled user",
-			middleware:     UserAuth(),
-			update:         map[string]any{"status": common.UserStatusDisabled},
-			expectedStatus: http.StatusOK,
-		},
-		{
-			name:           "demoted administrator",
-			middleware:     AdminAuth(),
-			update:         map[string]any{"role": common.RoleCommonUser},
-			expectedStatus: http.StatusOK,
-		},
-	}
-
-	for index, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			setupAuthTestDatabase(t)
-			user := model.User{
-				Id:       7301 + index,
-				Username: "current-auth-user",
-				Role:     common.RoleAdminUser,
-				Status:   common.UserStatusEnabled,
-				Group:    "default",
-			}
-			require.NoError(t, model.DB.Create(&user).Error)
-
-			gin.SetMode(gin.TestMode)
-			engine := gin.New()
-			engine.Use(sessions.Sessions("session", cookie.NewStore([]byte("current-auth-test-secret"))))
-			engine.GET("/seed", func(c *gin.Context) {
-				session := sessions.Default(c)
-				session.Set("id", user.Id)
-				session.Set("username", user.Username)
-				session.Set("role", user.Role)
-				session.Set("status", user.Status)
-				session.Set("group", user.Group)
-				require.NoError(t, session.Save())
-				c.Status(http.StatusNoContent)
-			})
-			handlerReached := false
-			engine.GET("/protected", test.middleware, func(c *gin.Context) {
-				handlerReached = true
-				c.Status(http.StatusNoContent)
-			})
-
-			seedResponse := httptest.NewRecorder()
-			engine.ServeHTTP(seedResponse, httptest.NewRequest(http.MethodGet, "/seed", nil))
-			require.Len(t, seedResponse.Result().Cookies(), 1)
-			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Updates(test.update).Error)
-			require.NoError(t, model.InvalidateUserCache(user.Id))
-
-			req := httptest.NewRequest(http.MethodGet, "/protected", nil)
-			req.AddCookie(seedResponse.Result().Cookies()[0])
-			req.Header.Set("New-Api-User", fmt.Sprint(user.Id))
-			response := httptest.NewRecorder()
-			engine.ServeHTTP(response, req)
-
-			assert.Equal(t, test.expectedStatus, response.Code)
-			assert.False(t, handlerReached)
-			assert.Contains(t, response.Body.String(), `"success":false`)
-		})
-	}
-}
-
-func TestTokenOrUserAuthDoesNotTrustSessionStatus(t *testing.T) {
-	setupAuthTestDatabase(t)
-	user := model.User{
-		Id:       7401,
-		Username: "disabled-video-user",
-		Role:     common.RoleCommonUser,
-		Status:   common.UserStatusDisabled,
-		Group:    "default",
-	}
-	require.NoError(t, model.DB.Create(&user).Error)
-
-	gin.SetMode(gin.TestMode)
-	engine := gin.New()
-	engine.Use(sessions.Sessions("session", cookie.NewStore([]byte("token-or-user-auth-test-secret"))))
-	engine.GET("/seed", func(c *gin.Context) {
-		session := sessions.Default(c)
-		session.Set("id", user.Id)
-		session.Set("username", user.Username)
-		session.Set("role", user.Role)
-		session.Set("status", common.UserStatusEnabled)
-		session.Set("group", user.Group)
-		require.NoError(t, session.Save())
-		c.Status(http.StatusNoContent)
-	})
-	handlerReached := false
-	engine.GET("/video", TokenOrUserAuth(), func(c *gin.Context) {
-		handlerReached = true
-		c.Status(http.StatusNoContent)
-	})
-
-	seedResponse := httptest.NewRecorder()
-	engine.ServeHTTP(seedResponse, httptest.NewRequest(http.MethodGet, "/seed", nil))
-	require.Len(t, seedResponse.Result().Cookies(), 1)
-	req := httptest.NewRequest(http.MethodGet, "/video", nil)
-	req.AddCookie(seedResponse.Result().Cookies()[0])
+	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	request.Header.Set("Authorization", "Bearer opaque.key.with-dots")
 	response := httptest.NewRecorder()
-	engine.ServeHTTP(response, req)
+
+	router.ServeHTTP(response, request)
 
 	assert.Equal(t, http.StatusOK, response.Code)
-	assert.False(t, handlerReached)
-	assert.Contains(t, response.Body.String(), `"success":false`)
-}
-
-func TestTryUserAuthIgnoresDisabledSessionUser(t *testing.T) {
-	setupAuthTestDatabase(t)
-	user := model.User{
-		Id:       7501,
-		Username: "disabled-public-user",
-		Role:     common.RoleCommonUser,
-		Status:   common.UserStatusDisabled,
-		Group:    "default",
+	var body struct {
+		ID int `json:"id"`
 	}
-	require.NoError(t, model.DB.Create(&user).Error)
-
-	gin.SetMode(gin.TestMode)
-	engine := gin.New()
-	engine.Use(sessions.Sessions("session", cookie.NewStore([]byte("try-user-auth-test-secret"))))
-	engine.GET("/seed", func(c *gin.Context) {
-		session := sessions.Default(c)
-		session.Set("id", user.Id)
-		require.NoError(t, session.Save())
-		c.Status(http.StatusNoContent)
-	})
-	engine.GET("/public", TryUserAuth(), func(c *gin.Context) {
-		_, authenticated := c.Get("id")
-		c.JSON(http.StatusOK, gin.H{"authenticated": authenticated})
-	})
-
-	seedResponse := httptest.NewRecorder()
-	engine.ServeHTTP(seedResponse, httptest.NewRequest(http.MethodGet, "/seed", nil))
-	require.Len(t, seedResponse.Result().Cookies(), 1)
-	req := httptest.NewRequest(http.MethodGet, "/public", nil)
-	req.AddCookie(seedResponse.Result().Cookies()[0])
-	response := httptest.NewRecorder()
-	engine.ServeHTTP(response, req)
-
-	assert.Equal(t, http.StatusOK, response.Code)
-	assert.JSONEq(t, `{"authenticated":false}`, response.Body.String())
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+	assert.Equal(t, user.Id, body.ID)
 }
 
-func TestUserSelfAuthClearsMalformedSession(t *testing.T) {
+func TestUserAuthNeverFallsBackForRecognizedInvalidInternalJWT(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	identity := service.AuthIdentity{UserID: 42, SessionID: "session-42", UserAuthVersion: 1, SessionVersion: 1}
+	token, _, err := service.IssueAccessToken(identity)
+	require.NoError(t, err)
+	tampered := tamperDashboardToken(token)
+	createMiddlewarePATUser(t, "jwt-fallback-user", tampered)
+	router := gin.New()
+	router.GET("/protected", UserAuth(), func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	request.Header.Set("Authorization", "Bearer "+tampered)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	assert.Equal(t, http.StatusUnauthorized, response.Code)
+	assert.Contains(t, response.Body.String(), "AUTH_UNAUTHORIZED")
+}
+
+func TestTryUserAuthCredentialClassification(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
 	gin.SetMode(gin.TestMode)
-	engine := gin.New()
-	engine.Use(sessions.Sessions("session", cookie.NewStore([]byte("malformed-auth-session-test-secret"))))
-	engine.GET("/seed", func(c *gin.Context) {
-		session := sessions.Default(c)
-		session.Set("id", 42)
-		session.Set("username", "stale-user")
-		session.Set("role", "not-an-integer")
-		session.Set("status", common.UserStatusEnabled)
-		session.Set("group", "default")
-		require.NoError(t, session.Save())
-		c.Status(http.StatusNoContent)
-	})
-	engine.GET("/self", UserSelfAuth(), func(c *gin.Context) {
-		c.Status(http.StatusNoContent)
-	})
-	engine.GET("/inspect", func(c *gin.Context) {
-		session := sessions.Default(c)
+
+	patUser := createMiddlewarePATUser(t, "optional-pat-user", "optional.pat.with-dots")
+	internalUser := createMiddlewarePATUser(t, "optional-session-user", "unrelated-pat")
+	now := time.Now().Unix()
+	session := &model.UserSession{
+		SID:             "optional-auth-session",
+		UserID:          internalUser.Id,
+		Version:         1,
+		UserAuthVersion: internalUser.AuthVersion,
+		Status:          model.UserSessionStatusActive,
+		RefreshHash:     "refresh-hash",
+		LoginMethod:     "password",
+		LastActiveAt:    now,
+		ExpiresAt:       now + 3600,
+	}
+	require.NoError(t, model.CreateUserSession(session))
+	identity := service.AuthIdentity{
+		UserID:          internalUser.Id,
+		SessionID:       session.SID,
+		UserAuthVersion: session.UserAuthVersion,
+		SessionVersion:  session.Version,
+	}
+	accessToken, _, err := service.IssueAccessToken(identity)
+	require.NoError(t, err)
+	securityProof, _, err := service.IssueSecurityProof(identity, "2fa", []string{"channel.key.read"})
+	require.NoError(t, err)
+	externalToken, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"iss": "external-issuer",
+		"aud": "external-audience",
+		"exp": time.Now().Add(time.Minute).Unix(),
+	}).SignedString([]byte("external-secret"))
+	require.NoError(t, err)
+
+	router := gin.New()
+	router.GET("/optional", TryUserAuth(), func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
-			"id":       session.Get("id"),
-			"username": session.Get("username"),
-			"role":     session.Get("role"),
-			"status":   session.Get("status"),
-			"group":    session.Get("group"),
+			"id":               c.GetInt("id"),
+			"use_access_token": c.GetBool("use_access_token"),
 		})
 	})
 
-	seedResponse := httptest.NewRecorder()
-	engine.ServeHTTP(seedResponse, httptest.NewRequest(http.MethodGet, "/seed", nil))
-	require.Len(t, seedResponse.Result().Cookies(), 1)
-
-	authRequest := httptest.NewRequest(http.MethodGet, "/self", nil)
-	authRequest.AddCookie(seedResponse.Result().Cookies()[0])
-	authResponse := httptest.NewRecorder()
-	engine.ServeHTTP(authResponse, authRequest)
-	require.Equal(t, http.StatusUnauthorized, authResponse.Code)
-
-	var clearedCookie *http.Cookie
-	for _, responseCookie := range authResponse.Result().Cookies() {
-		if responseCookie.Name == "session" {
-			clearedCookie = responseCookie
-		}
+	tests := []struct {
+		name          string
+		token         string
+		wantStatus    int
+		wantUserID    int
+		wantPAT       bool
+		wantErrorCode string
+	}{
+		{name: "no authorization header", wantStatus: http.StatusOK},
+		{name: "opaque unmatched credential", token: "opaque-relay-key", wantStatus: http.StatusOK},
+		{name: "dotted unmatched credential", token: "ordinary.key.with-dots", wantStatus: http.StatusOK},
+		{name: "third party jwt", token: externalToken, wantStatus: http.StatusOK},
+		{name: "valid pat", token: "optional.pat.with-dots", wantStatus: http.StatusOK, wantUserID: patUser.Id, wantPAT: true},
+		{name: "valid internal access jwt", token: accessToken, wantStatus: http.StatusOK, wantUserID: internalUser.Id},
+		{name: "expired internal access jwt", token: issueExpiredDashboardAccessToken(t, identity), wantStatus: http.StatusUnauthorized, wantErrorCode: "AUTH_TOKEN_EXPIRED"},
+		{name: "tampered internal access jwt", token: tamperDashboardToken(accessToken), wantStatus: http.StatusUnauthorized, wantErrorCode: "AUTH_UNAUTHORIZED"},
+		{name: "security proof used as access", token: securityProof, wantStatus: http.StatusUnauthorized, wantErrorCode: "AUTH_UNAUTHORIZED"},
 	}
-	require.NotNil(t, clearedCookie)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/optional", nil)
+			if test.token != "" {
+				request.Header.Set("Authorization", "Bearer "+test.token)
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			assert.Equal(t, test.wantStatus, response.Code)
+			if test.wantErrorCode != "" {
+				assert.Contains(t, response.Body.String(), test.wantErrorCode)
+				return
+			}
+			var body struct {
+				ID             int  `json:"id"`
+				UseAccessToken bool `json:"use_access_token"`
+			}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+			assert.Equal(t, test.wantUserID, body.ID)
+			assert.Equal(t, test.wantPAT, body.UseAccessToken)
+		})
+	}
 
-	inspectRequest := httptest.NewRequest(http.MethodGet, "/inspect", nil)
-	inspectRequest.AddCookie(clearedCookie)
-	inspectResponse := httptest.NewRecorder()
-	engine.ServeHTTP(inspectResponse, inspectRequest)
-	require.Equal(t, http.StatusOK, inspectResponse.Code)
-	assert.JSONEq(t, `{"id":null,"username":null,"role":null,"status":null,"group":null}`, inspectResponse.Body.String())
+	requiredRouter := gin.New()
+	requiredRouter.GET("/required", UserAuth(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	requiredRequest := httptest.NewRequest(http.MethodGet, "/required", nil)
+	requiredRequest.Header.Set("Authorization", "Bearer ordinary-unmatched-key")
+	requiredResponse := httptest.NewRecorder()
+	requiredRouter.ServeHTTP(requiredResponse, requiredRequest)
+	assert.Equal(t, http.StatusUnauthorized, requiredResponse.Code, "required dashboard authentication must not adopt optional-auth fallback semantics")
+
+	var patUserQueries int
+	forcedCacheError := errors.New("forced PAT user cache lookup failure")
+	const callbackName = "test:optional-auth-pat-user-cache-failure"
+	require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "users" {
+			return
+		}
+		patUserQueries++
+		if patUserQueries == 2 {
+			tx.AddError(forcedCacheError)
+		}
+	}))
+	cacheFailureRequest := httptest.NewRequest(http.MethodGet, "/optional", nil)
+	cacheFailureRequest.Header.Set("Authorization", "Bearer optional.pat.with-dots")
+	cacheFailureResponse := httptest.NewRecorder()
+	router.ServeHTTP(cacheFailureResponse, cacheFailureRequest)
+	model.DB.Callback().Query().Remove(callbackName)
+	assert.Equal(t, http.StatusInternalServerError, cacheFailureResponse.Code)
+	assert.Contains(t, cacheFailureResponse.Body.String(), "AUTH_INTERNAL_ERROR")
+
+	sqlDB, err := model.DB.DB()
+	require.NoError(t, err)
+	require.NoError(t, sqlDB.Close())
+	databaseFailureRequest := httptest.NewRequest(http.MethodGet, "/optional", nil)
+	databaseFailureRequest.Header.Set("Authorization", "Bearer database-failure-key")
+	databaseFailureResponse := httptest.NewRecorder()
+	router.ServeHTTP(databaseFailureResponse, databaseFailureRequest)
+	assert.Equal(t, http.StatusInternalServerError, databaseFailureResponse.Code)
+	assert.Contains(t, databaseFailureResponse.Body.String(), "AUTH_INTERNAL_ERROR")
 }

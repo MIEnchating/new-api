@@ -3,18 +3,43 @@ package common
 import (
 	"fmt"
 	"net"
-	"net/http"
 	"net/url"
 	"os"
 	"strings"
-	"time"
-
-	"github.com/gin-gonic/gin"
 )
 
-// SessionCookieSameSite allows top-level OAuth callbacks to carry the login
-// session while still excluding cookies from cross-site subrequests and POSTs.
-const SessionCookieSameSite http.SameSite = http.SameSiteLaxMode
+// NormalizeOrigin validates and canonicalizes a browser origin. Only an exact
+// scheme/host/effective-port match is meaningful; paths and wildcards are not
+// accepted for authentication cookie endpoints.
+func NormalizeOrigin(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "null" || strings.ContainsAny(raw, "\r\n") {
+		return "", fmt.Errorf("origin is empty or invalid")
+	}
+	parsedURL, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid origin: %w", err)
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return "", fmt.Errorf("origin scheme must be http or https")
+	}
+	if parsedURL.Host == "" || parsedURL.User != nil || parsedURL.RawQuery != "" || parsedURL.Fragment != "" || (parsedURL.Path != "" && parsedURL.Path != "/") {
+		return "", fmt.Errorf("origin must contain only scheme and host")
+	}
+	hostname := strings.ToLower(parsedURL.Hostname())
+	if hostname == "" || strings.Contains(hostname, "*") {
+		return "", fmt.Errorf("origin host is empty")
+	}
+	port := parsedURL.Port()
+	normalizedHost := hostname
+	if strings.Contains(hostname, ":") {
+		normalizedHost = "[" + hostname + "]"
+	}
+	if port == "" || (parsedURL.Scheme == "http" && port == "80") || (parsedURL.Scheme == "https" && port == "443") {
+		return parsedURL.Scheme + "://" + normalizedHost, nil
+	}
+	return parsedURL.Scheme + "://" + net.JoinHostPort(hostname, port), nil
+}
 
 func InitSessionCookieSettings() error {
 	secureRaw := strings.TrimSpace(os.Getenv("SESSION_COOKIE_SECURE"))
@@ -42,7 +67,6 @@ func InitSessionCookieSettings() error {
 	if trustedURLsRaw == "" {
 		return fmt.Errorf("SESSION_COOKIE_SECURE=true requires SESSION_COOKIE_TRUSTED_URL")
 	}
-
 	domain := strings.ToLower(strings.TrimPrefix(domainRaw, "."))
 	if domainRaw != "" && !isValidCookieDomain(domain) {
 		return fmt.Errorf("SESSION_COOKIE_DOMAIN must be a valid parent domain without scheme or port")
@@ -55,23 +79,26 @@ func InitSessionCookieSettings() error {
 		if trustedURL == "" {
 			return fmt.Errorf("SESSION_COOKIE_TRUSTED_URL contains an empty URL")
 		}
-		parsedURL, err := url.Parse(trustedURL)
+		normalizedOrigin, err := NormalizeOrigin(trustedURL)
 		if err != nil {
 			return fmt.Errorf("invalid SESSION_COOKIE_TRUSTED_URL: %w", err)
 		}
-		if parsedURL.Scheme != "https" || parsedURL.Host == "" || parsedURL.User != nil || (parsedURL.Path != "" && parsedURL.Path != "/") || parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
-			return fmt.Errorf("SESSION_COOKIE_TRUSTED_URL must contain only HTTPS origins without paths, queries, or fragments")
+		if !strings.HasPrefix(normalizedOrigin, "https://") {
+			return fmt.Errorf("SESSION_COOKIE_TRUSTED_URL must contain only https URLs with hosts")
 		}
-		hostname := strings.ToLower(parsedURL.Hostname())
+		parsedOrigin, err := url.Parse(normalizedOrigin)
+		if err != nil {
+			return fmt.Errorf("invalid SESSION_COOKIE_TRUSTED_URL: %w", err)
+		}
+		hostname := strings.ToLower(parsedOrigin.Hostname())
 		if domain != "" && hostname != domain && !strings.HasSuffix(hostname, "."+domain) {
 			return fmt.Errorf("SESSION_COOKIE_TRUSTED_URL host %s is outside SESSION_COOKIE_DOMAIN", hostname)
 		}
-		normalizedURL := "https://" + strings.ToLower(parsedURL.Host)
-		if _, exists := seenTrustedURLs[normalizedURL]; exists {
+		if _, exists := seenTrustedURLs[normalizedOrigin]; exists {
 			continue
 		}
-		seenTrustedURLs[normalizedURL] = struct{}{}
-		SessionCookieTrustedURLs = append(SessionCookieTrustedURLs, normalizedURL)
+		seenTrustedURLs[normalizedOrigin] = struct{}{}
+		SessionCookieTrustedURLs = append(SessionCookieTrustedURLs, normalizedOrigin)
 	}
 
 	SessionCookieSecure = true
@@ -100,57 +127,12 @@ func SessionDomainForHost(hostPort string) string {
 	if SessionCookieDomain == "" {
 		return ""
 	}
-	host := normalizeSessionCookieHost(hostPort)
-	if host == SessionCookieDomain || strings.HasSuffix(host, "."+SessionCookieDomain) {
-		return SessionCookieDomain
-	}
-	return ""
-}
-
-func normalizeSessionCookieHost(hostPort string) string {
 	host := strings.ToLower(strings.TrimSuffix(hostPort, "."))
 	if parsedHost, _, err := net.SplitHostPort(hostPort); err == nil {
 		host = strings.ToLower(strings.TrimSuffix(parsedHost, "."))
 	}
-	return host
-}
-
-// ClearLegacyHostOnlySessionCookie removes the host-only cookie used before
-// shared-domain sessions were enabled. Browsers may otherwise send both
-// cookies with the same name, causing the server to read stale session data.
-// When issuing a replacement shared cookie, call this before session.Save so
-// the shared cookie is the final Set-Cookie value for this response.
-func ClearLegacyHostOnlySessionCookie(c *gin.Context) {
-	domain := SessionDomainForHost(c.Request.Host)
-	if domain == "" {
-		return
+	if host == SessionCookieDomain || strings.HasSuffix(host, "."+SessionCookieDomain) {
+		return SessionCookieDomain
 	}
-
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     "session",
-		Value:    "",
-		Path:     "/",
-		Expires:  time.Unix(1, 0).UTC(),
-		MaxAge:   -1,
-		HttpOnly: true,
-		Secure:   SessionCookieSecure,
-		SameSite: SessionCookieSameSite,
-	})
-}
-
-// ClearDuplicateLegacySessionCookie removes a stale host-only session cookie
-// when the browser sends it together with the shared-domain session cookie.
-// The deletion cookie has no Domain attribute, so the shared cookie remains.
-func ClearDuplicateLegacySessionCookie(c *gin.Context) {
-	sessionCookieCount := 0
-	for _, cookie := range c.Request.Cookies() {
-		if cookie.Name == "session" {
-			sessionCookieCount++
-		}
-	}
-	if sessionCookieCount < 2 {
-		return
-	}
-
-	ClearLegacyHostOnlySessionCookie(c)
+	return ""
 }
