@@ -24,3 +24,15 @@ export function replaceBootstrapAndMount(
   rootElement.replaceChildren()
   mount(rootElement)
 }
+
+export async function initializeAndMountApplication(
+  rootElement: HTMLElement,
+  initialize: () => Promise<unknown>,
+  mount: (rootElement: HTMLElement) => void
+): Promise<void> {
+  try {
+    await initialize()
+  } finally {
+    replaceBootstrapAndMount(rootElement, mount)
+  }
+}

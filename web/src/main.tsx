@@ -29,7 +29,7 @@ import ReactDOM from 'react-dom/client'
 import { toast } from 'sonner'
 
 import { getStatus } from '@/lib/api'
-import { replaceBootstrapAndMount } from '@/lib/application-root'
+import { initializeAndMountApplication } from '@/lib/application-root'
 import { installBuildMetadata } from '@/lib/build-metadata'
 import { applyFaviconToDom } from '@/lib/dom-utils'
 import '@/lib/dayjs'
@@ -39,7 +39,7 @@ import { handleServerError } from '@/lib/handle-server-error'
 import { DirectionProvider } from './context/direction-provider'
 import { FontProvider } from './context/font-provider'
 import { ThemeProvider } from './context/theme-provider'
-import './i18n/config'
+import { initializeI18n } from './i18n/config'
 // Generated Routes
 import { routeTree } from './routeTree.gen'
 
@@ -156,7 +156,7 @@ if (!rootElement) {
     /* empty */
   }
 })()
-replaceBootstrapAndMount(rootElement, (applicationRoot) => {
+void initializeAndMountApplication(rootElement, initializeI18n, (applicationRoot) => {
   const root = ReactDOM.createRoot(applicationRoot)
   root.render(
     <StrictMode>
