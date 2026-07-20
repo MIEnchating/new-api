@@ -459,11 +459,7 @@ const MonitorRow = memo(function MonitorRow(props: {
           />
           <MetricItem
             label={t('7-day uptime')}
-            value={formatOptionalUptime(
-              props.monitor.uptime7 ??
-                props.monitor.uptime24 ??
-                props.monitor.uptime
-            )}
+            value={formatOptionalUptime(props.monitor.uptime7)}
           />
           <MetricItem
             label={t('Latency')}

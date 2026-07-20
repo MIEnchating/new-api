@@ -122,11 +122,14 @@ SESSION_SECRET=replace_with_a_long_random_secret
 SESSION_COOKIE_SECURE=true
 SESSION_COOKIE_TRUSTED_URL=https://yunmian.tech,https://www.yunmian.tech
 SESSION_COOKIE_DOMAIN=yunmian.tech
+USER_AUTH_CACHE_TTL_SECONDS=3
 ```
 
 `SESSION_COOKIE_DOMAIN` 填写根域名，不填写通配符，例如使用 `yunmian.tech`，不要使用 `*.yunmian.tech`。
 
 系统设置中的服务器地址、可信站点地址负责 OAuth 和支付返回来源；`SESSION_COOKIE_*` 控制浏览器 Cookie。多域名登录时两部分都要正确配置。
+
+`USER_AUTH_CACHE_TTL_SECONDS` 默认是 3 秒。项目内的禁用、角色和分组变更会主动刷新或失效缓存，并通过 Redis Pub/Sub 通知其他实例；直接在数据库外部修改用户记录，或 Redis 暂时不可用时，最长会等待该 TTL。设置为 `0` 可恢复为每次请求查询数据库。
 
 修改 Compose 环境变量后，单纯执行 `restart` 不会更新容器环境，必须重建应用容器：
 

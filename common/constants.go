@@ -77,6 +77,7 @@ var CryptoSecret = uuid.New().String()
 var SessionCookieSecure = false
 var SessionCookieTrustedURLs []string
 var SessionCookieDomain string
+var UserAuthCacheTTLSeconds = 3
 
 var OptionMap map[string]string
 var OptionMapRWMutex sync.RWMutex

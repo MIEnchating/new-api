@@ -1,10 +1,15 @@
 package service
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -26,11 +31,176 @@ import (
 const channelRouteTestModel = "gpt-channel-route-test"
 
 type rejectRedisCommandsHook struct {
+	mu        sync.Mutex
 	commands  []string
 	pipelines [][]string
 }
 
+type blockingTraceRedisHook struct {
+	mu                sync.Mutex
+	requestID         string
+	snapshots         []ChannelExecutionTrace
+	failuresRemaining int
+	rejectCommands    bool
+	firstStarted      chan struct{}
+	releaseFirst      chan struct{}
+}
+
+func (hook *blockingTraceRedisHook) BeforeProcess(ctx context.Context, _ redis.Cmder) (context.Context, error) {
+	hook.mu.Lock()
+	reject := hook.rejectCommands
+	hook.mu.Unlock()
+	if reject {
+		return ctx, errors.New("redis unavailable in test")
+	}
+	return ctx, nil
+}
+
+func (hook *blockingTraceRedisHook) AfterProcess(context.Context, redis.Cmder) error {
+	return nil
+}
+
+func (hook *blockingTraceRedisHook) BeforeProcessPipeline(ctx context.Context, commands []redis.Cmder) (context.Context, error) {
+	trace := ChannelExecutionTrace{}
+	if len(commands) > 0 {
+		args := commands[0].Args()
+		if len(args) > 2 {
+			var raw []byte
+			switch value := args[2].(type) {
+			case string:
+				raw = []byte(value)
+			case []byte:
+				raw = value
+			default:
+				raw = []byte(fmt.Sprint(value))
+			}
+			_ = common.Unmarshal(raw, &trace)
+		}
+	}
+	if hook.requestID != "" && trace.RequestID != hook.requestID {
+		return ctx, nil
+	}
+	hook.mu.Lock()
+	hook.snapshots = append(hook.snapshots, trace)
+	index := len(hook.snapshots)
+	shouldFail := hook.failuresRemaining > 0
+	if shouldFail {
+		hook.failuresRemaining--
+	}
+	hook.mu.Unlock()
+	if index == 1 && hook.firstStarted != nil {
+		close(hook.firstStarted)
+		if hook.releaseFirst != nil {
+			<-hook.releaseFirst
+		}
+	}
+	if shouldFail {
+		return ctx, errors.New("redis unavailable in test")
+	}
+	return ctx, nil
+}
+
+func (hook *blockingTraceRedisHook) AfterProcessPipeline(context.Context, []redis.Cmder) error {
+	return nil
+}
+
+func (hook *blockingTraceRedisHook) snapshotStatuses() []string {
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
+	statuses := make([]string, 0, len(hook.snapshots))
+	for _, snapshot := range hook.snapshots {
+		statuses = append(statuses, snapshot.Status)
+	}
+	return statuses
+}
+
+func (hook *blockingTraceRedisHook) snapshotTraces() []ChannelExecutionTrace {
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
+	return append([]ChannelExecutionTrace(nil), hook.snapshots...)
+}
+
+func (hook *blockingTraceRedisHook) pipelineCount() int {
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
+	return len(hook.snapshots)
+}
+
+func readTraceRedisCommand(reader *bufio.Reader) (string, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	if len(line) < 3 || line[0] != '*' {
+		return "", fmt.Errorf("unexpected RESP array: %q", line)
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(line[1:]))
+	if err != nil {
+		return "", err
+	}
+	command := ""
+	for index := 0; index < count; index++ {
+		lengthLine, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			return "", readErr
+		}
+		if len(lengthLine) < 3 || lengthLine[0] != '$' {
+			return "", fmt.Errorf("unexpected RESP bulk string: %q", lengthLine)
+		}
+		length, parseErr := strconv.Atoi(strings.TrimSpace(lengthLine[1:]))
+		if parseErr != nil {
+			return "", parseErr
+		}
+		value := make([]byte, length+2)
+		if _, readErr = io.ReadFull(reader, value); readErr != nil {
+			return "", readErr
+		}
+		if index == 0 {
+			command = strings.ToLower(string(value[:length]))
+		}
+	}
+	return command, nil
+}
+
+func serveTraceRedisConnection(connection net.Conn) {
+	defer connection.Close()
+	reader := bufio.NewReader(connection)
+	for {
+		command, err := readTraceRedisCommand(reader)
+		if err != nil {
+			return
+		}
+		response := ":1\r\n"
+		if command == "set" || command == "auth" || command == "select" {
+			response = "+OK\r\n"
+		}
+		if _, err = io.WriteString(connection, response); err != nil {
+			return
+		}
+	}
+}
+
+func newTraceRedisTestClient(t *testing.T, hook redis.Hook) *redis.Client {
+	t.Helper()
+	client := redis.NewClient(&redis.Options{
+		Addr:       "trace-redis-test",
+		MaxRetries: -1,
+		Dialer: func(context.Context, string, string) (net.Conn, error) {
+			clientConnection, serverConnection := net.Pipe()
+			go serveTraceRedisConnection(serverConnection)
+			return clientConnection, nil
+		},
+	})
+	if hook != nil {
+		client.AddHook(hook)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return client
+}
+
 func (hook *rejectRedisCommandsHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error) {
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
 	hook.commands = append(hook.commands, cmd.Name())
 	return ctx, errors.New("redis unavailable in test")
 }
@@ -44,12 +214,20 @@ func (hook *rejectRedisCommandsHook) BeforeProcessPipeline(ctx context.Context, 
 	for _, command := range commands {
 		names = append(names, command.Name())
 	}
+	hook.mu.Lock()
 	hook.pipelines = append(hook.pipelines, names)
+	hook.mu.Unlock()
 	return ctx, errors.New("redis unavailable in test")
 }
 
 func (hook *rejectRedisCommandsHook) AfterProcessPipeline(context.Context, []redis.Cmder) error {
 	return nil
+}
+
+func (hook *rejectRedisCommandsHook) pipelineCount() int {
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
+	return len(hook.pipelines)
 }
 
 func setupChannelRouteTest(t *testing.T) *gorm.DB {
@@ -80,6 +258,8 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	channelExecutionTraceCacheOnce = sync.Once{}
 	channelExecutionTraceCache = nil
 	channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
+	channelExecutionFallback = make(map[string]ChannelExecutionTrace)
+	channelExecutionFallbackOrder = make([]string, 0, channelExecutionFallbackSize)
 	channelExecutionRecentWrites = 0
 	tokenGroupRouteCooldowns = sync.Map{}
 
@@ -104,6 +284,8 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 		channelExecutionTraceCacheOnce = sync.Once{}
 		channelExecutionTraceCache = nil
 		channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
+		channelExecutionFallback = make(map[string]ChannelExecutionTrace)
+		channelExecutionFallbackOrder = make([]string, 0, channelExecutionFallbackSize)
 		channelExecutionRecentWrites = 0
 		tokenGroupRouteCooldowns = sync.Map{}
 		model.DB = oldDB
@@ -317,6 +499,320 @@ func TestPublishChannelExecutionTraceRedisUsesSinglePipeline(t *testing.T) {
 	require.Error(t, err)
 	require.Len(t, hook.pipelines, 1)
 	assert.Equal(t, []string{"set", "zadd", "zremrangebyscore", "expire", "zadd", "zremrangebyscore", "expire"}, hook.pipelines[0])
+}
+
+func TestChannelExecutionTraceDebouncesRunningRedisPublishes(t *testing.T) {
+	setupChannelRouteTest(t)
+	oldRDB := common.RDB
+	hook := &blockingTraceRedisHook{requestID: "debounced-running-publish"}
+	client := newTraceRedisTestClient(t, hook)
+	common.RDB = client
+	common.RedisEnabled = true
+	t.Cleanup(func() {
+		common.RDB = oldRDB
+	})
+
+	ctx := newChannelRouteContext()
+	ctx.Set(common.RequestIdKey, "debounced-running-publish")
+	for index := 0; index < 5; index++ {
+		appendChannelExecutionEvent(ctx, "default", channelRouteTestModel, "/v1/chat/completions", ChannelExecutionEvent{
+			ChannelID: index + 1,
+			State:     "active",
+		})
+	}
+
+	assert.Equal(t, 0, hook.pipelineCount())
+	require.Eventually(t, func() bool {
+		return hook.pipelineCount() == 1
+	}, time.Second, 10*time.Millisecond)
+
+	MarkChannelExecutionSuccess(ctx)
+	assert.Equal(t, 2, hook.pipelineCount())
+	state, exists := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, exists)
+	state.mu.Lock()
+	assert.Equal(t, "success", state.trace.Status)
+	require.Len(t, state.trace.Events, 6)
+	assert.Equal(t, "success", state.trace.Events[5].State)
+	assert.Equal(t, state.revision, state.publishedRevision)
+	state.mu.Unlock()
+}
+
+func TestChannelExecutionTraceTerminalPublishCannotBeOverwrittenByRunningSnapshot(t *testing.T) {
+	setupChannelRouteTest(t)
+	oldRDB := common.RDB
+	hook := &blockingTraceRedisHook{
+		requestID:    "terminal-publish-order",
+		firstStarted: make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+	}
+	client := newTraceRedisTestClient(t, hook)
+	common.RDB = client
+	common.RedisEnabled = true
+	t.Cleanup(func() {
+		common.RDB = oldRDB
+	})
+
+	ctx := newChannelRouteContext()
+	ctx.Set(common.RequestIdKey, "terminal-publish-order")
+	appendChannelExecutionEvent(ctx, "default", channelRouteTestModel, "/v1/chat/completions", ChannelExecutionEvent{
+		ChannelID: 1,
+		State:     "active",
+	})
+	select {
+	case <-hook.firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("running trace publish did not start")
+	}
+
+	terminalDone := make(chan struct{})
+	go func() {
+		MarkChannelExecutionSuccess(ctx)
+		close(terminalDone)
+	}()
+	select {
+	case <-terminalDone:
+		t.Fatal("terminal publish bypassed the in-flight running publish")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(hook.releaseFirst)
+	select {
+	case <-terminalDone:
+	case <-time.After(time.Second):
+		t.Fatal("terminal publish did not complete")
+	}
+
+	assert.Equal(t, []string{"running", "success"}, hook.snapshotStatuses())
+}
+
+func TestChannelExecutionTraceTerminalPublishRetriesAfterRedisRecovery(t *testing.T) {
+	setupChannelRouteTest(t)
+	oldRDB := common.RDB
+	hook := &blockingTraceRedisHook{requestID: "terminal-publish-recovery", failuresRemaining: 1, rejectCommands: true}
+	client := newTraceRedisTestClient(t, hook)
+	common.RDB = client
+	common.RedisEnabled = true
+	t.Cleanup(func() { common.RDB = oldRDB })
+
+	ctx := newChannelRouteContext()
+	ctx.Set(common.RequestIdKey, "terminal-publish-recovery")
+	state := ensureChannelExecutionTrace(ctx, "default", channelRouteTestModel, "/v1/chat/completions")
+	require.NotNil(t, state)
+
+	MarkChannelExecutionSuccess(ctx)
+	require.Equal(t, 1, hook.pipelineCount())
+	fallbackTrace, found, err := GetChannelExecutionTrace("terminal-publish-recovery")
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, "success", fallbackTrace.Status)
+	recent, err := ListChannelExecutionTraces(0, "default", 20)
+	require.NoError(t, err)
+	require.Len(t, recent, 1)
+	assert.Equal(t, "terminal-publish-recovery", recent[0].RequestID)
+	require.Eventually(t, func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return hook.pipelineCount() == 2 && state.publishedRevision == state.revision && !state.publishQueued
+	}, time.Second, 10*time.Millisecond)
+	assert.Equal(t, []string{"success", "success"}, hook.snapshotStatuses())
+
+	time.Sleep(2 * channelExecutionPublishRetryBase)
+	assert.Equal(t, 2, hook.pipelineCount(), "successful recovery must not publish the terminal snapshot again")
+}
+
+func TestChannelExecutionTraceReadsPersistedFallbackWhenRedisFails(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	oldRDB := common.RDB
+	hook := &blockingTraceRedisHook{rejectCommands: true}
+	client := newTraceRedisTestClient(t, hook)
+	common.RDB = client
+	common.RedisEnabled = true
+	t.Cleanup(func() { common.RDB = oldRDB })
+
+	requestID := "persisted-redis-fallback"
+	trace := ChannelExecutionTrace{
+		RequestID: requestID,
+		Status:    "failed",
+		Group:     "default",
+		UpdatedAt: time.Now().UnixMilli(),
+		Events: []ChannelExecutionEvent{
+			{Group: "default", ChannelID: 7, State: "failed"},
+		},
+	}
+	other, err := common.Marshal(map[string]interface{}{
+		"admin_info": map[string]interface{}{"channel_execution_trace": trace},
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.Log{
+		CreatedAt: common.GetTimestamp(),
+		Type:      model.LogTypeError,
+		RequestId: requestID,
+		Group:     "default",
+		ChannelId: 7,
+		Other:     string(other),
+	}).Error)
+
+	loaded, found, err := GetChannelExecutionTrace(requestID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, requestID, loaded.RequestID)
+	assert.Equal(t, "failed", loaded.Status)
+
+	recent, err := ListChannelExecutionTraces(7, "default", 20)
+	require.NoError(t, err)
+	require.Len(t, recent, 1)
+	assert.Equal(t, requestID, recent[0].RequestID)
+}
+
+func TestChannelExecutionTracePersistedCompactSummaryKeepsGroupStatuses(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	requestID := "persisted-compact-statuses"
+	wantStatuses := []ChannelExecutionRouteGroupStatus{
+		{Group: "premium", Status: "success"},
+		{Group: "fallback", Status: "pending"},
+	}
+	other, err := common.Marshal(map[string]interface{}{
+		"admin_info": map[string]interface{}{
+			"channel_execution_trace": ChannelExecutionTraceSummary{
+				Compact:            true,
+				Mode:               "route",
+				Status:             "success",
+				Group:              "premium",
+				RouteGroups:        []string{"premium", "fallback"},
+				RouteGroupStatuses: wantStatuses,
+				ChannelIDs:         []int{7},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.Log{
+		CreatedAt: common.GetTimestamp(),
+		Type:      model.LogTypeConsume,
+		RequestId: requestID,
+		Group:     "premium",
+		ChannelId: 7,
+		Other:     string(other),
+	}).Error)
+
+	trace, found, err := GetChannelExecutionTrace(requestID)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.True(t, trace.Compact)
+	assert.Equal(t, wantStatuses, trace.RouteGroupStatuses)
+}
+
+func TestChannelExecutionTraceFallbackIsBoundedWithoutRecentIndexAmplification(t *testing.T) {
+	setupChannelRouteTest(t)
+	now := time.Now().UnixMilli()
+	for index := 0; index <= channelExecutionFallbackSize; index++ {
+		rememberChannelExecutionTraceFallback(ChannelExecutionTrace{
+			RequestID: fmt.Sprintf("bounded-fallback-%d", index),
+			Status:    "failed",
+			Group:     "default",
+			UpdatedAt: now + int64(index),
+		})
+	}
+
+	channelExecutionRecentMu.Lock()
+	defer channelExecutionRecentMu.Unlock()
+	assert.Len(t, channelExecutionFallback, channelExecutionFallbackSize)
+	assert.Len(t, channelExecutionFallbackOrder, channelExecutionFallbackSize)
+	assert.NotContains(t, channelExecutionFallback, "bounded-fallback-0")
+	assert.Contains(t, channelExecutionFallback, fmt.Sprintf("bounded-fallback-%d", channelExecutionFallbackSize))
+	assert.Empty(t, channelExecutionRecent)
+}
+
+func TestChannelExecutionTraceRevisionPublishesSameMillisecondUpdate(t *testing.T) {
+	setupChannelRouteTest(t)
+	oldRDB := common.RDB
+	hook := &blockingTraceRedisHook{
+		requestID:    "same-millisecond-revision",
+		firstStarted: make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+	}
+	client := newTraceRedisTestClient(t, hook)
+	common.RDB = client
+	common.RedisEnabled = true
+	t.Cleanup(func() { common.RDB = oldRDB })
+
+	ctx := newChannelRouteContext()
+	ctx.Set(common.RequestIdKey, "same-millisecond-revision")
+	appendChannelExecutionEvent(ctx, "default", channelRouteTestModel, "/v1/chat/completions", ChannelExecutionEvent{
+		ChannelID: 1,
+		State:     "active",
+	})
+	select {
+	case <-hook.firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first running snapshot did not start")
+	}
+
+	state, exists := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, exists)
+	state.mu.Lock()
+	firstTimestamp := state.trace.UpdatedAt
+	state.mu.Unlock()
+	appendChannelExecutionEvent(ctx, "default", channelRouteTestModel, "/v1/chat/completions", ChannelExecutionEvent{
+		ChannelID: 2,
+		State:     "active",
+	})
+	state.mu.Lock()
+	state.trace.UpdatedAt = firstTimestamp
+	state.trace.Events[len(state.trace.Events)-1].Timestamp = firstTimestamp
+	state.mu.Unlock()
+	close(hook.releaseFirst)
+
+	require.Eventually(t, func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return hook.pipelineCount() == 2 && state.publishedRevision == state.revision && !state.publishQueued
+	}, time.Second, 10*time.Millisecond)
+	snapshots := hook.snapshotTraces()
+	require.Len(t, snapshots, 2)
+	assert.Equal(t, firstTimestamp, snapshots[0].UpdatedAt)
+	assert.Equal(t, firstTimestamp, snapshots[1].UpdatedAt)
+	require.Len(t, snapshots[0].Events, 1)
+	require.Len(t, snapshots[1].Events, 2)
+}
+
+func TestChannelExecutionTraceErrorSnapshotIsImmediateWithRedis(t *testing.T) {
+	setupChannelRouteTest(t)
+	oldRDB := common.RDB
+	hook := &blockingTraceRedisHook{requestID: "immediate-error-snapshot"}
+	client := newTraceRedisTestClient(t, hook)
+	common.RDB = client
+	common.RedisEnabled = true
+	t.Cleanup(func() { common.RDB = oldRDB })
+
+	ctx := newChannelRouteContext()
+	ctx.Set(common.RequestIdKey, "immediate-error-snapshot")
+	appendChannelExecutionEvent(ctx, "", channelRouteTestModel, "/v1/chat/completions", ChannelExecutionEvent{
+		Group:     "premium",
+		ChannelID: 1,
+		State:     "failed",
+	})
+	state, exists := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, exists)
+	state.mu.Lock()
+	state.trace.RouteGroups = []string{"premium", "fallback"}
+	state.mu.Unlock()
+
+	adminInfo := map[string]interface{}{}
+	AppendChannelExecutionTraceErrorAdminInfo(ctx, adminInfo)
+	errorTrace, exists := adminInfo["channel_execution_trace"].(ChannelExecutionTrace)
+	require.True(t, exists)
+	assert.Equal(t, "failed", errorTrace.Status)
+	assert.Equal(t, []ChannelExecutionRouteGroupStatus{
+		{Group: "premium", Status: "failed"},
+		{Group: "fallback", Status: "pending"},
+	}, errorTrace.RouteGroupStatuses)
+	assert.Equal(t, 0, hook.pipelineCount(), "error snapshot must not wait for the Redis debounce")
+
+	require.Eventually(t, func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return hook.pipelineCount() == 1 && state.publishedRevision == state.revision && !state.publishQueued
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestPruneChannelExecutionRecentRemovesColdExpiredAndEmptyKeys(t *testing.T) {
@@ -764,6 +1260,11 @@ func TestListChannelExecutionTracesFallsBackToPersistedSummary(t *testing.T) {
 				Mode:        "route",
 				Status:      "success",
 				Group:       "persisted-group",
+				RouteGroups: []string{"persisted-group", "fallback"},
+				RouteGroupStatuses: []ChannelExecutionRouteGroupStatus{
+					{Group: "persisted-group", Status: "success"},
+					{Group: "fallback", Status: "pending"},
+				},
 				ChannelIDs:  []int{108, 163},
 				AffinityHit: true,
 			},
@@ -786,6 +1287,10 @@ func TestListChannelExecutionTracesFallsBackToPersistedSummary(t *testing.T) {
 	assert.True(t, traces[0].Compact)
 	assert.Equal(t, "persisted-group", traces[0].Group)
 	assert.Equal(t, []int{108, 163}, traces[0].ChannelIDs)
+	assert.Equal(t, []ChannelExecutionRouteGroupStatus{
+		{Group: "persisted-group", Status: "success"},
+		{Group: "fallback", Status: "pending"},
+	}, traces[0].RouteGroupStatuses)
 	assert.True(t, traces[0].AffinityHit)
 	assert.Equal(t, "/v1/responses", traces[0].RequestPath)
 	assert.Equal(t, "gpt-persisted-trace", traces[0].Model)

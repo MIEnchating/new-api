@@ -248,18 +248,6 @@ export async function clearChannelRouteCooldown(
   return res.data
 }
 
-export async function clearChannelRouteAffinity(id: number): Promise<{
-  success: boolean
-  message?: string
-  data?: { deleted?: number }
-}> {
-  const res = await api.delete(
-    `/api/channel/${id}/route/affinity`,
-    channelActionConfig()
-  )
-  return res.data
-}
-
 export async function getChannelExecutionPlan(params: {
   group: string
   model: string

@@ -28,7 +28,6 @@ import { StrictMode } from 'react'
 import ReactDOM from 'react-dom/client'
 import { toast } from 'sonner'
 
-import { getStatus } from '@/lib/api'
 import { installBuildMetadata } from '@/lib/build-metadata'
 import {
   installChunkLoadErrorRecovery,
@@ -38,12 +37,14 @@ import { applyFaviconToDom } from '@/lib/dom-utils'
 import '@/lib/dayjs'
 import { initializeFrontendCache } from '@/lib/frontend-cache'
 import { handleServerError } from '@/lib/handle-server-error'
+import { shouldRetryQuery } from '@/lib/query-retry'
+import { getCachedStatus } from '@/lib/status-query'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { DirectionProvider } from './context/direction-provider'
 import { FontProvider } from './context/font-provider'
 import { ThemeProvider } from './context/theme-provider'
-import './i18n/config'
+import { initializeI18n } from './i18n/config'
 // Generated Routes
 import { routeTree } from './routeTree.gen'
 
@@ -59,18 +60,7 @@ installChunkLoadErrorRecovery()
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: (failureCount, error) => {
-        // eslint-disable-next-line no-console
-        if (import.meta.env.DEV) console.log({ failureCount, error })
-
-        if (failureCount >= 0 && import.meta.env.DEV) return false
-        if (failureCount > 3 && import.meta.env.PROD) return false
-
-        return !(
-          error instanceof AxiosError &&
-          [401, 403].includes(error.response?.status ?? 0)
-        )
-      },
+      retry: (failureCount, error) => shouldRetryQuery(failureCount, error),
       // Keep focused tabs from silently re-running heavy pages like logs.
       refetchOnWindowFocus: false,
       staleTime: 10 * 1000, // 10s
@@ -123,54 +113,30 @@ declare module '@tanstack/react-router' {
   }
 }
 
-// Render the app
-const rootElement = document.querySelector<HTMLElement>('#root')
-if (!rootElement) {
-  throw new Error('Root element not found')
-}
-// Set document.title and favicon from cached status, then refresh from network
-;(function initSystemBranding() {
+function renderApplication() {
+  const rootElement = document.querySelector<HTMLElement>('#root')
+  if (!rootElement) {
+    throw new Error('Root element not found')
+  }
+
+  // Apply cached branding synchronously. The root status query refreshes it.
   try {
-    if (typeof window === 'undefined' || typeof document === 'undefined') return
-    const apply = (name: string) => {
-      document.title = name
-      const metaTitle = document.querySelector(
-        'meta[name="title"]'
-      ) as HTMLMetaElement | null
-      if (metaTitle) metaTitle.setAttribute('content', name)
-    }
-    // Cache-first
-    try {
-      const saved = localStorage.getItem('status')
-      if (saved) {
-        const s = JSON.parse(saved)
-        if (s?.system_name) apply(s.system_name)
-        if (s?.logo) applyFaviconToDom(s.logo)
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      const apply = (name: string) => {
+        document.title = name
+        const metaTitle = document.querySelector(
+          'meta[name="title"]'
+        ) as HTMLMetaElement | null
+        if (metaTitle) metaTitle.setAttribute('content', name)
       }
-    } catch {
-      /* empty */
+      const status = getCachedStatus()
+      if (status?.system_name) apply(status.system_name)
+      if (status?.logo) applyFaviconToDom(status.logo)
     }
-    // Background refresh
-    getStatus()
-      .then((s) => {
-        if (s?.system_name) {
-          apply(s.system_name as string)
-          try {
-            localStorage.setItem('status', JSON.stringify(s))
-          } catch {
-            /* empty */
-          }
-        }
-        if (s?.logo) applyFaviconToDom(s.logo as string)
-      })
-      .catch(() => {
-        /* empty */
-      })
   } catch {
     /* empty */
   }
-})()
-if (!rootElement.innerHTML) {
+
   const root = ReactDOM.createRoot(rootElement)
   root.render(
     <StrictMode>
@@ -186,3 +152,15 @@ if (!rootElement.innerHTML) {
     </StrictMode>
   )
 }
+
+async function bootstrap() {
+  try {
+    const result = await initializeI18n()
+    if (!result.ok) recoverFromChunkLoadError(result.error)
+  } catch (error) {
+    recoverFromChunkLoadError(error)
+  }
+  renderApplication()
+}
+
+void bootstrap()

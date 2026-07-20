@@ -25,6 +25,14 @@ const (
 	channelExecutionTraceTTL         = 30 * time.Minute
 	channelExecutionIndexRefreshTTL  = channelExecutionTraceTTL / 2
 	channelExecutionRecentPruneEvery = 256
+	channelExecutionPublishDebounce  = 100 * time.Millisecond
+	channelExecutionPublishQueueSize = 4096
+	channelExecutionPublishJobSize   = 512
+	channelExecutionPublishWorkers   = 8
+	channelExecutionPublishRetries   = 3
+	channelExecutionPublishRetryBase = 50 * time.Millisecond
+	channelExecutionPublishTimeout   = 500 * time.Millisecond
+	channelExecutionFallbackSize     = 4096
 )
 
 type ChannelExecutionCandidate struct {
@@ -100,16 +108,36 @@ type ChannelExecutionTraceSummary struct {
 
 type channelExecutionTraceState struct {
 	mu                   sync.Mutex
+	publishMu            sync.Mutex
 	trace                ChannelExecutionTrace
 	indexedKeys          map[string]struct{}
 	lastIndexRefreshTime int64
+	revision             uint64
+	publishedRevision    uint64
+	publishFailureRev    uint64
+	publishFailures      int
+	publishQueued        bool
+}
+
+type channelExecutionPublishRequest struct {
+	state *channelExecutionTraceState
+	due   time.Time
+}
+
+type channelExecutionPublishResult struct {
+	succeeded bool
+	retryable bool
 }
 
 var channelExecutionTraceCacheOnce sync.Once
 var channelExecutionTraceCache *cachex.HybridCache[ChannelExecutionTrace]
 var channelExecutionRecentMu sync.Mutex
 var channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
+var channelExecutionFallback = make(map[string]ChannelExecutionTrace)
+var channelExecutionFallbackOrder = make([]string, 0, channelExecutionFallbackSize)
 var channelExecutionRecentWrites uint64
+var channelExecutionPublisherOnce sync.Once
+var channelExecutionPublishInput chan channelExecutionPublishRequest
 
 func getChannelExecutionTraceCache() *cachex.HybridCache[ChannelExecutionTrace] {
 	channelExecutionTraceCacheOnce.Do(func() {
@@ -264,24 +292,68 @@ func ensureChannelExecutionTrace(c *gin.Context, group string, modelName string,
 	return state
 }
 
-func publishChannelExecutionTrace(state *channelExecutionTraceState) {
+func channelExecutionTraceUsesRedis() bool {
+	return common.RedisEnabled && common.RDB != nil
+}
+
+func cloneChannelExecutionTrace(trace ChannelExecutionTrace) ChannelExecutionTrace {
+	clone := trace
+	clone.Events = append([]ChannelExecutionEvent(nil), trace.Events...)
+	for index := range clone.Events {
+		clone.Events[index].NextIDs = append([]int(nil), trace.Events[index].NextIDs...)
+	}
+	clone.RouteGroups = append([]string(nil), trace.RouteGroups...)
+	clone.RouteGroupStatuses = append([]ChannelExecutionRouteGroupStatus(nil), trace.RouteGroupStatuses...)
+	clone.ChannelIDs = append([]int(nil), trace.ChannelIDs...)
+	return clone
+}
+
+func publishChannelExecutionTraceSnapshot(state *channelExecutionTraceState, unpublishedOnly bool) channelExecutionPublishResult {
 	if state == nil {
-		return
+		return channelExecutionPublishResult{succeeded: true}
 	}
-	updateChannelExecutionRouteGroupStatuses(&state.trace)
-	snapshot := state.trace
-	snapshot.Events = append([]ChannelExecutionEvent(nil), state.trace.Events...)
+	// Serialize debounced snapshots with terminal snapshots so an older running
+	// write can never land after success/failure.
+	state.publishMu.Lock()
+	defer state.publishMu.Unlock()
+
+	state.mu.Lock()
+	if unpublishedOnly && state.revision <= state.publishedRevision {
+		state.mu.Unlock()
+		return channelExecutionPublishResult{succeeded: true}
+	}
+	revision := state.revision
+	snapshot := cloneChannelExecutionTrace(state.trace)
+	updateChannelExecutionRouteGroupStatuses(&snapshot)
 	if snapshot.RequestID == "" {
-		return
+		if revision > state.publishedRevision {
+			state.publishedRevision = revision
+		}
+		state.mu.Unlock()
+		return channelExecutionPublishResult{succeeded: true}
 	}
-	if common.RedisEnabled && common.RDB != nil {
+	var keysToIndex []string
+	refreshAll := false
+	usesRedis := channelExecutionTraceUsesRedis()
+	if usesRedis {
 		if state.indexedKeys == nil {
 			state.indexedKeys = make(map[string]struct{})
 		}
-		keysToIndex, refreshAll := channelExecutionIndexKeysForPublish(state, snapshot)
+		keysToIndex, refreshAll = channelExecutionIndexKeysForPublish(state, snapshot)
+	}
+	state.mu.Unlock()
+
+	if usesRedis {
 		if err := publishChannelExecutionTraceRedis(snapshot, keysToIndex); err != nil {
 			common.SysLog("failed to publish channel execution trace: " + err.Error())
-			return
+			if snapshot.Status != "running" {
+				rememberChannelExecutionTraceFallback(snapshot)
+			}
+			return channelExecutionPublishResult{retryable: true}
+		}
+		state.mu.Lock()
+		if revision > state.publishedRevision {
+			state.publishedRevision = revision
 		}
 		for _, key := range keysToIndex {
 			state.indexedKeys[key] = struct{}{}
@@ -289,12 +361,145 @@ func publishChannelExecutionTrace(state *channelExecutionTraceState) {
 		if refreshAll {
 			state.lastIndexRefreshTime = snapshot.UpdatedAt
 		}
-		return
+		state.mu.Unlock()
+		return channelExecutionPublishResult{succeeded: true}
 	}
 	if err := getChannelExecutionTraceCache().SetWithTTL(snapshot.RequestID, snapshot, channelExecutionTraceTTL); err != nil {
 		common.SysLog("failed to cache channel execution trace: " + err.Error())
+		return channelExecutionPublishResult{}
 	}
 	indexChannelExecutionTrace(snapshot)
+	state.mu.Lock()
+	if revision > state.publishedRevision {
+		state.publishedRevision = revision
+	}
+	state.mu.Unlock()
+	return channelExecutionPublishResult{succeeded: true}
+}
+
+func publishChannelExecutionTrace(state *channelExecutionTraceState) {
+	if state == nil {
+		return
+	}
+	result := publishChannelExecutionTraceSnapshot(state, true)
+	state.mu.Lock()
+	handleChannelExecutionPublishResultLocked(state, result, false)
+	state.mu.Unlock()
+}
+
+func startChannelExecutionTracePublisher() {
+	channelExecutionPublisherOnce.Do(func() {
+		channelExecutionPublishInput = make(chan channelExecutionPublishRequest, channelExecutionPublishQueueSize)
+		jobs := make(chan *channelExecutionTraceState, channelExecutionPublishJobSize)
+		go func() {
+			ticker := time.NewTicker(channelExecutionPublishDebounce / 4)
+			defer ticker.Stop()
+			pending := make(map[*channelExecutionTraceState]time.Time, channelExecutionPublishQueueSize)
+			for {
+				select {
+				case request := <-channelExecutionPublishInput:
+					if currentDue, exists := pending[request.state]; exists {
+						if request.due.Before(currentDue) {
+							pending[request.state] = request.due
+						}
+						continue
+					}
+					if len(pending) >= channelExecutionPublishQueueSize {
+						request.state.mu.Lock()
+						request.state.publishQueued = false
+						request.state.mu.Unlock()
+						continue
+					}
+					pending[request.state] = request.due
+				case now := <-ticker.C:
+					jobsFull := false
+					for state, due := range pending {
+						if now.Before(due) {
+							continue
+						}
+						select {
+						case jobs <- state:
+							delete(pending, state)
+						default:
+							jobsFull = true
+						}
+						if jobsFull {
+							break
+						}
+					}
+				}
+			}
+		}()
+		for range channelExecutionPublishWorkers {
+			go func() {
+				for state := range jobs {
+					result := publishChannelExecutionTraceSnapshot(state, true)
+					state.mu.Lock()
+					handleChannelExecutionPublishResultLocked(state, result, true)
+					state.mu.Unlock()
+				}
+			}()
+		}
+	})
+}
+
+func channelExecutionPublishRetryDelay(failures int) time.Duration {
+	if failures <= 1 {
+		return channelExecutionPublishRetryBase
+	}
+	return channelExecutionPublishRetryBase * time.Duration(1<<min(failures-1, 2))
+}
+
+func handleChannelExecutionPublishResultLocked(state *channelExecutionTraceState, result channelExecutionPublishResult, worker bool) {
+	if state == nil {
+		return
+	}
+	if worker {
+		state.publishQueued = false
+	}
+	if state.revision <= state.publishedRevision {
+		state.publishFailureRev = 0
+		state.publishFailures = 0
+		return
+	}
+	if !result.succeeded && !result.retryable {
+		return
+	}
+	if !result.retryable {
+		if !state.publishQueued {
+			delay := channelExecutionPublishDebounce
+			if state.trace.Status != "running" {
+				delay = 0
+			}
+			scheduleChannelExecutionTracePublishLocked(state, delay)
+		}
+		return
+	}
+	if state.publishFailureRev != state.revision {
+		state.publishFailureRev = state.revision
+		state.publishFailures = 0
+	}
+	state.publishFailures++
+	if state.publishFailures > channelExecutionPublishRetries || state.publishQueued {
+		return
+	}
+	scheduleChannelExecutionTracePublishLocked(state, channelExecutionPublishRetryDelay(state.publishFailures))
+}
+
+// scheduleChannelExecutionTracePublishLocked coalesces updates in a bounded
+// queue. Terminal states publish synchronously first and use this queue only
+// for bounded recovery attempts.
+func scheduleChannelExecutionTracePublishLocked(state *channelExecutionTraceState, delay time.Duration) {
+	if state == nil || state.publishQueued {
+		return
+	}
+	startChannelExecutionTracePublisher()
+	state.publishQueued = true
+	select {
+	case channelExecutionPublishInput <- channelExecutionPublishRequest{state: state, due: time.Now().Add(delay)}:
+	default:
+		state.publishQueued = false
+	}
 }
 
 func channelExecutionIndexKeysForPublish(state *channelExecutionTraceState, trace ChannelExecutionTrace) ([]string, bool) {
@@ -319,7 +524,7 @@ func publishChannelExecutionTraceRedis(trace ChannelExecutionTrace, indexKeys []
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), channelExecutionPublishTimeout)
 	defer cancel()
 	pipe := common.RDB.Pipeline()
 	pipe.Set(ctx, getChannelExecutionTraceCache().FullKey(trace.RequestID), raw, channelExecutionTraceTTL)
@@ -426,6 +631,13 @@ func indexChannelExecutionTrace(trace ChannelExecutionTrace) {
 		return
 	}
 
+	indexChannelExecutionTraceMemory(trace, keys)
+}
+
+func indexChannelExecutionTraceMemory(trace ChannelExecutionTrace, keys []string) {
+	if trace.RequestID == "" {
+		return
+	}
 	cutoff := time.Now().Add(-channelExecutionTraceTTL).UnixMilli()
 	channelExecutionRecentMu.Lock()
 	defer channelExecutionRecentMu.Unlock()
@@ -449,6 +661,49 @@ func indexChannelExecutionTrace(trace ChannelExecutionTrace) {
 	if channelExecutionRecentWrites%channelExecutionRecentPruneEvery == 0 {
 		pruneChannelExecutionRecentLocked(cutoff)
 	}
+}
+
+func rememberChannelExecutionTraceFallback(trace ChannelExecutionTrace) {
+	if trace.RequestID == "" {
+		return
+	}
+	cutoff := time.Now().Add(-channelExecutionTraceTTL).UnixMilli()
+	channelExecutionRecentMu.Lock()
+	defer channelExecutionRecentMu.Unlock()
+	if _, exists := channelExecutionFallback[trace.RequestID]; !exists {
+		channelExecutionFallbackOrder = append(channelExecutionFallbackOrder, trace.RequestID)
+	}
+	channelExecutionFallback[trace.RequestID] = cloneChannelExecutionTrace(trace)
+	pruneChannelExecutionFallbackLocked(cutoff)
+}
+
+func pruneChannelExecutionFallbackLocked(cutoff int64) {
+	for len(channelExecutionFallbackOrder) > 0 {
+		requestID := channelExecutionFallbackOrder[0]
+		trace, exists := channelExecutionFallback[requestID]
+		if exists && len(channelExecutionFallback) <= channelExecutionFallbackSize && trace.UpdatedAt >= cutoff {
+			break
+		}
+		channelExecutionFallbackOrder = channelExecutionFallbackOrder[1:]
+		if exists {
+			delete(channelExecutionFallback, requestID)
+		}
+	}
+}
+
+func getChannelExecutionTraceFallback(requestID string) (ChannelExecutionTrace, bool) {
+	cutoff := time.Now().Add(-channelExecutionTraceTTL).UnixMilli()
+	channelExecutionRecentMu.Lock()
+	defer channelExecutionRecentMu.Unlock()
+	trace, exists := channelExecutionFallback[requestID]
+	if !exists {
+		return ChannelExecutionTrace{}, false
+	}
+	if trace.UpdatedAt < cutoff {
+		delete(channelExecutionFallback, requestID)
+		return ChannelExecutionTrace{}, false
+	}
+	return cloneChannelExecutionTrace(trace), true
 }
 
 func queueChannelExecutionTraceIndex(ctx context.Context, pipe redis.Pipeliner, trace ChannelExecutionTrace, keys []string) {
@@ -524,6 +779,74 @@ func traceTouchesGroup(trace ChannelExecutionTrace, group string) bool {
 	return false
 }
 
+func channelExecutionTraceFromLog(logEntry model.Log) (ChannelExecutionTrace, bool) {
+	var other struct {
+		RequestPath string `json:"request_path"`
+		AdminInfo   struct {
+			ChannelExecutionTrace json.RawMessage `json:"channel_execution_trace"`
+		} `json:"admin_info"`
+	}
+	if err := json.Unmarshal([]byte(logEntry.Other), &other); err != nil || len(other.AdminInfo.ChannelExecutionTrace) == 0 {
+		return ChannelExecutionTrace{}, false
+	}
+	var trace ChannelExecutionTrace
+	if err := json.Unmarshal(other.AdminInfo.ChannelExecutionTrace, &trace); err != nil {
+		return ChannelExecutionTrace{}, false
+	}
+	if trace.RequestID == "" {
+		trace.RequestID = logEntry.RequestId
+	}
+	if trace.RequestID == "" {
+		return ChannelExecutionTrace{}, false
+	}
+	if trace.Group == "" {
+		trace.Group = logEntry.Group
+	}
+	if trace.Model == "" {
+		trace.Model = logEntry.ModelName
+	}
+	if trace.RequestPath == "" {
+		trace.RequestPath = other.RequestPath
+	}
+	if trace.StartedAt == 0 {
+		trace.StartedAt = logEntry.CreatedAt * 1000
+	}
+	if trace.UpdatedAt == 0 {
+		trace.UpdatedAt = logEntry.CreatedAt * 1000
+	}
+	if logEntry.Type == model.LogTypeError && trace.Status == "running" {
+		trace.Status = "failed"
+	}
+	if !trace.Compact || len(trace.Events) > 0 || len(trace.RouteGroupStatuses) == 0 {
+		if !trace.Compact || len(trace.RouteGroupStatuses) == 0 {
+			updateChannelExecutionRouteGroupStatuses(&trace)
+		}
+	}
+	return trace, true
+}
+
+func getPersistedChannelExecutionTrace(requestID string, cutoff int64) (ChannelExecutionTrace, bool, error) {
+	if model.LOG_DB == nil {
+		return ChannelExecutionTrace{}, false, nil
+	}
+	logs := make([]model.Log, 0, 10)
+	err := model.LOG_DB.
+		Select("id", "created_at", "type", "request_id", "model_name", "group", "channel_id", "other").
+		Where("created_at >= ? AND request_id = ? AND type IN ?", cutoff/1000, requestID, []int{model.LogTypeConsume, model.LogTypeError}).
+		Order("id DESC").
+		Limit(10).
+		Find(&logs).Error
+	if err != nil {
+		return ChannelExecutionTrace{}, false, err
+	}
+	for _, logEntry := range logs {
+		if trace, exists := channelExecutionTraceFromLog(logEntry); exists {
+			return trace, true, nil
+		}
+	}
+	return ChannelExecutionTrace{}, false, nil
+}
+
 func listPersistedChannelExecutionTraces(channelID int, group string, limit int, cutoff int64) ([]ChannelExecutionTrace, error) {
 	if model.LOG_DB == nil {
 		return nil, nil
@@ -550,45 +873,12 @@ func listPersistedChannelExecutionTraces(channelID int, group string, limit int,
 	traces := make([]ChannelExecutionTrace, 0, limit)
 	seen := make(map[string]struct{})
 	for _, logEntry := range logs {
-		var other struct {
-			RequestPath string `json:"request_path"`
-			AdminInfo   struct {
-				ChannelExecutionTrace json.RawMessage `json:"channel_execution_trace"`
-			} `json:"admin_info"`
-		}
-		if err := json.Unmarshal([]byte(logEntry.Other), &other); err != nil || len(other.AdminInfo.ChannelExecutionTrace) == 0 {
-			continue
-		}
-		var trace ChannelExecutionTrace
-		if err := json.Unmarshal(other.AdminInfo.ChannelExecutionTrace, &trace); err != nil {
-			continue
-		}
-		if trace.RequestID == "" {
-			trace.RequestID = logEntry.RequestId
-		}
-		if trace.RequestID == "" {
+		trace, exists := channelExecutionTraceFromLog(logEntry)
+		if !exists {
 			continue
 		}
 		if _, exists := seen[trace.RequestID]; exists {
 			continue
-		}
-		if trace.Group == "" {
-			trace.Group = logEntry.Group
-		}
-		if trace.Model == "" {
-			trace.Model = logEntry.ModelName
-		}
-		if trace.RequestPath == "" {
-			trace.RequestPath = other.RequestPath
-		}
-		if trace.StartedAt == 0 {
-			trace.StartedAt = logEntry.CreatedAt * 1000
-		}
-		if trace.UpdatedAt == 0 {
-			trace.UpdatedAt = logEntry.CreatedAt * 1000
-		}
-		if logEntry.Type == model.LogTypeError && trace.Status == "running" {
-			trace.Status = "failed"
 		}
 		if !traceTouchesGroup(trace, group) || (channelID > 0 && !traceTouchesChannelGroup(trace, channelID, group)) {
 			continue
@@ -600,6 +890,67 @@ func listPersistedChannelExecutionTraces(channelID int, group string, limit int,
 		}
 	}
 	return traces, nil
+}
+
+func listChannelExecutionMemoryTraces(channelID int, group string, cutoff int64) []ChannelExecutionTrace {
+	channelExecutionRecentMu.Lock()
+	defer channelExecutionRecentMu.Unlock()
+	entries := channelExecutionRecent[channelExecutionRecentGroupKey(group)]
+	if channelID > 0 {
+		entries = channelExecutionRecent[channelExecutionRecentKey(channelID, group)]
+	}
+	memoryTraces := make([]ChannelExecutionTrace, 0, len(entries))
+	for requestID, trace := range entries {
+		if trace.UpdatedAt < cutoff {
+			delete(entries, requestID)
+			continue
+		}
+		if traceTouchesGroup(trace, group) && (channelID == 0 || traceTouchesChannelGroup(trace, channelID, group)) {
+			memoryTraces = append(memoryTraces, cloneChannelExecutionTrace(trace))
+		}
+	}
+	for requestID, trace := range channelExecutionFallback {
+		if trace.UpdatedAt < cutoff {
+			delete(channelExecutionFallback, requestID)
+			continue
+		}
+		if traceTouchesGroup(trace, group) && (channelID == 0 || traceTouchesChannelGroup(trace, channelID, group)) {
+			memoryTraces = append(memoryTraces, cloneChannelExecutionTrace(trace))
+		}
+	}
+	return memoryTraces
+}
+
+func mergeChannelExecutionTraces(limit int, traceSets ...[]ChannelExecutionTrace) []ChannelExecutionTrace {
+	capacity := 0
+	for _, traces := range traceSets {
+		capacity += len(traces)
+	}
+	seen := make(map[string]struct{}, capacity)
+	merged := make([]ChannelExecutionTrace, 0, capacity)
+	for _, traces := range traceSets {
+		for _, trace := range traces {
+			if _, exists := seen[trace.RequestID]; exists {
+				continue
+			}
+			seen[trace.RequestID] = struct{}{}
+			merged = append(merged, trace)
+		}
+	}
+	sort.Slice(merged, func(i, j int) bool { return merged[i].UpdatedAt > merged[j].UpdatedAt })
+	if len(merged) > limit {
+		merged = merged[:limit]
+	}
+	return merged
+}
+
+func listChannelExecutionTraceFallbacks(channelID int, group string, limit int, cutoff int64) ([]ChannelExecutionTrace, error) {
+	memoryTraces := listChannelExecutionMemoryTraces(channelID, group, cutoff)
+	persistedTraces, err := listPersistedChannelExecutionTraces(channelID, group, limit, cutoff)
+	if err != nil && len(memoryTraces) == 0 {
+		return nil, err
+	}
+	return mergeChannelExecutionTraces(limit, memoryTraces, persistedTraces), nil
 }
 
 func ListChannelExecutionTraces(channelID int, group string, limit int) ([]ChannelExecutionTrace, error) {
@@ -626,11 +977,11 @@ func ListChannelExecutionTraces(channelID int, group string, limit int) ([]Chann
 			Max: "+inf", Min: strconv.FormatInt(cutoff, 10), Offset: 0, Count: int64(limit * 3),
 		}).Result()
 		if err != nil {
-			return nil, err
+			return listChannelExecutionTraceFallbacks(channelID, group, limit, cutoff)
 		}
 		values, err := getChannelExecutionTraceCache().GetMany(requestIDs)
 		if err != nil {
-			return nil, err
+			return listChannelExecutionTraceFallbacks(channelID, group, limit, cutoff)
 		}
 		traces := make([]ChannelExecutionTrace, 0, limit)
 		for _, requestID := range requestIDs {
@@ -643,36 +994,22 @@ func ListChannelExecutionTraces(channelID int, group string, limit int) ([]Chann
 				break
 			}
 		}
+		memoryTraces := listChannelExecutionMemoryTraces(channelID, group, cutoff)
+		traces = mergeChannelExecutionTraces(limit, traces, memoryTraces)
 		if len(traces) > 0 {
 			return traces, nil
 		}
-		return listPersistedChannelExecutionTraces(channelID, group, limit, cutoff)
+		persistedTraces, persistedErr := listPersistedChannelExecutionTraces(channelID, group, limit, cutoff)
+		if persistedErr != nil {
+			if len(traces) > 0 {
+				return traces, nil
+			}
+			return nil, persistedErr
+		}
+		return mergeChannelExecutionTraces(limit, traces, persistedTraces), nil
 	}
 
-	channelExecutionRecentMu.Lock()
-	entries := channelExecutionRecent[key]
-	traces := make([]ChannelExecutionTrace, 0, len(entries))
-	for requestID, trace := range entries {
-		if trace.UpdatedAt < cutoff {
-			delete(entries, requestID)
-			continue
-		}
-		if traceTouchesGroup(trace, group) && (channelID == 0 || traceTouchesChannelGroup(trace, channelID, group)) {
-			traces = append(traces, trace)
-		}
-	}
-	if len(entries) == 0 {
-		delete(channelExecutionRecent, key)
-	}
-	channelExecutionRecentMu.Unlock()
-	sort.Slice(traces, func(i, j int) bool { return traces[i].UpdatedAt > traces[j].UpdatedAt })
-	if len(traces) > limit {
-		traces = traces[:limit]
-	}
-	if len(traces) > 0 {
-		return traces, nil
-	}
-	return listPersistedChannelExecutionTraces(channelID, group, limit, cutoff)
+	return listChannelExecutionTraceFallbacks(channelID, group, limit, cutoff)
 }
 
 func appendChannelExecutionEvent(c *gin.Context, group string, modelName string, requestPath string, event ChannelExecutionEvent) {
@@ -681,7 +1018,6 @@ func appendChannelExecutionEvent(c *gin.Context, group string, modelName string,
 		return
 	}
 	state.mu.Lock()
-	defer state.mu.Unlock()
 	if group != "" {
 		state.trace.Group = group
 	}
@@ -689,7 +1025,15 @@ func appendChannelExecutionEvent(c *gin.Context, group string, modelName string,
 	event.Timestamp = time.Now().UnixMilli()
 	state.trace.UpdatedAt = event.Timestamp
 	state.trace.Events = append(state.trace.Events, event)
-	publishChannelExecutionTrace(state)
+	updateChannelExecutionRouteGroupStatuses(&state.trace)
+	state.revision++
+	if channelExecutionTraceUsesRedis() {
+		scheduleChannelExecutionTracePublishLocked(state, channelExecutionPublishDebounce)
+		state.mu.Unlock()
+		return
+	}
+	state.mu.Unlock()
+	publishChannelExecutionTraceSnapshot(state, true)
 }
 
 func nextChannelCandidateIDs(plan ChannelExecutionPlan, selectedID int, selectedPriority int64) []int {
@@ -828,8 +1172,8 @@ func MarkChannelExecutionSuccess(c *gin.Context) {
 		return
 	}
 	state.mu.Lock()
-	defer state.mu.Unlock()
 	if state.trace.Status != "running" {
+		state.mu.Unlock()
 		return
 	}
 	channelID := 0
@@ -854,6 +1198,9 @@ selectionLoop:
 	})
 	state.trace.Status = "success"
 	state.trace.UpdatedAt = now
+	updateChannelExecutionRouteGroupStatuses(&state.trace)
+	state.revision++
+	state.mu.Unlock()
 	publishChannelExecutionTrace(state)
 }
 
@@ -863,8 +1210,8 @@ func MarkChannelExecutionFailed(c *gin.Context, reason string) {
 		return
 	}
 	state.mu.Lock()
-	defer state.mu.Unlock()
 	if state.trace.Status != "running" {
+		state.mu.Unlock()
 		return
 	}
 	state.trace.Status = "failed"
@@ -875,6 +1222,9 @@ func MarkChannelExecutionFailed(c *gin.Context, reason string) {
 			Group: state.trace.Group, State: "finished", Reason: reason,
 		})
 	}
+	updateChannelExecutionRouteGroupStatuses(&state.trace)
+	state.revision++
+	state.mu.Unlock()
 	publishChannelExecutionTrace(state)
 }
 
@@ -884,8 +1234,8 @@ func FinalizeChannelExecutionTrace(c *gin.Context) {
 		return
 	}
 	state.mu.Lock()
-	defer state.mu.Unlock()
 	if state.trace.Status != "running" {
+		state.mu.Unlock()
 		return
 	}
 	state.trace.Status = "failed"
@@ -899,6 +1249,9 @@ func FinalizeChannelExecutionTrace(c *gin.Context) {
 		Sequence: len(state.trace.Events) + 1, Timestamp: state.trace.UpdatedAt,
 		Group: state.trace.Group, State: "finished", Reason: reason,
 	})
+	updateChannelExecutionRouteGroupStatuses(&state.trace)
+	state.revision++
+	state.mu.Unlock()
 	publishChannelExecutionTrace(state)
 }
 
@@ -925,10 +1278,13 @@ func appendChannelExecutionTraceAdminInfo(c *gin.Context, adminInfo map[string]i
 	state.mu.Lock()
 	snapshot := state.trace
 	snapshot.Events = append([]ChannelExecutionEvent(nil), state.trace.Events...)
+	snapshot.RouteGroups = append([]string(nil), state.trace.RouteGroups...)
+	snapshot.RouteGroupStatuses = append([]ChannelExecutionRouteGroupStatus(nil), state.trace.RouteGroupStatuses...)
 	state.mu.Unlock()
 	if errorSnapshot && snapshot.Status == "running" {
 		snapshot.Status = "failed"
 	}
+	updateChannelExecutionRouteGroupStatuses(&snapshot)
 	// Successful SQL logs only need the execution summary. The runtime cache
 	// keeps the complete timeline for the execution-plan UI.
 	if snapshot.Status == "success" {
@@ -970,5 +1326,21 @@ func GetChannelExecutionTrace(requestID string) (ChannelExecutionTrace, bool, er
 	if requestID == "" {
 		return ChannelExecutionTrace{}, false, nil
 	}
-	return getChannelExecutionTraceCache().Get(requestID)
+	// A local terminal fallback is immutable and was recorded only after a Redis
+	// publish failure, so it can avoid another Redis timeout on the same instance.
+	if fallback, exists := getChannelExecutionTraceFallback(requestID); exists {
+		return fallback, true, nil
+	}
+	trace, found, cacheErr := getChannelExecutionTraceCache().Get(requestID)
+	if cacheErr == nil && found {
+		return trace, true, nil
+	}
+	persisted, exists, persistedErr := getPersistedChannelExecutionTrace(requestID, time.Now().Add(-channelExecutionTraceTTL).UnixMilli())
+	if persistedErr != nil {
+		if cacheErr != nil {
+			return ChannelExecutionTrace{}, false, cacheErr
+		}
+		return ChannelExecutionTrace{}, false, persistedErr
+	}
+	return persisted, exists, nil
 }

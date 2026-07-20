@@ -9,6 +9,8 @@ services:
     image: mienvirtuoso/new-api:latest
     container_name: new-api
     restart: always
+    # Allow the application to finish active SSE requests before Docker sends SIGKILL.
+    stop_grace_period: 130s
     command: --log-dir /app/logs
     ports:
       - "127.0.0.1:3000:3000"
@@ -25,6 +27,7 @@ services:
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
       SESSION_COOKIE_TRUSTED_URL: ${SESSION_COOKIE_TRUSTED_URL:-}
       SESSION_COOKIE_DOMAIN: ${SESSION_COOKIE_DOMAIN:-}
+      USER_AUTH_CACHE_TTL_SECONDS: ${USER_AUTH_CACHE_TTL_SECONDS:-3}
     networks:
       - nginx
     healthcheck:

@@ -6,6 +6,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// maxPaginationOffset bounds OFFSET-based queries so an extremely large page
+// cannot overflow GetStartIdx or force the database to scan an unbounded prefix.
+const maxPaginationOffset = 1_000_000
+
 type PageInfo struct {
 	Page     int `json:"page"`      // page num 页码
 	PageSize int `json:"page_size"` // page size 页大小
@@ -39,43 +43,33 @@ func (p *PageInfo) SetItems(items any) {
 }
 
 func GetPageQuery(c *gin.Context) *PageInfo {
-	pageInfo := &PageInfo{}
-	// 手动获取并处理每个参数
-	if page, err := strconv.Atoi(c.Query("p")); err == nil {
+	pageInfo := &PageInfo{Page: 1}
+	if page, err := strconv.Atoi(c.Query("p")); err == nil && page > 0 {
 		pageInfo.Page = page
 	}
-	if pageSize, err := strconv.Atoi(c.Query("page_size")); err == nil {
-		pageInfo.PageSize = pageSize
-	}
-	if pageInfo.Page < 1 {
-		// 兼容
-		page, _ := strconv.Atoi(c.Query("p"))
-		if page != 0 {
-			pageInfo.Page = page
-		} else {
-			pageInfo.Page = 1
-		}
-	}
 
-	if pageInfo.PageSize == 0 {
-		// 兼容
-		pageSize, _ := strconv.Atoi(c.Query("ps"))
-		if pageSize != 0 {
+	// Accept the current parameter first, then the two legacy aliases. Invalid
+	// and non-positive values are treated as absent so they can never become a
+	// negative GORM offset/limit (Limit(-1) disables the SQL LIMIT clause).
+	for _, key := range []string{"page_size", "ps", "size"} {
+		pageSize, err := strconv.Atoi(c.Query(key))
+		if err == nil && pageSize > 0 {
 			pageInfo.PageSize = pageSize
-		}
-		if pageInfo.PageSize == 0 {
-			pageSize, _ = strconv.Atoi(c.Query("size")) // token page
-			if pageSize != 0 {
-				pageInfo.PageSize = pageSize
-			}
-		}
-		if pageInfo.PageSize == 0 {
-			pageInfo.PageSize = ItemsPerPage
+			break
 		}
 	}
-
+	if pageInfo.PageSize == 0 {
+		pageInfo.PageSize = ItemsPerPage
+		if pageInfo.PageSize <= 0 {
+			pageInfo.PageSize = 10
+		}
+	}
 	if pageInfo.PageSize > 100 {
 		pageInfo.PageSize = 100
+	}
+	maxPage := maxPaginationOffset/pageInfo.PageSize + 1
+	if pageInfo.Page > maxPage {
+		pageInfo.Page = maxPage
 	}
 
 	return pageInfo

@@ -27,9 +27,11 @@ import {
   FormControl,
   FormDescription,
   FormField,
+  FormItem,
   FormLabel,
   FormMessage,
 } from '@/components/ui/form'
+import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 
 import {
@@ -56,17 +58,23 @@ const headerNavSchema = z.object({
   rankingsEnabled: z.boolean(),
   rankingsRequireAuth: z.boolean(),
   docs: z.boolean(),
+  docsLink: z.string(),
   about: z.boolean(),
 })
 
 type HeaderNavFormValues = z.infer<typeof headerNavSchema>
+type HeaderNavBooleanField = Exclude<keyof HeaderNavFormValues, 'docsLink'>
+type HeaderNavToggleValues = Omit<HeaderNavFormValues, 'docsLink'>
 
 type HeaderNavigationSectionProps = {
   config: HeaderNavModulesConfig
   initialSerialized: string
+  docsLink: string
 }
 
-const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
+const toFormValues = (
+  config: HeaderNavModulesConfig
+): HeaderNavToggleValues => ({
   home:
     config.home === undefined ? HEADER_NAV_DEFAULT.home : Boolean(config.home),
   console:
@@ -100,10 +108,14 @@ const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
 export function HeaderNavigationSection({
   config,
   initialSerialized,
+  docsLink,
 }: HeaderNavigationSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const formDefaults = useMemo(() => toFormValues(config), [config])
+  const formDefaults = useMemo(
+    () => ({ ...toFormValues(config), docsLink }),
+    [config, docsLink]
+  )
 
   const form = useForm<HeaderNavFormValues>({
     resolver: zodResolver(headerNavSchema),
@@ -134,22 +146,32 @@ export function HeaderNavigationSection({
     }
 
     const serialized = serializeHeaderNavModules(payload)
-    if (serialized === initialSerialized) {
+    const navigationChanged = serialized !== initialSerialized
+    const docsLinkChanged = values.docsLink !== docsLink
+    if (!navigationChanged && !docsLinkChanged) {
       return
     }
 
-    await updateOption.mutateAsync({
-      key: 'HeaderNavModules',
-      value: serialized,
-    })
+    if (navigationChanged) {
+      await updateOption.mutateAsync({
+        key: 'HeaderNavModules',
+        value: serialized,
+      })
+    }
+    if (docsLinkChanged) {
+      await updateOption.mutateAsync({
+        key: 'general_setting.docs_link',
+        value: values.docsLink,
+      })
+    }
   }
 
   const resetToDefault = () => {
-    form.reset(toFormValues(HEADER_NAV_DEFAULT))
+    form.reset({ ...toFormValues(HEADER_NAV_DEFAULT), docsLink })
   }
 
   const simpleModules: Array<{
-    key: keyof HeaderNavFormValues
+    key: HeaderNavBooleanField
     title: string
     description: string
   }> = [
@@ -176,8 +198,8 @@ export function HeaderNavigationSection({
   ]
 
   const accessModules: Array<{
-    enabledKey: keyof HeaderNavFormValues
-    requireAuthKey: keyof HeaderNavFormValues
+    enabledKey: HeaderNavBooleanField
+    requireAuthKey: HeaderNavBooleanField
     requireAuthDependsOn: 'pricingEnabled' | 'rankingsEnabled'
     title: string
     description: string
@@ -220,28 +242,59 @@ export function HeaderNavigationSection({
             saveLabel='Save navigation'
           />
           <div className='grid gap-4 md:grid-cols-2'>
-            {simpleModules.map((module) => (
-              <FormField
-                key={module.key}
-                control={form.control}
-                name={module.key}
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>{module.title}</FormLabel>
-                      <FormDescription>{module.description}</FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </SettingsSwitchItem>
-                )}
-              />
-            ))}
+            {simpleModules.map((module) => {
+              const toggleField = (
+                <FormField
+                  key={module.key}
+                  control={form.control}
+                  name={module.key}
+                  render={({ field }) => (
+                    <SettingsSwitchItem>
+                      <SettingsSwitchContent>
+                        <FormLabel>{module.title}</FormLabel>
+                        <FormDescription>{module.description}</FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </SettingsSwitchItem>
+                  )}
+                />
+              )
+
+              if (module.key !== 'docs') return toggleField
+
+              return (
+                <SettingsControlGroup key={module.key}>
+                  {toggleField}
+                  <FormField
+                    control={form.control}
+                    name='docsLink'
+                    render={({ field }) => (
+                      <SettingsControlChildren>
+                        <FormItem className='space-y-2 py-2'>
+                          <FormLabel>{t('Documentation Link')}</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder={t('https://docs.example.com')}
+                              {...field}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t('Link to your documentation site')}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      </SettingsControlChildren>
+                    )}
+                  />
+                </SettingsControlGroup>
+              )
+            })}
           </div>
 
           <div className='grid gap-4 lg:grid-cols-2'>

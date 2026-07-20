@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useIsFetching, useQuery } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
 import { Eye, EyeOff } from 'lucide-react'
@@ -108,7 +108,6 @@ export function CommonLogsFilterBar<TData>(
 ) {
   const { t } = useTranslation()
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
@@ -195,9 +194,7 @@ export function CommonLogsFilterBar<TData>(
         page: 1,
       },
     })
-    queryClient.invalidateQueries({ queryKey: ['logs'] })
-    queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
-  }, [filters, logType, navigate, queryClient])
+  }, [filters, logType, navigate])
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
@@ -221,9 +218,7 @@ export function CommonLogsFilterBar<TData>(
         ...resetSearch,
       },
     })
-    queryClient.invalidateQueries({ queryKey: ['logs'] })
-    queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
-  }, [navigate, queryClient])
+  }, [navigate])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -303,10 +298,7 @@ export function CommonLogsFilterBar<TData>(
   )
 
   const dateRangeFilter = (
-    <LogsFilterField
-      wide
-      className='w-full sm:w-[340px] lg:w-[420px] xl:w-[460px]'
-    >
+    <LogsFilterField className='w-full sm:col-span-2 lg:col-span-1'>
       <CompactDateTimeRangePicker
         start={filters.startTime}
         end={filters.endTime}
@@ -318,7 +310,7 @@ export function CommonLogsFilterBar<TData>(
     </LogsFilterField>
   )
   const modelFilter = (
-    <LogsFilterField className='w-full sm:min-w-[180px] sm:flex-1 lg:min-w-[220px]'>
+    <LogsFilterField className='w-full'>
       <LogsFilterInput
         placeholder={t('Model Name')}
         value={filters.model || ''}
@@ -328,7 +320,7 @@ export function CommonLogsFilterBar<TData>(
     </LogsFilterField>
   )
   const groupFilter = (
-    <LogsFilterField className='w-full sm:min-w-[8.5rem] sm:flex-1 lg:min-w-[9rem]'>
+    <LogsFilterField className='w-full'>
       <DataTableFacetedFilter
         title={t('Group')}
         options={groupItems}
@@ -342,7 +334,7 @@ export function CommonLogsFilterBar<TData>(
     </LogsFilterField>
   )
   const typeFilter = (
-    <LogsFilterField className='w-full sm:min-w-[8.5rem] sm:flex-1 lg:min-w-[9rem]'>
+    <LogsFilterField className='w-full'>
       <DataTableFacetedFilter
         title={t('Type')}
         options={logTypeItems}
@@ -369,7 +361,7 @@ export function CommonLogsFilterBar<TData>(
     </LogsFilterField>
   )
   const usernameFilter = isAdmin ? (
-    <LogsFilterField className='w-full sm:min-w-[160px] sm:flex-1 lg:min-w-[170px]'>
+    <LogsFilterField className='w-full'>
       <LogsFilterInput
         placeholder={t('Username')}
         type={sensitiveType}
@@ -380,7 +372,7 @@ export function CommonLogsFilterBar<TData>(
     </LogsFilterField>
   ) : null
   const channelFilter = isAdmin ? (
-    <LogsFilterField className='w-full sm:min-w-[130px] sm:flex-1 lg:min-w-[140px]'>
+    <LogsFilterField className='w-full'>
       <LogsFilterInput
         placeholder={t('Channel ID')}
         value={filters.channel || ''}
@@ -425,14 +417,20 @@ export function CommonLogsFilterBar<TData>(
       stats={statsBar}
       actionStart={sensitiveToggle}
       primaryFilters={
-        <>
+        <div
+          className={
+            isAdmin
+              ? 'grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-[minmax(18rem,20rem)_minmax(10rem,1fr)_minmax(8rem,0.8fr)] xl:grid-cols-[20rem_minmax(9.5rem,1fr)_minmax(7rem,0.8fr)_minmax(7rem,0.8fr)_minmax(8rem,0.85fr)_minmax(6.5rem,0.65fr)]'
+              : 'grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-[minmax(18rem,20rem)_minmax(10rem,1fr)] xl:grid-cols-[20rem_minmax(10rem,1fr)_minmax(8rem,0.8fr)_minmax(8rem,0.8fr)]'
+          }
+        >
           {dateRangeFilter}
           {modelFilter}
           {groupFilter}
           {typeFilter}
           {usernameFilter}
           {channelFilter}
-        </>
+        </div>
       }
       advancedFilters={advancedFilters}
       mobilePinnedFilters={dateRangeFilter}

@@ -106,6 +106,11 @@ func InitEnv() {
 	// Initialize variables with GetEnvOrDefault
 	SyncFrequency = GetEnvOrDefault("SYNC_FREQUENCY", 60)
 	BatchUpdateInterval = GetEnvOrDefault("BATCH_UPDATE_INTERVAL", 5)
+	UserAuthCacheTTLSeconds = GetEnvOrDefault("USER_AUTH_CACHE_TTL_SECONDS", 3)
+	if UserAuthCacheTTLSeconds < 0 || UserAuthCacheTTLSeconds > 30 {
+		SysError("USER_AUTH_CACHE_TTL_SECONDS must be between 0 and 30, using default value: 3")
+		UserAuthCacheTTLSeconds = 3
+	}
 	RelayTimeout = GetEnvOrDefault("RELAY_TIMEOUT", 0)
 	RelayIdleConnTimeout = GetEnvOrDefault("RELAY_IDLE_CONN_TIMEOUT", 90)
 	RelayMaxIdleConns = GetEnvOrDefault("RELAY_MAX_IDLE_CONNS", 500)

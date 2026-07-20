@@ -16,17 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-/// <reference types="@rsbuild/core/types" />
+export type LocaleLoadResult<T> =
+  | { ok: true; language: string; value: T }
+  | { ok: false; language: string; error: Error }
 
-declare module '@visactor/react-vchart' {
-  export const VChart: React.ComponentType<Record<string, unknown>>
+function toLocaleLoadError(language: string, error: unknown): Error {
+  return error instanceof Error
+    ? error
+    : new Error(`Unable to load locale: ${language}`)
 }
 
-declare module '@visactor/vchart-semi-theme' {
-  export const initVChartSemiTheme: (opts?: Record<string, unknown>) => void
-}
-
-declare module 'react-icons/si?full-pack' {
-  const icons: Record<string, unknown>
-  export = icons
+export async function evaluateLocaleLoader<T>(
+  language: string,
+  loader: () => Promise<T>
+): Promise<LocaleLoadResult<T>> {
+  try {
+    return { ok: true, language, value: await loader() }
+  } catch (error) {
+    return { ok: false, language, error: toLocaleLoadError(language, error) }
+  }
 }

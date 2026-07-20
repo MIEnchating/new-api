@@ -16,8 +16,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { CreditCard } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { IconBaseProps, IconType } from 'react-icons'
+import {
+  SiAlipay,
+  SiApplepay,
+  SiBinance,
+  SiBitcoin,
+  SiCashapp,
+  SiCoinbase,
+  SiEthereum,
+  SiGooglepay,
+  SiMastercard,
+  SiPaypal,
+  SiRevolut,
+  SiStripe,
+  SiTether,
+  SiVisa,
+  SiWechat,
+  SiWise,
+} from 'react-icons/si'
 
 type IconPackModule = Record<string, unknown>
 type IconPackLoader = () => Promise<IconPackModule>
@@ -51,7 +70,12 @@ const ICON_PACK_LOADERS = {
   pi: () => import('react-icons/pi').then((module) => module as IconPackModule),
   ri: () => import('react-icons/ri').then((module) => module as IconPackModule),
   rx: () => import('react-icons/rx').then((module) => module as IconPackModule),
-  si: () => import('react-icons/si').then((module) => module as IconPackModule),
+  // Keep the arbitrary-name fallback async even though common payment icons
+  // are statically imported and tree-shaken above.
+  si: () =>
+    import('react-icons/si?full-pack').then(
+      (module) => module as IconPackModule
+    ),
   sl: () => import('react-icons/sl').then((module) => module as IconPackModule),
   tb: () => import('react-icons/tb').then((module) => module as IconPackModule),
   tfi: () =>
@@ -65,6 +89,26 @@ const ICON_PACK_LOADERS = {
 type IconPackId = keyof typeof ICON_PACK_LOADERS
 
 const ICON_PACK_CACHE = new Map<IconPackId, Promise<IconPackModule>>()
+
+const COMMON_ICONS: Record<string, IconType> = {
+  LuCreditCard: CreditCard,
+  SiAlipay,
+  SiApplepay,
+  SiBinance,
+  SiBitcoin,
+  SiCashapp,
+  SiCoinbase,
+  SiEthereum,
+  SiGooglepay,
+  SiMastercard,
+  SiPaypal,
+  SiRevolut,
+  SiStripe,
+  SiTether,
+  SiVisa,
+  SiWechat,
+  SiWise,
+}
 
 const ICON_PACK_CANDIDATES: Array<[RegExp, IconPackId[]]> = [
   [/^Ai[A-Z0-9]/, ['ai']],
@@ -123,6 +167,9 @@ function isIconComponent(value: unknown): value is IconType {
 }
 
 async function resolveReactIcon(iconName: string): Promise<IconType | null> {
+  const commonIcon = COMMON_ICONS[iconName]
+  if (commonIcon) return commonIcon
+
   for (const packId of getCandidatePacks(iconName)) {
     try {
       const icon = (await loadIconPack(packId))[iconName]
@@ -145,6 +192,7 @@ type ResolvedIconState = {
 
 export function ReactIconByName({ name, ...props }: ReactIconByNameProps) {
   const iconName = normalizeIconName(name)
+  const commonIcon = iconName ? COMMON_ICONS[iconName] : undefined
   const [resolvedIcon, setResolvedIcon] = useState<ResolvedIconState | null>(
     null
   )
@@ -152,7 +200,7 @@ export function ReactIconByName({ name, ...props }: ReactIconByNameProps) {
   useEffect(() => {
     let cancelled = false
 
-    if (!iconName) return
+    if (!iconName || commonIcon) return
 
     void resolveReactIcon(iconName).then((Icon) => {
       if (!cancelled) setResolvedIcon({ iconName, Icon })
@@ -161,7 +209,12 @@ export function ReactIconByName({ name, ...props }: ReactIconByNameProps) {
     return () => {
       cancelled = true
     }
-  }, [iconName])
+  }, [commonIcon, iconName])
+
+  if (commonIcon) {
+    const CommonIcon = commonIcon
+    return <CommonIcon {...props} />
+  }
 
   if (!iconName || resolvedIcon?.iconName !== iconName || !resolvedIcon.Icon) {
     return null

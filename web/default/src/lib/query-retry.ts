@@ -16,17 +16,28 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-/// <reference types="@rsbuild/core/types" />
+import { isAxiosError, isCancel } from 'axios'
 
-declare module '@visactor/react-vchart' {
-  export const VChart: React.ComponentType<Record<string, unknown>>
+export const MAX_QUERY_RETRIES = 2
+
+const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504])
+
+export function isRetryableQueryError(error: unknown): boolean {
+  if (!isAxiosError(error) || isCancel(error)) return false
+
+  const status = error.response?.status
+  if (status === undefined) {
+    return true
+  }
+
+  return RETRYABLE_STATUS_CODES.has(status)
 }
 
-declare module '@visactor/vchart-semi-theme' {
-  export const initVChartSemiTheme: (opts?: Record<string, unknown>) => void
-}
-
-declare module 'react-icons/si?full-pack' {
-  const icons: Record<string, unknown>
-  export = icons
+export function shouldRetryQuery(
+  failureCount: number,
+  error: unknown,
+  development = import.meta.env.DEV
+): boolean {
+  if (development || failureCount >= MAX_QUERY_RETRIES) return false
+  return isRetryableQueryError(error)
 }

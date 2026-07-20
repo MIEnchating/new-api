@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type Table } from '@tanstack/react-table'
+import type { Table } from '@tanstack/react-table'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -39,14 +39,11 @@ export function DataTableViewOptions<TData>({
 }: DataTableViewOptionsProps<TData>) {
   const { t } = useTranslation()
 
-  const hideableColumns = React.useMemo(
+  const dataColumns = React.useMemo(
     () =>
       table
         .getAllColumns()
-        .filter(
-          (column) =>
-            typeof column.accessorFn !== 'undefined' && column.getCanHide()
-        ),
+        .filter((column) => typeof column.accessorFn !== 'undefined'),
     [table]
   )
 
@@ -66,12 +63,14 @@ export function DataTableViewOptions<TData>({
       <DropdownMenuContent align='end' className='w-[150px]'>
         <DropdownMenuGroup>
           <DropdownMenuLabel>{t('Toggle columns')}</DropdownMenuLabel>
-          {hideableColumns.map((column) => {
+          {dataColumns.map((column) => {
+            const canHide = column.getCanHide()
             return (
               <DropdownMenuCheckboxItem
                 key={column.id}
                 className='capitalize'
                 checked={column.getIsVisible()}
+                disabled={!canHide}
                 onCheckedChange={(value) => column.toggleVisibility(!!value)}
               >
                 {typeof column.columnDef.header === 'string'

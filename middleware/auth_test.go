@@ -112,11 +112,11 @@ func TestSessionAuthUsesCurrentStatusAndRole(t *testing.T) {
 		},
 	}
 
-	for _, test := range tests {
+	for index, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			setupAuthTestDatabase(t)
 			user := model.User{
-				Id:       7301,
+				Id:       7301 + index,
 				Username: "current-auth-user",
 				Role:     common.RoleAdminUser,
 				Status:   common.UserStatusEnabled,
@@ -147,6 +147,7 @@ func TestSessionAuthUsesCurrentStatusAndRole(t *testing.T) {
 			engine.ServeHTTP(seedResponse, httptest.NewRequest(http.MethodGet, "/seed", nil))
 			require.Len(t, seedResponse.Result().Cookies(), 1)
 			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Updates(test.update).Error)
+			require.NoError(t, model.InvalidateUserCache(user.Id))
 
 			req := httptest.NewRequest(http.MethodGet, "/protected", nil)
 			req.AddCookie(seedResponse.Result().Cookies()[0])

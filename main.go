@@ -40,6 +40,26 @@ import (
 	_ "net/http/pprof"
 )
 
+const (
+	// Keep header parsing bounded without imposing a write deadline on SSE or
+	// other long-lived relay responses. ReadTimeout intentionally remains zero:
+	// request bodies may be large or arrive slowly, and individual relay
+	// handlers already enforce their own body/operation limits.
+	httpReadHeaderTimeout = 15 * time.Second
+	httpIdleTimeout       = 2 * time.Minute
+	httpMaxHeaderBytes    = 256 << 10
+)
+
+func newHTTPServer(port string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              ":" + port,
+		Handler:           handler,
+		ReadHeaderTimeout: httpReadHeaderTimeout,
+		IdleTimeout:       httpIdleTimeout,
+		MaxHeaderBytes:    httpMaxHeaderBytes,
+	}
+}
+
 //go:embed web/default/dist
 var buildFS embed.FS
 
@@ -75,6 +95,7 @@ func main() {
 			common.FatalLog("failed to close database: " + err.Error())
 		}
 	}()
+	defer model.StopUserAuthStateCacheSync()
 
 	if common.RedisEnabled {
 		// for compatibility with old versions
@@ -222,10 +243,7 @@ func main() {
 		port = strconv.Itoa(*common.Port)
 	}
 
-	srv := &http.Server{
-		Addr:    ":" + port,
-		Handler: server,
-	}
+	srv := newHTTPServer(port, server)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -353,6 +371,7 @@ func InitResources() error {
 	if err != nil {
 		return err
 	}
+	model.StartUserAuthStateCacheSync()
 
 	perfmetrics.Init()
 

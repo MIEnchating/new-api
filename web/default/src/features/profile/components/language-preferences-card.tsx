@@ -30,10 +30,12 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { TitledCard } from '@/components/ui/titled-card'
+import { changeInterfaceLanguage } from '@/i18n/config'
 import {
   INTERFACE_LANGUAGE_OPTIONS,
   normalizeInterfaceLanguage,
 } from '@/i18n/languages'
+import { recoverFromChunkLoadError } from '@/lib/chunk-load-error'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { updateUserLanguage } from '../api'
@@ -67,9 +69,16 @@ export function LanguagePreferencesCard(props: LanguagePreferencesCardProps) {
     if (nextLanguage === currentLanguage) return
 
     const previousLanguage = currentLanguage
-    setCurrentLanguage(nextLanguage)
     setSaving(true)
-    await i18n.changeLanguage(nextLanguage)
+
+    const localeResult = await changeInterfaceLanguage(nextLanguage)
+    if (!localeResult.ok) {
+      recoverFromChunkLoadError(localeResult.error)
+      toast.error(t('Failed to load'))
+      setSaving(false)
+      return
+    }
+    setCurrentLanguage(nextLanguage)
 
     try {
       const response = await updateUserLanguage(nextLanguage)
@@ -95,7 +104,7 @@ export function LanguagePreferencesCard(props: LanguagePreferencesCardProps) {
       toast.success(t('Language preference saved'))
     } catch {
       setCurrentLanguage(previousLanguage)
-      await i18n.changeLanguage(previousLanguage)
+      await changeInterfaceLanguage(previousLanguage)
       toast.error(t('Failed to update settings'))
     } finally {
       setSaving(false)

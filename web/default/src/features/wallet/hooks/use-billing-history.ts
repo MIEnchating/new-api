@@ -45,6 +45,38 @@ function defaultStartTime() {
   return value
 }
 
+interface BillingHistoryFilters {
+  keyword: string
+  userKeyword: string
+  types: BillingRecordType[]
+  startTime?: Date
+  endTime?: Date
+}
+
+function createDefaultFilters(): BillingHistoryFilters {
+  return {
+    keyword: '',
+    userKeyword: '',
+    types: [...ALL_BILLING_TYPES],
+    startTime: defaultStartTime(),
+    endTime: new Date(),
+  }
+}
+
+function snapshotFilters(
+  filters: BillingHistoryFilters
+): BillingHistoryFilters {
+  return {
+    keyword: filters.keyword.trim(),
+    userKeyword: filters.userKeyword.trim(),
+    types: [...filters.types],
+    startTime: filters.startTime
+      ? new Date(filters.startTime.getTime())
+      : undefined,
+    endTime: filters.endTime ? new Date(filters.endTime.getTime()) : undefined,
+  }
+}
+
 // ============================================================================
 // Billing History Hook
 // ============================================================================
@@ -54,21 +86,23 @@ interface UseBillingHistoryOptions {
   initialPage?: number
   /** Initial page size */
   initialPageSize?: number
+  /** Only load records while the dialog is open */
+  enabled?: boolean
 }
 
 export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
-  const { initialPage = 1, initialPageSize = 10 } = options
+  const { initialPage = 1, initialPageSize = 10, enabled = true } = options
   const isAdmin = useIsAdmin()
 
   const [records, setRecords] = useState<BillingRecord[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(initialPage)
   const [pageSize, setPageSize] = useState(initialPageSize)
-  const [keyword, setKeyword] = useState('')
-  const [userKeyword, setUserKeyword] = useState('')
-  const [types, setTypes] = useState<BillingRecordType[]>(ALL_BILLING_TYPES)
-  const [startTime, setStartTime] = useState<Date | undefined>(defaultStartTime)
-  const [endTime, setEndTime] = useState<Date | undefined>(() => new Date())
+  const [filters, setFilters] =
+    useState<BillingHistoryFilters>(createDefaultFilters)
+  const [appliedFilters, setAppliedFilters] = useState<BillingHistoryFilters>(
+    () => snapshotFilters(filters)
+  )
   const [loading, setLoading] = useState(false)
   const [completing, setCompleting] = useState(false)
   const requestSequenceRef = useRef(0)
@@ -83,14 +117,14 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
       const params = {
         page,
         pageSize,
-        keyword,
-        userKeyword: isAdmin ? userKeyword : undefined,
-        types,
-        startTimestamp: startTime
-          ? Math.floor(startTime.getTime() / 1000)
+        keyword: appliedFilters.keyword,
+        userKeyword: isAdmin ? appliedFilters.userKeyword : undefined,
+        types: appliedFilters.types,
+        startTimestamp: appliedFilters.startTime
+          ? Math.floor(appliedFilters.startTime.getTime() / 1000)
           : undefined,
-        endTimestamp: endTime
-          ? Math.floor(endTime.getTime() / 1000)
+        endTimestamp: appliedFilters.endTime
+          ? Math.floor(appliedFilters.endTime.getTime() / 1000)
           : undefined,
       }
       const response = isAdmin
@@ -129,7 +163,7 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
         setLoading(false)
       }
     }
-  }, [isAdmin, page, pageSize, keyword, userKeyword, types, startTime, endTime])
+  }, [isAdmin, page, pageSize, appliedFilters])
 
   /**
    * Complete a pending order (admin only)
@@ -183,56 +217,62 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
   /**
    * Search by keyword
    */
-  const handleSearch = useCallback((newKeyword: string) => {
-    setKeyword(newKeyword)
-    setPage(1) // Reset to first page when searching
+  const handleKeywordChange = useCallback((newKeyword: string) => {
+    setFilters((current) => ({ ...current, keyword: newKeyword }))
   }, [])
 
-  const handleUserSearch = useCallback((newKeyword: string) => {
-    setUserKeyword(newKeyword)
-    setPage(1)
+  const handleUserKeywordChange = useCallback((newKeyword: string) => {
+    setFilters((current) => ({ ...current, userKeyword: newKeyword }))
   }, [])
 
   const handleTypesChange = useCallback((newTypes: string[]) => {
-    setTypes(newTypes as BillingRecordType[])
-    setPage(1)
+    setFilters((current) => ({
+      ...current,
+      types: newTypes as BillingRecordType[],
+    }))
   }, [])
 
   const handleStartTimeChange = useCallback((value: Date | undefined) => {
-    setStartTime(value)
-    setPage(1)
+    setFilters((current) => ({ ...current, startTime: value }))
   }, [])
 
   const handleEndTimeChange = useCallback((value: Date | undefined) => {
-    setEndTime(value)
-    setPage(1)
+    setFilters((current) => ({ ...current, endTime: value }))
   }, [])
 
-  // Fetch data when dependencies change
+  const handleApplyFilters = useCallback(() => {
+    setPage(1)
+    setAppliedFilters(snapshotFilters(filters))
+  }, [filters])
+
+  // Fetch the initial page and subsequent applied-filter or pagination changes.
   useEffect(() => {
-    fetchBillingHistory()
-  }, [fetchBillingHistory])
+    if (enabled) {
+      fetchBillingHistory()
+    }
+  }, [enabled, fetchBillingHistory])
 
   return {
     records,
     total,
     page,
     pageSize,
-    keyword,
-    userKeyword,
-    types,
-    startTime,
-    endTime,
+    keyword: filters.keyword,
+    userKeyword: filters.userKeyword,
+    types: filters.types,
+    startTime: filters.startTime,
+    endTime: filters.endTime,
     loading,
     completing,
     isAdmin,
     handlePageChange,
     handlePageSizeChange,
-    handleSearch,
-    handleUserSearch,
+    handleKeywordChange,
+    handleUserKeywordChange,
     handleTypesChange,
     handleStartTimeChange,
     handleEndTimeChange,
+    handleApplyFilters,
     handleCompleteOrder,
     refresh: fetchBillingHistory,
   }

@@ -20,7 +20,9 @@ import { useNavigate } from '@tanstack/react-router'
 import i18n from 'i18next'
 
 import type { User } from '@/features/users/types'
+import { changeInterfaceLanguage } from '@/i18n/config'
 import { getSelf } from '@/lib/api'
+import { recoverFromChunkLoadError } from '@/lib/chunk-load-error'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
@@ -70,7 +72,9 @@ export function useAuthRedirect() {
 
         const savedLang = getSavedLanguage(user)
         if (savedLang && savedLang !== i18n.language) {
-          void i18n.changeLanguage(savedLang)
+          void changeInterfaceLanguage(savedLang).then((result) => {
+            if (!result.ok) recoverFromChunkLoadError(result.error)
+          })
         }
       },
       clearUser: auth.reset,

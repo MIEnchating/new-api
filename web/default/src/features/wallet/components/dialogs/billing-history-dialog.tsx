@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   Search,
+  Loader2,
   Copy,
   Check,
   ChevronLeft,
@@ -95,13 +96,14 @@ export function BillingHistoryDialog({
     isAdmin,
     handlePageChange,
     handlePageSizeChange,
-    handleSearch,
-    handleUserSearch,
+    handleKeywordChange,
+    handleUserKeywordChange,
     handleTypesChange,
     handleStartTimeChange,
     handleEndTimeChange,
+    handleApplyFilters,
     handleCompleteOrder,
-  } = useBillingHistory()
+  } = useBillingHistory({ enabled: open })
 
   const [confirmTradeNo, setConfirmTradeNo] = useState<string | null>(null)
   const { copyToClipboard, copiedText } = useCopyToClipboard({ notify: false })
@@ -154,6 +156,15 @@ export function BillingHistoryDialog({
     }
   }
 
+  const handleFilterKeyDown = (
+    event: React.KeyboardEvent<HTMLInputElement>
+  ) => {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      handleApplyFilters()
+    }
+  }
+
   return (
     <>
       <Dialog
@@ -175,7 +186,8 @@ export function BillingHistoryDialog({
               <Input
                 placeholder={t('Search by order number...')}
                 value={keyword}
-                onChange={(e) => handleSearch(e.target.value)}
+                onChange={(e) => handleKeywordChange(e.target.value)}
+                onKeyDown={handleFilterKeyDown}
                 className='h-9 pl-10'
               />
             </div>
@@ -185,7 +197,8 @@ export function BillingHistoryDialog({
                 <Input
                   placeholder={t('Search users by ID or name...')}
                   value={userKeyword}
-                  onChange={(e) => handleUserSearch(e.target.value)}
+                  onChange={(e) => handleUserKeywordChange(e.target.value)}
+                  onKeyDown={handleFilterKeyDown}
                   className='h-9 pl-10'
                 />
               </div>
@@ -206,7 +219,7 @@ export function BillingHistoryDialog({
               />
             </div>
 
-            <div className='grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_132px]'>
+            <div className='grid min-w-0 gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end'>
               <div className='flex min-w-0 flex-col gap-1.5'>
                 <Label className='text-muted-foreground text-xs'>
                   {t('Date Range')}
@@ -221,36 +234,19 @@ export function BillingHistoryDialog({
                   }}
                 />
               </div>
-              <div className='flex flex-col gap-1.5'>
-                <Label className='text-muted-foreground text-xs'>
-                  {t('Rows per page')}
-                </Label>
-                <Select
-                  items={[
-                    { value: '10', label: t('10 / page') },
-                    { value: '20', label: t('20 / page') },
-                    { value: '50', label: t('50 / page') },
-                    { value: '100', label: t('100 / page') },
-                  ]}
-                  value={pageSize.toString()}
-                  onValueChange={(value) =>
-                    value !== null &&
-                    handlePageSizeChange(Number.parseInt(value))
-                  }
-                >
-                  <SelectTrigger className='h-9 w-full'>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent alignItemWithTrigger={false}>
-                    <SelectGroup>
-                      <SelectItem value='10'>{t('10 / page')}</SelectItem>
-                      <SelectItem value='20'>{t('20 / page')}</SelectItem>
-                      <SelectItem value='50'>{t('50 / page')}</SelectItem>
-                      <SelectItem value='100'>{t('100 / page')}</SelectItem>
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </div>
+              <Button
+                type='button'
+                onClick={handleApplyFilters}
+                disabled={loading}
+                className='h-9 w-full gap-1.5 sm:w-auto sm:min-w-24'
+              >
+                {loading ? (
+                  <Loader2 className='size-4 animate-spin' />
+                ) : (
+                  <Search className='size-4' />
+                )}
+                {t('Search')}
+              </Button>
             </div>
           </div>
 
@@ -418,13 +414,43 @@ export function BillingHistoryDialog({
           </div>
 
           {/* Pagination */}
-          {!loading && records.length > 0 && (
+          {!loading && (
             <div className='flex flex-col items-center gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between'>
               <div className='text-muted-foreground text-xs sm:text-sm'>
-                {t('Showing')} {(page - 1) * pageSize + 1}-
+                {t('Showing')} {total === 0 ? 0 : (page - 1) * pageSize + 1}-
                 {Math.min(page * pageSize, total)} {t('of')} {total}
               </div>
-              <div className='flex items-center gap-2'>
+              <div className='flex flex-wrap items-center justify-center gap-2'>
+                <div className='flex items-center gap-2'>
+                  <Label className='text-muted-foreground text-xs whitespace-nowrap'>
+                    {t('Rows per page')}
+                  </Label>
+                  <Select
+                    items={[
+                      { value: '10', label: '10' },
+                      { value: '20', label: '20' },
+                      { value: '50', label: '50' },
+                      { value: '100', label: '100' },
+                    ]}
+                    value={pageSize.toString()}
+                    onValueChange={(value) =>
+                      value !== null &&
+                      handlePageSizeChange(Number.parseInt(value))
+                    }
+                  >
+                    <SelectTrigger className='h-8 w-[4.75rem]'>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      <SelectGroup>
+                        <SelectItem value='10'>10</SelectItem>
+                        <SelectItem value='20'>20</SelectItem>
+                        <SelectItem value='50'>50</SelectItem>
+                        <SelectItem value='100'>100</SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Button
                   variant='outline'
                   size='sm'
@@ -437,13 +463,13 @@ export function BillingHistoryDialog({
                 <div className='text-muted-foreground flex items-center gap-1 text-sm'>
                   <span className='font-medium'>{page}</span>
                   <span>/</span>
-                  <span>{totalPages}</span>
+                  <span>{Math.max(totalPages, 1)}</span>
                 </div>
                 <Button
                   variant='outline'
                   size='sm'
                   onClick={() => handlePageChange(page + 1)}
-                  disabled={page >= totalPages}
+                  disabled={totalPages === 0 || page >= totalPages}
                   className='h-8 w-8 p-0'
                 >
                   <ChevronRight className='h-4 w-4' />

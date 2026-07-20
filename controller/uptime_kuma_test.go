@@ -48,6 +48,44 @@ func TestNormalizeUptimeHeartbeatTimeMarksNaiveTimestampAsUTC(t *testing.T) {
 	)
 }
 
+func TestResolveSevenDayUptimeAcceptsOnlySevenDayKeys(t *testing.T) {
+	t.Run("accepts supported seven day suffixes", func(t *testing.T) {
+		for _, testCase := range []struct {
+			name   string
+			suffix string
+			value  float64
+		}{
+			{name: "168 hours", suffix: "_168", value: 0.981},
+			{name: "7d", suffix: "_7d", value: 0.982},
+			{name: "7 days", suffix: "_7", value: 0.983},
+		} {
+			t.Run(testCase.name, func(t *testing.T) {
+				uptime, exists := resolveSevenDayUptime(
+					map[string]float64{"42" + testCase.suffix: testCase.value},
+					"42",
+				)
+
+				require.True(t, exists)
+				assert.Equal(t, testCase.value, uptime)
+			})
+		}
+	})
+
+	t.Run("rejects non seven day suffixes", func(t *testing.T) {
+		for _, suffix := range []string{"_24", "_720", "_30d"} {
+			t.Run(suffix, func(t *testing.T) {
+				uptime, exists := resolveSevenDayUptime(
+					map[string]float64{"42" + suffix: 0.999},
+					"42",
+				)
+
+				assert.False(t, exists)
+				assert.Zero(t, uptime)
+			})
+		}
+	})
+}
+
 func TestGetAndDecodeRejectsOversizedChunkedResponse(t *testing.T) {
 	client := &http.Client{Transport: uptimeRoundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		return &http.Response{

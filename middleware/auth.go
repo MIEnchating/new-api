@@ -157,7 +157,7 @@ func authHelperWithOptions(c *gin.Context, minRole int, allowMissingUserID bool)
 			return
 		}
 
-		currentUser, err := model.GetUserAuthState(id)
+		currentUser, err := model.GetUserAuthStateWithContext(c.Request.Context(), id)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				abortMalformedAuthSession(c, session)
@@ -265,7 +265,7 @@ func TryUserAuth() func(c *gin.Context) {
 		session := sessions.Default(c)
 		id, ok := session.Get("id").(int)
 		if ok && id > 0 {
-			user, err := model.GetUserAuthState(id)
+			user, err := model.GetUserAuthStateWithContext(c.Request.Context(), id)
 			if err == nil && user.Status == common.UserStatusEnabled && validUserInfo(user.Username, user.Role) {
 				c.Set("id", id)
 			}

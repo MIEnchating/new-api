@@ -209,7 +209,7 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 				monitor.Uptime = uptime
 				monitor.Uptime24 = uptime
 			}
-			if uptime, exists := resolveHistoryUptime(heartbeatData.UptimeList, monitorID); exists {
+			if uptime, exists := resolveSevenDayUptime(heartbeatData.UptimeList, monitorID); exists {
 				monitor.Uptime7 = float64Ptr(uptime)
 			}
 
@@ -237,8 +237,8 @@ func float64Ptr(value float64) *float64 {
 	return &value
 }
 
-func resolveHistoryUptime(uptimeList map[string]float64, monitorID string) (float64, bool) {
-	for _, suffix := range []string{"_168", "_7d", "_7", "_720", "_30d", uptimeKeySuffix} {
+func resolveSevenDayUptime(uptimeList map[string]float64, monitorID string) (float64, bool) {
+	for _, suffix := range []string{"_168", "_7d", "_7"} {
 		if uptime, exists := uptimeList[monitorID+suffix]; exists {
 			return uptime, true
 		}

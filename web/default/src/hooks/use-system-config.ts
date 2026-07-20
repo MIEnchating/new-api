@@ -16,10 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useEffect } from 'react'
 
+import type { SystemStatus } from '@/features/auth/types'
 import { DEFAULT_SYSTEM_NAME, DEFAULT_LOGO } from '@/lib/constants'
 import { applyFaviconToDom } from '@/lib/dom-utils'
+import { cacheStatus, statusQueryOptions } from '@/lib/status-query'
 import {
   useSystemConfigStore,
   type CurrencyConfig,
@@ -31,23 +34,6 @@ import {
 interface UseSystemConfigOptions {
   /** Automatically fetch config from backend (use only in root component) */
   autoLoad?: boolean
-}
-
-interface StatusApiResponse {
-  success: boolean
-  data: {
-    system_name?: string
-    logo?: string
-    footer_html?: string
-    demo_site_enabled?: boolean
-    display_token_stat_enabled?: boolean
-    display_in_currency?: boolean
-    quota_display_type?: CurrencyDisplayType
-    quota_per_unit?: number
-    usd_exchange_rate?: number
-    custom_currency_symbol?: string
-    custom_currency_exchange_rate?: number
-  }
 }
 
 function toNumber(value: unknown, fallback: number): number {
@@ -63,7 +49,7 @@ function toNumber(value: unknown, fallback: number): number {
  * Map `/api/status` response data to our persisted system config structure
  */
 export function mapStatusDataToConfig(
-  data: StatusApiResponse['data'] | undefined
+  data: SystemStatus | undefined
 ): Partial<SystemConfig> {
   if (!data) return {}
 
@@ -95,22 +81,12 @@ export function mapStatusDataToConfig(
   return {
     systemName: data.system_name || DEFAULT_SYSTEM_NAME,
     logo: data.logo || DEFAULT_LOGO,
-    footerHtml: data.footer_html,
+    footerHtml:
+      typeof data.footer_html === 'string' ? data.footer_html : undefined,
     demoSiteEnabled: data.demo_site_enabled,
     displayTokenStatEnabled: data.display_token_stat_enabled,
     currency,
   }
-}
-
-// Fetch system config from API
-async function fetchSystemConfig(): Promise<Partial<SystemConfig>> {
-  const response = await fetch('/api/status')
-  if (!response.ok) throw new Error('Failed to fetch status')
-
-  const data: StatusApiResponse = await response.json()
-  if (!data.success) throw new Error('API returned error')
-
-  return mapStatusDataToConfig(data.data)
 }
 
 // Preload image and return cleanup function
@@ -143,6 +119,7 @@ function preloadImage(
  */
 export function useSystemConfig(options: UseSystemConfigOptions = {}) {
   const { autoLoad = false } = options
+  const statusQuery = useQuery({ ...statusQueryOptions, enabled: autoLoad })
   const {
     config,
     loading,
@@ -152,23 +129,30 @@ export function useSystemConfig(options: UseSystemConfigOptions = {}) {
     setLoading,
   } = useSystemConfigStore()
 
-  // Load config from backend
-  const loadConfig = useCallback(async () => {
-    try {
-      setLoading(true)
-      const newConfig = await fetchSystemConfig()
-      setConfig(newConfig)
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to load system config:', error)
-    } finally {
-      setLoading(false)
-    }
-  }, [setConfig, setLoading])
+  useEffect(() => {
+    if (!autoLoad) return
+    setLoading(statusQuery.isLoading)
+  }, [autoLoad, setLoading, statusQuery.isLoading])
 
   useEffect(() => {
-    if (autoLoad) loadConfig()
-  }, [autoLoad, loadConfig])
+    if (!autoLoad || !statusQuery.data) return
+    setConfig(mapStatusDataToConfig(statusQuery.data))
+    cacheStatus(statusQuery.data)
+  }, [autoLoad, setConfig, statusQuery.data])
+
+  useEffect(() => {
+    if (!autoLoad || !statusQuery.error) return
+    // eslint-disable-next-line no-console
+    console.error('Failed to load system config:', statusQuery.error)
+  }, [autoLoad, statusQuery.error])
+
+  useEffect(() => {
+    if (!config.systemName || typeof document === 'undefined') return
+    document.title = config.systemName
+    const metaTitle =
+      document.querySelector<HTMLMetaElement>('meta[name="title"]')
+    metaTitle?.setAttribute('content', config.systemName)
+  }, [config.systemName])
 
   // Preload logo image when URL changes
   useEffect(() => {
