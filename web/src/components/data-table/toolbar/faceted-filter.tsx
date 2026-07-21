@@ -109,10 +109,7 @@ function DataTableFacetedFilterInner<TData, TValue>({
         <span className='min-w-0 truncate'>{title}</span>
         {selectedValues?.size > 0 && (
           <>
-            <Separator
-              orientation='vertical'
-              className='mx-2 h-4 shrink-0'
-            />
+            <Separator orientation='vertical' className='mx-2 h-4 shrink-0' />
             <Badge
               variant='secondary'
               className='shrink-0 rounded-sm px-1 font-normal lg:hidden'

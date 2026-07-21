@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-
 const CHUNK_ERROR_PATTERNS = [
   /ChunkLoadError/i,
   /Loading (?:CSS )?chunk [^ ]+ failed/i,

@@ -94,7 +94,7 @@ export function VendorMutateDialog({
     setIsSaving(true)
     try {
       const response = isEdit
-        ? await updateVendor({ ...values, id: currentVendor!.id })
+        ? await updateVendor({ ...values, id: currentVendor?.id ?? 0 })
         : await createVendor(values)
 
       if (response.success) {

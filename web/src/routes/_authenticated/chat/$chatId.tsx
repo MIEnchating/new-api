@@ -1,3 +1,4 @@
+/* oxlint-disable react/iframe-missing-sandbox -- Configured chat apps require their original origin and provider capabilities. */
 /*
 Copyright (C) 2023-2026 QuantumNous
 

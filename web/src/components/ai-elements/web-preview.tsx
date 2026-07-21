@@ -1,3 +1,4 @@
+/* oxlint-disable react/iframe-missing-sandbox -- Interactive previews require scripts and same-origin behavior. */
 /*
 Copyright (C) 2023-2026 QuantumNous
 

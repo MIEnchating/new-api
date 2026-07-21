@@ -16,8 +16,21 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export const UPDATE_REPOSITORY = 'MIEnchating/new-api'
+import { createContext, useContext } from 'react'
 
-export const LATEST_RELEASE_API_URL = `https://api.github.com/repos/${UPDATE_REPOSITORY}/releases/latest`
+export type SearchContextType = {
+  open: boolean
+  setOpen: React.Dispatch<React.SetStateAction<boolean>>
+}
 
-export const RELEASE_WORKFLOW_URL = `https://github.com/${UPDATE_REPOSITORY}/actions/workflows/release.yml`
+export const SearchContext = createContext<SearchContextType | null>(null)
+
+export function useSearch() {
+  const searchContext = useContext(SearchContext)
+
+  if (!searchContext) {
+    throw new Error('useSearch has to be used within SearchProvider')
+  }
+
+  return searchContext
+}
