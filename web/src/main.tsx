@@ -35,6 +35,7 @@ import { applyFaviconToDom } from '@/lib/dom-utils'
 import '@/lib/dayjs'
 import { initializeFrontendCache } from '@/lib/frontend-cache'
 import { handleServerError } from '@/lib/handle-server-error'
+import { normalizeSystemLogo } from '@/lib/system-branding'
 
 import { DirectionProvider } from './context/direction-provider'
 import { FontProvider } from './context/font-provider'
@@ -131,7 +132,7 @@ if (!rootElement) {
       if (saved) {
         const s = JSON.parse(saved)
         if (s?.system_name) apply(s.system_name)
-        if (s?.logo) applyFaviconToDom(s.logo)
+        applyFaviconToDom(normalizeSystemLogo(s?.logo))
       }
     } catch {
       /* empty */
@@ -147,7 +148,7 @@ if (!rootElement) {
             /* empty */
           }
         }
-        if (s?.logo) applyFaviconToDom(s.logo as string)
+        applyFaviconToDom(normalizeSystemLogo(s?.logo))
       })
       .catch(() => {
         /* empty */
@@ -156,19 +157,23 @@ if (!rootElement) {
     /* empty */
   }
 })()
-void initializeAndMountApplication(rootElement, initializeI18n, (applicationRoot) => {
-  const root = ReactDOM.createRoot(applicationRoot)
-  root.render(
-    <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <ThemeProvider>
-          <FontProvider>
-            <DirectionProvider>
-              <RouterProvider router={router} />
-            </DirectionProvider>
-          </FontProvider>
-        </ThemeProvider>
-      </QueryClientProvider>
-    </StrictMode>
-  )
-})
+void initializeAndMountApplication(
+  rootElement,
+  initializeI18n,
+  (applicationRoot) => {
+    const root = ReactDOM.createRoot(applicationRoot)
+    root.render(
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider>
+            <FontProvider>
+              <DirectionProvider>
+                <RouterProvider router={router} />
+              </DirectionProvider>
+            </FontProvider>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </StrictMode>
+    )
+  }
+)

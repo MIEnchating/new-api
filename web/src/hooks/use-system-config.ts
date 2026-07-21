@@ -23,6 +23,7 @@ import type { SystemStatus } from '@/features/auth/types'
 import { DEFAULT_SYSTEM_NAME, DEFAULT_LOGO } from '@/lib/constants'
 import { applyFaviconToDom } from '@/lib/dom-utils'
 import { cacheStatus, statusQueryOptions } from '@/lib/status-query'
+import { normalizeSystemLogo } from '@/lib/system-branding'
 import {
   useSystemConfigStore,
   type CurrencyConfig,
@@ -80,7 +81,7 @@ export function mapStatusDataToConfig(
 
   return {
     systemName: data.system_name || DEFAULT_SYSTEM_NAME,
-    logo: data.logo || DEFAULT_LOGO,
+    logo: normalizeSystemLogo(data.logo),
     footerHtml:
       typeof data.footer_html === 'string' ? data.footer_html : undefined,
     demoSiteEnabled: data.demo_site_enabled,
