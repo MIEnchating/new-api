@@ -124,7 +124,7 @@ export async function handleEnableChannel(
 ): Promise<void> {
   try {
     const response = await updateChannelStatus(id, CHANNEL_STATUS.ENABLED)
-    if (response.success) {
+    if (response.success && response.data !== false) {
       toast.success(i18next.t(SUCCESS_MESSAGES.ENABLED))
       queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
       onSuccess?.()
@@ -149,7 +149,7 @@ export async function handleDisableChannel(
       id,
       CHANNEL_STATUS.MANUAL_DISABLED
     )
-    if (response.success) {
+    if (response.success && response.data !== false) {
       toast.success(i18next.t(SUCCESS_MESSAGES.DISABLED))
       queryClient?.invalidateQueries({ queryKey: channelsQueryKeys.lists() })
       onSuccess?.()

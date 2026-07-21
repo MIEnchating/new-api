@@ -21,6 +21,7 @@ import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 
+import { sideDrawerContentClassName } from '@/components/drawer-layout'
 import { Button } from '@/components/ui/button'
 import {
   ChartContainer,
@@ -28,19 +29,20 @@ import {
   ChartTooltipContent,
 } from '@/components/ui/chart'
 import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/components/ui/drawer'
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import type { UptimeHeartbeat, UptimeMonitor } from '@/features/dashboard/types'
 import { useMediaQuery } from '@/hooks'
 
 import { getOrderedHeartbeats } from './monitor-utils'
 
 type MonitorDetailsDrawerProps = {
+  open: boolean
   monitor: UptimeMonitor | null
   onOpenChange: (open: boolean) => void
 }
@@ -225,33 +227,35 @@ export function MonitorDetailsDrawer(props: MonitorDetailsDrawerProps) {
   const chartData = useMemo(() => buildChartData(heartbeats), [heartbeats])
 
   return (
-    <Drawer
-      open={!!props.monitor}
-      onOpenChange={props.onOpenChange}
-      direction={isMobile ? 'bottom' : 'right'}
-    >
-      <DrawerContent className='data-[vaul-drawer-direction=bottom]:max-h-[92vh] data-[vaul-drawer-direction=right]:w-full data-[vaul-drawer-direction=right]:sm:max-w-2xl'>
-        <DrawerHeader className='relative shrink-0 border-b pr-14 text-left'>
-          <DrawerTitle>
-            {props.monitor?.name || t('Unnamed monitor')}
-          </DrawerTitle>
-          <DrawerDescription>
+    <Sheet open={props.open} onOpenChange={props.onOpenChange}>
+      <SheetContent
+        side={isMobile ? 'bottom' : 'right'}
+        showCloseButton={false}
+        className={sideDrawerContentClassName(
+          isMobile ? 'h-[92dvh] max-h-[92dvh] rounded-t-xl' : 'sm:max-w-2xl'
+        )}
+      >
+        <SheetHeader className='relative shrink-0 border-b pr-14 text-left'>
+          <SheetTitle>{props.monitor?.name || t('Unnamed monitor')}</SheetTitle>
+          <SheetDescription>
             {props.monitor?.group
               ? `${t('Group')}: ${props.monitor.group}`
               : t('Details')}
-          </DrawerDescription>
-          <DrawerClose asChild>
-            <Button
-              type='button'
-              variant='ghost'
-              size='icon'
-              className='absolute top-3 right-3'
-              aria-label={t('Close')}
-            >
-              <X className='size-4' />
-            </Button>
-          </DrawerClose>
-        </DrawerHeader>
+          </SheetDescription>
+          <SheetClose
+            render={
+              <Button
+                type='button'
+                variant='ghost'
+                size='icon'
+                className='absolute top-3 right-3'
+                aria-label={t('Close')}
+              />
+            }
+          >
+            <X className='size-4' />
+          </SheetClose>
+        </SheetHeader>
 
         <div className='min-h-0 flex-1 overflow-y-auto px-4 pb-6 sm:px-6'>
           <div className='grid grid-cols-2 sm:grid-cols-3 [&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1'>
@@ -296,7 +300,7 @@ export function MonitorDetailsDrawer(props: MonitorDetailsDrawerProps) {
             />
           </div>
         </div>
-      </DrawerContent>
-    </Drawer>
+      </SheetContent>
+    </Sheet>
   )
 }

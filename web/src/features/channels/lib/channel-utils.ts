@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { isHttpUrl } from '@/lib/content-format'
 import { formatCurrencyFromUSD, formatQuotaWithCurrency } from '@/lib/currency'
 import { formatTimestampToDate } from '@/lib/format'
 
@@ -157,6 +158,21 @@ export function isChannelEnabled(channel: Channel): boolean {
  */
 export function isMultiKeyChannel(channel: Channel): boolean {
   return channel.channel_info?.is_multi_key || false
+}
+
+/**
+ * Return the channel API address when it is safe to expose as a link.
+ */
+export function getChannelNameHref(
+  baseUrl: string | null | undefined,
+  sensitiveVisible: boolean
+): string | null {
+  if (!sensitiveVisible) {
+    return null
+  }
+
+  const href = baseUrl?.trim() ?? ''
+  return href && isHttpUrl(href) ? href : null
 }
 
 // ============================================================================

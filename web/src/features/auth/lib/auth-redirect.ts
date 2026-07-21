@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { AuthUser } from '@/stores/auth-store'
+import type { AuthBundle, AuthUser } from '@/stores/auth-store'
 
 const allowedRedirectProtocols = new Set(['http:', 'https:'])
 
@@ -77,4 +77,31 @@ export function sanitizeAuthRedirect(
   }
 
   return `${redirectURL.pathname}${redirectURL.search}${redirectURL.hash}`
+}
+
+interface CompleteAuthenticationRedirectOptions {
+  bundle: AuthBundle
+  redirectTo?: string
+  origin: string
+  currentLanguage: string
+  applyBundle: (bundle: AuthBundle) => void
+  navigate: (target: string) => void | Promise<unknown>
+  scheduleLanguageChange: (language: string) => void
+}
+
+export async function completeAuthenticationRedirect(
+  options: CompleteAuthenticationRedirectOptions
+): Promise<string> {
+  options.applyBundle(options.bundle)
+  const target =
+    sanitizeAuthRedirect(options.redirectTo, options.origin) ?? '/dashboard'
+
+  const navigation = options.navigate(target)
+  const savedLanguage = getSavedLanguage(options.bundle.user)
+  if (savedLanguage && savedLanguage !== options.currentLanguage) {
+    options.scheduleLanguageChange(savedLanguage)
+  }
+
+  await navigation
+  return target
 }

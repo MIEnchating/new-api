@@ -62,6 +62,7 @@ import {
   formatRelativeTime,
   formatResponseTime,
   getBalanceVariant,
+  getChannelNameHref,
   getChannelTypeIcon,
   getChannelTypeLabel,
   getResponseTimeConfig,
@@ -630,16 +631,36 @@ export function useChannelsColumns(
           const hasParamOverride = Boolean(channel.param_override?.trim())
           const remark = channel.remark?.trim() ?? ''
           const remarkIsUrl = isHttpUrl(remark)
+          const channelNameHref = getChannelNameHref(
+            channel.base_url,
+            sensitiveVisible
+          )
+
+          const channelName = (
+            <TruncatedText
+              text={sensitiveVisible ? name : SENSITIVE_MASK}
+              className='font-medium'
+              maxWidth='max-w-full'
+            />
+          )
 
           return (
             <div className='flex max-w-full min-w-0 items-center gap-2'>
               <div className='flex max-w-full min-w-0 flex-col gap-1'>
                 <div className='flex max-w-full min-w-0 items-center gap-1.5'>
-                  <TruncatedText
-                    text={sensitiveVisible ? name : SENSITIVE_MASK}
-                    className='font-medium'
-                    maxWidth='max-w-full'
-                  />
+                  {channelNameHref ? (
+                    <a
+                      href={channelNameHref}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      className='text-primary min-w-0 hover:underline'
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      {channelName}
+                    </a>
+                  ) : (
+                    channelName
+                  )}
                   {isPassThrough && (
                     <TooltipProvider delay={100}>
                       <Tooltip>

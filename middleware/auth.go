@@ -342,6 +342,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 			return
 		}
 
+		userCache.WriteContext(c)
 		c.Set("id", token.UserId)
 		c.Set("token_id", token.Id)
 		c.Set("token_key", token.Key)

@@ -65,6 +65,7 @@ type MonitorStatusMeta = {
   label: string
   icon: LucideIcon
   dotClassName: string
+  textClassName: string
   variant: StatusVariant
 }
 
@@ -73,24 +74,28 @@ const STATUS_META: Record<number, MonitorStatusMeta> = {
     label: 'Operational',
     icon: CheckCircle2,
     dotClassName: 'bg-success',
+    textClassName: 'text-status-success',
     variant: 'success',
   },
   0: {
     label: 'Down',
     icon: AlertTriangle,
     dotClassName: 'bg-destructive',
+    textClassName: 'text-destructive',
     variant: 'danger',
   },
   2: {
-    label: 'Pending',
+    label: 'Retry',
     icon: CircleDashed,
     dotClassName: 'bg-warning',
+    textClassName: 'text-status-warning',
     variant: 'warning',
   },
   3: {
     label: 'Maintenance',
     icon: Wrench,
     dotClassName: 'bg-info',
+    textClassName: 'text-info',
     variant: 'info',
   },
 }
@@ -99,6 +104,7 @@ const UNKNOWN_STATUS_META: MonitorStatusMeta = {
   label: 'Unknown',
   icon: CircleDashed,
   dotClassName: 'bg-muted-foreground/40',
+  textClassName: 'text-background/70',
   variant: 'neutral',
 }
 
@@ -339,11 +345,22 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
         >
           {heartbeats.map((heartbeat) => {
             const meta = getStatusMeta(heartbeat.status)
+            const hasPing =
+              typeof heartbeat.ping === 'number' &&
+              Number.isFinite(heartbeat.ping)
+            let detail: string | null = null
+            if (heartbeat.msg) {
+              detail = heartbeat.msg
+            } else if (hasPing) {
+              detail = `${t('Latency')}: ${formatPing(heartbeat.ping)}`
+            }
             const label = [
-              t(meta.label),
+              `${t('Status')}: ${t(meta.label)}`,
               formatDateTime(heartbeat.time),
-              formatPing(heartbeat.ping),
-            ].join(' · ')
+              detail,
+            ]
+              .filter(Boolean)
+              .join(' · ')
 
             return (
               <Tooltip
@@ -354,7 +371,7 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
                     <span
                       aria-label={label}
                       className={cn(
-                        'block min-h-3 cursor-default rounded-[2px]',
+                        'block min-h-3 cursor-default rounded-full transition-[transform,filter,box-shadow] duration-150 ease-out hover:z-10 hover:-translate-y-1 hover:brightness-110 hover:shadow-sm',
                         heartbeat.status === 1 ? 'h-10 sm:h-12' : 'h-7 sm:h-8',
                         meta.dotClassName
                       )}
@@ -364,15 +381,24 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
                 <TooltipContent
                   side='top'
                   sideOffset={6}
-                  className='flex-col items-start gap-0.5'
+                  className='max-w-72 min-w-48 flex-col items-stretch gap-0 px-3 py-2.5'
                 >
-                  <span className='font-medium'>
-                    {formatPing(heartbeat.ping)}
+                  <span
+                    className={cn(
+                      'text-center text-sm font-semibold',
+                      meta.textClassName
+                    )}
+                  >
+                    {t(meta.label)}
                   </span>
-                  <span className='opacity-75'>
+                  <span className='mt-1 text-center text-xs tabular-nums opacity-75'>
                     {formatDateTime(heartbeat.time)}
                   </span>
-                  {heartbeat.msg ? <span>{heartbeat.msg}</span> : null}
+                  {detail ? (
+                    <span className='border-background/15 mt-2 border-t pt-2 text-xs leading-relaxed break-words'>
+                      {detail}
+                    </span>
+                  ) : null}
                 </TooltipContent>
               </Tooltip>
             )
@@ -412,18 +438,12 @@ const MonitorRow = memo(function MonitorRow(props: {
   const meta = getStatusMeta(props.monitor.status)
 
   return (
-    <article className='bg-background/80 rounded-lg border p-3 sm:p-4'>
-      <div
-        role='button'
-        tabIndex={0}
+    <article className='bg-background/80 hover:border-foreground/20 overflow-hidden rounded-lg border transition-[box-shadow,border-color] duration-200 ease-out hover:shadow-md'>
+      <button
+        type='button'
+        data-press-animation='none'
         onClick={() => props.onSelect(props.monitor)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault()
-            props.onSelect(props.monitor)
-          }
-        }}
-        className='hover:bg-muted/20 focus-visible:ring-ring -m-2 cursor-pointer rounded-md p-2 transition-colors outline-none focus-visible:ring-2'
+        className='hover:bg-muted/20 active:bg-muted/40 focus-visible:ring-ring w-full cursor-pointer p-3 text-left transition-colors duration-150 ease-out outline-none focus-visible:ring-2 focus-visible:ring-inset sm:p-4'
       >
         <div className='flex min-w-0 flex-wrap items-start justify-between gap-3'>
           <div className='flex min-w-0 items-center gap-3'>
@@ -470,9 +490,9 @@ const MonitorRow = memo(function MonitorRow(props: {
             value={getRelativeTime(props.monitor.lastChecked, t)}
           />
         </div>
-      </div>
+      </button>
 
-      <div className='mt-4'>
+      <div className='border-t px-3 py-3 sm:px-4 sm:py-4'>
         <HeartbeatTimeline heartbeats={props.monitor.heartbeats} />
       </div>
     </article>
@@ -532,6 +552,7 @@ export function StatusMonitor() {
   const [selectedMonitor, setSelectedMonitor] = useState<UptimeMonitor | null>(
     null
   )
+  const [monitorDetailsOpen, setMonitorDetailsOpen] = useState(false)
 
   const fetchStatus = useCallback((mode: 'initial' | 'refresh') => {
     if (mode === 'initial') {
@@ -673,6 +694,11 @@ export function StatusMonitor() {
     fetchStatus('refresh')
   }, [fetchStatus])
 
+  const handleMonitorSelect = useCallback((monitor: UptimeMonitor) => {
+    setSelectedMonitor(monitor)
+    setMonitorDetailsOpen(true)
+  }, [])
+
   let content = null
   if (loading) {
     content = <LoadingState />
@@ -724,7 +750,7 @@ export function StatusMonitor() {
               <MonitorRow
                 key={item.key}
                 monitor={item.monitor}
-                onSelect={setSelectedMonitor}
+                onSelect={handleMonitorSelect}
               />
             ))}
           </div>
@@ -819,10 +845,9 @@ export function StatusMonitor() {
         </SectionPageLayout.Content>
       </SectionPageLayout>
       <MonitorDetailsDrawer
+        open={monitorDetailsOpen}
         monitor={selectedMonitor}
-        onOpenChange={(open) => {
-          if (!open) setSelectedMonitor(null)
-        }}
+        onOpenChange={setMonitorDetailsOpen}
       />
     </>
   )

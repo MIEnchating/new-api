@@ -29,9 +29,10 @@ describe('system branding', () => {
     assert.equal(normalizeSystemLogo('  '), DEFAULT_LOGO)
   })
 
-  test('migrates the legacy Yunmian icon URL', () => {
+  test('canonicalizes Yunmian logo aliases', () => {
+    assert.equal(normalizeSystemLogo('https://yunmian.tech/icon'), DEFAULT_LOGO)
     assert.equal(
-      normalizeSystemLogo('https://www.yunmian.tech/icon'),
+      normalizeSystemLogo('https://www.yunmian.tech/logo.png'),
       DEFAULT_LOGO
     )
   })
@@ -49,8 +50,8 @@ describe('system branding', () => {
 
     assert.match(
       indexHtml,
-      /src="https:\/\/www\.yunmian\.tech\/logo\.png\?v=20260721"/
+      /src="https:\/\/www\.yunmian\.tech\/icon\?v=20260721-3"/
     )
-    assert.doesNotMatch(indexHtml, /src="\/logo\.png"/)
+    assert.doesNotMatch(indexHtml, /src="[^"]*logo\.png/)
   })
 })

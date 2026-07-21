@@ -100,7 +100,7 @@ start_services() {
   echo "$!" >"${BACKEND_PID_FILE}"
 
   (
-    cd "${ROOT_DIR}/web/default"
+    cd "${ROOT_DIR}/web"
     nohup setsid env \
       VITE_REACT_APP_SERVER_URL="http://127.0.0.1:${BACKEND_PORT}" \
       "${BUN_BIN}" run dev --port "${FRONTEND_PORT}" \

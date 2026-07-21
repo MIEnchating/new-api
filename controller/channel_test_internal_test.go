@@ -143,6 +143,76 @@ func TestDeleteChannelBatchReportsAndAuditsActualDeletedCount(t *testing.T) {
 	assert.Equal(t, float64(1), auditData.Operation.Params["count"])
 }
 
+func TestAddChannelCanBeDisabledImmediatelyWithMemoryCache(t *testing.T) {
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Log{}))
+	originalMemoryCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = originalMemoryCacheEnabled
+	})
+	model.InitChannelCache()
+
+	addBody, err := common.Marshal(AddChannelRequest{
+		Mode: "single",
+		Channel: &model.Channel{
+			Type:   constant.ChannelTypeOpenAI,
+			Key:    "sk-new-channel",
+			Status: common.ChannelStatusEnabled,
+			Name:   "new channel",
+			Models: "gpt-test",
+			Group:  "default",
+		},
+	})
+	require.NoError(t, err)
+	addRecorder := httptest.NewRecorder()
+	addContext, _ := gin.CreateTestContext(addRecorder)
+	addContext.Request = httptest.NewRequest(
+		http.MethodPost,
+		"/api/channel/",
+		bytes.NewReader(addBody),
+	)
+	addContext.Request.Header.Set("Content-Type", "application/json")
+
+	AddChannel(addContext)
+
+	require.Contains(t, addRecorder.Body.String(), `"success":true`)
+	var channel model.Channel
+	require.NoError(t, db.Where("name = ?", "new channel").First(&channel).Error)
+	cachedChannel, err := model.CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	require.Equal(t, common.ChannelStatusEnabled, cachedChannel.Status)
+
+	statusBody, err := common.Marshal(ChannelStatusRequest{
+		Status: common.ChannelStatusManuallyDisabled,
+	})
+	require.NoError(t, err)
+	statusRecorder := httptest.NewRecorder()
+	statusContext, _ := gin.CreateTestContext(statusRecorder)
+	statusContext.Params = gin.Params{{Key: "id", Value: fmt.Sprintf("%d", channel.Id)}}
+	statusContext.Request = httptest.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("/api/channel/%d/status", channel.Id),
+		bytes.NewReader(statusBody),
+	)
+	statusContext.Request.Header.Set("Content-Type", "application/json")
+
+	UpdateChannelStatus(statusContext)
+
+	var statusResponse struct {
+		Success bool `json:"success"`
+		Data    bool `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(statusRecorder.Body.Bytes(), &statusResponse))
+	require.True(t, statusResponse.Success)
+	require.True(t, statusResponse.Data)
+	require.NoError(t, db.First(&channel, channel.Id).Error)
+	require.Equal(t, common.ChannelStatusManuallyDisabled, channel.Status)
+	cachedChannel, err = model.CacheGetChannel(channel.Id)
+	require.NoError(t, err)
+	require.Equal(t, common.ChannelStatusManuallyDisabled, cachedChannel.Status)
+}
+
 func TestSettleTestQuotaUsesTieredBilling(t *testing.T) {
 	info := &relaycommon.RelayInfo{
 		TieredBillingSnapshot: &billingexpr.BillingSnapshot{

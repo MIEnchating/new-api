@@ -501,8 +501,8 @@ For commercial licensing, please contact support@quantumnous.com
     }
   }
 
-  button:not(:disabled):active,
-  [role='button']:not(:disabled):active {
+  button:not(:disabled):not([data-press-animation='none']):active,
+  [role='button']:not(:disabled):not([data-press-animation='none']):active {
     transform: scale(0.98);
   }
 

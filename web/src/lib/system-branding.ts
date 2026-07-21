@@ -18,13 +18,17 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { DEFAULT_LOGO } from './constants'
 
-const LEGACY_YUNMIAN_LOGO = 'https://www.yunmian.tech/icon'
+const YUNMIAN_LOGO_ALIASES = new Set([
+  'https://yunmian.tech/icon',
+  'https://www.yunmian.tech/logo.png',
+  'https://www.yunmian.tech/logo.png?v=20260721',
+])
 
 export function normalizeSystemLogo(logo: unknown): string {
   if (typeof logo !== 'string') return DEFAULT_LOGO
 
   const normalizedLogo = logo.trim()
-  if (!normalizedLogo || normalizedLogo === LEGACY_YUNMIAN_LOGO) {
+  if (!normalizedLogo || YUNMIAN_LOGO_ALIASES.has(normalizedLogo)) {
     return DEFAULT_LOGO
   }
 

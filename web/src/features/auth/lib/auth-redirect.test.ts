@@ -19,11 +19,34 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import type { AuthUser } from '@/stores/auth-store'
+import type { AuthBundle, AuthUser } from '@/stores/auth-store'
 
-import { getSavedLanguage, sanitizeAuthRedirect } from './auth-redirect'
+import {
+  completeAuthenticationRedirect,
+  getSavedLanguage,
+  sanitizeAuthRedirect,
+} from './auth-redirect'
 
 const origin = 'https://dashboard.example.com'
+
+function buildAuthBundle(language: string): AuthBundle {
+  return {
+    access_token: 'access-token',
+    token_type: 'Bearer',
+    access_expires_at: 2_000_000_000,
+    user: { id: 1, username: 'user', role: 1, language },
+    session: {
+      sid: 'session-id',
+      current: true,
+      login_method: 'password',
+      ip: '127.0.0.1',
+      user_agent: 'test',
+      created_at: 1,
+      last_active_at: 1,
+      expires_at: 2_000_000_000,
+    },
+  }
+}
 
 describe('authentication redirect validation', () => {
   test('preserves safe internal paths, search parameters, and fragments', () => {
@@ -94,5 +117,58 @@ describe('saved authentication language', () => {
       getSavedLanguage({ ...user, setting: { language: 123 } }),
       undefined
     )
+  })
+})
+
+describe('successful authentication redirect', () => {
+  test('starts navigation before scheduling a saved language change', async () => {
+    const events: string[] = []
+    const bundle = buildAuthBundle('zh-CN')
+
+    const target = await completeAuthenticationRedirect({
+      bundle,
+      redirectTo: '/usage-logs/common',
+      origin,
+      currentLanguage: 'en',
+      applyBundle: () => events.push('bundle'),
+      navigate: (path) => {
+        events.push(`navigate:${path}`)
+      },
+      scheduleLanguageChange: (language) => events.push(`language:${language}`),
+    })
+
+    assert.equal(target, '/usage-logs/common')
+    assert.deepEqual(events, [
+      'bundle',
+      'navigate:/usage-logs/common',
+      'language:zh-CN',
+    ])
+  })
+
+  test('does not wait for the language request before completing navigation', async () => {
+    let resolveNavigation!: () => void
+    const navigation = new Promise<void>((resolve) => {
+      resolveNavigation = resolve
+    })
+    let languageFinished = false
+    const languageRequest = new Promise<void>(() => {})
+    const bundle = buildAuthBundle('ja')
+
+    const completion = completeAuthenticationRedirect({
+      bundle,
+      origin,
+      currentLanguage: 'en',
+      applyBundle: () => {},
+      navigate: () => navigation,
+      scheduleLanguageChange: () => {
+        void languageRequest.then(() => {
+          languageFinished = true
+        })
+      },
+    })
+    resolveNavigation()
+
+    assert.equal(await completion, '/dashboard')
+    assert.equal(languageFinished, false)
   })
 })

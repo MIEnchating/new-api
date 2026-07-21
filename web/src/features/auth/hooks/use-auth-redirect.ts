@@ -17,13 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useNavigate } from '@tanstack/react-router'
-import i18n from 'i18next'
 
-import {
-  getSavedLanguage,
-  sanitizeAuthRedirect,
-} from '@/features/auth/lib/auth-redirect'
+import { completeAuthenticationRedirect } from '@/features/auth/lib/auth-redirect'
+import i18n, { changeInterfaceLanguage } from '@/i18n/config'
 import { applyAuthBundle } from '@/lib/api'
+import { recoverFromChunkLoadError } from '@/lib/chunk-load-error'
 import type { AuthBundle } from '@/stores/auth-store'
 
 /**
@@ -41,15 +39,19 @@ export function useAuthRedirect() {
     bundle: AuthBundle,
     redirectTo?: string
   ) => {
-    applyAuthBundle(bundle)
-    const savedLang = getSavedLanguage(bundle.user)
-    if (savedLang && savedLang !== i18n.language) {
-      await i18n.changeLanguage(savedLang)
-    }
-
-    const targetPath =
-      sanitizeAuthRedirect(redirectTo, window.location.origin) ?? '/dashboard'
-    navigate({ href: targetPath, replace: true })
+    await completeAuthenticationRedirect({
+      bundle,
+      redirectTo,
+      origin: window.location.origin,
+      currentLanguage: i18n.language,
+      applyBundle: applyAuthBundle,
+      navigate: (target) => navigate({ href: target, replace: true }),
+      scheduleLanguageChange: (language) => {
+        void changeInterfaceLanguage(language).then((result) => {
+          if (!result.ok) recoverFromChunkLoadError(result.error)
+        })
+      },
+    })
   }
 
   /**

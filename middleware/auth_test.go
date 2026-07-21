@@ -47,6 +47,57 @@ func setupDashboardAuthMiddlewareTest(t *testing.T) {
 	})
 }
 
+func TestTokenAuthReadOnlyWritesUserQuotaContext(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	redisServer := miniredis.RunT(t)
+	previousRedisEnabled := common.RedisEnabled
+	previousRDB := common.RDB
+	common.RedisEnabled = true
+	common.RDB = redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		common.RDB = previousRDB
+	})
+	user := &model.User{
+		Username: "readonly-usage-user", Password: "password-placeholder",
+		Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
+		Group: "default", Quota: 12_500_000, AffCode: "readonly-usage-aff",
+	}
+	require.NoError(t, model.DB.Create(user).Error)
+	token := &model.Token{
+		UserId: user.Id, Key: "readonlyusagekey", Name: "readonly-usage-key",
+		Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true,
+	}
+	require.NoError(t, model.DB.Create(token).Error)
+	cachedToken := *token
+	cachedToken.Key = ""
+	cachedToken.CacheSchema = 2
+	tokenCacheKey := fmt.Sprintf("token:%s", common.GenerateHMAC(token.Key))
+	require.NoError(t, common.RedisHSetObj(tokenCacheKey, &cachedToken, time.Minute))
+
+	router := gin.New()
+	router.GET("/api/usage/token/", TokenAuthReadOnly(), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"user_id": c.GetInt("id"),
+			"quota":   common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
+		})
+	})
+	request := httptest.NewRequest(http.MethodGet, "/api/usage/token/", nil)
+	request.Header.Set("Authorization", "Bearer sk-"+token.Key)
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var body struct {
+		UserID int `json:"user_id"`
+		Quota  int `json:"quota"`
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+	assert.Equal(t, user.Id, body.UserID)
+	assert.Equal(t, user.Quota, body.Quota)
+}
+
 func TestTokenAuthRestoresConfiguredGroupRoutesWhenOwnGroupIsHidden(t *testing.T) {
 	setupDashboardAuthMiddlewareTest(t)
 	redisServer := miniredis.RunT(t)
