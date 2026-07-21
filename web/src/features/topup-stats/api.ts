@@ -18,11 +18,36 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import type { TopUpStatsParams, TopUpStatsResponse } from './types'
+import type {
+  InvoiceAction,
+  TopUpInvoiceBatchResponse,
+  TopUpInvoiceResponse,
+  TopUpStatsParams,
+  TopUpStatsResponse,
+} from './types'
 
 export async function getTopUpStats(
   params: TopUpStatsParams
 ): Promise<TopUpStatsResponse> {
   const response = await api.get('/api/user/topup/stats', { params })
+  return response.data
+}
+
+export async function updateTopUpInvoice(
+  id: number,
+  action: InvoiceAction
+): Promise<TopUpInvoiceResponse> {
+  const response = await api.put(`/api/user/topup/${id}/invoice`, { action })
+  return response.data
+}
+
+export async function updateTopUpInvoices(
+  ids: number[],
+  action: InvoiceAction
+): Promise<TopUpInvoiceBatchResponse> {
+  const response = await api.put('/api/user/topup/invoice/batch', {
+    ids,
+    action,
+  })
   return response.data
 }

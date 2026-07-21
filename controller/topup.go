@@ -1,10 +1,12 @@
 package controller
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -489,12 +491,47 @@ func GetTopUpStats(c *gin.Context) {
 	}
 
 	pageInfo := common.GetPageQuery(c)
-	summary, items, total, err := model.GetUserTopUpStats(
-		startTime,
-		endTime,
-		c.Query("keyword"),
-		pageInfo,
-	)
+	types := parseBillingHistoryTypes(c.Query("types"))
+	statsFilter := model.TopUpStatsFilter{
+		Reference:       strings.TrimSpace(c.Query("keyword")),
+		UserKeyword:     strings.TrimSpace(c.Query("user_keyword")),
+		Statuses:        parseTopUpStatsStringValues(c.Query("status")),
+		PaymentMethods:  parseTopUpStatsStringValues(c.Query("payment_method")),
+		InvoiceStatuses: parseTopUpStatsIntValues(c.Query("invoice_status")),
+	}
+	summary := model.TopUpStatsSummary{}
+	includeOnlineTopUp := len(types) == 0
+	for _, billingType := range types {
+		if billingType == model.BillingTypeOnlineTopup {
+			includeOnlineTopUp = true
+			break
+		}
+	}
+	if includeOnlineTopUp {
+		summary, _, _, err = model.GetUserTopUpStats(
+			startTime,
+			endTime,
+			"",
+			&common.PageInfo{Page: 1, PageSize: 1},
+			statsFilter,
+		)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
+
+	items, total, err := model.GetBillingHistory(model.BillingHistoryFilter{
+		UserKeyword:     statsFilter.UserKeyword,
+		Reference:       statsFilter.Reference,
+		Types:           types,
+		Statuses:        statsFilter.Statuses,
+		PaymentMethods:  statsFilter.PaymentMethods,
+		InvoiceStatuses: statsFilter.InvoiceStatuses,
+		StartTime:       startTime,
+		EndTime:         endTime,
+		PageInfo:        pageInfo,
+	})
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -507,6 +544,122 @@ func GetTopUpStats(c *gin.Context) {
 		"page":      pageInfo.GetPage(),
 		"page_size": pageInfo.GetPageSize(),
 	})
+}
+
+func parseTopUpStatsStringValues(raw string) []string {
+	values := make([]string, 0)
+	for _, value := range strings.Split(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func parseTopUpStatsIntValues(raw string) []int {
+	values := make([]int, 0)
+	for _, value := range parseTopUpStatsStringValues(raw) {
+		parsed, err := strconv.Atoi(value)
+		if err == nil && parsed >= model.TopUpInvoiceStatusNone && parsed <= model.TopUpInvoiceStatusReturned {
+			values = append(values, parsed)
+		}
+	}
+	return values
+}
+
+type AdminTopUpInvoiceRequest struct {
+	Action string `json:"action"`
+}
+
+type AdminTopUpInvoiceBatchRequest struct {
+	Ids    []int  `json:"ids"`
+	Action string `json:"action"`
+}
+
+func apiTopUpInvoiceError(c *gin.Context, err error, action string) {
+	switch {
+	case errors.Is(err, model.ErrTopUpNotFound):
+		common.ApiErrorMsg(c, "充值订单不存在")
+	case errors.Is(err, model.ErrTopUpStatusInvalid):
+		common.ApiErrorMsg(c, "只有支付成功的订单可以开票")
+	case errors.Is(err, model.ErrTopUpInvoiceStatus):
+		if action == model.TopUpInvoiceActionIssue {
+			common.ApiErrorMsg(c, "所选订单中存在已开票订单，不能重复开票")
+		} else {
+			common.ApiErrorMsg(c, "只有已开票订单可以退回")
+		}
+	case errors.Is(err, model.ErrTopUpInvoiceAction):
+		common.ApiErrorMsg(c, "开票操作无效")
+	case errors.Is(err, model.ErrTopUpInvoiceBatch):
+		common.ApiErrorMsg(c, "批量订单数量或参数无效")
+	default:
+		common.ApiError(c, err)
+	}
+}
+
+// UpdateTopUpInvoice updates the internal invoice marker for a successful
+// top-up. The marker has no effect on payment or balance accounting.
+func UpdateTopUpInvoice(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "订单 ID 无效")
+		return
+	}
+
+	var req AdminTopUpInvoiceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	if req.Action != model.TopUpInvoiceActionIssue && req.Action != model.TopUpInvoiceActionReturn {
+		common.ApiErrorMsg(c, "开票操作无效")
+		return
+	}
+
+	topUp, err := model.UpdateTopUpInvoiceStatus(id, req.Action, c.GetInt("id"))
+	if err != nil {
+		apiTopUpInvoiceError(c, err, req.Action)
+		return
+	}
+
+	auditAction := "topup.invoice_issue"
+	if req.Action == model.TopUpInvoiceActionReturn {
+		auditAction = "topup.invoice_return"
+	}
+	recordManageAuditFor(c, topUp.UserId, auditAction, map[string]interface{}{
+		"id":       topUp.Id,
+		"trade_no": topUp.TradeNo,
+	})
+	common.ApiSuccess(c, topUp)
+}
+
+func UpdateTopUpInvoices(c *gin.Context) {
+	var req AdminTopUpInvoiceBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		common.ApiErrorMsg(c, "参数错误")
+		return
+	}
+	if req.Action != model.TopUpInvoiceActionIssue && req.Action != model.TopUpInvoiceActionReturn {
+		common.ApiErrorMsg(c, "开票操作无效")
+		return
+	}
+
+	topUps, err := model.UpdateTopUpInvoiceStatuses(req.Ids, req.Action, c.GetInt("id"))
+	if err != nil {
+		apiTopUpInvoiceError(c, err, req.Action)
+		return
+	}
+	auditAction := "topup.invoice_issue"
+	if req.Action == model.TopUpInvoiceActionReturn {
+		auditAction = "topup.invoice_return"
+	}
+	for _, topUp := range topUps {
+		recordManageAuditFor(c, topUp.UserId, auditAction, map[string]interface{}{
+			"id":       topUp.Id,
+			"trade_no": topUp.TradeNo,
+		})
+	}
+	common.ApiSuccess(c, gin.H{"count": len(topUps), "items": topUps})
 }
 
 type AdminCompleteTopupRequest struct {

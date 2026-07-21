@@ -16,35 +16,68 @@ import (
 )
 
 type TopUp struct {
-	Id              int     `json:"id"`
-	UserId          int     `json:"user_id" gorm:"index"`
-	Amount          int64   `json:"amount"`
-	Money           float64 `json:"money"`
-	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
-	PaymentProvider string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
-	CreateTime      int64   `json:"create_time"`
-	CompleteTime    int64   `json:"complete_time" gorm:"index:idx_topups_status_complete,priority:2"`
-	Status          string  `json:"status" gorm:"index:idx_topups_status_complete,priority:1"`
+	Id                int     `json:"id"`
+	UserId            int     `json:"user_id" gorm:"index"`
+	Amount            int64   `json:"amount"`
+	Money             float64 `json:"money"`
+	TradeNo           string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	PaymentMethod     string  `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider   string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	CreateTime        int64   `json:"create_time"`
+	CompleteTime      int64   `json:"complete_time" gorm:"index:idx_topups_status_complete,priority:2"`
+	Status            string  `json:"status" gorm:"index:idx_topups_status_complete,priority:1"`
+	InvoiceStatus     int     `json:"invoice_status" gorm:"index"`
+	InvoicedAt        int64   `json:"invoiced_at"`
+	InvoicedBy        int     `json:"invoiced_by"`
+	InvoiceReturnedAt int64   `json:"invoice_returned_at"`
+	InvoiceReturnedBy int     `json:"invoice_returned_by"`
 }
 
 type TopUpStatsSummary struct {
-	OrderCount int64   `json:"order_count"`
-	UserCount  int64   `json:"user_count"`
-	TotalMoney float64 `json:"total_money"`
+	OrderCount   int64   `json:"order_count"`
+	UserCount    int64   `json:"user_count"`
+	TotalMoney   float64 `json:"total_money"`
+	InvoiceCount int64   `json:"invoice_count"`
 }
 
 type TopUpStatsOrder struct {
-	Id              int     `json:"id"`
-	TradeNo         string  `json:"trade_no"`
-	UserId          int     `json:"user_id"`
-	Username        string  `json:"username"`
-	DisplayName     string  `json:"display_name"`
-	PaymentMethod   string  `json:"payment_method"`
-	PaymentProvider string  `json:"payment_provider"`
-	Money           float64 `json:"money"`
-	CompleteTime    int64   `json:"complete_time"`
+	Id                int     `json:"id"`
+	TradeNo           string  `json:"trade_no"`
+	UserId            int     `json:"user_id"`
+	Username          string  `json:"username"`
+	DisplayName       string  `json:"display_name"`
+	PaymentMethod     string  `json:"payment_method"`
+	PaymentProvider   string  `json:"payment_provider"`
+	Amount            int64   `json:"amount"`
+	Money             float64 `json:"money"`
+	Status            string  `json:"status"`
+	CreateTime        int64   `json:"create_time"`
+	CompleteTime      int64   `json:"complete_time"`
+	OrderTime         int64   `json:"order_time"`
+	InvoiceStatus     int     `json:"invoice_status"`
+	InvoicedAt        int64   `json:"invoiced_at"`
+	InvoicedBy        int     `json:"invoiced_by"`
+	InvoiceReturnedAt int64   `json:"invoice_returned_at"`
+	InvoiceReturnedBy int     `json:"invoice_returned_by"`
 }
+
+type TopUpStatsFilter struct {
+	Keyword         string
+	Reference       string
+	UserKeyword     string
+	Statuses        []string
+	PaymentMethods  []string
+	InvoiceStatuses []int
+}
+
+const (
+	TopUpInvoiceStatusNone     = 0
+	TopUpInvoiceStatusIssued   = 1
+	TopUpInvoiceStatusReturned = 2
+
+	TopUpInvoiceActionIssue  = "issue"
+	TopUpInvoiceActionReturn = "return"
+)
 
 const (
 	PaymentMethodStripe       = "stripe"
@@ -78,6 +111,9 @@ var (
 	ErrPaymentMethodMismatch = errors.New("payment method mismatch")
 	ErrTopUpNotFound         = errors.New("topup not found")
 	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
+	ErrTopUpInvoiceAction    = errors.New("invalid invoice action")
+	ErrTopUpInvoiceStatus    = errors.New("invalid invoice status")
+	ErrTopUpInvoiceBatch     = errors.New("invalid invoice batch")
 )
 
 type inviteRechargeRebateResult struct {
@@ -395,24 +431,54 @@ func applyTopUpStatsKeyword(query *gorm.DB, keyword string) (*gorm.DB, error) {
 	return query.Where("("+strings.Join(conditions, " OR ")+")", args...), nil
 }
 
-// GetUserTopUpStats returns a summary and paginated successful orders for an
-// inclusive completion-time range. It is called only by the admin controller.
-func GetUserTopUpStats(startTime int64, endTime int64, keyword string, pageInfo *common.PageInfo) (summary TopUpStatsSummary, items []TopUpStatsOrder, total int64, err error) {
-	query := DB.Table("top_ups AS t").
-		Joins("LEFT JOIN users AS u ON u.id = t.user_id").
-		Where("t.status = ? AND t.complete_time >= ? AND t.complete_time <= ?", common.TopUpStatusSuccess, startTime, endTime)
-	query, err = applyTopUpStatsKeyword(query, keyword)
+// GetUserTopUpStats returns successful-order statistics and all top-up orders
+// in an inclusive time range. It uses the same timestamp rule as wallet
+// billing history: positive complete_time first, otherwise create_time.
+func GetUserTopUpStats(startTime int64, endTime int64, keyword string, pageInfo *common.PageInfo, filters ...TopUpStatsFilter) (summary TopUpStatsSummary, items []TopUpStatsOrder, total int64, err error) {
+	filter := TopUpStatsFilter{Keyword: keyword}
+	if len(filters) > 0 {
+		filter = filters[0]
+		filter.Keyword = keyword
+	}
+	baseQuery := DB.Table("top_ups AS t").
+		Joins("LEFT JOIN users AS u ON u.id = t.user_id")
+	baseQuery, err = applyTopUpStatsKeyword(baseQuery, filter.Keyword)
 	if err != nil {
 		return summary, nil, 0, err
 	}
+	if reference := strings.TrimSpace(filter.Reference); reference != "" {
+		pattern, patternErr := sanitizeLikePattern("%" + reference + "%")
+		if patternErr != nil {
+			return summary, nil, 0, patternErr
+		}
+		baseQuery = baseQuery.Where("t.trade_no LIKE ? ESCAPE '!'", pattern)
+	}
+	baseQuery, err = applyBillingUserFilter(baseQuery, "t.user_id", BillingHistoryFilter{UserKeyword: filter.UserKeyword})
+	if err != nil {
+		return summary, nil, 0, err
+	}
+	if len(filter.Statuses) > 0 {
+		baseQuery = baseQuery.Where("t.status IN ?", filter.Statuses)
+	}
+	if len(filter.PaymentMethods) > 0 {
+		baseQuery = baseQuery.Where("t.payment_method IN ?", filter.PaymentMethods)
+	}
+	if len(filter.InvoiceStatuses) > 0 {
+		baseQuery = baseQuery.Where("t.invoice_status IN ?", filter.InvoiceStatuses)
+	}
 
-	if err = query.Session(&gorm.Session{}).
-		Select("COUNT(*) AS order_count, COUNT(DISTINCT t.user_id) AS user_count, COALESCE(SUM(t.money), 0) AS total_money").
+	effectiveOrderTimeExpr := "CASE WHEN t.complete_time > 0 THEN t.complete_time ELSE t.create_time END"
+	if err = baseQuery.Session(&gorm.Session{}).
+		Where("t.status = ? AND ("+effectiveOrderTimeExpr+") >= ? AND ("+effectiveOrderTimeExpr+") <= ?", common.TopUpStatusSuccess, startTime, endTime).
+		Select("COUNT(*) AS order_count, COUNT(DISTINCT t.user_id) AS user_count, COALESCE(SUM(t.money), 0) AS total_money, COALESCE(SUM(CASE WHEN t.invoice_status = ? THEN 1 ELSE 0 END), 0) AS invoice_count", TopUpInvoiceStatusIssued).
 		Scan(&summary).Error; err != nil {
 		return summary, nil, 0, err
 	}
 
-	if err = query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+	orderTimeExpr := effectiveOrderTimeExpr
+	listQuery := baseQuery.Session(&gorm.Session{}).
+		Where("("+orderTimeExpr+") >= ? AND ("+orderTimeExpr+") <= ?", startTime, endTime)
+	if err = listQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return summary, nil, 0, err
 	}
 
@@ -421,13 +487,124 @@ func GetUserTopUpStats(startTime int64, endTime int64, keyword string, pageInfo 
 		return summary, items, 0, nil
 	}
 
-	err = query.Session(&gorm.Session{}).
-		Select("t.id AS id, t.trade_no AS trade_no, t.user_id AS user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, COALESCE(t.payment_method, '') AS payment_method, COALESCE(t.payment_provider, '') AS payment_provider, t.money AS money, t.complete_time AS complete_time").
-		Order("t.complete_time DESC, t.id DESC").
+	err = listQuery.Session(&gorm.Session{}).
+		Select("t.id AS id, t.trade_no AS trade_no, t.user_id AS user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, COALESCE(t.payment_method, '') AS payment_method, COALESCE(t.payment_provider, '') AS payment_provider, t.amount AS amount, t.money AS money, t.status AS status, t.create_time AS create_time, t.complete_time AS complete_time, " + orderTimeExpr + " AS order_time, COALESCE(t.invoice_status, 0) AS invoice_status, COALESCE(t.invoiced_at, 0) AS invoiced_at, COALESCE(t.invoiced_by, 0) AS invoiced_by, COALESCE(t.invoice_returned_at, 0) AS invoice_returned_at, COALESCE(t.invoice_returned_by, 0) AS invoice_returned_by").
+		Order("order_time DESC, t.id DESC").
 		Limit(pageInfo.GetPageSize()).
 		Offset(pageInfo.GetStartIdx()).
 		Scan(&items).Error
 	return summary, items, total, err
+}
+
+// UpdateTopUpInvoiceStatus changes only the internal invoice marker. It never
+// modifies payment state, user quota, or billing transactions.
+func UpdateTopUpInvoiceStatus(id int, action string, operatorId int) (*TopUp, error) {
+	topUps, err := UpdateTopUpInvoiceStatuses([]int{id}, action, operatorId)
+	if err != nil {
+		return nil, err
+	}
+	return topUps[0], nil
+}
+
+func UpdateTopUpInvoiceStatuses(ids []int, action string, operatorId int) ([]*TopUp, error) {
+	if len(ids) == 0 || len(ids) > 100 || operatorId <= 0 {
+		return nil, ErrTopUpInvoiceBatch
+	}
+	seen := make(map[int]struct{}, len(ids))
+	uniqueIds := make([]int, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			return nil, ErrTopUpInvoiceBatch
+		}
+		if _, exists := seen[id]; !exists {
+			seen[id] = struct{}{}
+			uniqueIds = append(uniqueIds, id)
+		}
+	}
+	if action != TopUpInvoiceActionIssue && action != TopUpInvoiceActionReturn {
+		return nil, ErrTopUpInvoiceAction
+	}
+
+	topUps := make([]*TopUp, 0, len(uniqueIds))
+	now := common.GetTimestamp()
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		locked := make([]TopUp, 0, len(uniqueIds))
+		if err := lockForUpdate(tx).Where("id IN ?", uniqueIds).Order("id ASC").Find(&locked).Error; err != nil {
+			return err
+		}
+		if len(locked) != len(uniqueIds) {
+			return ErrTopUpNotFound
+		}
+		for index := range locked {
+			if locked[index].Status != common.TopUpStatusSuccess {
+				return ErrTopUpStatusInvalid
+			}
+			if action == TopUpInvoiceActionIssue && locked[index].InvoiceStatus == TopUpInvoiceStatusIssued {
+				return ErrTopUpInvoiceStatus
+			}
+			if action == TopUpInvoiceActionReturn && locked[index].InvoiceStatus != TopUpInvoiceStatusIssued {
+				return ErrTopUpInvoiceStatus
+			}
+		}
+
+		updates := map[string]interface{}{}
+		if action == TopUpInvoiceActionIssue {
+			updates = map[string]interface{}{
+				"invoice_status":      TopUpInvoiceStatusIssued,
+				"invoiced_at":         now,
+				"invoiced_by":         operatorId,
+				"invoice_returned_at": 0,
+				"invoice_returned_by": 0,
+			}
+		} else {
+			updates = map[string]interface{}{
+				"invoice_status":      TopUpInvoiceStatusReturned,
+				"invoice_returned_at": now,
+				"invoice_returned_by": operatorId,
+			}
+		}
+		if err := tx.Model(&TopUp{}).Where("id IN ?", uniqueIds).Updates(updates).Error; err != nil {
+			return err
+		}
+		for _, topUp := range locked {
+			copy := topUp
+			topUps = append(topUps, &copy)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, topUp := range topUps {
+		if action == TopUpInvoiceActionIssue {
+			topUp.InvoiceStatus = TopUpInvoiceStatusIssued
+			topUp.InvoicedAt = now
+			topUp.InvoicedBy = operatorId
+			topUp.InvoiceReturnedAt = 0
+			topUp.InvoiceReturnedBy = 0
+		} else {
+			topUp.InvoiceStatus = TopUpInvoiceStatusReturned
+			topUp.InvoiceReturnedAt = now
+			topUp.InvoiceReturnedBy = operatorId
+		}
+	}
+	return topUps, nil
+}
+
+func initializeTopUpInvoiceFields() error {
+	columns := []string{
+		"invoice_status",
+		"invoiced_at",
+		"invoiced_by",
+		"invoice_returned_at",
+		"invoice_returned_by",
+	}
+	for _, column := range columns {
+		if err := DB.Model(&TopUp{}).Where(column+" IS NULL").Update(column, 0).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // searchTopUpCountHardLimit 搜索充值记录时 COUNT 的安全上限，

@@ -19,7 +19,7 @@
 - 渠道执行计划、实时执行轨迹和管理员日志诊断。
 - 普通用户与管理员日志字段隔离，上游请求 ID 链路记录。
 - 分组缓存监控、缓存显示顺序和官方服务状态监控。
-- 用户账单历史、管理员充值统计和多种额度变更类型。
+- 用户账单历史、管理员订单历史、充值统计和开票标记。
 - CC Switch 模型与用量查询配置导入。
 - 多域名 OAuth、共享会话 Cookie 和固定 `SESSION_SECRET`。
 - 自定义错误返回、渠道管理权限和操作审计。
@@ -38,6 +38,7 @@ Bun frontend: http://154.36.172.108:3002
 ```bash
 scripts/dev-local.sh start
 scripts/dev-local.sh status
+scripts/dev-local.sh restart-backend
 scripts/dev-local.sh restart
 scripts/dev-local.sh stop
 ```

@@ -20,18 +20,45 @@ export type TopUpStatsSummary = {
   order_count: number
   user_count: number
   total_money: number
+  invoice_count: number
 }
 
+export type TopUpStatus = 'success' | 'pending' | 'failed' | 'expired'
+export type InvoiceStatus = 0 | 1 | 2
+export type InvoiceAction = 'issue' | 'return'
+export type BillingRecordType =
+  | 'online_topup'
+  | 'redemption'
+  | 'affiliate_transfer'
+  | 'admin_adjustment'
+
 export type TopUpStatsItem = {
-  id: number
-  trade_no: string
+  id: string
+  topup_id?: number
+  type: BillingRecordType
+  reference: string
   user_id: number
   username: string
   display_name: string
   payment_method: string
   payment_provider: string
+  quota: number
   money: number
-  complete_time: number
+  status: TopUpStatus
+  created_at: number
+  invoice_status: InvoiceStatus
+  invoiced_at: number
+  invoiced_by: number
+  invoice_returned_at: number
+  invoice_returned_by: number
+  operator_user_id?: number
+  detail?: string
+}
+
+export type TopUpInvoiceResponse = {
+  success: boolean
+  message: string
+  data?: unknown
 }
 
 export type TopUpStatsData = {
@@ -54,4 +81,18 @@ export type TopUpStatsParams = {
   p: number
   page_size: number
   keyword?: string
+  user_keyword?: string
+  types?: string
+  status?: string
+  payment_method?: string
+  invoice_status?: string
+}
+
+export type TopUpInvoiceBatchResponse = {
+  success: boolean
+  message: string
+  data?: {
+    count: number
+    items: TopUpStatsItem[]
+  }
 }

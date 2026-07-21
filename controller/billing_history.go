@@ -84,6 +84,12 @@ func getBillingHistory(c *gin.Context, admin bool) {
 func redactUserBillingHistory(items []model.BillingHistoryItem) {
 	for i := range items {
 		items[i].OperatorUserId = 0
+		items[i].TopUpId = 0
+		items[i].InvoiceStatus = nil
+		items[i].InvoicedAt = 0
+		items[i].InvoicedBy = 0
+		items[i].InvoiceReturnedAt = 0
+		items[i].InvoiceReturnedBy = 0
 	}
 }
 

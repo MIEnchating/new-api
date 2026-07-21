@@ -83,21 +83,8 @@ start_services() {
   mkdir -p "${RUN_DIR}/backend" "${BUILD_DIR}"
   load_environment
 
-  (
-    cd "${ROOT_DIR}"
-    PATH="${TOOLS_DIR}/go/bin:${TOOLS_DIR}/bun/bin:${PATH}" \
-      GOMODCACHE="${ROOT_DIR}/.gomodcache" \
-      GOCACHE="${ROOT_DIR}/.gocache" \
-      "${GO_BIN}" build \
-        -ldflags "-X github.com/QuantumNous/new-api/common.Version=$(<"${ROOT_DIR}/VERSION")" \
-        -o "${BUILD_DIR}/new-api-dev" .
-  )
-
-  nohup setsid "${BUILD_DIR}/new-api-dev" \
-    --port "${BACKEND_PORT}" \
-    --log-dir "${RUN_DIR}/backend" \
-    >"${RUN_DIR}/backend-console.log" 2>&1 </dev/null &
-  echo "$!" >"${BACKEND_PID_FILE}"
+  build_backend
+  start_backend_process
 
   (
     cd "${ROOT_DIR}/web"
@@ -110,6 +97,40 @@ start_services() {
 
   echo "Backend:  http://0.0.0.0:${BACKEND_PORT}"
   echo "Frontend: http://0.0.0.0:${FRONTEND_PORT}"
+}
+
+build_backend() {
+  (
+    cd "${ROOT_DIR}"
+    PATH="${TOOLS_DIR}/go/bin:${TOOLS_DIR}/bun/bin:${PATH}" \
+      GOMODCACHE="${ROOT_DIR}/.gomodcache" \
+      GOCACHE="${ROOT_DIR}/.gocache" \
+      "${GO_BIN}" build \
+        -ldflags "-X github.com/QuantumNous/new-api/common.Version=$(<"${ROOT_DIR}/VERSION")" \
+        -o "${BUILD_DIR}/new-api-dev.next" .
+    mv "${BUILD_DIR}/new-api-dev.next" "${BUILD_DIR}/new-api-dev"
+  )
+}
+
+start_backend_process() {
+  nohup setsid "${BUILD_DIR}/new-api-dev" \
+    --port "${BACKEND_PORT}" \
+    --log-dir "${RUN_DIR}/backend" \
+    >"${RUN_DIR}/backend-console.log" 2>&1 </dev/null &
+  echo "$!" >"${BACKEND_PID_FILE}"
+}
+
+restart_backend() {
+  if [[ ! -x "${GO_BIN}" ]]; then
+    echo "Go is missing from ${TOOLS_DIR}." >&2
+    exit 1
+  fi
+  mkdir -p "${RUN_DIR}/backend" "${BUILD_DIR}"
+  load_environment
+  build_backend
+  stop_process "Backend" "${BACKEND_PID_FILE}" "${BUILD_DIR}/new-api-dev"
+  start_backend_process
+  echo "Backend: http://0.0.0.0:${BACKEND_PORT}"
 }
 
 stop_process() {
@@ -164,11 +185,14 @@ case "${1:-start}" in
     stop_services
     start_services
     ;;
+  restart-backend)
+    restart_backend
+    ;;
   status)
     show_status
     ;;
   *)
-    echo "Usage: $0 {start|stop|restart|status}" >&2
+    echo "Usage: $0 {start|stop|restart|restart-backend|status}" >&2
     exit 2
     ;;
 esac

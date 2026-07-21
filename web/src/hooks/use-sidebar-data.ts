@@ -142,7 +142,7 @@ export function useSidebarData(): SidebarData {
             icon: Users,
           },
           {
-            title: t('Top-up Stats'),
+            title: t('Order History'),
             url: '/topup-stats',
             icon: BarChart3,
             requiredRole: ROLE.ADMIN,
