@@ -27,6 +27,9 @@ import type { UpdateOptionRequest } from '../types'
 const STATUS_RELATED_KEYS = new Set([
   'HeaderNavModules',
   'general_setting.docs_link',
+  'Logo',
+  'SystemName',
+  'Footer',
   'SidebarModulesAdmin',
   'Notice',
   'LogConsumeEnabled',
@@ -39,6 +42,10 @@ const STATUS_RELATED_KEYS = new Set([
   'general_setting.custom_currency_exchange_rate',
 ])
 
+export function shouldRefreshStatusForOption(key: string): boolean {
+  return STATUS_RELATED_KEYS.has(key)
+}
+
 export function useUpdateOption() {
   const queryClient = useQueryClient()
 
@@ -50,7 +57,7 @@ export function useUpdateOption() {
         queryClient.invalidateQueries({ queryKey: ['system-options'] })
 
         // If updating frontend-display-related config, also refresh status
-        if (STATUS_RELATED_KEYS.has(variables.key)) {
+        if (shouldRefreshStatusForOption(variables.key)) {
           queryClient.invalidateQueries({ queryKey: ['status'] })
           try {
             window.localStorage.removeItem('status')
