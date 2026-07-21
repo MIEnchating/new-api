@@ -455,22 +455,10 @@ func TokenAuth() func(c *gin.Context) {
 
 		userCache.WriteContext(c)
 
-		userGroup := userCache.Group
-		tokenGroup := token.Group
-		if tokenGroup != "" {
-			// check common.UserUsableGroups[userGroup]
-			if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
-				abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("无权访问 %s 分组", tokenGroup))
-				return
-			}
-			// check group in common.GroupRatio
-			if !ratio_setting.ContainsGroupRatio(tokenGroup) {
-				if tokenGroup != "auto" {
-					abortWithOpenAiMessage(c, http.StatusForbidden, fmt.Sprintf("分组 %s 已被弃用", tokenGroup))
-					return
-				}
-			}
-			userGroup = tokenGroup
+		userGroup, err := resolveTokenUsingGroup(token, userCache.Group)
+		if err != nil {
+			abortWithOpenAiMessage(c, http.StatusForbidden, err.Error())
+			return
 		}
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, userGroup)
 
@@ -480,6 +468,47 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		c.Next()
 	}
+}
+
+func resolveTokenUsingGroup(token *model.Token, userGroup string) (string, error) {
+	if token == nil {
+		return "", fmt.Errorf("token is nil")
+	}
+	if strings.TrimSpace(token.GroupRouteConfig) != "" {
+		_, routes, err := model.NormalizeTokenGroupRouteConfig(token.GroupRouteConfig)
+		if err != nil {
+			return "", err
+		}
+		routes = model.EnabledTokenGroupRoutes(routes)
+		if len(routes) == 0 {
+			return "", fmt.Errorf("密钥路由没有已启用的分组")
+		}
+		usableGroups := service.GetUserUsableGroups(userGroup)
+		for _, route := range routes {
+			if route.Group == "auto" {
+				return "", fmt.Errorf("密钥路由不支持 auto 分组")
+			}
+			if _, ok := usableGroups[route.Group]; !ok {
+				return "", fmt.Errorf("无权访问 %s 分组", route.Group)
+			}
+			if !ratio_setting.ContainsGroupRatio(route.Group) {
+				return "", fmt.Errorf("分组 %s 已被弃用", route.Group)
+			}
+		}
+		return routes[0].Group, nil
+	}
+
+	tokenGroup := token.Group
+	if tokenGroup == "" {
+		return userGroup, nil
+	}
+	if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
+		return "", fmt.Errorf("无权访问 %s 分组", tokenGroup)
+	}
+	if tokenGroup != "auto" && !ratio_setting.ContainsGroupRatio(tokenGroup) {
+		return "", fmt.Errorf("分组 %s 已被弃用", tokenGroup)
+	}
+	return tokenGroup, nil
 }
 
 func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) error {
@@ -502,6 +531,10 @@ func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) e
 	}
 	common.SetContextKey(c, constant.ContextKeyTokenGroup, token.Group)
 	common.SetContextKey(c, constant.ContextKeyTokenCrossGroupRetry, token.CrossGroupRetry)
+	if routes := token.GetGroupRoutes(); len(routes) > 0 {
+		common.SetContextKey(c, constant.ContextKeyTokenGroupRoutes, routes)
+		common.SetContextKey(c, constant.ContextKeyTokenGroupRouteSticky, token.GroupRouteSticky)
+	}
 	if len(parts) > 1 {
 		if model.IsAdmin(token.UserId) {
 			c.Set("specific_channel_id", parts[1])

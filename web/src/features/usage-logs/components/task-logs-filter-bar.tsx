@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useIsFetching } from '@tanstack/react-query'
+import { useIsFetching, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
 import { useState, useEffect, useCallback } from 'react'
@@ -24,7 +24,7 @@ import { useTranslation } from 'react-i18next'
 
 import { CompactDateTimeRangePicker } from '@/components/compact-date-time-range-picker'
 
-import { buildSearchParams } from '../lib/filter'
+import { applyLogSearch, buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { DrawingLogFilters, LogCategory, TaskLogFilters } from '../types'
 import {
@@ -35,6 +35,14 @@ import {
 import { useLogsViewScope } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
+
+const taskLogSearchKeys = [
+  'page',
+  'startTime',
+  'endTime',
+  'channel',
+  'filter',
+] as const
 
 type TaskLikeLogCategory = Extract<LogCategory, 'drawing' | 'task'>
 type TaskLogsFilters = DrawingLogFilters | TaskLogFilters
@@ -68,6 +76,7 @@ function setFilterValue(
 export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
@@ -115,17 +124,29 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     []
   )
 
-  const handleApply = useCallback(() => {
+  const handleApply = useCallback(async () => {
     const filterParams = buildSearchParams(filters, props.logCategory)
-    navigate({
-      to: '/usage-logs/$section',
-      params: { section: props.logCategory },
-      search: {
-        ...filterParams,
-        page: 1,
-      },
+    const nextSearch = {
+      ...filterParams,
+      page: 1,
+    }
+    await applyLogSearch({
+      currentSearch: searchParams,
+      nextSearch,
+      keys: taskLogSearchKeys,
+      refetch: () =>
+        queryClient.refetchQueries({
+          queryKey: ['logs', props.logCategory, isAdmin],
+          type: 'active',
+        }),
+      navigate: () =>
+        navigate({
+          to: '/usage-logs/$section',
+          params: { section: props.logCategory },
+          search: nextSearch,
+        }),
     })
-  }, [filters, navigate, props.logCategory])
+  }, [filters, isAdmin, navigate, props.logCategory, queryClient, searchParams])
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()

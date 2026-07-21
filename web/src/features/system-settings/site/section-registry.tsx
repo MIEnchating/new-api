@@ -36,15 +36,15 @@ const SITE_SECTIONS = [
     build: (settings: SiteSettings) => (
       <SystemInfoSection
         defaultValues={{
-          theme: {
-            frontend: settings['theme.frontend'] as 'default' | 'classic',
-          },
           SystemName: settings.SystemName,
           Logo: settings.Logo,
           Footer: settings.Footer,
           About: settings.About,
           HomePageContent: settings.HomePageContent,
           ServerAddress: settings.ServerAddress,
+          general_setting: {
+            docs_link: settings['general_setting.docs_link'],
+          },
           TrustedSiteOrigins: settings.TrustedSiteOrigins,
           legal: {
             user_agreement: settings['legal.user_agreement'],
@@ -71,7 +71,6 @@ const SITE_SECTIONS = [
         <HeaderNavigationSection
           config={headerNavConfig}
           initialSerialized={headerNavSerialized}
-          docsLink={settings['general_setting.docs_link']}
         />
       )
     },

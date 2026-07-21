@@ -31,6 +31,7 @@ type Token struct {
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	GroupRouteConfig   string         `json:"group_route_config" gorm:"type:text"`
 	GroupRouteSticky   bool           `json:"group_route_sticky" gorm:"default:false"`
+	CacheSchema        int            `json:"-" gorm:"-"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
 
@@ -345,27 +346,12 @@ func GetTokenById(id int) (*Token, error) {
 	token := Token{Id: id}
 	var err error = nil
 	err = DB.First(&token, "id = ?", id).Error
-	if shouldUpdateRedis(true, err) {
-		gopool.Go(func() {
-			if err := cacheSetToken(token); err != nil {
-				common.SysLog("failed to update user status cache: " + err.Error())
-			}
-		})
-	}
 	return &token, err
 }
 
 func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
-	defer func() {
-		// Update Redis cache asynchronously on successful DB read
-		if shouldUpdateRedis(fromDB, err) && token != nil {
-			gopool.Go(func() {
-				if err := cacheSetToken(*token); err != nil {
-					common.SysLog("failed to update user status cache: " + err.Error())
-				}
-			})
-		}
-	}()
+	var cacheGeneration int64
+	cacheFillAllowed := false
 	if !fromDB && common.RedisEnabled {
 		// Try Redis first
 		token, err := cacheGetTokenByKey(key)
@@ -374,8 +360,20 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 		}
 		// Don't return error - fall through to DB
 	}
-	fromDB = true
+	if common.RedisEnabled {
+		cacheGeneration, err = cacheGetTokenGeneration(key)
+		if err == nil {
+			cacheFillAllowed = true
+		} else {
+			common.SysLog("failed to read token cache generation: " + err.Error())
+		}
+	}
 	err = DB.Where(commonKeyCol+" = ?", key).First(&token).Error
+	if err == nil && token != nil && cacheFillAllowed {
+		if cacheErr := cacheSetTokenAtGeneration(*token, cacheGeneration); cacheErr != nil {
+			common.SysLog("failed to update token cache: " + cacheErr.Error())
+		}
+	}
 	return token, err
 }
 

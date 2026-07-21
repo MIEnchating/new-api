@@ -11,10 +11,15 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -29,7 +34,7 @@ func setupDashboardAuthMiddlewareTest(t *testing.T) {
 	previousSecret := common.SessionSecret
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.Token{}))
 	model.DB = db
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
 	common.RedisEnabled = false
@@ -40,6 +45,98 @@ func setupDashboardAuthMiddlewareTest(t *testing.T) {
 		common.RedisEnabled = previousRedis
 		common.SessionSecret = previousSecret
 	})
+}
+
+func TestTokenAuthRestoresConfiguredGroupRoutesWhenOwnGroupIsHidden(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	redisServer := miniredis.RunT(t)
+	previousRedisEnabled := common.RedisEnabled
+	previousRDB := common.RDB
+	common.RedisEnabled = true
+	common.RDB = redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		common.RDB = previousRDB
+	})
+	originalUsableGroups := setting.UserUsableGroups2JSONString()
+	originalGroupRatios := ratio_setting.GroupRatio2JSONString()
+	specialGroups := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup
+	originalSpecialGroups := specialGroups.ReadAll()
+	t.Cleanup(func() {
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(originalUsableGroups))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatios))
+		specialGroups.Clear()
+		specialGroups.AddAll(originalSpecialGroups)
+	})
+
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"codex-pro":"Codex Pro"}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"codex-pro":0.14,"vue源码分组":1}`))
+	specialGroups.Clear()
+	specialGroups.Set("vue源码分组", map[string]string{"-:vue源码分组": "hidden"})
+
+	user := &model.User{
+		Username: "route-group-user", Password: "password-placeholder",
+		Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
+		Group: "vue源码分组", Quota: 1000, AffCode: "route-group-user-aff",
+	}
+	require.NoError(t, model.DB.Create(user).Error)
+
+	routeConfig := `[{"group":"codex-pro","priority":10,"cooldown_seconds":60}]`
+	routeToken := &model.Token{
+		UserId: user.Id, Key: "routegroupkey", Name: "route-pro",
+		Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true,
+		GroupRouteConfig: routeConfig, GroupRouteSticky: true,
+	}
+	fixedToken := &model.Token{
+		UserId: user.Id, Key: "fixedgroupkey", Name: "fixed-pro",
+		Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true,
+		Group: "codex-pro",
+	}
+	require.NoError(t, model.DB.Create(routeToken).Error)
+	require.NoError(t, model.DB.Create(fixedToken).Error)
+	cacheToken := func(token *model.Token) {
+		t.Helper()
+		cached := *token
+		cached.Key = ""
+		cached.CacheSchema = 2
+		key := fmt.Sprintf("token:%s", common.GenerateHMAC(token.Key))
+		require.NoError(t, common.RedisHSetObj(key, &cached, time.Minute))
+	}
+	cacheToken(routeToken)
+	cacheToken(fixedToken)
+
+	assertTokenGroup := func(key string, expectRoutes bool) {
+		t.Helper()
+		var usingGroup string
+		var routes []model.TokenGroupRoute
+		var sticky bool
+		router := gin.New()
+		router.POST("/v1/responses", TokenAuth(), func(c *gin.Context) {
+			usingGroup = common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+			routes, _ = common.GetContextKeyType[[]model.TokenGroupRoute](c, constant.ContextKeyTokenGroupRoutes)
+			sticky = common.GetContextKeyBool(c, constant.ContextKeyTokenGroupRouteSticky)
+			c.Status(http.StatusNoContent)
+		})
+		request := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+		request.Header.Set("Authorization", "Bearer sk-"+key)
+		response := httptest.NewRecorder()
+
+		router.ServeHTTP(response, request)
+
+		require.Equal(t, http.StatusNoContent, response.Code, response.Body.String())
+		assert.Equal(t, "codex-pro", usingGroup)
+		if expectRoutes {
+			require.Len(t, routes, 1)
+			assert.Equal(t, "codex-pro", routes[0].Group)
+			assert.True(t, sticky)
+		} else {
+			assert.Empty(t, routes)
+			assert.False(t, sticky)
+		}
+	}
+
+	assertTokenGroup(fixedToken.Key, false)
+	assertTokenGroup(routeToken.Key, true)
 }
 
 func issueExpiredDashboardAccessToken(t *testing.T, identity service.AuthIdentity) string {

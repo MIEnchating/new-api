@@ -16,22 +16,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { SettingsPage } from '../components/settings-page'
-import { defaultSiteSettings } from './defaults'
-import {
-  SITE_DEFAULT_SECTION,
-  getSiteSectionContent,
-  getSiteSectionMeta,
-} from './section-registry.tsx'
+import type { SiteSettings } from '../types'
 
-export function SiteSettings() {
-  return (
-    <SettingsPage
-      routePath='/_authenticated/system-settings/site/$section'
-      defaultSettings={defaultSiteSettings}
-      defaultSection={SITE_DEFAULT_SECTION}
-      getSectionContent={getSiteSectionContent}
-      getSectionMeta={getSiteSectionMeta}
-    />
-  )
+export const defaultSiteSettings: SiteSettings = {
+  Notice: '',
+  SystemName: 'New API',
+  Logo: '',
+  Footer: '',
+  About: '',
+  HomePageContent: '',
+  ServerAddress: '',
+  TrustedSiteOrigins: '',
+  'legal.user_agreement': '',
+  'legal.privacy_policy': '',
+  HeaderNavModules: '',
+  'general_setting.docs_link': '',
+  SidebarModulesAdmin: '',
 }

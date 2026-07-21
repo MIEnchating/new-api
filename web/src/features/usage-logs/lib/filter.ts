@@ -28,6 +28,57 @@ import type {
   TaskLogFilters,
 } from '../types'
 
+function normalizeSearchValue(value: unknown): unknown {
+  if (value === undefined || value === null || value === '') return undefined
+  if (Array.isArray(value)) return value.map(String)
+  return value
+}
+
+/**
+ * Compare only the URL fields owned by a search action. Route schemas often
+ * normalize omitted string fields to an empty string, so those values must be
+ * treated as equivalent or repeated searches turn into no-op navigations.
+ */
+export function haveSameSearchParams(
+  current: Record<string, unknown>,
+  next: Record<string, unknown>,
+  keys: readonly string[]
+): boolean {
+  return keys.every((key) => {
+    const currentValue = normalizeSearchValue(current[key])
+    const nextValue = normalizeSearchValue(next[key])
+    if (Array.isArray(currentValue) || Array.isArray(nextValue)) {
+      return JSON.stringify(currentValue) === JSON.stringify(nextValue)
+    }
+    return currentValue === nextValue
+  })
+}
+
+interface ApplyLogSearchOptions {
+  currentSearch: Record<string, unknown>
+  nextSearch: Record<string, unknown>
+  keys: readonly string[]
+  navigate: () => void | Promise<unknown>
+  refetch: () => void | Promise<unknown>
+}
+
+export async function applyLogSearch(
+  options: ApplyLogSearchOptions
+): Promise<'refetched' | 'navigated'> {
+  if (
+    haveSameSearchParams(
+      options.currentSearch,
+      options.nextSearch,
+      options.keys
+    )
+  ) {
+    await options.refetch()
+    return 'refetched'
+  }
+  await options.navigate()
+  return 'navigated'
+}
+
 // ============================================================================
 // Filter Building Functions
 // ============================================================================

@@ -47,10 +47,10 @@ func GetOrderedGroupNames() []string {
 func GetUserUsableGroups(userGroup string) map[string]string {
 	groupsCopy := setting.GetUserUsableGroupsCopy()
 	if userGroup != "" {
-		explicitlyRemoved := make(map[string]struct{})
 		specialSettings, b := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(userGroup)
 		if b {
 			// Additions are applied first so an explicit removal always wins.
+			explicitlyRemoved := make(map[string]struct{})
 			for specialGroup, desc := range specialSettings {
 				if strings.HasPrefix(specialGroup, "-:") {
 					groupToRemove := strings.TrimPrefix(specialGroup, "-:")
@@ -65,10 +65,6 @@ func GetUserUsableGroups(userGroup string) map[string]string {
 			for groupToRemove := range explicitlyRemoved {
 				delete(groupsCopy, groupToRemove)
 			}
-		}
-		_, userGroupRemoved := explicitlyRemoved[userGroup]
-		if _, ok := groupsCopy[userGroup]; !ok && !userGroupRemoved {
-			groupsCopy[userGroup] = "用户分组"
 		}
 	}
 	return groupsCopy

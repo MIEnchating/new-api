@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useIsFetching, useQuery } from '@tanstack/react-query'
+import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
 import { Eye, EyeOff } from 'lucide-react'
@@ -34,7 +34,7 @@ import {
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { getUsageLogGroups } from '../group-options-api'
-import { buildSearchParams } from '../lib/filter'
+import { applyLogSearch, buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
@@ -46,6 +46,20 @@ import {
 import { useLogsViewScope, useUsageLogsContext } from './usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')
+
+const commonLogSearchKeys = [
+  'page',
+  'startTime',
+  'endTime',
+  'channel',
+  'model',
+  'token',
+  'group',
+  'username',
+  'requestId',
+  'upstreamRequestId',
+  'type',
+] as const
 
 type LogTypeValue = (typeof LOG_TYPE_FILTERS)[number]['value']
 const logTypeValueSet = new Set<string>(
@@ -108,6 +122,7 @@ export function CommonLogsFilterBar<TData>(
 ) {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
@@ -183,18 +198,36 @@ export function CommonLogsFilterBar<TData>(
     [searchState]
   )
 
-  const handleApply = useCallback(() => {
+  const handleApply = useCallback(async () => {
     const filterParams = buildSearchParams(filters, 'common')
-    navigate({
-      to: '/usage-logs/$section',
-      params: { section: 'common' },
-      search: {
-        ...filterParams,
-        type: [logType],
-        page: 1,
-      },
+    const nextSearch = {
+      ...filterParams,
+      type: [logType],
+      page: 1,
+    }
+    await applyLogSearch({
+      currentSearch: searchParams,
+      nextSearch,
+      keys: commonLogSearchKeys,
+      refetch: () =>
+        Promise.all([
+          queryClient.refetchQueries({
+            queryKey: ['logs', 'common', isAdmin],
+            type: 'active',
+          }),
+          queryClient.refetchQueries({
+            queryKey: ['usage-logs-stats', isAdmin],
+            type: 'active',
+          }),
+        ]),
+      navigate: () =>
+        navigate({
+          to: '/usage-logs/$section',
+          params: { section: 'common' },
+          search: nextSearch,
+        }),
     })
-  }, [filters, logType, navigate])
+  }, [filters, isAdmin, logType, navigate, queryClient, searchParams])
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
