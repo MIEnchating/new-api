@@ -23,6 +23,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { CompactDateTimeRangePicker } from '@/components/compact-date-time-range-picker'
+import { useDelayedLoading } from '@/hooks/use-delayed-loading'
 
 import { applyLogSearch, buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
@@ -80,6 +81,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
+  const searchLoading = useDelayedLoading(fetchingLogs > 0)
 
   const [filters, setFilters] = useState<TaskLogsFilters>(() => {
     const { start, end } = getDefaultTimeRange()
@@ -241,7 +243,8 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
       mobileFilterCount={[filterValue, filters.channel].filter(Boolean).length}
       hasActiveFilters={hasAdditionalFilters}
       onSearch={handleApply}
-      searchLoading={fetchingLogs > 0}
+      searchLoading={searchLoading}
+      searchDisabled={fetchingLogs > 0}
       onReset={handleReset}
     />
   )

@@ -50,6 +50,7 @@ interface LogsFilterToolbarProps<TData> {
   hasAdvancedActiveFilters?: boolean
   advancedFilterCount?: number
   searchLoading?: boolean
+  searchDisabled?: boolean
   onReset: () => void
   onSearch: () => void
   className?: string
@@ -192,7 +193,7 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
               <Button
                 type='button'
                 onClick={props.onSearch}
-                disabled={props.searchLoading}
+                disabled={props.searchDisabled || props.searchLoading}
               >
                 {props.searchLoading && <Loader2 className='animate-spin' />}
                 {t('Search')}
@@ -230,7 +231,7 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
               <Button
                 type='button'
                 onClick={handleMobileSearch}
-                disabled={props.searchLoading}
+                disabled={props.searchDisabled || props.searchLoading}
               >
                 {props.searchLoading && <Loader2 className='animate-spin' />}
                 {t('Search')}
@@ -243,9 +244,7 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
   }
 
   return (
-    <div
-      className={cn('flex min-w-0 flex-col gap-2', props.className)}
-    >
+    <div className={cn('flex min-w-0 flex-col gap-2', props.className)}>
       <div className='flex min-w-0 flex-wrap items-center gap-2 sm:gap-3'>
         {props.primaryFilters}
       </div>
@@ -271,7 +270,7 @@ export function LogsFilterToolbar<TData>(props: LogsFilterToolbarProps<TData>) {
           <Button
             type='button'
             onClick={props.onSearch}
-            disabled={props.searchLoading}
+            disabled={props.searchDisabled || props.searchLoading}
           >
             {props.searchLoading && <Loader2 className='animate-spin' />}
             {t('Search')}

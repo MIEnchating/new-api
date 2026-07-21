@@ -31,6 +31,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useDelayedLoading } from '@/hooks/use-delayed-loading'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { getUsageLogGroups } from '../group-options-api'
@@ -127,6 +128,7 @@ export function CommonLogsFilterBar<TData>(
   const { isAdminView: isAdmin } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
+  const searchLoading = useDelayedLoading(fetchingLogs > 0)
   const { data: availableGroups = [] } = useQuery({
     queryKey: ['usage-log-groups', isAdmin],
     queryFn: () => getUsageLogGroups(isAdmin),
@@ -486,7 +488,8 @@ export function CommonLogsFilterBar<TData>(
       advancedFilterCount={expandedFilterCount}
       hasActiveFilters={hasAdditionalFilters}
       onSearch={handleApply}
-      searchLoading={fetchingLogs > 0}
+      searchLoading={searchLoading}
+      searchDisabled={fetchingLogs > 0}
       onReset={handleReset}
     />
   )

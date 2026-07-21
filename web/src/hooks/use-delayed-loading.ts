@@ -16,32 +16,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useRouterState } from '@tanstack/react-router'
-import { useEffect, useRef } from 'react'
-import LoadingBar, { type LoadingBarRef } from 'react-top-loading-bar'
+import { useEffect, useState } from 'react'
 
-export function NavigationProgress() {
-  const ref = useRef<LoadingBarRef>(null)
-  const startedRef = useRef(false)
-  const state = useRouterState()
+export function useDelayedLoading(loading: boolean, delayMs = 200): boolean {
+  const [visible, setVisible] = useState(false)
 
   useEffect(() => {
-    if (state.status === 'pending') {
-      const timeout = setTimeout(() => {
-        startedRef.current = true
-        ref.current?.continuousStart()
-      }, 200)
-
-      return () => clearTimeout(timeout)
+    if (!loading) {
+      setVisible(false)
+      return
     }
 
-    if (startedRef.current) {
-      ref.current?.complete()
-      startedRef.current = false
-    }
-  }, [state.status])
+    const timeout = setTimeout(() => setVisible(true), delayMs)
+    return () => clearTimeout(timeout)
+  }, [delayMs, loading])
 
-  return (
-    <LoadingBar color='var(--muted-foreground)' ref={ref} shadow height={2} />
-  )
+  return loading && visible
 }
