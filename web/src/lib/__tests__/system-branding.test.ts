@@ -42,12 +42,12 @@ describe('system branding', () => {
     assert.equal(normalizeSystemLogo(customLogo), customLogo)
   })
 
-  test('loads the local logo before React mounts', () => {
+  test('loads the local loading logo before React mounts', () => {
     const indexHtml = readFileSync(
       new URL('../../../index.html', import.meta.url),
       'utf8'
     )
 
-    assert.match(indexHtml, /src="\/logo\.png\?v=20260721-4"/)
+    assert.match(indexHtml, /src="\/loading-logo\.jpg\?v=20260721-5"/)
   })
 })
