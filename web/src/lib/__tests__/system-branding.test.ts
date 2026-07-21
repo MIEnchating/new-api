@@ -24,7 +24,7 @@ import { DEFAULT_LOGO } from '../constants'
 import { normalizeSystemLogo } from '../system-branding'
 
 describe('system branding', () => {
-  test('uses the Yunmian logo when no logo is configured', () => {
+  test('uses the local logo when no logo is configured', () => {
     assert.equal(normalizeSystemLogo(undefined), DEFAULT_LOGO)
     assert.equal(normalizeSystemLogo('  '), DEFAULT_LOGO)
   })
@@ -42,16 +42,12 @@ describe('system branding', () => {
     assert.equal(normalizeSystemLogo(customLogo), customLogo)
   })
 
-  test('loads the Yunmian logo before React mounts', () => {
+  test('loads the local logo before React mounts', () => {
     const indexHtml = readFileSync(
       new URL('../../../index.html', import.meta.url),
       'utf8'
     )
 
-    assert.match(
-      indexHtml,
-      /src="https:\/\/www\.yunmian\.tech\/icon\?v=20260721-3"/
-    )
-    assert.doesNotMatch(indexHtml, /src="[^"]*logo\.png/)
+    assert.match(indexHtml, /src="\/logo\.png\?v=20260721-4"/)
   })
 })

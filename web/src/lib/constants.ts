@@ -22,7 +22,7 @@ For commercial licensing, please contact support@quantumnous.com
 
 // System Configuration Defaults
 export const DEFAULT_SYSTEM_NAME = 'New API'
-export const DEFAULT_LOGO = 'https://www.yunmian.tech/icon'
+export const DEFAULT_LOGO = '/logo.png'
 
 // LocalStorage Keys
 export const STORAGE_KEYS = {
