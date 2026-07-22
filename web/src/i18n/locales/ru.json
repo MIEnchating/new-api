@@ -762,6 +762,7 @@
     "Cooling": "Cooling",
     "Cooldown time (seconds)": "Время ожидания (секунды)",
     "How long a failed routed channel stays out of selection before it is tried again": "How long a failed routed channel stays out of selection before it is tried again",
+    "How long a failed routed channel stays out of selection before it is tried again (0 disables cooldown)": "Время исключения неисправного маршрутизируемого канала до следующей попытки (0 отключает период охлаждения)",
     "Soft-freeze failed channels during retries instead of immediately routing back to them": "Soft-freeze failed channels during retries instead of immediately routing back to them",
     "Channel ID": "ID канала",
     "Channel ID is required": "Требуется ID канала",

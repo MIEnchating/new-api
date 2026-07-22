@@ -145,17 +145,6 @@ const routingReliabilitySchema = z
       })
     }
 
-    if (
-      values.ChannelRouteCooldownEnabled &&
-      values.ChannelRouteCooldownSeconds <= 0
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['ChannelRouteCooldownSeconds'],
-        message: 'Cooldown must be greater than 0 seconds',
-      })
-    }
-
     values.error_response_setting.rules.forEach((rule, index) => {
       if (!rule.enabled) return
 

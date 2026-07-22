@@ -56,30 +56,17 @@ import {
   getRouteAffinityStats,
 } from './route-affinity-api'
 
-const routeAffinitySchema = z
-  .object({
-    RetryTimes: z.coerce.number().min(0).max(10),
-    ChannelRouteCooldownEnabled: z.boolean(),
-    ChannelRouteCooldownSeconds: z.coerce
-      .number()
-      .int()
-      .min(0)
-      .max(31536000, 'Cooldown cannot exceed 31536000 seconds'),
-    ChannelRouteStickyEnabled: z.boolean(),
-    ChannelRouteSameChannelRetries: z.coerce.number().int().min(0).max(10),
-  })
-  .superRefine((values, ctx) => {
-    if (
-      values.ChannelRouteCooldownEnabled &&
-      values.ChannelRouteCooldownSeconds <= 0
-    ) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['ChannelRouteCooldownSeconds'],
-        message: 'Cooldown must be greater than 0 seconds',
-      })
-    }
-  })
+const routeAffinitySchema = z.object({
+  RetryTimes: z.coerce.number().min(0).max(10),
+  ChannelRouteCooldownEnabled: z.boolean(),
+  ChannelRouteCooldownSeconds: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(31536000, 'Cooldown cannot exceed 31536000 seconds'),
+  ChannelRouteStickyEnabled: z.boolean(),
+  ChannelRouteSameChannelRetries: z.coerce.number().int().min(0).max(10),
+})
 
 type RouteAffinityFormInput = z.input<typeof routeAffinitySchema>
 type RouteAffinityFormValues = z.output<typeof routeAffinitySchema>
@@ -324,7 +311,7 @@ export function ChannelRoutingSection(props: RouteAffinitySectionProps) {
                   </FormControl>
                   <FormDescription>
                     {t(
-                      'How long a failed routed channel stays out of selection before it is tried again'
+                      'How long a failed routed channel stays out of selection before it is tried again (0 disables cooldown)'
                     )}
                   </FormDescription>
                   <FormMessage />

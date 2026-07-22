@@ -762,6 +762,7 @@
     "Cooling": "Cooling",
     "Cooldown time (seconds)": "Thời gian chờ (giây)",
     "How long a failed routed channel stays out of selection before it is tried again": "How long a failed routed channel stays out of selection before it is tried again",
+    "How long a failed routed channel stays out of selection before it is tried again (0 disables cooldown)": "Thời gian loại kênh định tuyến lỗi khỏi lựa chọn trước khi thử lại (0 tắt thời gian chờ)",
     "Soft-freeze failed channels during retries instead of immediately routing back to them": "Soft-freeze failed channels during retries instead of immediately routing back to them",
     "Channel ID": "Mã kênh",
     "Channel ID is required": "Cần có ID kênh",

@@ -940,6 +940,37 @@ func TestChannelRouteCooldownSkipsFailedChannelAndReturnsAfterClear(t *testing.T
 	assert.Equal(t, 1, channel.Id)
 }
 
+func TestChannelRouteCanDisableCooldownWhileStillFailingOver(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	seedChannelRouteChannel(t, db, 1, "default", 2)
+	seedChannelRouteChannel(t, db, 2, "default", 1)
+	model.InitChannelCache()
+	common.ChannelRouteCooldownSeconds = 0
+
+	ctx := newChannelRouteContext()
+	param := newChannelRouteRetryParam(ctx, "default")
+	first, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, 1, first.Id)
+
+	ctx.Set("use_channel", []string{"1"})
+	assert.True(t, MarkChannelRouteFailure(ctx, newChannelRouteFailure()))
+	assert.False(t, IsChannelRouteFrozen("default", 1, common.GetTimestamp()))
+
+	param.SetRetry(1)
+	second, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	assert.Equal(t, 2, second.Id)
+
+	nextCtx := newChannelRouteContext()
+	next, _, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(nextCtx, "default"))
+	require.NoError(t, err)
+	require.NotNil(t, next)
+	assert.Equal(t, 1, next.Id)
+}
+
 func TestChannelRouteDoesNotFreezeOnlyAvailableChannel(t *testing.T) {
 	db := setupChannelRouteTest(t)
 	seedChannelRouteChannel(t, db, 1, "default", 1)

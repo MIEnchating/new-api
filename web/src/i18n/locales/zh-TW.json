@@ -762,6 +762,7 @@
     "Cooling": "冷卻中",
     "Cooldown time (seconds)": "冷卻時間（秒）",
     "How long a failed routed channel stays out of selection before it is tried again": "失敗的路由渠道在重新嘗試前排除出選擇的時間",
+    "How long a failed routed channel stays out of selection before it is tried again (0 disables cooldown)": "失敗的路由渠道在重新嘗試前排除出選擇的時間（0 表示關閉冷卻）",
     "Soft-freeze failed channels during retries instead of immediately routing back to them": "請求重試時軟冷卻失敗渠道，避免立刻再次路由回該渠道",
     "Channel ID": "渠道 ID",
     "Channel ID is required": "缺少渠道 ID",

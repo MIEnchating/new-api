@@ -39,7 +39,14 @@ type ChannelRouteAffinityStats struct {
 }
 
 func IsChannelRouteEnabled() bool {
-	return common.ChannelRouteCooldownEnabled && common.ChannelRouteCooldownSeconds > 0
+	return common.ChannelRouteCooldownEnabled
+}
+
+// IsChannelRouteCooldownEnabled reports whether failed channels should be
+// excluded from future requests. Routing itself remains enabled when the
+// configured cooldown is zero.
+func IsChannelRouteCooldownEnabled() bool {
+	return IsChannelRouteEnabled() && common.ChannelRouteCooldownSeconds > 0
 }
 
 func IsChannelRouteStickyEnabled() bool {
@@ -179,6 +186,9 @@ func IsChannelRouteFrozen(group string, channelID int, now int64) bool {
 }
 
 func GetChannelRouteCooldownUntil(group string, channelID int, now int64) int64 {
+	if !IsChannelRouteCooldownEnabled() {
+		return 0
+	}
 	if group == "" || channelID <= 0 {
 		return 0
 	}
@@ -200,7 +210,7 @@ func GetChannelRouteCooldownUntil(group string, channelID int, now int64) int64 
 // fallback semantics on a per-channel basis.
 func getChannelRouteCooldownsUntil(group string, channelIDs []int, now int64) map[int]int64 {
 	cooldowns := make(map[int]int64, len(channelIDs))
-	if group == "" || len(channelIDs) == 0 {
+	if !IsChannelRouteCooldownEnabled() || group == "" || len(channelIDs) == 0 {
 		return cooldowns
 	}
 
@@ -338,6 +348,18 @@ func TrackChannelRouteSelection(c *gin.Context, group string, modelName string, 
 	c.Set(ginKeyChannelRouteRequestPath, requestPath)
 }
 
+func channelWasUsed(c *gin.Context, channelID int) bool {
+	if c == nil || channelID <= 0 {
+		return false
+	}
+	for _, value := range c.GetStringSlice("use_channel") {
+		if value == strconv.Itoa(channelID) {
+			return true
+		}
+	}
+	return false
+}
+
 func markChannelRouteStickyHit(c *gin.Context, group string, modelName string, requestPath string, channelID int) {
 	if c == nil || group == "" || modelName == "" || channelID <= 0 {
 		return
@@ -459,6 +481,9 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 		0,
 		param.RequestPath,
 		func(channel *model.Channel) bool {
+			if !IsChannelRouteCooldownEnabled() && channelWasUsed(param.Ctx, channel.Id) {
+				return false
+			}
 			until := cooldownUntil(channel.Id)
 			frozen := until > now
 			if frozen {
@@ -485,7 +510,7 @@ func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 	if cooldownSeconds <= 0 {
 		cooldownSeconds = common.ChannelRouteCooldownSeconds
 	}
-	if group == "" || channelID <= 0 || cooldownSeconds <= 0 {
+	if group == "" || channelID <= 0 {
 		return false
 	}
 	modelName := c.GetString(ginKeyChannelRouteModel)
@@ -508,6 +533,10 @@ func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 			logger.LogDebug(c, "channel route cooldown skipped because no alternative channel is available: group=%s channel=%d", group, channelID)
 			return false
 		}
+	}
+	if cooldownSeconds <= 0 {
+		logger.LogDebug(c, "channel route cooldown disabled: group=%s channel=%d", group, channelID)
+		return true
 	}
 	until := FreezeChannelRoute(group, channelID, cooldownSeconds)
 	TrackChannelExecutionCooling(c, group, channelID, until)

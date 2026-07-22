@@ -762,6 +762,7 @@
     "Cooling": "Cooling",
     "Cooldown time (seconds)": "Cooldown time (seconds)",
     "How long a failed routed channel stays out of selection before it is tried again": "How long a failed routed channel stays out of selection before it is tried again",
+    "How long a failed routed channel stays out of selection before it is tried again (0 disables cooldown)": "How long a failed routed channel stays out of selection before it is tried again (0 disables cooldown)",
     "Soft-freeze failed channels during retries instead of immediately routing back to them": "Soft-freeze failed channels during retries instead of immediately routing back to them",
     "Channel ID": "Channel ID",
     "Channel ID is required": "Channel ID is required",

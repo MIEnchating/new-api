@@ -762,6 +762,7 @@
     "Cooling": "Cooling",
     "Cooldown time (seconds)": "クールダウン時間（秒）",
     "How long a failed routed channel stays out of selection before it is tried again": "How long a failed routed channel stays out of selection before it is tried again",
+    "How long a failed routed channel stays out of selection before it is tried again (0 disables cooldown)": "失敗したルートチャネルを再試行まで選択対象から外す時間（0 でクールダウンを無効化）",
     "Soft-freeze failed channels during retries instead of immediately routing back to them": "Soft-freeze failed channels during retries instead of immediately routing back to them",
     "Channel ID": "チャネルID",
     "Channel ID is required": "チャネル ID が必要です",
