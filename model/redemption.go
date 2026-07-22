@@ -13,20 +13,25 @@ import (
 )
 
 type Redemption struct {
-	Id              int            `json:"id"`
-	UserId          int            `json:"user_id"`
-	Key             string         `json:"key" gorm:"type:char(32);uniqueIndex"`
-	Status          int            `json:"status" gorm:"default:1"`
-	Name            string         `json:"name" gorm:"index"`
-	Quota           int            `json:"quota" gorm:"default:100"`
-	CreatedTime     int64          `json:"created_time" gorm:"bigint"`
-	RedeemedTime    int64          `json:"redeemed_time" gorm:"bigint"`
-	Count           int            `json:"count" gorm:"-:all"` // only for api request
-	UsedUserId      int            `json:"used_user_id"`
-	DeletedAt       gorm.DeletedAt `gorm:"index"`
-	ExpiredTime     int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
-	BatchId         string         `json:"batch_id" gorm:"type:varchar(32);index"`
-	LimitOnePerUser bool           `json:"limit_one_per_user" gorm:"default:false"`
+	Id                int            `json:"id"`
+	UserId            int            `json:"user_id"`
+	Key               string         `json:"key" gorm:"type:char(32);uniqueIndex"`
+	Status            int            `json:"status" gorm:"default:1"`
+	Name              string         `json:"name" gorm:"index"`
+	Quota             int            `json:"quota" gorm:"default:100"`
+	CreatedTime       int64          `json:"created_time" gorm:"bigint"`
+	RedeemedTime      int64          `json:"redeemed_time" gorm:"bigint"`
+	Count             int            `json:"count" gorm:"-:all"` // only for api request
+	UsedUserId        int            `json:"used_user_id"`
+	DeletedAt         gorm.DeletedAt `gorm:"index"`
+	ExpiredTime       int64          `json:"expired_time" gorm:"bigint"` // 过期时间，0 表示不过期
+	BatchId           string         `json:"batch_id" gorm:"type:varchar(32);index"`
+	LimitOnePerUser   bool           `json:"limit_one_per_user" gorm:"default:false"`
+	InvoiceStatus     int            `json:"invoice_status" gorm:"default:0;index"`
+	InvoicedAt        int64          `json:"invoiced_at" gorm:"bigint;default:0"`
+	InvoicedBy        int            `json:"invoiced_by" gorm:"default:0"`
+	InvoiceReturnedAt int64          `json:"invoice_returned_at" gorm:"bigint;default:0"`
+	InvoiceReturnedBy int            `json:"invoice_returned_by" gorm:"default:0"`
 }
 
 type RedemptionBatchClaim struct {

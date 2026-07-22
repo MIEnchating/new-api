@@ -172,12 +172,12 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
 
             <div className='flex items-center justify-between gap-2 text-xs'>
               <span className='text-muted-foreground'>
-                {t('Redemption limit')}
+                {t('Campaign type')}
               </span>
               <span className='font-medium'>
                 {redemption.limit_one_per_user
-                  ? t('One per user')
-                  : t('Unlimited')}
+                  ? t('Campaign exclusive')
+                  : t('Regular')}
               </span>
             </div>
           </div>

@@ -93,13 +93,13 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
     },
     {
       accessorKey: 'limit_one_per_user',
-      header: t('Redemption limit'),
+      header: t('Campaign type'),
       meta: { mobileHidden: true },
       cell: ({ row }) => {
         const limited = row.getValue('limit_one_per_user') as boolean
         return (
           <StatusBadge
-            label={limited ? t('One per user') : t('Unlimited')}
+            label={limited ? t('Campaign exclusive') : t('Regular')}
             variant={limited ? 'info' : 'neutral'}
             copyable={false}
             className='-ml-1.5'

@@ -684,6 +684,10 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   // Redemption codes
   'redemption.create':
     'Created {{count}} redemption codes named {{name}} ({{quota}} each)',
+  'redemption.invoice_issue':
+    'Marked redemption credit {{reference}} as invoiced',
+  'redemption.invoice_return':
+    'Returned invoice marker for redemption credit {{reference}}',
   'topup.invoice_issue': 'Marked top-up order {{trade_no}} as invoiced',
   'topup.invoice_return':
     'Returned invoice marker for top-up order {{trade_no}}',

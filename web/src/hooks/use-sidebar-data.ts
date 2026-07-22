@@ -142,15 +142,15 @@ export function useSidebarData(): SidebarData {
             icon: Users,
           },
           {
-            title: t('Order History'),
-            url: '/topup-stats',
-            icon: BarChart3,
-            requiredRole: ROLE.ADMIN,
-          },
-          {
             title: t('Redemption Codes'),
             url: '/redemption-codes',
             icon: Ticket,
+          },
+          {
+            title: t('Order Management'),
+            url: '/topup-stats',
+            icon: BarChart3,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('Subscriptions'),

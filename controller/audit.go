@@ -51,9 +51,11 @@ var auditContentTemplates = map[string]string{
 	"channel.upstream_apply_all":   "Applied upstream model changes to ${count} channels",
 	"channel.upstream_detect_all":  "Started upstream model detection task ${task_id}",
 
-	"redemption.create":    "Created ${count} redemption codes named ${name} (${quota} each)",
-	"topup.invoice_issue":  "Marked top-up order ${trade_no} as invoiced",
-	"topup.invoice_return": "Returned invoice marker for top-up order ${trade_no}",
+	"redemption.create":         "Created ${count} redemption codes named ${name} (${quota} each)",
+	"redemption.invoice_issue":  "Marked redemption credit ${reference} as invoiced",
+	"redemption.invoice_return": "Returned invoice marker for redemption credit ${reference}",
+	"topup.invoice_issue":       "Marked top-up order ${trade_no} as invoiced",
+	"topup.invoice_return":      "Returned invoice marker for top-up order ${trade_no}",
 
 	"subscription.plan_reset":      "Reset active subscriptions for plan ${plan_id}",
 	"subscription.user_plan_reset": "Reset active plan ${plan_id} subscriptions for user ${target_user_id}",

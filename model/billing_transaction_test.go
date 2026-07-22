@@ -44,6 +44,11 @@ func TestGetBillingHistoryMergesSourcesAndFilters(t *testing.T) {
 		Status: common.RedemptionCodeStatusUsed, Quota: 500, UsedUserId: userOneID,
 		CreatedTime: now - 50, RedeemedTime: now - 10,
 	}).Error)
+	require.NoError(t, DB.Create(&Redemption{
+		UserId: 1, Key: fmt.Sprintf("%032d", (now+1)%1_000_000_000), Name: "billing-campaign",
+		Status: common.RedemptionCodeStatusUsed, Quota: 800, UsedUserId: userOneID,
+		CreatedTime: now - 45, RedeemedTime: now - 8, LimitOnePerUser: true,
+	}).Error)
 	require.NoError(t, CreateBillingTransaction(nil, &BillingTransaction{
 		EventKey: "billing-affiliate-test", UserId: userOneID, Type: BillingTypeAffiliate,
 		Quota: 300, Reference: "affiliate-test", Status: "success", CreatedAt: now,
@@ -53,15 +58,31 @@ func TestGetBillingHistoryMergesSourcesAndFilters(t *testing.T) {
 		Quota: -100, Reference: "admin-test", Status: "success", CreatedAt: now - 5,
 	}))
 
-	items, total, err := GetBillingHistory(BillingHistoryFilter{
+	items, total, typeCounts, typeQuotas, err := GetBillingHistoryWithTypeStats(BillingHistoryFilter{
 		UserId: userOneID, StartTime: now - 100, EndTime: now + 1,
 		PageInfo: &common.PageInfo{Page: 1, PageSize: 10},
 	})
 	require.NoError(t, err)
-	require.Equal(t, int64(3), total)
-	require.Len(t, items, 3)
+	require.Equal(t, int64(4), total)
+	require.Len(t, items, 4)
+	require.Equal(t, int64(1), typeCounts[BillingTypeOnlineTopup])
+	require.Equal(t, int64(1), typeCounts[BillingTypeRedemption])
+	require.Equal(t, int64(1), typeCounts[BillingTypeAffiliate])
+	require.Zero(t, typeCounts[BillingTypeAdminAdjustment])
+	require.Equal(t, int64(calculateTopUpCreditedQuota(PaymentProviderStripe, 2, 1.9)), typeQuotas[BillingTypeOnlineTopup])
+	require.Equal(t, int64(500), typeQuotas[BillingTypeRedemption])
+	require.Equal(t, int64(300), typeQuotas[BillingTypeAffiliate])
+	require.Zero(t, typeQuotas[BillingTypeAdminAdjustment])
 	require.Equal(t, BillingTypeAffiliate, items[0].Type)
-	require.ElementsMatch(t, []string{BillingTypeAffiliate, BillingTypeRedemption, BillingTypeOnlineTopup}, []string{items[0].Type, items[1].Type, items[2].Type})
+	require.ElementsMatch(t, []string{BillingTypeAffiliate, BillingTypeRedemption, BillingTypeRedemption, BillingTypeOnlineTopup}, []string{items[0].Type, items[1].Type, items[2].Type, items[3].Type})
+	campaignItems := make([]BillingHistoryItem, 0, 1)
+	for _, item := range items {
+		if item.ExcludedFromStats {
+			campaignItems = append(campaignItems, item)
+		}
+	}
+	require.Len(t, campaignItems, 1)
+	require.False(t, campaignItems[0].InvoiceEligible)
 
 	items, total, err = GetBillingHistory(BillingHistoryFilter{
 		UserKeyword: "billing-history-two", Types: []string{BillingTypeAdminAdjustment},
@@ -72,6 +93,62 @@ func TestGetBillingHistoryMergesSourcesAndFilters(t *testing.T) {
 	require.Equal(t, int64(1), total)
 	require.Len(t, items, 1)
 	require.Equal(t, userTwoID, items[0].UserId)
+}
+
+func TestUpdateBillingInvoiceStatusesSupportsRegularRedemptions(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	now := common.GetTimestamp()
+	topup := TopUp{
+		UserId: userOneID, Amount: 2, Money: 2, TradeNo: fmt.Sprintf("billing-invoice-%d", now),
+		PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe,
+		CreateTime: now - 20, CompleteTime: now - 10, Status: common.TopUpStatusSuccess,
+	}
+	require.NoError(t, DB.Create(&topup).Error)
+	redemption := Redemption{
+		UserId: 1, Key: fmt.Sprintf("%032d", (now+2)%1_000_000_000), Name: "invoice-redemption",
+		Status: common.RedemptionCodeStatusUsed, Quota: 500, UsedUserId: userOneID,
+		CreatedTime: now - 20, RedeemedTime: now - 5,
+	}
+	require.NoError(t, DB.Create(&redemption).Error)
+
+	records, err := UpdateBillingInvoiceStatuses([]BillingInvoiceTarget{
+		{Id: topup.Id, Type: BillingTypeOnlineTopup},
+		{Id: redemption.Id, Type: BillingTypeRedemption},
+	}, TopUpInvoiceActionIssue, 91)
+	require.NoError(t, err)
+	require.Len(t, records, 2)
+	require.NoError(t, DB.First(&topup, topup.Id).Error)
+	require.NoError(t, DB.Unscoped().First(&redemption, redemption.Id).Error)
+	require.Equal(t, TopUpInvoiceStatusIssued, topup.InvoiceStatus)
+	require.Equal(t, TopUpInvoiceStatusIssued, redemption.InvoiceStatus)
+
+	_, err = UpdateBillingInvoiceStatuses([]BillingInvoiceTarget{
+		{Id: topup.Id, Type: BillingTypeOnlineTopup},
+		{Id: redemption.Id, Type: BillingTypeRedemption},
+	}, TopUpInvoiceActionReturn, 92)
+	require.NoError(t, err)
+	require.NoError(t, DB.First(&topup, topup.Id).Error)
+	require.NoError(t, DB.Unscoped().First(&redemption, redemption.Id).Error)
+	require.Equal(t, TopUpInvoiceStatusReturned, topup.InvoiceStatus)
+	require.Equal(t, TopUpInvoiceStatusReturned, redemption.InvoiceStatus)
+}
+
+func TestUpdateBillingInvoiceStatusesRejectsCampaignRedemptions(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	now := common.GetTimestamp()
+	redemption := Redemption{
+		UserId: 1, Key: fmt.Sprintf("%032d", (now+3)%1_000_000_000), Name: "campaign-redemption",
+		Status: common.RedemptionCodeStatusUsed, Quota: 500, UsedUserId: userOneID,
+		CreatedTime: now - 20, RedeemedTime: now - 5, LimitOnePerUser: true,
+	}
+	require.NoError(t, DB.Create(&redemption).Error)
+
+	_, err := UpdateBillingInvoiceStatuses([]BillingInvoiceTarget{{
+		Id: redemption.Id, Type: BillingTypeRedemption,
+	}}, TopUpInvoiceActionIssue, 91)
+	require.ErrorIs(t, err, ErrBillingInvoiceIneligible)
+	require.NoError(t, DB.Unscoped().First(&redemption, redemption.Id).Error)
+	require.Zero(t, redemption.InvoiceStatus)
 }
 
 func TestGetBillingHistoryUsesStripeCreditedQuota(t *testing.T) {

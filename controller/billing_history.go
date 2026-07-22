@@ -85,11 +85,13 @@ func redactUserBillingHistory(items []model.BillingHistoryItem) {
 	for i := range items {
 		items[i].OperatorUserId = 0
 		items[i].TopUpId = 0
+		items[i].RedemptionId = 0
 		items[i].InvoiceStatus = nil
 		items[i].InvoicedAt = 0
 		items[i].InvoicedBy = 0
 		items[i].InvoiceReturnedAt = 0
 		items[i].InvoiceReturnedBy = 0
+		items[i].InvoiceEligible = false
 	}
 }
 

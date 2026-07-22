@@ -44,6 +44,7 @@ type BillingTransaction struct {
 type BillingHistoryItem struct {
 	Id                string  `json:"id"`
 	TopUpId           int     `json:"topup_id,omitempty"`
+	RedemptionId      int     `json:"redemption_id,omitempty"`
 	UserId            int     `json:"user_id"`
 	Username          string  `json:"username"`
 	DisplayName       string  `json:"display_name"`
@@ -62,6 +63,8 @@ type BillingHistoryItem struct {
 	InvoicedBy        int     `json:"invoiced_by,omitempty"`
 	InvoiceReturnedAt int64   `json:"invoice_returned_at,omitempty"`
 	InvoiceReturnedBy int     `json:"invoice_returned_by,omitempty"`
+	InvoiceEligible   bool    `json:"invoice_eligible"`
+	ExcludedFromStats bool    `json:"excluded_from_stats"`
 }
 
 type BillingHistoryFilter struct {
@@ -75,6 +78,27 @@ type BillingHistoryFilter struct {
 	StartTime       int64
 	EndTime         int64
 	PageInfo        *common.PageInfo
+}
+
+type BillingHistoryTypeCounts map[string]int64
+type BillingHistoryTypeQuotas map[string]int64
+
+func newBillingHistoryTypeCounts() BillingHistoryTypeCounts {
+	return BillingHistoryTypeCounts{
+		BillingTypeOnlineTopup:     0,
+		BillingTypeRedemption:      0,
+		BillingTypeAffiliate:       0,
+		BillingTypeAdminAdjustment: 0,
+	}
+}
+
+func newBillingHistoryTypeQuotas() BillingHistoryTypeQuotas {
+	return BillingHistoryTypeQuotas{
+		BillingTypeOnlineTopup:     0,
+		BillingTypeRedemption:      0,
+		BillingTypeAffiliate:       0,
+		BillingTypeAdminAdjustment: 0,
+	}
 }
 
 func normalizeBillingHistoryTypes(types []string) []string {
@@ -288,12 +312,12 @@ func billingPageWindow(pageInfo *common.PageInfo) (offset int, pageSize int, lim
 
 const onlineTopUpBillingTime = "CASE WHEN t.complete_time > 0 THEN t.complete_time ELSE t.create_time END"
 
-func queryOnlineTopups(filter BillingHistoryFilter, limit int) ([]BillingHistoryItem, int64, error) {
+func queryOnlineTopups(filter BillingHistoryFilter, limit int) ([]BillingHistoryItem, int64, int64, error) {
 	query := DB.Table("top_ups AS t").Joins("LEFT JOIN users AS u ON u.id = t.user_id")
 	var err error
 	query, err = applyBillingUserFilter(query, "t.user_id", filter)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	query = applyBillingTimeRange(query, onlineTopUpBillingTime, filter.StartTime, filter.EndTime)
 	if len(filter.Statuses) > 0 {
@@ -308,13 +332,29 @@ func queryOnlineTopups(filter BillingHistoryFilter, limit int) ([]BillingHistory
 	if reference := strings.TrimSpace(filter.Reference); reference != "" {
 		pattern, patternErr := sanitizeLikePattern("%" + reference + "%")
 		if patternErr != nil {
-			return nil, 0, patternErr
+			return nil, 0, 0, patternErr
 		}
 		query = query.Where("t.trade_no LIKE ? ESCAPE '!'", pattern)
 	}
 	var total int64
 	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
+	}
+	type quotaRow struct {
+		Amount          int64
+		Money           float64
+		PaymentProvider string
+	}
+	quotaRows := make([]quotaRow, 0)
+	if err := query.Session(&gorm.Session{}).
+		Where("t.status = ?", common.TopUpStatusSuccess).
+		Select("t.amount, t.money, t.payment_provider").
+		Scan(&quotaRows).Error; err != nil {
+		return nil, 0, 0, err
+	}
+	var quotaTotal int64
+	for _, topup := range quotaRows {
+		quotaTotal += int64(calculateTopUpCreditedQuota(topup.PaymentProvider, topup.Amount, topup.Money))
 	}
 	type row struct {
 		Id                int
@@ -339,7 +379,7 @@ func queryOnlineTopups(filter BillingHistoryFilter, limit int) ([]BillingHistory
 	if err := query.Session(&gorm.Session{}).
 		Select("t.id, t.user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, t.amount, t.money, t.trade_no, t.payment_method, t.payment_provider, t.create_time, t.complete_time, t.status, COALESCE(t.invoice_status, 0) AS invoice_status, COALESCE(t.invoiced_at, 0) AS invoiced_at, COALESCE(t.invoiced_by, 0) AS invoiced_by, COALESCE(t.invoice_returned_at, 0) AS invoice_returned_at, COALESCE(t.invoice_returned_by, 0) AS invoice_returned_by").
 		Order(onlineTopUpBillingTime + " DESC, t.id DESC").Limit(limit).Scan(&rows).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	items := make([]BillingHistoryItem, 0, len(rows))
 	for _, topup := range rows {
@@ -358,14 +398,15 @@ func queryOnlineTopups(filter BillingHistoryFilter, limit int) ([]BillingHistory
 			InvoiceStatus: &invoiceStatus, InvoicedAt: topup.InvoicedAt,
 			InvoicedBy: topup.InvoicedBy, InvoiceReturnedAt: topup.InvoiceReturnedAt,
 			InvoiceReturnedBy: topup.InvoiceReturnedBy,
+			InvoiceEligible:   topup.Status == common.TopUpStatusSuccess,
 		})
 	}
-	return items, total, nil
+	return items, total, quotaTotal, nil
 }
 
-func queryRedemptions(filter BillingHistoryFilter, limit int) ([]BillingHistoryItem, int64, error) {
-	if (len(filter.Statuses) > 0 && !slices.Contains(filter.Statuses, common.TopUpStatusSuccess)) || len(filter.PaymentMethods) > 0 || len(filter.InvoiceStatuses) > 0 {
-		return []BillingHistoryItem{}, 0, nil
+func queryRedemptions(filter BillingHistoryFilter, limit int) ([]BillingHistoryItem, int64, int64, int64, error) {
+	if (len(filter.Statuses) > 0 && !slices.Contains(filter.Statuses, common.TopUpStatusSuccess)) || len(filter.PaymentMethods) > 0 {
+		return []BillingHistoryItem{}, 0, 0, 0, nil
 	}
 	query := DB.Unscoped().Table("redemptions AS r").
 		Joins("LEFT JOIN users AS u ON u.id = r.used_user_id").
@@ -373,51 +414,85 @@ func queryRedemptions(filter BillingHistoryFilter, limit int) ([]BillingHistoryI
 	var err error
 	query, err = applyBillingUserFilter(query, "r.used_user_id", filter)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, 0, err
 	}
 	query = applyBillingTimeRange(query, "r.redeemed_time", filter.StartTime, filter.EndTime)
+	if len(filter.InvoiceStatuses) > 0 {
+		query = query.Where("r.limit_one_per_user = ? AND r.invoice_status IN ?", false, filter.InvoiceStatuses)
+	}
 	if reference := strings.TrimSpace(filter.Reference); reference != "" {
 		pattern, patternErr := sanitizeLikePattern("%" + reference + "%")
 		if patternErr != nil {
-			return nil, 0, patternErr
+			return nil, 0, 0, 0, patternErr
 		}
 		query = query.Where("r.name LIKE ? ESCAPE '!'", pattern)
 	}
 	var total int64
 	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, 0, 0, err
+	}
+	var statsCount int64
+	if err := query.Session(&gorm.Session{}).
+		Where("r.limit_one_per_user = ?", false).
+		Count(&statsCount).Error; err != nil {
+		return nil, 0, 0, 0, err
+	}
+	var quotaStats struct {
+		Quota int64
+	}
+	if err := query.Session(&gorm.Session{}).
+		Where("r.limit_one_per_user = ?", false).
+		Select("COALESCE(SUM(r.quota), 0) AS quota").
+		Scan(&quotaStats).Error; err != nil {
+		return nil, 0, 0, 0, err
 	}
 	type row struct {
-		Id           int
-		UsedUserId   int
-		Username     string
-		DisplayName  string
-		Name         string
-		Quota        int
-		RedeemedTime int64
+		Id                int
+		UsedUserId        int
+		Username          string
+		DisplayName       string
+		Name              string
+		Quota             int
+		RedeemedTime      int64
+		LimitOnePerUser   bool
+		InvoiceStatus     int
+		InvoicedAt        int64
+		InvoicedBy        int
+		InvoiceReturnedAt int64
+		InvoiceReturnedBy int
 	}
 	rows := make([]row, 0)
 	if err := query.Session(&gorm.Session{}).
-		Select("r.id, r.used_user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, r.name, r.quota, r.redeemed_time").
+		Select("r.id, r.used_user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, r.name, r.quota, r.redeemed_time, r.limit_one_per_user, COALESCE(r.invoice_status, 0) AS invoice_status, COALESCE(r.invoiced_at, 0) AS invoiced_at, COALESCE(r.invoiced_by, 0) AS invoiced_by, COALESCE(r.invoice_returned_at, 0) AS invoice_returned_at, COALESCE(r.invoice_returned_by, 0) AS invoice_returned_by").
 		Order("r.redeemed_time DESC, r.id DESC").Limit(limit).Scan(&rows).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, 0, 0, err
 	}
 	items := make([]BillingHistoryItem, 0, len(rows))
 	for _, redemption := range rows {
-		items = append(items, BillingHistoryItem{
-			Id: fmt.Sprintf("redemption:%d", redemption.Id), UserId: redemption.UsedUserId,
+		invoiceStatus := redemption.InvoiceStatus
+		item := BillingHistoryItem{
+			Id: fmt.Sprintf("redemption:%d", redemption.Id), RedemptionId: redemption.Id,
+			UserId:   redemption.UsedUserId,
 			Username: redemption.Username, DisplayName: redemption.DisplayName,
 			Type: BillingTypeRedemption, Quota: redemption.Quota,
 			Reference: redemption.Name, PaymentMethod: BillingTypeRedemption,
 			Status: "success", CreatedAt: redemption.RedeemedTime,
-		})
+			InvoiceEligible:   !redemption.LimitOnePerUser,
+			ExcludedFromStats: redemption.LimitOnePerUser,
+			InvoiceStatus:     &invoiceStatus,
+			InvoicedAt:        redemption.InvoicedAt,
+			InvoicedBy:        redemption.InvoicedBy,
+			InvoiceReturnedAt: redemption.InvoiceReturnedAt,
+			InvoiceReturnedBy: redemption.InvoiceReturnedBy,
+		}
+		items = append(items, item)
 	}
-	return items, total, nil
+	return items, total, statsCount, quotaStats.Quota, nil
 }
 
-func queryStoredBillingTransactions(filter BillingHistoryFilter, types []string, limit int) ([]BillingHistoryItem, int64, error) {
+func queryStoredBillingTransactions(filter BillingHistoryFilter, types []string, limit int) ([]BillingHistoryItem, int64, int64, error) {
 	if len(filter.InvoiceStatuses) > 0 {
-		return []BillingHistoryItem{}, 0, nil
+		return []BillingHistoryItem{}, 0, 0, nil
 	}
 	query := DB.Table("billing_transactions AS b").
 		Joins("LEFT JOIN users AS u ON u.id = b.user_id").
@@ -425,7 +500,7 @@ func queryStoredBillingTransactions(filter BillingHistoryFilter, types []string,
 	var err error
 	query, err = applyBillingUserFilter(query, "b.user_id", filter)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	query = applyBillingTimeRange(query, "b.created_at", filter.StartTime, filter.EndTime)
 	if len(filter.Statuses) > 0 {
@@ -437,13 +512,22 @@ func queryStoredBillingTransactions(filter BillingHistoryFilter, types []string,
 	if reference := strings.TrimSpace(filter.Reference); reference != "" {
 		pattern, patternErr := sanitizeLikePattern("%" + reference + "%")
 		if patternErr != nil {
-			return nil, 0, patternErr
+			return nil, 0, 0, patternErr
 		}
 		query = query.Where("b.reference LIKE ? ESCAPE '!'", pattern)
 	}
 	var total int64
 	if err := query.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
+	}
+	var quotaStats struct {
+		Quota int64
+	}
+	if err := query.Session(&gorm.Session{}).
+		Where("b.status = ?", "success").
+		Select("COALESCE(SUM(b.quota), 0) AS quota").
+		Scan(&quotaStats).Error; err != nil {
+		return nil, 0, 0, err
 	}
 	type row struct {
 		Id             int64
@@ -464,7 +548,7 @@ func queryStoredBillingTransactions(filter BillingHistoryFilter, types []string,
 	if err := query.Session(&gorm.Session{}).
 		Select("b.id, b.user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, b.type, b.quota, b.money, b.reference, b.payment_method, b.status, b.operator_user_id, b.created_at, b.detail").
 		Order("b.created_at DESC, b.id DESC").Limit(limit).Scan(&rows).Error; err != nil {
-		return nil, 0, err
+		return nil, 0, 0, err
 	}
 	items := make([]BillingHistoryItem, 0, len(rows))
 	for _, transaction := range rows {
@@ -477,49 +561,53 @@ func queryStoredBillingTransactions(filter BillingHistoryFilter, types []string,
 			CreatedAt: transaction.CreatedAt, Detail: transaction.Detail,
 		})
 	}
-	return items, total, nil
+	return items, total, quotaStats.Quota, nil
 }
 
-func GetBillingHistory(filter BillingHistoryFilter) ([]BillingHistoryItem, int64, error) {
+func GetBillingHistoryWithTypeStats(filter BillingHistoryFilter) ([]BillingHistoryItem, int64, BillingHistoryTypeCounts, BillingHistoryTypeQuotas, error) {
+	typeCounts := newBillingHistoryTypeCounts()
+	typeQuotas := newBillingHistoryTypeQuotas()
 	filter.Types = normalizeBillingHistoryTypes(filter.Types)
 	if len(filter.Types) == 0 {
-		return []BillingHistoryItem{}, 0, nil
+		return []BillingHistoryItem{}, 0, typeCounts, typeQuotas, nil
 	}
 	offset, pageSize, limit, err := billingPageWindow(filter.PageInfo)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, nil, nil, err
 	}
 	items := make([]BillingHistoryItem, 0, limit*2)
 	var total int64
 	if containsBillingType(filter.Types, BillingTypeOnlineTopup) {
-		topupItems, count, err := queryOnlineTopups(filter, limit)
+		topupItems, count, quota, err := queryOnlineTopups(filter, limit)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, nil, nil, err
 		}
 		items = append(items, topupItems...)
 		total += count
+		typeCounts[BillingTypeOnlineTopup] = count
+		typeQuotas[BillingTypeOnlineTopup] = quota
 	}
 	if containsBillingType(filter.Types, BillingTypeRedemption) {
-		redemptionItems, count, err := queryRedemptions(filter, limit)
+		redemptionItems, count, statsCount, quota, err := queryRedemptions(filter, limit)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, nil, nil, err
 		}
 		items = append(items, redemptionItems...)
 		total += count
+		typeCounts[BillingTypeRedemption] = statsCount
+		typeQuotas[BillingTypeRedemption] = quota
 	}
-	storedTypes := make([]string, 0, 2)
 	for _, billingType := range filter.Types {
 		if billingType == BillingTypeAffiliate || billingType == BillingTypeAdminAdjustment {
-			storedTypes = append(storedTypes, billingType)
+			storedItems, count, quota, err := queryStoredBillingTransactions(filter, []string{billingType}, limit)
+			if err != nil {
+				return nil, 0, nil, nil, err
+			}
+			items = append(items, storedItems...)
+			total += count
+			typeCounts[billingType] = count
+			typeQuotas[billingType] = quota
 		}
-	}
-	if len(storedTypes) > 0 {
-		storedItems, count, err := queryStoredBillingTransactions(filter, storedTypes, limit)
-		if err != nil {
-			return nil, 0, err
-		}
-		items = append(items, storedItems...)
-		total += count
 	}
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].CreatedAt != items[j].CreatedAt {
@@ -528,11 +616,21 @@ func GetBillingHistory(filter BillingHistoryFilter) ([]BillingHistoryItem, int64
 		return items[i].Id > items[j].Id
 	})
 	if offset >= len(items) {
-		return []BillingHistoryItem{}, total, nil
+		return []BillingHistoryItem{}, total, typeCounts, typeQuotas, nil
 	}
 	end := offset + pageSize
 	if end > len(items) {
 		end = len(items)
 	}
-	return items[offset:end], total, nil
+	return items[offset:end], total, typeCounts, typeQuotas, nil
+}
+
+func GetBillingHistoryWithTypeCounts(filter BillingHistoryFilter) ([]BillingHistoryItem, int64, BillingHistoryTypeCounts, error) {
+	items, total, typeCounts, _, err := GetBillingHistoryWithTypeStats(filter)
+	return items, total, typeCounts, err
+}
+
+func GetBillingHistory(filter BillingHistoryFilter) ([]BillingHistoryItem, int64, error) {
+	items, total, _, err := GetBillingHistoryWithTypeCounts(filter)
+	return items, total, err
 }

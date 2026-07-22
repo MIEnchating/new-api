@@ -311,6 +311,9 @@ func migrateDB() error {
 	if err := initializeTopUpInvoiceFields(); err != nil {
 		return err
 	}
+	if err := initializeRedemptionInvoiceFields(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}

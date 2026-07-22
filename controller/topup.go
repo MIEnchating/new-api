@@ -521,7 +521,7 @@ func GetTopUpStats(c *gin.Context) {
 		}
 	}
 
-	items, total, err := model.GetBillingHistory(model.BillingHistoryFilter{
+	items, total, typeCounts, typeQuotas, err := model.GetBillingHistoryWithTypeStats(model.BillingHistoryFilter{
 		UserKeyword:     statsFilter.UserKeyword,
 		Reference:       statsFilter.Reference,
 		Types:           types,
@@ -538,11 +538,13 @@ func GetTopUpStats(c *gin.Context) {
 	}
 
 	common.ApiSuccess(c, gin.H{
-		"summary":   summary,
-		"items":     items,
-		"total":     total,
-		"page":      pageInfo.GetPage(),
-		"page_size": pageInfo.GetPageSize(),
+		"summary":     summary,
+		"type_counts": typeCounts,
+		"type_quotas": typeQuotas,
+		"items":       items,
+		"total":       total,
+		"page":        pageInfo.GetPage(),
+		"page_size":   pageInfo.GetPageSize(),
 	})
 }
 
@@ -569,17 +571,23 @@ func parseTopUpStatsIntValues(raw string) []int {
 
 type AdminTopUpInvoiceRequest struct {
 	Action string `json:"action"`
+	Type   string `json:"type"`
 }
 
 type AdminTopUpInvoiceBatchRequest struct {
-	Ids    []int  `json:"ids"`
-	Action string `json:"action"`
+	Ids    []int                        `json:"ids"`
+	Items  []model.BillingInvoiceTarget `json:"items"`
+	Action string                       `json:"action"`
 }
 
 func apiTopUpInvoiceError(c *gin.Context, err error, action string) {
 	switch {
 	case errors.Is(err, model.ErrTopUpNotFound):
 		common.ApiErrorMsg(c, "充值订单不存在")
+	case errors.Is(err, model.ErrBillingInvoiceNotFound):
+		common.ApiErrorMsg(c, "所选入账记录不存在")
+	case errors.Is(err, model.ErrBillingInvoiceIneligible):
+		common.ApiErrorMsg(c, "只有支付成功的订单和普通兑换码入账可以开票，活动专属兑换不计入统计")
 	case errors.Is(err, model.ErrTopUpStatusInvalid):
 		common.ApiErrorMsg(c, "只有支付成功的订单可以开票")
 	case errors.Is(err, model.ErrTopUpInvoiceStatus):
@@ -595,6 +603,24 @@ func apiTopUpInvoiceError(c *gin.Context, err error, action string) {
 	default:
 		common.ApiError(c, err)
 	}
+}
+
+func recordBillingInvoiceAudit(c *gin.Context, record model.BillingInvoiceRecord, action string) {
+	auditAction := "topup.invoice_issue"
+	if action == model.TopUpInvoiceActionReturn {
+		auditAction = "topup.invoice_return"
+	}
+	if record.Type == model.BillingTypeRedemption {
+		auditAction = "redemption.invoice_issue"
+		if action == model.TopUpInvoiceActionReturn {
+			auditAction = "redemption.invoice_return"
+		}
+	}
+	recordManageAuditFor(c, record.UserId, auditAction, map[string]interface{}{
+		"id":        record.Id,
+		"trade_no":  record.Reference,
+		"reference": record.Reference,
+	})
 }
 
 // UpdateTopUpInvoice updates the internal invoice marker for a successful
@@ -616,21 +642,32 @@ func UpdateTopUpInvoice(c *gin.Context) {
 		return
 	}
 
-	topUp, err := model.UpdateTopUpInvoiceStatus(id, req.Action, c.GetInt("id"))
+	billingType := req.Type
+	if billingType == "" {
+		billingType = model.BillingTypeOnlineTopup
+	}
+	if billingType == model.BillingTypeOnlineTopup {
+		topUp, err := model.UpdateTopUpInvoiceStatus(id, req.Action, c.GetInt("id"))
+		if err != nil {
+			apiTopUpInvoiceError(c, err, req.Action)
+			return
+		}
+		recordBillingInvoiceAudit(c, model.BillingInvoiceRecord{
+			Id: topUp.Id, Type: model.BillingTypeOnlineTopup,
+			UserId: topUp.UserId, Reference: topUp.TradeNo,
+		}, req.Action)
+		common.ApiSuccess(c, topUp)
+		return
+	}
+	records, err := model.UpdateBillingInvoiceStatuses([]model.BillingInvoiceTarget{{
+		Id: id, Type: billingType,
+	}}, req.Action, c.GetInt("id"))
 	if err != nil {
 		apiTopUpInvoiceError(c, err, req.Action)
 		return
 	}
-
-	auditAction := "topup.invoice_issue"
-	if req.Action == model.TopUpInvoiceActionReturn {
-		auditAction = "topup.invoice_return"
-	}
-	recordManageAuditFor(c, topUp.UserId, auditAction, map[string]interface{}{
-		"id":       topUp.Id,
-		"trade_no": topUp.TradeNo,
-	})
-	common.ApiSuccess(c, topUp)
+	recordBillingInvoiceAudit(c, records[0], req.Action)
+	common.ApiSuccess(c, records[0])
 }
 
 func UpdateTopUpInvoices(c *gin.Context) {
@@ -644,22 +681,31 @@ func UpdateTopUpInvoices(c *gin.Context) {
 		return
 	}
 
-	topUps, err := model.UpdateTopUpInvoiceStatuses(req.Ids, req.Action, c.GetInt("id"))
+	targets := req.Items
+	if len(targets) == 0 && len(req.Ids) > 0 {
+		topUps, err := model.UpdateTopUpInvoiceStatuses(req.Ids, req.Action, c.GetInt("id"))
+		if err != nil {
+			apiTopUpInvoiceError(c, err, req.Action)
+			return
+		}
+		for _, topUp := range topUps {
+			recordBillingInvoiceAudit(c, model.BillingInvoiceRecord{
+				Id: topUp.Id, Type: model.BillingTypeOnlineTopup,
+				UserId: topUp.UserId, Reference: topUp.TradeNo,
+			}, req.Action)
+		}
+		common.ApiSuccess(c, gin.H{"count": len(topUps), "items": topUps})
+		return
+	}
+	records, err := model.UpdateBillingInvoiceStatuses(targets, req.Action, c.GetInt("id"))
 	if err != nil {
 		apiTopUpInvoiceError(c, err, req.Action)
 		return
 	}
-	auditAction := "topup.invoice_issue"
-	if req.Action == model.TopUpInvoiceActionReturn {
-		auditAction = "topup.invoice_return"
+	for _, record := range records {
+		recordBillingInvoiceAudit(c, record, req.Action)
 	}
-	for _, topUp := range topUps {
-		recordManageAuditFor(c, topUp.UserId, auditAction, map[string]interface{}{
-			"id":       topUp.Id,
-			"trade_no": topUp.TradeNo,
-		})
-	}
-	common.ApiSuccess(c, gin.H{"count": len(topUps), "items": topUps})
+	common.ApiSuccess(c, gin.H{"count": len(records), "items": records})
 }
 
 type AdminCompleteTopupRequest struct {

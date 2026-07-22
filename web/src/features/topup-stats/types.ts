@@ -35,6 +35,7 @@ export type BillingRecordType =
 export type TopUpStatsItem = {
   id: string
   topup_id?: number
+  redemption_id?: number
   type: BillingRecordType
   reference: string
   user_id: number
@@ -51,6 +52,8 @@ export type TopUpStatsItem = {
   invoiced_by: number
   invoice_returned_at: number
   invoice_returned_by: number
+  invoice_eligible: boolean
+  excluded_from_stats: boolean
   operator_user_id?: number
   detail?: string
 }
@@ -63,6 +66,8 @@ export type TopUpInvoiceResponse = {
 
 export type TopUpStatsData = {
   summary: TopUpStatsSummary
+  type_counts: Record<BillingRecordType, number>
+  type_quotas: Record<BillingRecordType, number>
   items: TopUpStatsItem[]
   total: number
   page: number
@@ -95,4 +100,9 @@ export type TopUpInvoiceBatchResponse = {
     count: number
     items: TopUpStatsItem[]
   }
+}
+
+export type BillingInvoiceTarget = {
+  id: number
+  type: 'online_topup' | 'redemption'
 }

@@ -28,6 +28,7 @@ import * as React from 'react'
 import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useDebounce, useMediaQuery } from '@/hooks'
@@ -39,6 +40,7 @@ import { DataTableViewOptions } from './view-options'
 type FilterDef = {
   columnId: string
   title: string
+  className?: string
   options: {
     label: string
     value: string
@@ -104,6 +106,8 @@ export type DataTableToolbarProps<TData> = {
    * the expandable inputs currently hold a value.
    */
   hasExpandedActiveFilters?: boolean
+  /** Number of active expandable filters shown beside the toggle. */
+  expandedActiveFilterCount?: number
   /**
    * Custom action buttons rendered BEFORE the built-in
    * Reset / Search / View buttons.
@@ -312,6 +316,7 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
             title={filter.title}
             options={filter.options}
             singleSelect={filter.singleSelect}
+            className={filter.className}
           />
         )
       }),
@@ -376,6 +381,11 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
       )}
     >
       {expanded ? t('Collapse') : t('Expand')}
+      {(props.expandedActiveFilterCount ?? 0) > 0 && (
+        <Badge className='ml-0.5 size-5 justify-center p-0 text-[10px]'>
+          {props.expandedActiveFilterCount}
+        </Badge>
+      )}
       <ChevronDown
         className={cn(
           'size-3.5 transition-transform duration-200',
@@ -460,9 +470,6 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
           {props.customSearch !== undefined ? props.customSearch : searchInput}
           {props.additionalSearch}
           {filterChips}
-          <div className='ms-auto flex shrink-0 items-center gap-1.5 sm:gap-2'>
-            {expandToggle}
-          </div>
         </div>
 
         {expanded && hasExpandable && (
@@ -479,6 +486,7 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
             {searchButton}
             {viewToggleNode}
             {viewOptionsNode}
+            {expandToggle}
           </div>
         </div>
       </div>

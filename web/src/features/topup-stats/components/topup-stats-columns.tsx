@@ -17,41 +17,31 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { CreditCard, ReceiptText, Undo2 } from 'lucide-react'
+import { Eye, ReceiptText, Undo2 } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
 import { LongText } from '@/components/long-text'
 import { StatusBadge } from '@/components/status-badge'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import {
-  getPaymentMethodName,
-  getStatusConfig,
-} from '@/features/wallet/lib/billing'
+import { getStatusConfig } from '@/features/wallet/lib/billing'
 import { formatNumber, formatQuota, formatTimestamp } from '@/lib/format'
 
 import { getBillingTypeConfig, getInvoiceStatusConfig } from '../lib'
 import type { InvoiceAction, TopUpStatsItem } from '../types'
 
-function formatProvider(provider: string): string {
-  return provider
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
-}
-
 type TopUpStatsColumnsOptions = {
   onInvoiceAction: (item: TopUpStatsItem, action: InvoiceAction) => void
-  updatingId?: number
+  onViewDetails: (item: TopUpStatsItem) => void
+  updatingKey?: string
 }
 
 export function useTopUpStatsColumns({
   onInvoiceAction,
-  updatingId,
+  onViewDetails,
+  updatingKey,
 }: TopUpStatsColumnsOptions): ColumnDef<TopUpStatsItem>[] {
   const { t } = useTranslation()
 
@@ -114,12 +104,19 @@ export function useTopUpStatsColumns({
         cell: ({ row }) => {
           const config = getBillingTypeConfig(row.original.type, t)
           return (
-            <StatusBadge
-              label={config.label}
-              icon={config.icon}
-              variant={config.variant}
-              copyable={false}
-            />
+            <div className='flex min-w-0 flex-col items-start gap-1'>
+              <StatusBadge
+                label={config.label}
+                icon={config.icon}
+                variant={config.variant}
+                copyable={false}
+              />
+              {row.original.excluded_from_stats && (
+                <span className='text-warning text-xs'>
+                  {t('Campaign exclusive')}
+                </span>
+              )}
+            </div>
           )
         },
         size: 160,
@@ -155,46 +152,6 @@ export function useTopUpStatsColumns({
         meta: { mobileOrder: 10 },
       },
       {
-        accessorKey: 'payment_method',
-        header: t('Top-up method'),
-        cell: ({ row }) => {
-          const { payment_method: method, payment_provider: provider } =
-            row.original
-          if (row.original.type !== 'online_topup') {
-            return <span className='text-muted-foreground'>-</span>
-          }
-          let displayMethod = '-'
-          if (method) {
-            const methodName = getPaymentMethodName(method, t)
-            displayMethod =
-              methodName === method ? formatProvider(method) : methodName
-          } else if (provider) {
-            displayMethod = formatProvider(provider)
-          }
-          const showProvider = Boolean(
-            method &&
-            provider &&
-            provider.toLowerCase() !== method.toLowerCase()
-          )
-
-          return (
-            <div className='flex min-w-0 flex-col items-start gap-1'>
-              <Badge variant='outline' className='bg-muted/40 max-w-full'>
-                <CreditCard data-icon='inline-start' />
-                <span className='truncate'>{displayMethod}</span>
-              </Badge>
-              {showProvider && (
-                <span className='text-muted-foreground max-w-40 truncate text-xs'>
-                  {t('Provider')}: {formatProvider(provider)}
-                </span>
-              )}
-            </div>
-          )
-        },
-        size: 190,
-        meta: { mobileOrder: 20 },
-      },
-      {
         accessorKey: 'status',
         header: t('Order status'),
         cell: ({ row }) => {
@@ -212,45 +169,58 @@ export function useTopUpStatsColumns({
           )
         },
         size: 120,
-        meta: { mobileOrder: 25 },
+        meta: { mobileOrder: 20 },
       },
       {
-        accessorKey: 'money',
-        header: t('Payment amount'),
-        cell: ({ row }) =>
-          row.original.type === 'online_topup' ? (
-            <span className='text-foreground font-semibold tabular-nums'>
-              {formatNumber(row.original.money)}
-            </span>
-          ) : (
-            <span className='text-muted-foreground'>-</span>
-          ),
-        size: 150,
-        meta: { mobileOrder: 30 },
+        accessorKey: 'payment_method',
+        header: t('Top-up method'),
+        cell: () => null,
+        enableHiding: false,
       },
       {
-        accessorKey: 'quota',
-        header: t('Quota Change'),
+        id: 'amount',
+        header: t('Amount'),
         cell: ({ row }) => {
-          const quota = row.original.quota
+          const item = row.original
+          const quotaText = `${item.quota > 0 ? '+' : ''}${formatQuota(item.quota)}`
+          if (item.type === 'online_topup') {
+            return (
+              <div className='flex flex-col gap-0.5 tabular-nums'>
+                <span className='font-semibold'>
+                  {formatNumber(item.money)}
+                </span>
+                <span className='text-muted-foreground text-xs'>
+                  {t('Quota Change')}: {quotaText}
+                </span>
+              </div>
+            )
+          }
           return (
             <span
-              className={`font-semibold tabular-nums ${quota < 0 ? 'text-destructive' : 'text-success'}`}
+              className={`font-semibold tabular-nums ${item.quota < 0 ? 'text-destructive' : 'text-success'}`}
             >
-              {quota > 0 ? '+' : ''}
-              {formatQuota(quota)}
+              {quotaText}
             </span>
           )
         },
-        size: 150,
-        meta: { mobileOrder: 32 },
+        size: 170,
+        meta: { mobileOrder: 25 },
       },
       {
         accessorKey: 'invoice_status',
         header: t('Invoice status'),
         cell: ({ row }) => {
           const item = row.original
-          if (item.type !== 'online_topup' || item.status !== 'success') {
+          if (item.excluded_from_stats) {
+            return (
+              <StatusBadge
+                label={t('Not included in statistics')}
+                variant='warning'
+                copyable={false}
+              />
+            )
+          }
+          if (!item.invoice_eligible) {
             return <span className='text-muted-foreground'>-</span>
           }
           const config = getInvoiceStatusConfig(item.invoice_status, t)
@@ -269,7 +239,7 @@ export function useTopUpStatsColumns({
           )
         },
         size: 130,
-        meta: { mobileOrder: 35 },
+        meta: { mobileOrder: 30 },
       },
       {
         accessorKey: 'created_at',
@@ -280,72 +250,53 @@ export function useTopUpStatsColumns({
           </span>
         ),
         size: 190,
-        meta: { mobileOrder: 40 },
-      },
-      {
-        accessorKey: 'detail',
-        header: t('Details'),
-        cell: ({ row }) => {
-          const item = row.original
-          const content =
-            item.detail ||
-            (item.operator_user_id
-              ? `${t('Admin')} #${item.operator_user_id}`
-              : '-')
-          return (
-            <LongText className='text-muted-foreground max-w-56 text-xs'>
-              {content}
-            </LongText>
-          )
-        },
-        size: 220,
-        meta: { mobileOrder: 45 },
+        meta: { mobileOrder: 35 },
       },
       {
         id: 'actions',
         header: () => <div className='text-center'>{t('Actions')}</div>,
         cell: ({ row }) => {
           const item = row.original
-          if (
-            item.type !== 'online_topup' ||
-            item.status !== 'success' ||
-            !item.topup_id
-          ) {
-            return (
-              <div className='text-muted-foreground text-center' aria-hidden>
-                -
-              </div>
-            )
-          }
           const isIssued = item.invoice_status === 1
           const action: InvoiceAction = isIssued ? 'return' : 'issue'
           const label = isIssued ? t('Return invoice') : t('Mark as invoiced')
           const Icon = isIssued ? Undo2 : ReceiptText
           return (
-            <div className='flex justify-center'>
+            <div className='flex items-center justify-center gap-1.5'>
               <Button
                 type='button'
-                variant={isIssued ? 'outline' : 'default'}
+                variant='outline'
                 size='sm'
-                className={
-                  isIssued
-                    ? 'border-warning/40 text-warning hover:bg-warning/10 hover:text-warning'
-                    : undefined
-                }
-                onClick={() => onInvoiceAction(item, action)}
-                disabled={updatingId === item.topup_id}
+                onClick={() => onViewDetails(item)}
               >
-                <Icon data-icon='inline-start' />
-                {label}
+                <Eye data-icon='inline-start' />
+                {t('Details')}
               </Button>
+              {item.invoice_eligible && (
+                <Button
+                  type='button'
+                  variant={isIssued ? 'outline' : 'default'}
+                  size='sm'
+                  className={
+                    isIssued
+                      ? 'border-warning/40 text-warning hover:bg-warning/10 hover:text-warning'
+                      : undefined
+                  }
+                  onClick={() => onInvoiceAction(item, action)}
+                  disabled={updatingKey === item.id}
+                >
+                  <Icon data-icon='inline-start' />
+                  {label}
+                </Button>
+              )}
             </div>
           )
         },
-        size: 148,
+        size: 260,
         enableHiding: false,
         meta: { pinned: 'right' as const },
       },
     ],
-    [onInvoiceAction, t, updatingId]
+    [onInvoiceAction, onViewDetails, t, updatingKey]
   )
 }

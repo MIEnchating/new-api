@@ -29,8 +29,14 @@ describe('system branding', () => {
     assert.equal(normalizeSystemLogo('  '), DEFAULT_LOGO)
   })
 
-  test('canonicalizes Yunmian logo aliases', () => {
-    assert.equal(normalizeSystemLogo('https://yunmian.tech/icon'), DEFAULT_LOGO)
+  test('preserves a configured Yunmian icon', () => {
+    assert.equal(
+      normalizeSystemLogo('https://yunmian.tech/icon'),
+      'https://yunmian.tech/icon'
+    )
+  })
+
+  test('canonicalizes remote copies of the local default logo', () => {
     assert.equal(
       normalizeSystemLogo('https://www.yunmian.tech/logo.png'),
       DEFAULT_LOGO

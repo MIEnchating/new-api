@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CreditCard, Database, ReceiptText, Undo2 } from 'lucide-react'
+import { Database, Eye, ReceiptText, Undo2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
@@ -32,10 +32,7 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  getPaymentMethodName,
-  getStatusConfig,
-} from '@/features/wallet/lib/billing'
+import { getStatusConfig } from '@/features/wallet/lib/billing'
 import { formatNumber, formatQuota, formatTimestamp } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -49,17 +46,10 @@ type TopUpStatsMobileListProps = {
   emptyTitle: string
   emptyDescription: string
   onInvoiceAction: (item: TopUpStatsItem, action: InvoiceAction) => void
-  updatingId?: number
+  onViewDetails: (item: TopUpStatsItem) => void
+  updatingKey?: string
   selectedIds: Set<string>
   onToggleSelected: (id: string, selected: boolean) => void
-}
-
-function formatProvider(provider: string): string {
-  return provider
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
 }
 
 function MobileListSkeleton() {
@@ -90,7 +80,8 @@ export function TopUpStatsMobileList({
   emptyTitle,
   emptyDescription,
   onInvoiceAction,
-  updatingId,
+  onViewDetails,
+  updatingKey,
   selectedIds,
   onToggleSelected,
 }: TopUpStatsMobileListProps) {
@@ -123,18 +114,6 @@ export function TopUpStatsMobileList({
     >
       {rows.map((row) => {
         const typeConfig = getBillingTypeConfig(row.type, t)
-        let methodName = '-'
-        if (row.type === 'online_topup' && row.payment_method) {
-          methodName = getPaymentMethodName(row.payment_method, t)
-        } else if (row.type === 'online_topup' && row.payment_provider) {
-          methodName = formatProvider(row.payment_provider)
-        }
-        const showProvider = Boolean(
-          row.payment_method &&
-          row.payment_provider &&
-          row.payment_provider.toLowerCase() !==
-            row.payment_method.toLowerCase()
-        )
         const username = row.username || row.display_name || `#${row.user_id}`
         const statusConfig = getStatusConfig(row.status)
         const invoiceConfig = getInvoiceStatusConfig(row.invoice_status, t)
@@ -142,7 +121,7 @@ export function TopUpStatsMobileList({
         return (
           <article key={row.id} className='px-3 py-2.5'>
             <div className='flex min-w-0 items-center gap-2'>
-              {row.type === 'online_topup' && row.status === 'success' && (
+              {row.invoice_eligible && (
                 <Checkbox
                   checked={selectedIds.has(row.id)}
                   onCheckedChange={(value) =>
@@ -173,12 +152,23 @@ export function TopUpStatsMobileList({
                   copyable={false}
                 />
               ) : (
-                <StatusBadge
-                  label={typeConfig.label}
-                  icon={typeConfig.icon}
-                  variant={typeConfig.variant}
-                  copyable={false}
-                />
+                <div className='flex shrink-0 items-center gap-1'>
+                  <StatusBadge
+                    label={typeConfig.label}
+                    icon={typeConfig.icon}
+                    variant={typeConfig.variant}
+                    copyable={false}
+                  />
+                  {row.excluded_from_stats && (
+                    <Badge
+                      variant='outline'
+                      className='border-warning/40 bg-warning/10 text-warning'
+                      title={t('Not included in statistics')}
+                    >
+                      {t('Campaign exclusive')}
+                    </Badge>
+                  )}
+                </div>
               )}
             </div>
 
@@ -221,27 +211,22 @@ export function TopUpStatsMobileList({
                 <div className='text-muted-foreground mb-1 text-[11px] leading-4'>
                   {t('Type')}
                 </div>
-                {row.type === 'online_topup' ? (
-                  <Badge
-                    variant='outline'
-                    className='bg-muted/40 max-w-full font-normal'
-                  >
-                    <CreditCard data-icon='inline-start' />
-                    <span className='truncate'>
-                      {methodName}
-                      {showProvider
-                        ? ` · ${formatProvider(row.payment_provider)}`
-                        : ''}
-                    </span>
-                  </Badge>
-                ) : (
+                <div className='flex flex-wrap items-center gap-1'>
                   <StatusBadge
                     label={typeConfig.label}
                     icon={typeConfig.icon}
                     variant={typeConfig.variant}
                     copyable={false}
                   />
-                )}
+                  {row.excluded_from_stats && (
+                    <Badge
+                      variant='outline'
+                      className='border-warning/40 bg-warning/10 text-warning'
+                    >
+                      {t('Campaign exclusive')}
+                    </Badge>
+                  )}
+                </div>
               </div>
 
               <div className='min-w-0 text-right'>
@@ -254,43 +239,52 @@ export function TopUpStatsMobileList({
               </div>
             </div>
 
-            {(row.detail || row.operator_user_id) && (
-              <div className='text-muted-foreground mt-2 truncate text-xs'>
-                {row.detail || `${t('Admin')} #${row.operator_user_id}`}
+            <div className='mt-2.5 flex items-center justify-between gap-2 border-t pt-2.5'>
+              <div>
+                {row.invoice_eligible && (
+                  <StatusBadge
+                    label={invoiceConfig.label}
+                    variant={invoiceConfig.variant}
+                    showDot
+                    copyable={false}
+                  />
+                )}
               </div>
-            )}
-
-            {row.type === 'online_topup' && row.status === 'success' && (
-              <div className='mt-2.5 flex items-center justify-between border-t pt-2.5'>
-                <StatusBadge
-                  label={invoiceConfig.label}
-                  variant={invoiceConfig.variant}
-                  showDot
-                  copyable={false}
-                />
+              <div className='flex items-center gap-1.5'>
                 <Button
                   type='button'
-                  variant={row.invoice_status === 1 ? 'outline' : 'ghost'}
+                  variant='outline'
                   size='sm'
-                  onClick={() =>
-                    onInvoiceAction(
-                      row,
-                      row.invoice_status === 1 ? 'return' : 'issue'
-                    )
-                  }
-                  disabled={updatingId === row.topup_id}
+                  onClick={() => onViewDetails(row)}
                 >
-                  {row.invoice_status === 1 ? (
-                    <Undo2 data-icon='inline-start' />
-                  ) : (
-                    <ReceiptText data-icon='inline-start' />
-                  )}
-                  {row.invoice_status === 1
-                    ? t('Return invoice')
-                    : t('Mark as invoiced')}
+                  <Eye data-icon='inline-start' />
+                  {t('Details')}
                 </Button>
+                {row.invoice_eligible && (
+                  <Button
+                    type='button'
+                    variant={row.invoice_status === 1 ? 'outline' : 'ghost'}
+                    size='sm'
+                    onClick={() =>
+                      onInvoiceAction(
+                        row,
+                        row.invoice_status === 1 ? 'return' : 'issue'
+                      )
+                    }
+                    disabled={updatingKey === row.id}
+                  >
+                    {row.invoice_status === 1 ? (
+                      <Undo2 data-icon='inline-start' />
+                    ) : (
+                      <ReceiptText data-icon='inline-start' />
+                    )}
+                    {row.invoice_status === 1
+                      ? t('Return invoice')
+                      : t('Mark as invoiced')}
+                  </Button>
+                )}
               </div>
-            )}
+            </div>
           </article>
         )
       })}

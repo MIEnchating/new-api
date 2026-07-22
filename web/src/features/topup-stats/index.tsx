@@ -26,7 +26,6 @@ import {
   CircleDollarSign,
   FileCheck2,
   ReceiptText,
-  RefreshCw,
   Undo2,
   Users,
 } from 'lucide-react'
@@ -38,25 +37,28 @@ import { CompactDateTimeRangePicker } from '@/components/compact-date-time-range
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import {
   DataTableBulkActions,
+  DataTableFacetedFilter,
   DataTablePage,
   useDataTable,
 } from '@/components/data-table'
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 import dayjs from '@/lib/dayjs'
-import { formatNumber } from '@/lib/format'
+import { formatNumber, formatQuota } from '@/lib/format'
 
 import { getTopUpStats, updateTopUpInvoice, updateTopUpInvoices } from './api'
 import { useTopUpStatsColumns } from './components/topup-stats-columns'
+import { TopUpStatsDetailsDialog } from './components/topup-stats-details-dialog'
 import { TopUpStatsMobileList } from './components/topup-stats-mobile-list'
-import type { InvoiceAction, TopUpStatsItem, TopUpStatsSummary } from './types'
+import type {
+  BillingInvoiceTarget,
+  InvoiceAction,
+  TopUpStatsItem,
+  TopUpStatsSummary,
+} from './types'
 
 type StatsRange = {
   start: Date
@@ -73,11 +75,94 @@ type AppliedFilters = {
   invoiceStatuses: string[]
 }
 
+const DEFAULT_ORDER_TYPES = ['online_topup', 'redemption'] as const
+const ORDER_MANAGEMENT_TYPES = [
+  ...DEFAULT_ORDER_TYPES,
+  'admin_adjustment',
+] as const
+
+function getDefaultColumnFilters(): ColumnFiltersState {
+  return [{ id: 'type', value: [...DEFAULT_ORDER_TYPES] }]
+}
+
 const emptySummary: TopUpStatsSummary = {
   order_count: 0,
   user_count: 0,
   total_money: 0,
   invoice_count: 0,
+}
+
+const emptyTypeQuotas: Record<TopUpStatsItem['type'], number> = {
+  online_topup: 0,
+  redemption: 0,
+  affiliate_transfer: 0,
+  admin_adjustment: 0,
+}
+
+function TypeQuotaBadge(props: {
+  label: string
+  value: number
+  accent: string
+  loading: boolean
+}) {
+  return (
+    <span className='border-border/60 bg-muted/25 inline-flex h-9 min-w-0 items-center gap-2 rounded-md border px-2.5 text-xs shadow-xs'>
+      <span className={`h-4 w-0.5 shrink-0 rounded-full ${props.accent}`} />
+      <span className='text-muted-foreground truncate'>{props.label}</span>
+      {props.loading ? (
+        <Skeleton className='h-3.5 w-7' />
+      ) : (
+        <span className='text-foreground/85 font-mono font-semibold tabular-nums'>
+          {formatQuota(props.value)}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function SummaryMetricBadge(props: {
+  label: string
+  value: string
+  icon: typeof CircleDollarSign
+  iconClassName: string
+  loading: boolean
+}) {
+  const Icon = props.icon
+  return (
+    <div className='border-border/60 bg-card inline-flex h-9 min-w-0 items-center gap-2 rounded-md border px-2.5 shadow-xs'>
+      <span
+        className={`flex size-6 shrink-0 items-center justify-center rounded ${props.iconClassName}`}
+      >
+        <Icon className='size-3.5' aria-hidden='true' />
+      </span>
+      <span className='text-muted-foreground text-xs whitespace-nowrap'>
+        {props.label}
+      </span>
+      {props.loading ? (
+        <Skeleton className='h-4 w-10' />
+      ) : (
+        <span
+          className='max-w-28 truncate font-mono text-sm font-semibold tabular-nums'
+          title={props.value}
+        >
+          {props.value}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function getBillingInvoiceTarget(
+  item: TopUpStatsItem
+): BillingInvoiceTarget | null {
+  if (!item.invoice_eligible) return null
+  if (item.type === 'online_topup' && item.topup_id) {
+    return { id: item.topup_id, type: item.type }
+  }
+  if (item.type === 'redemption' && item.redemption_id) {
+    return { id: item.redemption_id, type: item.type }
+  }
+  return null
 }
 
 function getTodayRange(): StatsRange {
@@ -94,13 +179,15 @@ export function TopUpStats() {
   const [range, setRange] = useState<StatsRange>(getTodayRange)
   const [globalFilter, setGlobalFilter] = useState('')
   const [userKeyword, setUserKeyword] = useState('')
-  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([])
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(
+    getDefaultColumnFilters
+  )
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [appliedFilters, setAppliedFilters] = useState<AppliedFilters>(() => ({
     range: getTodayRange(),
     keyword: '',
     userKeyword: '',
-    types: [],
+    types: [...DEFAULT_ORDER_TYPES],
     statuses: [],
     paymentMethods: [],
     invoiceStatuses: [],
@@ -109,6 +196,10 @@ export function TopUpStats() {
     items: TopUpStatsItem[]
     action: InvoiceAction
   } | null>(null)
+  const [returnConfirmed, setReturnConfirmed] = useState(false)
+  const [detailsTarget, setDetailsTarget] = useState<TopUpStatsItem | null>(
+    null
+  )
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
     pageSize: 20,
@@ -122,16 +213,16 @@ export function TopUpStats() {
       items: TopUpStatsItem[]
       action: InvoiceAction
     }) => {
-      const topUpIds = items
-        .map((item) => item.topup_id)
-        .filter((id): id is number => typeof id === 'number' && id > 0)
-      if (topUpIds.length !== items.length) {
+      const targets = items
+        .map(getBillingInvoiceTarget)
+        .filter((target): target is BillingInvoiceTarget => target !== null)
+      if (targets.length !== items.length) {
         throw new Error(t('Failed to update invoice'))
       }
       const response =
         items.length === 1
-          ? await updateTopUpInvoice(topUpIds[0], action)
-          : await updateTopUpInvoices(topUpIds, action)
+          ? await updateTopUpInvoice(targets[0], action)
+          : await updateTopUpInvoices(targets, action)
       if (!response.success) {
         throw new Error(response.message || t('Failed to update invoice'))
       }
@@ -144,22 +235,31 @@ export function TopUpStats() {
           : t('{{count}} invoice markers returned', { count })
       )
       setInvoiceTarget(null)
+      setReturnConfirmed(false)
       setRowSelection({})
       await queryClient.invalidateQueries({ queryKey: ['admin-topup-stats'] })
     },
     onError: (error: Error) => toast.error(error.message),
   })
 
-  const handleInvoiceAction = useCallback(
-    (item: TopUpStatsItem, action: InvoiceAction) => {
-      setInvoiceTarget({ items: [item], action })
+  const openInvoiceConfirmation = useCallback(
+    (items: TopUpStatsItem[], action: InvoiceAction) => {
+      setReturnConfirmed(false)
+      setInvoiceTarget({ items, action })
     },
     []
   )
+  const handleInvoiceAction = useCallback(
+    (item: TopUpStatsItem, action: InvoiceAction) => {
+      openInvoiceConfirmation([item], action)
+    },
+    [openInvoiceConfirmation]
+  )
   const columns = useTopUpStatsColumns({
     onInvoiceAction: handleInvoiceAction,
-    updatingId: invoiceMutation.isPending
-      ? invoiceMutation.variables?.items[0]?.topup_id
+    onViewDetails: setDetailsTarget,
+    updatingKey: invoiceMutation.isPending
+      ? invoiceMutation.variables?.items[0]?.id
       : undefined,
   })
 
@@ -213,12 +313,12 @@ export function TopUpStats() {
     setRange(today)
     setGlobalFilter('')
     setUserKeyword('')
-    setColumnFilters([])
+    setColumnFilters(getDefaultColumnFilters())
     setAppliedFilters({
       range: today,
       keyword: '',
       userKeyword: '',
-      types: [],
+      types: [...DEFAULT_ORDER_TYPES],
       statuses: [],
       paymentMethods: [],
       invoiceStatuses: [],
@@ -232,6 +332,11 @@ export function TopUpStats() {
     dayjs(range.end).isSame(dayjs(), 'day')
   const rows = query.data?.items ?? []
   const summary = query.data?.summary ?? emptySummary
+  const typeQuotas = query.data?.type_quotas ?? emptyTypeQuotas
+  const totalQuota =
+    typeQuotas.online_topup +
+    typeQuotas.redemption +
+    typeQuotas.admin_adjustment
 
   const { table } = useDataTable({
     data: rows,
@@ -239,12 +344,10 @@ export function TopUpStats() {
     pagination,
     columnFilters,
     onColumnFiltersChange: setColumnFilters,
+    initialColumnVisibility: { payment_method: false },
     rowSelection,
     onRowSelectionChange: setRowSelection,
-    enableRowSelection: (row) =>
-      row.original.type === 'online_topup' &&
-      row.original.status === 'success' &&
-      Boolean(row.original.topup_id),
+    enableRowSelection: (row) => row.original.invoice_eligible,
     getRowId: (row) => row.id,
     onPaginationChange: setPagination,
     globalFilter,
@@ -266,11 +369,13 @@ export function TopUpStats() {
     [columnFilters]
   )
   const handleSearch = useCallback(() => {
+    const selectedTypes = readStringFilter('type')
     setAppliedFilters({
       range,
       keyword: globalFilter.trim(),
       userKeyword: userKeyword.trim(),
-      types: readStringFilter('type'),
+      types:
+        selectedTypes.length > 0 ? selectedTypes : [...ORDER_MANAGEMENT_TYPES],
       statuses: readStringFilter('status'),
       paymentMethods: readStringFilter('payment_method'),
       invoiceStatuses: readStringFilter('invoice_status'),
@@ -283,16 +388,10 @@ export function TopUpStats() {
     .getSelectedRowModel()
     .rows.map((row) => row.original)
   const bulkIssueItems = selectedItems.filter(
-    (item) =>
-      item.type === 'online_topup' &&
-      item.status === 'success' &&
-      item.invoice_status !== 1
+    (item) => item.invoice_eligible && item.invoice_status !== 1
   )
   const bulkReturnItems = selectedItems.filter(
-    (item) =>
-      item.type === 'online_topup' &&
-      item.status === 'success' &&
-      item.invoice_status === 1
+    (item) => item.invoice_eligible && item.invoice_status === 1
   )
   const selectedIds = new Set(selectedItems.map((item) => item.id))
 
@@ -358,225 +457,231 @@ export function TopUpStats() {
   return (
     <>
       <SectionPageLayout fixedContent>
-        <SectionPageLayout.Title>{t('Order History')}</SectionPageLayout.Title>
-        <SectionPageLayout.Actions>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='icon'
-                  onClick={() => query.refetch()}
-                  disabled={query.isFetching}
-                  aria-label={t('Refresh')}
+        <SectionPageLayout.Title>
+          {t('Order Management')}
+        </SectionPageLayout.Title>
+        <SectionPageLayout.Content>
+          <div className='h-full min-h-0'>
+            <DataTablePage
+              table={table}
+              columns={columns}
+              isLoading={query.isLoading}
+              isFetching={query.isFetching}
+              emptyTitle={
+                query.isError
+                  ? t('Failed to load order history')
+                  : t('No billing records found')
+              }
+              emptyDescription={
+                query.isError
+                  ? query.error.message
+                  : t('Try adjusting your search')
+              }
+              skeletonKeyPrefix='topup-stats-skeleton'
+              applyHeaderSize
+              tableClassName={
+                !query.isLoading && rows.length === 0
+                  ? '[&_[data-slot=table]]:h-full'
+                  : undefined
+              }
+              mobile={
+                <TopUpStatsMobileList
+                  rows={rows}
+                  isLoading={query.isLoading}
+                  isFetching={query.isFetching && !query.isLoading}
+                  emptyTitle={
+                    query.isError
+                      ? t('Failed to load order history')
+                      : t('No billing records found')
+                  }
+                  emptyDescription={
+                    query.isError
+                      ? query.error.message
+                      : t('Try adjusting your search')
+                  }
+                  onInvoiceAction={handleInvoiceAction}
+                  onViewDetails={setDetailsTarget}
+                  updatingKey={
+                    invoiceMutation.isPending
+                      ? invoiceMutation.variables?.items[0]?.id
+                      : undefined
+                  }
+                  selectedIds={selectedIds}
+                  onToggleSelected={(id, selected) =>
+                    table.getRow(id).toggleSelected(selected)
+                  }
                 />
               }
-            >
-              <RefreshCw
-                className={`size-4 ${query.isFetching ? 'animate-spin' : ''}`}
-              />
-            </TooltipTrigger>
-            <TooltipContent>{t('Refresh')}</TooltipContent>
-          </Tooltip>
-        </SectionPageLayout.Actions>
-        <SectionPageLayout.Content>
-          <div className='flex h-full min-h-0 flex-col gap-3 sm:gap-4'>
-            <div className='bg-border grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-lg border sm:grid-cols-4'>
-              {metrics.map((metric) => (
-                <div
-                  key={metric.label}
-                  className='bg-card flex min-w-0 flex-col items-start gap-2 px-3 py-3 sm:min-h-24 sm:flex-row sm:items-center sm:gap-3 sm:px-4'
-                >
-                  <div
-                    className={`flex size-8 shrink-0 items-center justify-center rounded-md sm:size-9 ${metric.iconClassName}`}
+              bulkActions={
+                <DataTableBulkActions table={table} entityName={t('order')}>
+                  <Button
+                    type='button'
+                    size='sm'
+                    onClick={() =>
+                      openInvoiceConfirmation(bulkIssueItems, 'issue')
+                    }
+                    disabled={
+                      bulkIssueItems.length === 0 || invoiceMutation.isPending
+                    }
                   >
-                    <metric.icon className='size-4' aria-hidden='true' />
-                  </div>
-                  <div className='min-w-0'>
-                    <div className='text-muted-foreground truncate text-[11px] leading-4 sm:text-xs'>
-                      {metric.label}
-                    </div>
-                    {query.isLoading ? (
-                      <Skeleton className='mt-1 h-6 w-14 sm:mt-2 sm:w-20' />
-                    ) : (
-                      <div
-                        className='mt-0.5 truncate text-lg font-semibold tabular-nums sm:mt-1 sm:text-xl'
-                        title={metric.value}
-                      >
-                        {metric.value}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className='min-h-0 flex-1'>
-              <DataTablePage
-                table={table}
-                columns={columns}
-                isLoading={query.isLoading}
-                isFetching={query.isFetching}
-                emptyTitle={
-                  query.isError
-                    ? t('Failed to load order history')
-                    : t('No billing records found')
-                }
-                emptyDescription={
-                  query.isError
-                    ? query.error.message
-                    : t('Try adjusting your search')
-                }
-                skeletonKeyPrefix='topup-stats-skeleton'
-                applyHeaderSize
-                mobile={
-                  <TopUpStatsMobileList
-                    rows={rows}
-                    isLoading={query.isLoading}
-                    isFetching={query.isFetching && !query.isLoading}
-                    emptyTitle={
-                      query.isError
-                        ? t('Failed to load order history')
-                        : t('No billing records found')
+                    <ReceiptText data-icon='inline-start' />
+                    {t('Mark as invoiced')}
+                  </Button>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={() =>
+                      openInvoiceConfirmation(bulkReturnItems, 'return')
                     }
-                    emptyDescription={
-                      query.isError
-                        ? query.error.message
-                        : t('Try adjusting your search')
+                    disabled={
+                      bulkReturnItems.length === 0 || invoiceMutation.isPending
                     }
-                    onInvoiceAction={handleInvoiceAction}
-                    updatingId={
-                      invoiceMutation.isPending
-                        ? invoiceMutation.variables?.items[0]?.topup_id
-                        : undefined
-                    }
-                    selectedIds={selectedIds}
-                    onToggleSelected={(id, selected) =>
-                      table.getRow(id).toggleSelected(selected)
-                    }
-                  />
-                }
-                bulkActions={
-                  <DataTableBulkActions table={table} entityName={t('order')}>
-                    <Button
-                      type='button'
-                      size='sm'
-                      onClick={() =>
-                        setInvoiceTarget({
-                          items: bulkIssueItems,
-                          action: 'issue',
-                        })
-                      }
-                      disabled={
-                        bulkIssueItems.length === 0 || invoiceMutation.isPending
-                      }
-                    >
-                      <ReceiptText data-icon='inline-start' />
-                      {t('Mark as invoiced')}
-                    </Button>
-                    <Button
-                      type='button'
-                      variant='outline'
-                      size='sm'
-                      onClick={() =>
-                        setInvoiceTarget({
-                          items: bulkReturnItems,
-                          action: 'return',
-                        })
-                      }
-                      disabled={
-                        bulkReturnItems.length === 0 ||
-                        invoiceMutation.isPending
-                      }
-                    >
-                      <Undo2 data-icon='inline-start' />
-                      {t('Return invoice')}
-                    </Button>
-                  </DataTableBulkActions>
-                }
-                toolbarProps={{
-                  searchPlaceholder: t('Search by order number...'),
-                  filters: [
-                    {
-                      columnId: 'type',
-                      title: t('Type'),
-                      options: [
-                        {
-                          label: t('Online Top-up'),
-                          value: 'online_topup',
-                        },
-                        {
-                          label: t('Redemption Code'),
-                          value: 'redemption',
-                        },
-                        {
-                          label: t('Affiliate Transfer'),
-                          value: 'affiliate_transfer',
-                        },
-                        {
-                          label: t('Admin Adjustment'),
-                          value: 'admin_adjustment',
-                        },
-                      ],
-                    },
-                    {
-                      columnId: 'status',
-                      title: t('Order status'),
-                      options: [
+                  >
+                    <Undo2 data-icon='inline-start' />
+                    {t('Return invoice')}
+                  </Button>
+                </DataTableBulkActions>
+              }
+              toolbarProps={{
+                customSearch: (
+                  <>
+                    <CompactDateTimeRangePicker
+                      start={range.start}
+                      end={range.end}
+                      onChange={handleRangeChange}
+                      className='w-full sm:min-w-[300px] sm:flex-[1.25]'
+                    />
+                    <Input
+                      value={userKeyword}
+                      onChange={(event) => setUserKeyword(event.target.value)}
+                      placeholder={t('Search users by ID or name...')}
+                      className='w-full sm:min-w-[200px] sm:flex-[0.85]'
+                    />
+                  </>
+                ),
+                filters: [
+                  {
+                    columnId: 'type',
+                    title: t('Type'),
+                    className: 'min-w-[190px] flex-1 justify-start',
+                    options: [
+                      {
+                        label: t('Online Top-up'),
+                        value: 'online_topup',
+                      },
+                      {
+                        label: t('Redemption Code'),
+                        value: 'redemption',
+                      },
+                      {
+                        label: t('Admin Adjustment'),
+                        value: 'admin_adjustment',
+                      },
+                    ],
+                  },
+                  {
+                    columnId: 'invoice_status',
+                    title: t('Invoice status'),
+                    className: 'min-w-[180px] flex-1 justify-start',
+                    options: [
+                      { label: t('Not invoiced'), value: '0' },
+                      { label: t('Invoiced'), value: '1' },
+                      { label: t('Returned'), value: '2' },
+                    ],
+                  },
+                ],
+                expandable: (
+                  <>
+                    <Input
+                      value={globalFilter}
+                      onChange={(event) => setGlobalFilter(event.target.value)}
+                      placeholder={t('Search by order number...')}
+                      className='w-full sm:min-w-[240px] sm:flex-1'
+                    />
+                    <DataTableFacetedFilter
+                      column={table.getColumn('status')}
+                      title={t('Order status')}
+                      className='min-w-[180px] flex-1 justify-start'
+                      options={[
                         { label: t('Success'), value: 'success' },
                         { label: t('Pending'), value: 'pending' },
                         { label: t('Failed'), value: 'failed' },
                         { label: t('Expired'), value: 'expired' },
-                      ],
-                    },
-                    {
-                      columnId: 'payment_method',
-                      title: t('Top-up method'),
-                      options: [
+                      ]}
+                    />
+                    <DataTableFacetedFilter
+                      column={table.getColumn('payment_method')}
+                      title={t('Top-up method')}
+                      className='min-w-[180px] flex-1 justify-start'
+                      options={[
                         { label: t('Alipay'), value: 'alipay' },
                         { label: t('WeChat Pay'), value: 'wxpay' },
                         { label: 'Stripe', value: 'stripe' },
                         { label: 'Waffo', value: 'waffo' },
                         { label: 'Creem', value: 'creem' },
                         { label: t('Balance'), value: 'balance' },
-                      ],
-                    },
-                    {
-                      columnId: 'invoice_status',
-                      title: t('Invoice status'),
-                      options: [
-                        { label: t('Not invoiced'), value: '0' },
-                        { label: t('Invoiced'), value: '1' },
-                        { label: t('Returned'), value: '2' },
-                      ],
-                    },
-                  ],
-                  additionalSearch: (
-                    <>
-                      <Input
-                        value={userKeyword}
-                        onChange={(event) => setUserKeyword(event.target.value)}
-                        placeholder={t('Search users by ID or name...')}
-                        className='w-full sm:w-[220px]'
+                      ]}
+                    />
+                  </>
+                ),
+                hasExpandedActiveFilters:
+                  globalFilter.trim() !== '' ||
+                  readStringFilter('status').length > 0 ||
+                  readStringFilter('payment_method').length > 0,
+                expandedActiveFilterCount: [
+                  globalFilter.trim(),
+                  readStringFilter('status').length > 0,
+                  readStringFilter('payment_method').length > 0,
+                ].filter(Boolean).length,
+                leftActions: (
+                  <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
+                    <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                      {metrics.map((metric) => (
+                        <SummaryMetricBadge
+                          key={metric.label}
+                          {...metric}
+                          loading={query.isLoading}
+                        />
+                      ))}
+                    </div>
+                    <div className='bg-border mx-0.5 hidden h-5 w-px shrink-0 xl:block' />
+                    <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                      <TypeQuotaBadge
+                        label={t('Online payment')}
+                        value={typeQuotas.online_topup}
+                        accent='bg-emerald-500/70'
+                        loading={query.isLoading}
                       />
-                      <CompactDateTimeRangePicker
-                        start={range.start}
-                        end={range.end}
-                        onChange={handleRangeChange}
-                        className='w-full sm:w-[330px]'
+                      <TypeQuotaBadge
+                        label={t('Redemption Code')}
+                        value={typeQuotas.redemption}
+                        accent='bg-sky-500/70'
+                        loading={query.isLoading}
                       />
-                    </>
-                  ),
-                  hasAdditionalFilters: !isToday,
-                  onReset: resetFilters,
-                  onSearch: handleSearch,
-                  searchLoading: query.isFetching,
-                  hideViewOptions: true,
-                  mobileCollapsibleFilters: true,
-                }}
-              />
-            </div>
+                      <TypeQuotaBadge
+                        label={t('Admin Adjustment')}
+                        value={typeQuotas.admin_adjustment}
+                        accent='bg-amber-500/70'
+                        loading={query.isLoading}
+                      />
+                      <TypeQuotaBadge
+                        label={t('Total Quota')}
+                        value={totalQuota}
+                        accent='bg-foreground/60'
+                        loading={query.isLoading}
+                      />
+                    </div>
+                  </div>
+                ),
+                hasAdditionalFilters: !isToday || userKeyword.trim() !== '',
+                onReset: resetFilters,
+                onSearch: handleSearch,
+                searchLoading: query.isFetching,
+                hideViewOptions: false,
+                mobileCollapsibleFilters: true,
+              }}
+            />
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>
@@ -584,7 +689,10 @@ export function TopUpStats() {
       <ConfirmDialog
         open={invoiceTarget !== null}
         onOpenChange={(open) => {
-          if (!open && !invoiceMutation.isPending) setInvoiceTarget(null)
+          if (!open && !invoiceMutation.isPending) {
+            setInvoiceTarget(null)
+            setReturnConfirmed(false)
+          }
         }}
         title={
           invoiceTarget?.action === 'return'
@@ -598,9 +706,32 @@ export function TopUpStats() {
             : t('Confirm invoice')
         }
         destructive={invoiceTarget?.action === 'return'}
+        disabled={invoiceTarget?.action === 'return' && !returnConfirmed}
         isLoading={invoiceMutation.isPending}
         handleConfirm={() => {
           if (invoiceTarget) invoiceMutation.mutate(invoiceTarget)
+        }}
+      >
+        {invoiceTarget?.action === 'return' && (
+          <label className='bg-destructive/5 border-destructive/20 flex cursor-pointer items-start gap-2.5 rounded-md border p-3 text-sm'>
+            <Checkbox
+              checked={returnConfirmed}
+              onCheckedChange={(checked) =>
+                setReturnConfirmed(checked === true)
+              }
+              disabled={invoiceMutation.isPending}
+              className='mt-0.5'
+            />
+            <span>
+              {t('Please confirm that you understand the consequences')}
+            </span>
+          </label>
+        )}
+      </ConfirmDialog>
+      <TopUpStatsDetailsDialog
+        item={detailsTarget}
+        onOpenChange={(open) => {
+          if (!open) setDetailsTarget(null)
         }}
       />
     </>

@@ -346,10 +346,10 @@ export function RedemptionsMutateDrawer({
                     render={({ field }) => (
                       <FormItem className='flex items-center justify-between gap-4 rounded-md border px-3 py-3'>
                         <div className='space-y-0.5'>
-                          <FormLabel>{t('One code per user')}</FormLabel>
+                          <FormLabel>{t('Campaign exclusive')}</FormLabel>
                           <FormDescription>
                             {t(
-                              'Each user can redeem only one code from this batch.'
+                              'Each user can redeem only one code from this campaign batch.'
                             )}
                           </FormDescription>
                         </div>
