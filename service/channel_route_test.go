@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -240,6 +241,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	oldChannelRouteCooldownSeconds := common.ChannelRouteCooldownSeconds
 	oldChannelRouteStickyEnabled := common.ChannelRouteStickyEnabled
 	oldChannelRouteSameChannelRetries := common.ChannelRouteSameChannelRetries
+	oldChannelRouteGroupExclusions := setting.ChannelRouteGroupExclusions2JSONString()
 	oldRetryTimes := common.RetryTimes
 	oldDB := model.DB
 	oldLogDB := model.LOG_DB
@@ -249,6 +251,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	common.ChannelRouteCooldownSeconds = 60
 	common.ChannelRouteStickyEnabled = false
 	common.ChannelRouteSameChannelRetries = 0
+	require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString("{}"))
 	common.RetryTimes = 0
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	channelRouteCooldowns = sync.Map{}
@@ -276,6 +279,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 		common.ChannelRouteCooldownSeconds = oldChannelRouteCooldownSeconds
 		common.ChannelRouteStickyEnabled = oldChannelRouteStickyEnabled
 		common.ChannelRouteSameChannelRetries = oldChannelRouteSameChannelRetries
+		require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString(oldChannelRouteGroupExclusions))
 		common.RetryTimes = oldRetryTimes
 		channelRouteCooldowns = sync.Map{}
 		channelRouteCooldownWrites.Store(0)
@@ -325,6 +329,22 @@ func TestShouldRetrySameChannelRouteHonorsLimitAndDisable(t *testing.T) {
 		http.StatusBadRequest,
 	)
 	assert.False(t, ShouldRetrySameChannelRoute(nonRouteErr, 0))
+}
+
+func TestShouldRetrySameChannelRouteHonorsGroupExclusions(t *testing.T) {
+	setupChannelRouteTest(t)
+	common.ChannelRouteSameChannelRetries = 2
+	require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString(`{
+		"no-retry":"same_channel_retry",
+		"no-next":"next_channel",
+		"excluded":"all"
+	}`))
+	routeErr := newChannelRouteFailure()
+
+	assert.False(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "no-retry"))
+	assert.True(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "no-next"))
+	assert.False(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "excluded"))
+	assert.True(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "default"))
 }
 
 func TestPruneExpiredChannelRouteCooldownsKeepsActiveEntries(t *testing.T) {
@@ -969,6 +989,41 @@ func TestChannelRouteCanDisableCooldownWhileStillFailingOver(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, next)
 	assert.Equal(t, 1, next.Id)
+}
+
+func TestChannelRouteSameChannelRetriesThenFailsOverAtSamePriority(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	seedChannelRouteChannel(t, db, 1, "default", 1)
+	seedChannelRouteChannel(t, db, 2, "default", 1)
+	model.InitChannelCache()
+	common.ChannelRouteCooldownSeconds = 0
+	common.ChannelRouteStickyEnabled = true
+	common.ChannelRouteSameChannelRetries = 2
+	SetChannelRouteStickyChannel("default", channelRouteTestModel, "/v1/chat/completions", 1)
+
+	ctx := newChannelRouteContext()
+	param := newChannelRouteRetryParam(ctx, "default")
+	first, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Equal(t, 1, first.Id)
+
+	routeErr := newChannelRouteFailure()
+	usedChannels := []string{"1"}
+	for retriesUsed := 0; retriesUsed < common.ChannelRouteSameChannelRetries; retriesUsed++ {
+		assert.True(t, ShouldRetrySameChannelRoute(routeErr, retriesUsed))
+		usedChannels = append(usedChannels, "1")
+	}
+	ctx.Set("use_channel", usedChannels)
+	assert.False(t, ShouldRetrySameChannelRoute(routeErr, common.ChannelRouteSameChannelRetries))
+	assert.True(t, MarkChannelRouteFailure(ctx, routeErr))
+	assert.Zero(t, GetChannelRouteStickyChannel("default", channelRouteTestModel, "/v1/chat/completions"))
+
+	param.SetRetry(1)
+	fallback, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, fallback)
+	assert.Equal(t, 2, fallback.Id)
 }
 
 func TestChannelRouteDoesNotFreezeOnlyAvailableChannel(t *testing.T) {

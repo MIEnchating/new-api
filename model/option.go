@@ -51,6 +51,7 @@ func InitOptionMap() {
 	common.OptionMap["ChannelRouteCooldownSeconds"] = strconv.Itoa(common.ChannelRouteCooldownSeconds)
 	common.OptionMap["ChannelRouteStickyEnabled"] = strconv.FormatBool(common.ChannelRouteStickyEnabled)
 	common.OptionMap["ChannelRouteSameChannelRetries"] = strconv.Itoa(common.ChannelRouteSameChannelRetries)
+	common.OptionMap["ChannelRouteGroupExclusions"] = setting.ChannelRouteGroupExclusions2JSONString()
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
 	common.OptionMap["DisplayTokenStatEnabled"] = strconv.FormatBool(common.DisplayTokenStatEnabled)
@@ -547,6 +548,8 @@ func updateOptionMap(key string, value string) (err error) {
 		common.ChannelRouteCooldownSeconds, _ = strconv.Atoi(value)
 	case "ChannelRouteSameChannelRetries":
 		common.ChannelRouteSameChannelRetries, _ = strconv.Atoi(value)
+	case "ChannelRouteGroupExclusions":
+		err = setting.UpdateChannelRouteGroupExclusionsByJSONString(value)
 	case "DataExportInterval":
 		common.DataExportInterval, _ = strconv.Atoi(value)
 	case "DataExportDefaultTime":

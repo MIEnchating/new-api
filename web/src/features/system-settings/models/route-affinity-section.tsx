@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
-import { RefreshCw, Save, Trash2 } from 'lucide-react'
+import { Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -38,8 +38,17 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
+import { getChannelFilterGroups } from '@/features/channels/api'
 
 import {
   SettingsForm,
@@ -56,6 +65,43 @@ import {
   getRouteAffinityStats,
 } from './route-affinity-api'
 
+const exclusionModes = ['same_channel_retry', 'next_channel', 'all'] as const
+type ExclusionMode = (typeof exclusionModes)[number]
+
+function exclusionModeLabelKey(mode: ExclusionMode) {
+  switch (mode) {
+    case 'same_channel_retry':
+      return 'Do not retry the current channel'
+    case 'next_channel':
+      return 'Do not switch to another channel'
+    case 'all':
+      return 'Do not retry or switch channels'
+  }
+}
+
+function parseGroupExclusions(value: string): Record<string, ExclusionMode> {
+  try {
+    const parsed = JSON.parse(value || '{}')
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+      return {}
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, ExclusionMode] =>
+          entry[0].trim() !== '' &&
+          typeof entry[1] === 'string' &&
+          exclusionModes.includes(entry[1] as ExclusionMode)
+      )
+    )
+  } catch {
+    return {}
+  }
+}
+
+function serializeGroupExclusions(value: Record<string, ExclusionMode>) {
+  return JSON.stringify(value)
+}
+
 const routeAffinitySchema = z.object({
   RetryTimes: z.coerce.number().min(0).max(10),
   ChannelRouteCooldownEnabled: z.boolean(),
@@ -66,6 +112,7 @@ const routeAffinitySchema = z.object({
     .max(31536000, 'Cooldown cannot exceed 31536000 seconds'),
   ChannelRouteStickyEnabled: z.boolean(),
   ChannelRouteSameChannelRetries: z.coerce.number().int().min(0).max(10),
+  ChannelRouteGroupExclusions: z.string(),
 })
 
 type RouteAffinityFormInput = z.input<typeof routeAffinitySchema>
@@ -77,6 +124,7 @@ type RouteAffinitySettings = {
   ChannelRouteCooldownSeconds: number
   ChannelRouteStickyEnabled: boolean
   ChannelRouteSameChannelRetries: number
+  ChannelRouteGroupExclusions: string
 }
 
 type RouteAffinitySectionProps = {
@@ -92,7 +140,144 @@ function normalizeValues(
     ChannelRouteCooldownSeconds: values.ChannelRouteCooldownSeconds,
     ChannelRouteStickyEnabled: values.ChannelRouteStickyEnabled,
     ChannelRouteSameChannelRetries: values.ChannelRouteSameChannelRetries,
+    ChannelRouteGroupExclusions: serializeGroupExclusions(
+      parseGroupExclusions(values.ChannelRouteGroupExclusions)
+    ),
   }
+}
+
+function GroupExclusionEditor(props: {
+  value: string
+  groupOptions: string[]
+  disabled: boolean
+  onChange: (value: string) => void
+}) {
+  const { t } = useTranslation()
+  const exclusions = parseGroupExclusions(props.value)
+  const entries = Object.entries(exclusions)
+  const availableGroups = props.groupOptions.filter(
+    (group) => !(group in exclusions)
+  )
+
+  const update = (next: Record<string, ExclusionMode>) => {
+    props.onChange(serializeGroupExclusions(next))
+  }
+
+  const addRule = () => {
+    const group = availableGroups[0]
+    if (!group) return
+    update({ ...exclusions, [group]: 'all' })
+  }
+
+  return (
+    <div className='space-y-3'>
+      {entries.length > 0 ? (
+        <div className='divide-y rounded-md border'>
+          {entries.map(([group, mode]) => {
+            const selectableGroups = [
+              group,
+              ...props.groupOptions.filter(
+                (option) => option !== group && !(option in exclusions)
+              ),
+            ]
+            return (
+              <div
+                key={group}
+                className='grid min-w-0 gap-2 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(12rem,1fr)_2.25rem] sm:items-center'
+              >
+                <Select
+                  value={group}
+                  disabled={props.disabled}
+                  onValueChange={(nextGroup) => {
+                    if (!nextGroup || nextGroup === group) return
+                    const next = { ...exclusions }
+                    delete next[group]
+                    next[nextGroup] = mode
+                    update(next)
+                  }}
+                >
+                  <SelectTrigger className='min-w-0'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      {selectableGroups.map((option) => (
+                        <SelectItem key={option} value={option}>
+                          {option}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={mode}
+                  disabled={props.disabled}
+                  onValueChange={(nextMode) => {
+                    if (!exclusionModes.includes(nextMode as ExclusionMode)) {
+                      return
+                    }
+                    update({
+                      ...exclusions,
+                      [group]: nextMode as ExclusionMode,
+                    })
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue>{t(exclusionModeLabelKey(mode))}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent alignItemWithTrigger={false}>
+                    <SelectGroup>
+                      <SelectItem value='same_channel_retry'>
+                        {t('Do not retry the current channel')}
+                      </SelectItem>
+                      <SelectItem value='next_channel'>
+                        {t('Do not switch to another channel')}
+                      </SelectItem>
+                      <SelectItem value='all'>
+                        {t('Do not retry or switch channels')}
+                      </SelectItem>
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='icon'
+                  className='text-destructive justify-self-end'
+                  disabled={props.disabled}
+                  aria-label={t('Delete')}
+                  onClick={() => {
+                    const next = { ...exclusions }
+                    delete next[group]
+                    update(next)
+                  }}
+                >
+                  <Trash2 className='size-4' />
+                </Button>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className='text-muted-foreground rounded-md border border-dashed px-3 py-5 text-center text-sm'>
+          {t('No route exclusion groups configured')}
+        </div>
+      )}
+
+      <Button
+        type='button'
+        variant='outline'
+        size='sm'
+        disabled={props.disabled || availableGroups.length === 0}
+        onClick={addRule}
+      >
+        <Plus data-icon='inline-start' />
+        {t('Add excluded group')}
+      </Button>
+    </div>
+  )
 }
 
 export function ChannelRoutingSection(props: RouteAffinitySectionProps) {
@@ -119,6 +304,11 @@ export function ChannelRoutingSection(props: RouteAffinitySectionProps) {
     queryKey: ['route-affinity-stats'],
     queryFn: getRouteAffinityStats,
   })
+  const groupOptionsQuery = useQuery({
+    queryKey: ['channel-route-group-options'],
+    queryFn: () => getChannelFilterGroups(true),
+  })
+  const groupOptions = groupOptionsQuery.data?.data ?? []
 
   const routeEnabled = form.watch('ChannelRouteCooldownEnabled')
 
@@ -314,6 +504,32 @@ export function ChannelRoutingSection(props: RouteAffinitySectionProps) {
                       'How long a failed routed channel stays out of selection before it is tried again (0 disables cooldown)'
                     )}
                   </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <Separator />
+
+            <FormField
+              control={form.control}
+              name='ChannelRouteGroupExclusions'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Route exclusion groups')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Configure whether each group skips same-channel retries, next-channel failover, or both'
+                    )}
+                  </FormDescription>
+                  <FormControl>
+                    <GroupExclusionEditor
+                      value={field.value}
+                      groupOptions={groupOptions}
+                      disabled={!routeEnabled || groupOptionsQuery.isLoading}
+                      onChange={field.onChange}
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}

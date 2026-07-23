@@ -48,12 +48,15 @@ describe('system branding', () => {
     assert.equal(normalizeSystemLogo(customLogo), customLogo)
   })
 
-  test('loads the local loading logo before React mounts', () => {
+  test('shows a logo-free loading indicator before React mounts', () => {
     const indexHtml = readFileSync(
       new URL('../../../index.html', import.meta.url),
       'utf8'
     )
 
-    assert.match(indexHtml, /src="\/loading-logo\.jpg\?v=20260721-5"/)
+    assert.match(indexHtml, /id="app-bootstrap-mark"/)
+    assert.match(indexHtml, /app-bootstrap-wave/)
+    assert.match(indexHtml, /span:nth-child\(7\)/)
+    assert.doesNotMatch(indexHtml, /<img[^>]+loading-logo/)
   })
 })

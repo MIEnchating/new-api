@@ -130,6 +130,7 @@ var optionAuditValueKeys = map[string]struct{}{
 	"ChannelRouteCooldownSeconds":    {},
 	"ChannelRouteStickyEnabled":      {},
 	"ChannelRouteSameChannelRetries": {},
+	"ChannelRouteGroupExclusions":    {},
 }
 
 func buildOptionAuditParams(key string, previousValue string, currentValue string) map[string]interface{} {
@@ -355,6 +356,14 @@ func UpdateOption(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "同渠道重试次数必须在 0 到 10 之间",
+			})
+			return
+		}
+	case "ChannelRouteGroupExclusions":
+		if _, parseErr := setting.ParseChannelRouteGroupExclusions(option.Value.(string)); parseErr != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": parseErr.Error(),
 			})
 			return
 		}

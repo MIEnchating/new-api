@@ -68,6 +68,10 @@ import { getRoleLabelKey } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 
 import type { UsageLog } from '../../data/schema'
+import {
+  buildChannelExecutionTimeline,
+  getStandbyChannelIds,
+} from '../../lib/channel-execution-timeline'
 import { mergeExecutionTrace } from '../../lib/execution-trace'
 import {
   parseLogOther,
@@ -105,6 +109,16 @@ function timingTextColorClass(
   if (variant === 'success') return 'text-emerald-600'
   if (variant === 'warning') return 'text-amber-600'
   return 'text-rose-600'
+}
+
+function formatExecutionDuration(
+  startedAt: number | undefined,
+  endedAt: number | undefined
+) {
+  if (!startedAt) return '--'
+  const durationMs = Math.max(0, (endedAt ?? Date.now()) - startedAt)
+  if (durationMs < 1000) return `${Math.round(durationMs)} ms`
+  return formatUseTime(durationMs / 1000)
 }
 
 function DetailRow(props: {
@@ -787,9 +801,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
     enabled:
       props.open &&
       props.isAdmin &&
-      storedExecutionTrace?.compact === true &&
+      Boolean(storedExecutionTrace) &&
       Boolean(props.log.request_id),
-    staleTime: 30_000,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchInterval: (query) =>
+      props.open && query.state.data?.data?.status === 'running'
+        ? 1_000
+        : false,
     retry: false,
   })
   const fetchedExecutionTrace = fullExecutionTraceQuery.data?.success
@@ -800,8 +819,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
     fetchedExecutionTrace
   )
   const executionEvents = executionTrace?.events ?? []
-  const lastFailedExecutionEventIndex = executionEvents.reduce(
-    (lastIndex, event, index) => (event.state === 'failed' ? index : lastIndex),
+  const executionTimeline = buildChannelExecutionTimeline(executionEvents)
+  const standbyChannelIds = getStandbyChannelIds(executionTimeline)
+  const lastFailedAttemptIndex = executionTimeline.reduce(
+    (lastIndex, item, index) =>
+      item.kind === 'attempt' && item.state === 'failed' ? index : lastIndex,
     -1
   )
   let executionTraceStatus = executionTrace?.status
@@ -1352,26 +1374,140 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   }
                 />
               ) : null}
+              {standbyChannelIds.length > 0 ? (
+                <DetailRow
+                  label={t('Standby channels')}
+                  value={
+                    <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
+                      {standbyChannelIds.map((channelID) => (
+                        <StatusBadge
+                          key={channelID}
+                          variant='neutral'
+                          size='sm'
+                          copyable={false}
+                        >
+                          <span className='font-mono'>#{channelID}</span>
+                        </StatusBadge>
+                      ))}
+                      <span className='text-muted-foreground text-[11px]'>
+                        {t(
+                          'Not executed; used only if the current channel fails'
+                        )}
+                      </span>
+                    </span>
+                  }
+                />
+              ) : null}
             </div>
-            {executionEvents.length > 0 ? (
+            {executionTimeline.length > 0 ? (
               <div className='mt-3 border-t pt-3'>
-                {executionEvents.map((event, index, events) => {
+                {executionTimeline.map((item, index, items) => {
+                  if (item.kind === 'attempt') {
+                    const AttemptIcon = executionEventIcon(item.state)
+                    const attemptStatus: ChannelExecutionStatus =
+                      item.state === 'active' ? 'running' : item.state
+                    const reasonIsDuplicate =
+                      item.state === 'failed' &&
+                      index === lastFailedAttemptIndex &&
+                      isDuplicateLogDiagnosticMessage(item.reason, details)
+                    return (
+                      <div
+                        key={`attempt-${item.channelId}-${item.startedAt ?? index}`}
+                        className='relative grid grid-cols-[24px_minmax(0,1fr)] gap-2.5 pb-3 last:pb-0'
+                      >
+                        {index < items.length - 1 && (
+                          <span className='bg-border absolute top-6 bottom-0 left-[11px] w-px' />
+                        )}
+                        <span
+                          className={cn(
+                            'bg-background z-10 flex size-6 items-center justify-center rounded-full border',
+                            textColorMap[
+                              executionEventVariant(item.state) ?? 'neutral'
+                            ]
+                          )}
+                        >
+                          <AttemptIcon className='size-3' />
+                        </span>
+                        <div className='min-w-0'>
+                          <div className='flex flex-wrap items-center gap-1.5'>
+                            <StatusBadge
+                              variant={channelExecutionStatusVariant(
+                                attemptStatus
+                              )}
+                              size='sm'
+                              copyable={false}
+                            >
+                              {t(channelExecutionStatusLabel(attemptStatus))}
+                            </StatusBadge>
+                            {item.selectionState === 'affinity_hit' ? (
+                              <StatusBadge
+                                variant='purple'
+                                size='sm'
+                                copyable={false}
+                              >
+                                {t('Affinity hit')}
+                              </StatusBadge>
+                            ) : null}
+                            {item.selectionState === 'same_channel_retry' ? (
+                              <StatusBadge
+                                variant='warning'
+                                size='sm'
+                                copyable={false}
+                              >
+                                {t('Same-channel retry')}
+                              </StatusBadge>
+                            ) : null}
+                            <span className='text-xs font-medium'>
+                              #{item.channelId} {item.channelName}
+                            </span>
+                            {item.startedAt ? (
+                              <span className='text-muted-foreground ml-auto font-mono text-[11px] tabular-nums'>
+                                {new Date(item.startedAt).toLocaleTimeString()}
+                              </span>
+                            ) : null}
+                          </div>
+                          {item.reason && !reasonIsDuplicate ? (
+                            <p className='text-muted-foreground mt-1 text-xs break-all'>
+                              {item.reason}
+                            </p>
+                          ) : null}
+                          <div className='text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]'>
+                            <span>
+                              {t('Duration')}:{' '}
+                              {formatExecutionDuration(
+                                item.startedAt,
+                                item.endedAt
+                              )}
+                            </span>
+                            {item.retryIndex != null && item.retryIndex > 0 ? (
+                              <span>
+                                {t('Retry')}: {item.retryIndex}
+                              </span>
+                            ) : null}
+                            {item.priority != null ? (
+                              <span>
+                                {t('Priority')}: {item.priority}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  }
+
+                  const event = item.event
                   const EventIcon = executionEventIcon(event.state)
                   const isGroupEvent = Boolean(event.group && !event.channel_id)
                   const eventDescription = executionEventDescription(
                     event.state,
                     isGroupEvent
                   )
-                  const eventReasonIsDuplicate =
-                    event.state === 'failed' &&
-                    index === lastFailedExecutionEventIndex &&
-                    isDuplicateLogDiagnosticMessage(event.reason, details)
                   return (
                     <div
                       key={`${event.sequence ?? index}-${event.timestamp ?? 0}`}
                       className='relative grid grid-cols-[24px_minmax(0,1fr)] gap-2.5 pb-3 last:pb-0'
                     >
-                      {index < events.length - 1 && (
+                      {index < items.length - 1 && (
                         <span className='bg-border absolute top-6 bottom-0 left-[11px] w-px' />
                       )}
                       <span
@@ -1438,9 +1574,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
                             {t(eventDescription)}
                           </p>
                         ) : null}
-                        {event.reason &&
-                        event.state !== 'affinity_hit' &&
-                        !eventReasonIsDuplicate ? (
+                        {event.reason && event.state !== 'affinity_hit' ? (
                           <p className='text-muted-foreground mt-1 text-xs break-all'>
                             {t(executionEventReasonLabel(event.reason))}
                           </p>
@@ -1466,28 +1600,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
                                 {formatTimestampToDate(event.cooldown_until)}
                               </span>
                             ) : null}
-                          </div>
-                        ) : null}
-                        {event.next_ids?.length ? (
-                          <div className='mt-1.5 flex flex-wrap items-center gap-1.5'>
-                            <span className='text-muted-foreground text-[11px]'>
-                              {t('Standby channels')}
-                            </span>
-                            {event.next_ids.map((channelID) => (
-                              <StatusBadge
-                                key={channelID}
-                                variant='neutral'
-                                size='sm'
-                                copyable={false}
-                              >
-                                #{channelID}
-                              </StatusBadge>
-                            ))}
-                            <span className='text-muted-foreground text-[11px]'>
-                              {t(
-                                'Not executed; used only if the current channel fails'
-                              )}
-                            </span>
                           </div>
                         ) : null}
                       </div>

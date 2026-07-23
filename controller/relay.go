@@ -276,7 +276,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 		service.TrackChannelExecutionFailure(c, channel.Id, newAPIError.ErrorWithStatusCode())
-		if service.ShouldRetrySameChannelRoute(newAPIError, sameChannelRetriesUsed) {
+		if service.ShouldRetrySameChannelRouteForContext(c, newAPIError, sameChannelRetriesUsed) {
 			sameChannelRetriesUsed++
 			retrySameChannel = channel
 			service.TrackChannelExecutionSameChannelRetry(c, channel, sameChannelRetriesUsed)
@@ -509,9 +509,15 @@ func shouldAttemptNextChannel(c *gin.Context, openaiErr *types.NewAPIError, retr
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) bool {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
-	channelRouteFrozen := service.MarkChannelRouteFailure(c, err)
+	nextChannelExcluded := service.IsNextChannelRouteExcluded(c)
+	channelRouteFrozen := false
+	if !nextChannelExcluded {
+		channelRouteFrozen = service.MarkChannelRouteFailure(c, err)
+	} else {
+		logger.LogInfo(c, fmt.Sprintf("渠道路由分组已排除跨渠道切换：分组 %s", common.GetContextKeyString(c, constant.ContextKeyChannelRouteGroup)))
+	}
 	tokenGroupRouteFrozen := false
-	if !channelRouteFrozen {
+	if !channelRouteFrozen && !nextChannelExcluded {
 		tokenGroupRouteFrozen = service.MarkTokenGroupRouteFailure(c, err)
 	}
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
@@ -762,7 +768,7 @@ func RelayTask(c *gin.Context) {
 		if !taskErr.LocalError {
 			routeError = types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
 			service.TrackChannelExecutionFailure(c, channel.Id, routeError.ErrorWithStatusCode())
-			if !channelLocked && service.ShouldRetrySameChannelRoute(routeError, sameChannelRetriesUsed) {
+			if !channelLocked && service.ShouldRetrySameChannelRouteForContext(c, routeError, sameChannelRetriesUsed) {
 				sameChannelRetriesUsed++
 				retrySameChannel = channel
 				service.TrackChannelExecutionSameChannelRetry(c, channel, sameChannelRetriesUsed)

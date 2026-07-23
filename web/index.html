@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/jpeg" href="/loading-logo.jpg?v=20260721-5" />
+    <link rel="icon" href="/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="google" content="notranslate" />
 
@@ -35,32 +35,62 @@
       }
 
       #app-bootstrap-mark {
-        position: relative;
-        width: 44px;
-        height: 44px;
-        display: grid;
-        place-items: center;
+        display: flex;
+        width: 68px;
+        height: 36px;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
       }
 
-      #app-bootstrap-mark::before {
-        position: absolute;
-        inset: 0;
-        border: 2px solid #e5e7eb;
-        border-top-color: #18181b;
-        border-radius: 50%;
-        content: '';
-        animation: app-bootstrap-spin 0.8s linear infinite;
+      #app-bootstrap-mark span {
+        width: 4px;
+        height: 30px;
+        border-radius: 999px;
+        background: #18181b;
+        opacity: 0.24;
+        transform: scaleY(0.38);
+        animation: app-bootstrap-wave 1.05s ease-in-out infinite;
       }
 
-      #app-bootstrap-mark img {
-        width: 26px;
-        height: 26px;
-        object-fit: contain;
+      #app-bootstrap-mark span:nth-child(1) {
+        animation-delay: -0.42s;
       }
 
-      @keyframes app-bootstrap-spin {
-        to {
-          transform: rotate(360deg);
+      #app-bootstrap-mark span:nth-child(2) {
+        animation-delay: -0.3s;
+      }
+
+      #app-bootstrap-mark span:nth-child(3) {
+        animation-delay: -0.18s;
+      }
+
+      #app-bootstrap-mark span:nth-child(4) {
+        animation-delay: -0.06s;
+      }
+
+      #app-bootstrap-mark span:nth-child(5) {
+        animation-delay: 0.06s;
+      }
+
+      #app-bootstrap-mark span:nth-child(6) {
+        animation-delay: 0.18s;
+      }
+
+      #app-bootstrap-mark span:nth-child(7) {
+        animation-delay: 0.3s;
+      }
+
+      @keyframes app-bootstrap-wave {
+        0%,
+        100% {
+          opacity: 0.24;
+          transform: scaleY(0.38);
+        }
+
+        50% {
+          opacity: 1;
+          transform: scaleY(1);
         }
       }
 
@@ -69,15 +99,16 @@
           background: #09090b;
         }
 
-        #app-bootstrap-mark::before {
-          border-color: #27272a;
-          border-top-color: #fafafa;
+        #app-bootstrap-mark span {
+          background: #fafafa;
         }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        #app-bootstrap-mark::before {
+        #app-bootstrap-mark span {
           animation: none;
+          opacity: 0.6;
+          transform: scaleY(0.62);
         }
       }
     </style>
@@ -89,7 +120,8 @@
     <div id="root" translate="no" class="notranslate">
       <div id="app-bootstrap" aria-hidden="true">
         <div id="app-bootstrap-mark">
-          <img src="/loading-logo.jpg?v=20260721-5" alt="" />
+          <span></span><span></span><span></span><span></span><span></span
+          ><span></span><span></span>
         </div>
       </div>
     </div>

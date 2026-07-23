@@ -112,6 +112,37 @@ describe('execution trace merge', () => {
     assert.equal(merged?.affinity_hit, true)
   })
 
+  test('replaces a non-compact intermediate failure with the final trace', () => {
+    const intermediateFailure: ChannelExecutionTraceInfo = {
+      ...staleFetched,
+      status: 'failed',
+      updated_at: 150,
+    }
+    const completedFallback: ChannelExecutionTraceInfo = {
+      ...staleFetched,
+      status: 'success',
+      updated_at: 300,
+      channel_ids: [167, 153],
+      events: [
+        ...(staleFetched.events ?? []),
+        {
+          sequence: 2,
+          timestamp: 300,
+          group: 'codex-pro',
+          channel_id: 153,
+          state: 'success',
+        },
+      ],
+    }
+
+    const merged = mergeExecutionTrace(intermediateFailure, completedFallback)
+
+    assert.equal(merged?.status, 'success')
+    assert.equal(merged?.updated_at, 300)
+    assert.deepEqual(merged?.channel_ids, [167, 153])
+    assert.equal(merged?.events?.at(-1)?.channel_id, 153)
+  })
+
   test('returns the stored summary when no full trace is available', () => {
     assert.equal(mergeExecutionTrace(storedTerminal, undefined), storedTerminal)
   })

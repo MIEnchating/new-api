@@ -232,6 +232,7 @@ export type ModelSettings = {
   ChannelRouteCooldownSeconds: number
   ChannelRouteStickyEnabled: boolean
   ChannelRouteSameChannelRetries: number
+  ChannelRouteGroupExclusions: string
   ChannelDisableThreshold: string
   AutomaticDisableChannelEnabled: boolean
   AutomaticEnableChannelEnabled: boolean

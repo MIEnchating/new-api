@@ -14,6 +14,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -171,6 +172,29 @@ func TestShouldAttemptNextTaskChannelDoesNotRouteLockedChannel(t *testing.T) {
 	assert.True(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 0, true, true))
 	assert.False(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 10, true, false))
 	assert.False(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 10, false, true))
+}
+
+func TestProcessChannelErrorStopsWhenGroupExcludesNextChannel(t *testing.T) {
+	oldRouteEnabled := common.ChannelRouteCooldownEnabled
+	oldExclusions := setting.ChannelRouteGroupExclusions2JSONString()
+	t.Cleanup(func() {
+		common.ChannelRouteCooldownEnabled = oldRouteEnabled
+		require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString(oldExclusions))
+	})
+	common.ChannelRouteCooldownEnabled = true
+	require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString(`{"image-group":"next_channel"}`))
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil)
+	common.SetContextKey(c, constant.ContextKeyChannelRouteGroup, "image-group")
+
+	routeAdvanced := processChannelError(c, types.ChannelError{
+		ChannelId: 1,
+		AutoBan:   false,
+	}, types.NewOpenAIError(errors.New("upstream unavailable"), types.ErrorCodeBadResponse, http.StatusInternalServerError))
+
+	assert.False(t, routeAdvanced)
 }
 
 func TestChannelAndTokenGroupRoutesAdvanceTogether(t *testing.T) {

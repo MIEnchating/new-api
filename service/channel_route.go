@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
@@ -332,9 +333,27 @@ func ShouldFreezeChannelRoute(err *types.NewAPIError) bool {
 }
 
 func ShouldRetrySameChannelRoute(err *types.NewAPIError, retriesUsed int) bool {
+	return ShouldRetrySameChannelRouteForGroup(err, retriesUsed, "")
+}
+
+func ShouldRetrySameChannelRouteForGroup(err *types.NewAPIError, retriesUsed int, group string) bool {
 	return IsChannelRouteEnabled() &&
+		!setting.IsChannelRouteSameChannelRetryExcluded(group) &&
 		common.ChannelRouteSameChannelRetries > retriesUsed &&
 		ShouldFreezeChannelRoute(err)
+}
+
+func ShouldRetrySameChannelRouteForContext(c *gin.Context, err *types.NewAPIError, retriesUsed int) bool {
+	group := common.GetContextKeyString(c, constant.ContextKeyChannelRouteGroup)
+	return ShouldRetrySameChannelRouteForGroup(err, retriesUsed, group)
+}
+
+func IsNextChannelRouteExcluded(c *gin.Context) bool {
+	if !IsChannelRouteEnabled() || c == nil {
+		return false
+	}
+	group := common.GetContextKeyString(c, constant.ContextKeyChannelRouteGroup)
+	return setting.IsChannelRouteNextChannelExcluded(group)
 }
 
 func TrackChannelRouteSelection(c *gin.Context, group string, modelName string, requestPath string, channelID int) {
