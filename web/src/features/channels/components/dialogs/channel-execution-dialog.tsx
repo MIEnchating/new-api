@@ -19,30 +19,21 @@ For commercial licensing, please contact support@quantumnous.com
 /* eslint-disable no-nested-ternary */
 import { useQuery } from '@tanstack/react-query'
 import {
-  type LucideIcon,
   ArrowDown,
   CheckCircle2,
-  CircleDot,
-  Clock3,
   Equal,
-  GitBranch,
   Loader2,
   RefreshCcw,
   Search,
   Shuffle,
-  SkipForward,
   Snowflake,
-  XCircle,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { ChannelExecutionTimelineList } from '@/components/channel-execution-timeline-list'
 import { Dialog } from '@/components/dialog'
-import {
-  StatusBadge,
-  textColorMap,
-  type StatusVariant,
-} from '@/components/status-badge'
+import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -54,6 +45,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  buildCompactChannelExecutionEvents,
+  buildChannelExecutionTimeline,
+  getStandbyChannelIds,
+} from '@/lib/channel-execution-timeline'
 import { cn } from '@/lib/utils'
 
 import {
@@ -61,7 +57,6 @@ import {
   getChannelExecutionOptions,
   getRecentChannelExecutionTraces,
   getChannelExecutionTrace,
-  type ChannelExecutionEvent,
   type ChannelExecutionRouteGroupStatus,
 } from '../../api'
 import { selectExecutionTrace } from '../../lib/channel-execution-trace'
@@ -69,45 +64,6 @@ import { selectExecutionTrace } from '../../lib/channel-execution-trace'
 type ChannelExecutionDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-}
-
-const eventAppearance: Record<
-  ChannelExecutionEvent['state'],
-  {
-    icon: LucideIcon
-    variant: StatusVariant
-    label: string
-    description?: string
-  }
-> = {
-  active: {
-    icon: CircleDot,
-    variant: 'info',
-    label: 'Channel request started',
-    description: 'The upstream request has been sent to this channel',
-  },
-  affinity_hit: {
-    icon: GitBranch,
-    variant: 'purple',
-    label: 'Reused affinity channel',
-    description:
-      'The last successful channel was selected from the same matching context; no upstream request has been sent at this stage',
-  },
-  same_channel_retry: {
-    icon: RefreshCcw,
-    variant: 'warning',
-    label: 'Same-channel retry',
-  },
-  success: {
-    icon: CheckCircle2,
-    variant: 'success',
-    label: 'Channel request succeeded',
-    description: 'This channel returned a successful response',
-  },
-  failed: { icon: XCircle, variant: 'danger', label: 'Failed' },
-  cooling: { icon: Snowflake, variant: 'warning', label: 'Cooling' },
-  skipped: { icon: SkipForward, variant: 'neutral', label: 'Skipped' },
-  finished: { icon: Clock3, variant: 'neutral', label: 'Finished' },
 }
 
 function splitValues(value: string) {
@@ -183,29 +139,6 @@ function routeGroupStatusVariant(
   }
 }
 
-function eventReasonLabel(reason?: string) {
-  switch (reason) {
-    case 'route_affinity':
-      return 'Route affinity'
-    case 'channel_affinity':
-      return 'Channel affinity'
-    case 'affinity_cooling':
-      return 'Affinity target is cooling'
-    case 'cooling':
-      return 'Channel is cooling'
-    case 'group_route_failure':
-      return 'Group route failed'
-    case 'group_affinity':
-      return 'Group affinity'
-    case 'group_cooling':
-      return 'Group is cooling'
-    case 'group_unsupported':
-      return 'Group does not support this request'
-    default:
-      return reason || ''
-  }
-}
-
 function queryErrorMessage(error: unknown, fallback: string) {
   if (error && typeof error === 'object') {
     const responseMessage = (
@@ -219,36 +152,6 @@ function queryErrorMessage(error: unknown, fallback: string) {
     return error.message
   }
   return fallback
-}
-
-function eventAppearanceForEvent(event: ChannelExecutionEvent) {
-  const isGroupEvent = Boolean(event.group && !event.channel_id)
-  if (!isGroupEvent) return eventAppearance[event.state]
-  if (event.state === 'affinity_hit') {
-    return {
-      ...eventAppearance[event.state],
-      label: 'Reused affinity group',
-      description:
-        'This is a group-routing decision, not an upstream channel request',
-    }
-  }
-  if (event.state === 'cooling') {
-    return {
-      ...eventAppearance[event.state],
-      label: 'Group entered cooldown',
-      description:
-        'This is a group-routing decision, not an upstream channel request',
-    }
-  }
-  if (event.state === 'skipped') {
-    return {
-      ...eventAppearance[event.state],
-      label: 'Candidate group skipped',
-      description:
-        'This is a group-routing decision, not an upstream channel request',
-    }
-  }
-  return eventAppearance[event.state]
 }
 
 export function ChannelExecutionDialog({
@@ -360,6 +263,22 @@ export function ChannelExecutionDialog({
     selectedRecentTrace
   )
   const traceEvents = trace?.events ?? []
+  const executionEvents =
+    traceEvents.length > 0
+      ? traceEvents
+      : buildCompactChannelExecutionEvents(trace, {
+          channelId: trace?.channel_ids?.[0],
+          channelName: trace?.channel_ids?.[0]
+            ? channelNames.get(trace.channel_ids[0])
+            : undefined,
+          startedAt: trace?.started_at,
+          endedAt: trace?.updated_at,
+        })
+  const executionTimeline = buildChannelExecutionTimeline(executionEvents, {
+    status: trace?.status,
+    endedAt: trace?.updated_at,
+  })
+  const standbyChannelIds = getStandbyChannelIds(executionTimeline)
   const submitRequestID = () => {
     const nextRequestID = requestID.trim()
     if (!nextRequestID) return
@@ -949,14 +868,19 @@ export function ChannelExecutionDialog({
                     </dl>
                   </div>
                 </div>
-                {trace.compact ? (
-                  <div className='space-y-2'>
-                    <div className='flex flex-wrap items-center gap-1.5'>
-                      <span className='text-muted-foreground mr-1 text-xs'>
-                        {t('Channel chain')}
-                      </span>
-                      {trace.channel_ids?.length ? (
-                        trace.channel_ids.map((channelID) => (
+                <div className='space-y-3'>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    {trace.compact ? (
+                      <StatusBadge variant='neutral' size='sm' copyable={false}>
+                        {t('Execution summary')}
+                      </StatusBadge>
+                    ) : null}
+                    {standbyChannelIds.length > 0 ? (
+                      <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+                        <span className='text-muted-foreground text-xs'>
+                          {t('Standby channels')}
+                        </span>
+                        {standbyChannelIds.map((channelID) => (
                           <StatusBadge
                             key={channelID}
                             variant='neutral'
@@ -967,134 +891,20 @@ export function ChannelExecutionDialog({
                             {channelNames.get(channelID) ||
                               t('Unknown channel')}
                           </StatusBadge>
-                        ))
-                      ) : (
-                        <span className='text-muted-foreground text-xs'>-</span>
-                      )}
-                    </div>
-                    {trace.mode === 'route' ? (
-                      <div className='flex flex-wrap items-center gap-2'>
-                        <span className='text-muted-foreground text-xs'>
-                          {t('Route affinity')}
-                        </span>
-                        <StatusBadge
-                          variant={trace.affinity_hit ? 'purple' : 'neutral'}
-                          size='sm'
-                          copyable={false}
-                        >
+                        ))}
+                        <span className='text-muted-foreground text-[11px]'>
                           {t(
-                            trace.affinity_hit
-                              ? 'Affinity hit'
-                              : 'No affinity hit'
+                            'Not executed; used only if the current channel fails'
                           )}
-                        </StatusBadge>
+                        </span>
                       </div>
                     ) : null}
                   </div>
-                ) : (
-                  <div>
-                    {traceEvents.map((event, index) => {
-                      const appearance = eventAppearanceForEvent(event)
-                      const isGroupEvent = Boolean(
-                        event.group && !event.channel_id
-                      )
-                      const Icon = appearance.icon
-                      return (
-                        <div
-                          key={`${event.sequence}-${event.timestamp}`}
-                          className='relative grid grid-cols-[28px_minmax(0,1fr)] gap-3 pb-4 last:pb-0'
-                        >
-                          {index < traceEvents.length - 1 && (
-                            <span className='bg-border absolute top-7 bottom-0 left-[13px] w-px' />
-                          )}
-                          <span
-                            className={cn(
-                              'bg-background z-10 flex size-7 items-center justify-center rounded-full border',
-                              textColorMap[appearance.variant],
-                              event.state === 'active' &&
-                                trace.status === 'running' &&
-                                'border-info'
-                            )}
-                          >
-                            <Icon
-                              className={cn(
-                                'size-3.5',
-                                event.state === 'active' &&
-                                  trace.status === 'running' &&
-                                  'animate-pulse'
-                              )}
-                            />
-                          </span>
-                          <div className='min-w-0 pt-0.5'>
-                            <div className='flex flex-wrap items-center gap-x-2 gap-y-1'>
-                              <StatusBadge
-                                variant={appearance.variant}
-                                size='sm'
-                                copyable={false}
-                              >
-                                {t(appearance.label)}
-                              </StatusBadge>
-                              {event.group && (
-                                <span className='font-mono text-xs'>
-                                  {isGroupEvent
-                                    ? `${t('Candidate group')}: `
-                                    : ''}
-                                  {event.group}
-                                </span>
-                              )}
-                              {event.channel_id ? (
-                                <span className='text-xs font-medium'>
-                                  #{event.channel_id} {event.channel_name}
-                                </span>
-                              ) : null}
-                              <span className='text-muted-foreground ml-auto font-mono text-xs tabular-nums'>
-                                {formatEventTime(event.timestamp)}
-                              </span>
-                            </div>
-                            {appearance.description && (
-                              <p className='text-muted-foreground mt-1 text-xs'>
-                                {t(appearance.description)}
-                              </p>
-                            )}
-                            {event.reason && event.state !== 'affinity_hit' && (
-                              <p className='text-muted-foreground mt-1 text-xs break-all'>
-                                {t(eventReasonLabel(event.reason))}
-                              </p>
-                            )}
-                            {event.next_ids?.length ? (
-                              <div className='bg-muted/35 mt-2 rounded-md px-2.5 py-2'>
-                                <div className='flex flex-wrap items-center gap-1.5'>
-                                  <span className='mr-0.5 text-xs font-medium'>
-                                    {t('Candidates after failure')}
-                                  </span>
-                                  {event.next_ids.map((id) => (
-                                    <StatusBadge
-                                      key={id}
-                                      variant='neutral'
-                                      size='sm'
-                                      copyable={false}
-                                    >
-                                      <span className='font-mono'>#{id}</span>
-                                      {channelNames.get(id) ||
-                                        t('Unknown channel')}
-                                    </StatusBadge>
-                                  ))}
-                                </div>
-                                <p className='text-muted-foreground mt-1.5 text-[11px]'>
-                                  {t(
-                                    trace.mode === 'route'
-                                      ? 'If this channel fails, routing selects again from these available channels; the displayed order is not the execution order'
-                                      : 'If this channel fails, retry continues from candidates in the next available priority level'
-                                  )}
-                                </p>
-                              </div>
-                            ) : null}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
+                  <ChannelExecutionTimelineList
+                    items={executionTimeline}
+                    executionGroup={trace.group}
+                  />
+                </div>
               </div>
             ) : searchedRequestID && traceQuery.isLoading ? (
               <div className='text-muted-foreground flex items-center justify-center gap-2 py-10 text-sm'>

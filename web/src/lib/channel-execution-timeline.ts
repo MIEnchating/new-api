@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { ChannelExecutionTraceInfo } from '../types'
+import type { ChannelExecutionTraceInfo } from '@/features/usage-logs/types'
 
 export type ChannelExecutionEvent = NonNullable<
   ChannelExecutionTraceInfo['events']
@@ -31,7 +31,7 @@ export type ChannelExecutionAttempt = {
   retryIndex?: number
   selectionState?: 'affinity_hit' | 'same_channel_retry'
   selectionReason?: string
-  state: 'active' | 'success' | 'failed'
+  state: 'active' | 'success' | 'failed' | 'cancelled'
   reason?: string
   startedAt?: number
   endedAt?: number
@@ -59,7 +59,11 @@ type CompactTimelineFallback = {
 }
 
 function isTerminalEvent(event: ChannelExecutionEvent) {
-  return event.state === 'success' || event.state === 'failed'
+  return (
+    event.state === 'success' ||
+    event.state === 'failed' ||
+    event.state === 'cancelled'
+  )
 }
 
 export function buildCompactChannelExecutionEvents(
@@ -129,8 +133,6 @@ export function buildChannelExecutionTimeline(
     // an upstream request, so it must not appear as a timeline node.
     if (event.state === 'finished') {
       flushPendingSelection()
-      openAttempt = undefined
-      openRequest = undefined
       continue
     }
 
@@ -214,7 +216,7 @@ export function buildChannelExecutionTimeline(
       openAttempt?.channelId === event.channel_id &&
       openAttempt.state === 'active'
     ) {
-      openAttempt.state = event.state as 'success' | 'failed'
+      openAttempt.state = event.state as 'success' | 'failed' | 'cancelled'
       openAttempt.reason = event.reason
       openAttempt.endedAt = event.timestamp
       openAttempt = undefined
@@ -261,6 +263,31 @@ export function buildChannelExecutionTimeline(
           channel_name: openRequest.channel_name,
           priority: openRequest.priority,
           state: 'success',
+        },
+        startedAt: openRequest.timestamp,
+      })
+    }
+  } else if (terminal?.status === 'cancelled') {
+    const endedAt = Math.max(
+      terminal.endedAt ?? 0,
+      openAttempt?.startedAt ?? openRequest?.timestamp ?? 0
+    )
+    if (openAttempt?.state === 'active') {
+      openAttempt.state = 'cancelled'
+      openAttempt.reason =
+        'Request cancelled before this channel returned a result'
+      openAttempt.endedAt = endedAt
+    } else if (openRequest) {
+      items.push({
+        kind: 'event',
+        event: {
+          sequence: events.length + 1,
+          timestamp: endedAt,
+          group: openRequest.group,
+          channel_id: openRequest.channel_id,
+          channel_name: openRequest.channel_name,
+          priority: openRequest.priority,
+          state: 'cancelled',
         },
         startedAt: openRequest.timestamp,
       })

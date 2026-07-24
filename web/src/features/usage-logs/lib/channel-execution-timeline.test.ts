@@ -23,7 +23,7 @@ import {
   buildCompactChannelExecutionEvents,
   buildChannelExecutionTimeline,
   getStandbyChannelIds,
-} from './channel-execution-timeline.ts'
+} from '../../../lib/channel-execution-timeline.ts'
 
 describe('channel execution timeline', () => {
   test('reconstructs a simple successful trace from its compact summary', () => {
@@ -317,5 +317,45 @@ describe('channel execution timeline', () => {
       finalAttempt.reason,
       'status_code=500, upstream error: do request failed'
     )
+  })
+
+  test('closes the last in-flight channel when the request is cancelled', () => {
+    const timeline = buildChannelExecutionTimeline(
+      [
+        {
+          timestamp: 100,
+          channel_id: 160,
+          channel_name: 'primary',
+          state: 'active',
+        },
+        {
+          timestamp: 200,
+          channel_id: 160,
+          state: 'failed',
+          reason: 'status_code=500, upstream error: do request failed',
+        },
+        {
+          timestamp: 201,
+          channel_id: 161,
+          channel_name: 'fallback',
+          state: 'active',
+        },
+        {
+          timestamp: 240,
+          state: 'finished',
+          reason: 'context canceled',
+        },
+      ],
+      { status: 'cancelled', endedAt: 240 }
+    )
+
+    assert.equal(timeline.length, 4)
+    const cancelled = timeline[3]
+    assert.equal(cancelled?.kind, 'event')
+    if (cancelled?.kind !== 'event') return
+    assert.equal(cancelled.event.channel_id, 161)
+    assert.equal(cancelled.event.state, 'cancelled')
+    assert.equal(cancelled.startedAt, 201)
+    assert.equal(cancelled.event.timestamp, 240)
   })
 })

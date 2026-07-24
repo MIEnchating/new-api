@@ -148,6 +148,7 @@ export type UsageBillingPath =
 
 export interface LogOtherData {
   admin_info?: {
+    retry_intermediate?: boolean
     is_multi_key?: boolean
     multi_key_index?: number
     use_channel?: Array<number | string>

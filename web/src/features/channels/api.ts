@@ -110,6 +110,7 @@ export type ChannelExecutionEvent = {
     | 'same_channel_retry'
     | 'success'
     | 'failed'
+    | 'cancelled'
     | 'cooling'
     | 'skipped'
     | 'finished'
