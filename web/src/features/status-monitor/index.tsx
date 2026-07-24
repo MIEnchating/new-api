@@ -472,7 +472,15 @@ const MonitorRow = memo(function MonitorRow(props: {
           </div>
         </div>
 
-        <div className='mt-3 grid min-w-0 grid-cols-2 gap-2 sm:mt-4'>
+        <div className='mt-3 grid min-w-0 grid-cols-2 gap-2 sm:mt-4 sm:grid-cols-3'>
+          <MetricItem
+            label={t('30-minute uptime')}
+            value={formatOptionalUptime(props.monitor.uptime30m)}
+          />
+          <MetricItem
+            label={t('1-hour uptime')}
+            value={formatOptionalUptime(props.monitor.uptime1h)}
+          />
           <MetricItem
             label={t('24-hour uptime')}
             value={formatUptime(props.monitor.uptime24 ?? props.monitor.uptime)}

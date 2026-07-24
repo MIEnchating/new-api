@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -26,9 +28,12 @@ const (
 	uptimeStatusCacheTTL   = 15 * time.Second
 	uptimeStatusErrorTTL   = 3 * time.Second
 	uptimeResponseMaxBytes = 8 << 20
+	uptimeBadgeMaxBytes    = 128 << 10
+	uptimeMetricWorkers    = 12
 	uptimeKeySuffix        = "_24"
 	apiStatusPath          = "/api/status-page/"
 	apiHeartbeatPath       = "/api/status-page/heartbeat/"
+	apiBadgePath           = "/api/badge/"
 )
 
 var errUptimeResponseTooLarge = errors.New("uptime response exceeds size limit")
@@ -56,6 +61,8 @@ var defaultUptimeStatusLoader uptimeStatusLoader
 type Monitor struct {
 	Name        string      `json:"name"`
 	Uptime      float64     `json:"uptime"`
+	Uptime30m   *float64    `json:"uptime30m,omitempty"`
+	Uptime1h    *float64    `json:"uptime1h,omitempty"`
 	Uptime24    float64     `json:"uptime24"`
 	Uptime7     *float64    `json:"uptime7,omitempty"`
 	Status      int         `json:"status"`
@@ -143,6 +150,62 @@ func getAndDecode(ctx context.Context, client *http.Client, url string, dest int
 	return err
 }
 
+func parseUptimeBadge(reader io.Reader) (float64, error) {
+	limited := &io.LimitedReader{R: reader, N: uptimeBadgeMaxBytes + 1}
+	var badge struct {
+		Title string `xml:"title"`
+	}
+	if err := xml.NewDecoder(limited).Decode(&badge); err != nil {
+		return 0, err
+	}
+	if limited.N <= 0 {
+		return 0, errUptimeResponseTooLarge
+	}
+
+	separator := strings.LastIndex(badge.Title, ":")
+	if separator < 0 {
+		return 0, errors.New("uptime badge title has no value")
+	}
+	value := strings.TrimSpace(strings.TrimSuffix(badge.Title[separator+1:], "%"))
+	percentage, err := strconv.ParseFloat(value, 64)
+	if err != nil || percentage < 0 || percentage > 100 {
+		return 0, errors.New("uptime badge contains an invalid percentage")
+	}
+	return percentage / 100, nil
+}
+
+func fetchBadgeUptime(
+	ctx context.Context,
+	client *http.Client,
+	baseURL string,
+	monitorID string,
+	duration string,
+) (float64, error) {
+	url := fmt.Sprintf(
+		"%s%s%s/uptime/%s?label=uptime",
+		baseURL,
+		apiBadgePath,
+		monitorID,
+		duration,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, errors.New("non-200 badge status")
+	}
+	if resp.ContentLength > uptimeBadgeMaxBytes {
+		return 0, errUptimeResponseTooLarge
+	}
+	return parseUptimeBadge(resp.Body)
+}
+
 func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[string]interface{}) (UptimeGroupResult, error) {
 	url, _ := groupConfig["url"].(string)
 	slug, _ := groupConfig["slug"].(string)
@@ -192,6 +255,12 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 		return result, err
 	}
 
+	type monitorReference struct {
+		index int
+		id    string
+	}
+	monitorReferences := make([]monitorReference, 0)
+
 	for _, pg := range statusData.PublicGroupList {
 		if len(pg.MonitorList) == 0 {
 			continue
@@ -227,6 +296,47 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 			}
 
 			result.Monitors = append(result.Monitors, monitor)
+			monitorReferences = append(monitorReferences, monitorReference{
+				index: len(result.Monitors) - 1,
+				id:    monitorID,
+			})
+		}
+	}
+
+	type metricResult struct {
+		monitorIndex int
+		duration     string
+		uptime       float64
+	}
+	metricResults := make(chan metricResult, len(monitorReferences)*3)
+	metricsGroup, metricsCtx := errgroup.WithContext(ctx)
+	metricsGroup.SetLimit(uptimeMetricWorkers)
+	for _, reference := range monitorReferences {
+		for _, duration := range []string{"30m", "1h", "7d"} {
+			reference, duration := reference, duration
+			metricsGroup.Go(func() error {
+				uptime, err := fetchBadgeUptime(metricsCtx, client, baseURL, reference.id, duration)
+				if err == nil {
+					metricResults <- metricResult{
+						monitorIndex: reference.index,
+						duration:     duration,
+						uptime:       uptime,
+					}
+				}
+				return nil
+			})
+		}
+	}
+	_ = metricsGroup.Wait()
+	close(metricResults)
+	for metric := range metricResults {
+		switch metric.duration {
+		case "30m":
+			result.Monitors[metric.monitorIndex].Uptime30m = float64Ptr(metric.uptime)
+		case "1h":
+			result.Monitors[metric.monitorIndex].Uptime1h = float64Ptr(metric.uptime)
+		case "7d":
+			result.Monitors[metric.monitorIndex].Uptime7 = float64Ptr(metric.uptime)
 		}
 	}
 
@@ -293,6 +403,14 @@ func cloneUptimeStatusSnapshot(snapshot uptimeStatusSnapshot) uptimeStatusSnapsh
 			if monitor.Ping != nil {
 				ping := *monitor.Ping
 				cloned.Results[groupIndex].Monitors[monitorIndex].Ping = &ping
+			}
+			if monitor.Uptime30m != nil {
+				uptime30m := *monitor.Uptime30m
+				cloned.Results[groupIndex].Monitors[monitorIndex].Uptime30m = &uptime30m
+			}
+			if monitor.Uptime1h != nil {
+				uptime1h := *monitor.Uptime1h
+				cloned.Results[groupIndex].Monitors[monitorIndex].Uptime1h = &uptime1h
 			}
 			if monitor.Uptime7 != nil {
 				uptime7 := *monitor.Uptime7

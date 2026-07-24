@@ -23,9 +23,9 @@ import type {
   RowSelectionState,
 } from '@tanstack/react-table'
 import {
-  CircleDollarSign,
   FileCheck2,
   ReceiptText,
+  type LucideIcon,
   Undo2,
   Users,
 } from 'lucide-react'
@@ -123,7 +123,7 @@ function TypeQuotaBadge(props: {
 function SummaryMetricBadge(props: {
   label: string
   value: string
-  icon: typeof CircleDollarSign
+  icon: LucideIcon
   iconClassName: string
   loading: boolean
 }) {
@@ -398,13 +398,6 @@ export function TopUpStats() {
   const metrics = useMemo(
     () => [
       {
-        label: t('Total payment'),
-        value: formatNumber(summary.total_money),
-        icon: CircleDollarSign,
-        iconClassName:
-          'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
-      },
-      {
         label: t('Successful orders'),
         value: formatNumber(summary.order_count),
         icon: ReceiptText,
@@ -637,16 +630,6 @@ export function TopUpStats() {
                 leftActions: (
                   <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
                     <div className='flex min-w-0 flex-wrap items-center gap-2'>
-                      {metrics.map((metric) => (
-                        <SummaryMetricBadge
-                          key={metric.label}
-                          {...metric}
-                          loading={query.isLoading}
-                        />
-                      ))}
-                    </div>
-                    <div className='bg-border mx-0.5 hidden h-5 w-px shrink-0 xl:block' />
-                    <div className='flex min-w-0 flex-wrap items-center gap-2'>
                       <TypeQuotaBadge
                         label={t('Online payment')}
                         value={typeQuotas.online_topup}
@@ -671,6 +654,16 @@ export function TopUpStats() {
                         accent='bg-foreground/60'
                         loading={query.isLoading}
                       />
+                    </div>
+                    <div className='bg-border mx-0.5 hidden h-5 w-px shrink-0 xl:block' />
+                    <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                      {metrics.map((metric) => (
+                        <SummaryMetricBadge
+                          key={metric.label}
+                          {...metric}
+                          loading={query.isLoading}
+                        />
+                      ))}
                     </div>
                   </div>
                 ),

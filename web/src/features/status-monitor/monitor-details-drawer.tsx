@@ -258,7 +258,7 @@ export function MonitorDetailsDrawer(props: MonitorDetailsDrawerProps) {
         </SheetHeader>
 
         <div className='min-h-0 flex-1 overflow-y-auto px-4 pb-6 sm:px-6'>
-          <div className='grid grid-cols-2 sm:grid-cols-3 [&>*:last-child]:col-span-2 sm:[&>*:last-child]:col-span-1'>
+          <div className='grid grid-cols-2 sm:grid-cols-3'>
             <DrawerMetric
               icon={Gauge}
               label={t('Latency')}
@@ -266,10 +266,25 @@ export function MonitorDetailsDrawer(props: MonitorDetailsDrawerProps) {
             />
             <DrawerMetric
               icon={Activity}
+              label={t('30-minute uptime')}
+              value={formatPercent(props.monitor?.uptime30m)}
+            />
+            <DrawerMetric
+              icon={Activity}
+              label={t('1-hour uptime')}
+              value={formatPercent(props.monitor?.uptime1h)}
+            />
+            <DrawerMetric
+              icon={Activity}
               label={t('24-hour uptime')}
               value={formatPercent(
                 props.monitor?.uptime24 ?? props.monitor?.uptime
               )}
+            />
+            <DrawerMetric
+              icon={Activity}
+              label={t('7-day uptime')}
+              value={formatPercent(props.monitor?.uptime7)}
             />
             <DrawerMetric
               icon={Clock3}

@@ -116,6 +116,15 @@ func appendUpstreamRequestIdsAdminInfo(c *gin.Context, other map[string]interfac
 		other["admin_info"] = adminInfo
 	}
 	adminInfo["upstream_request_ids"] = append([]string(nil), requestIds...)
+	if sources, exists := c.Get(common.UpstreamRequestIdSourcesKey); exists {
+		if sourceByRequestId, ok := sources.(map[string]string); ok && len(sourceByRequestId) > 0 {
+			copiedSources := make(map[string]string, len(sourceByRequestId))
+			for requestId, source := range sourceByRequestId {
+				copiedSources[requestId] = source
+			}
+			adminInfo["upstream_request_id_sources"] = copiedSources
+		}
+	}
 }
 
 func applyUserVisibleLogFilter(tx *gorm.DB, column string) *gorm.DB {

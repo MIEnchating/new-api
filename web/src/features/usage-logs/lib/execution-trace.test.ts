@@ -146,4 +146,33 @@ describe('execution trace merge', () => {
   test('returns the stored summary when no full trace is available', () => {
     assert.equal(mergeExecutionTrace(storedTerminal, undefined), storedTerminal)
   })
+
+  test('keeps a persisted fallback compact when Redis has no full trace', () => {
+    const persistedFallback: ChannelExecutionTraceInfo = {
+      ...storedTerminal,
+      request_id: 'request-from-sql',
+      model: 'gpt-5.6',
+      request_path: '/v1/responses',
+      started_at: 100,
+      updated_at: 200,
+    }
+
+    const merged = mergeExecutionTrace(storedTerminal, persistedFallback)
+
+    assert.equal(merged?.compact, true)
+    assert.equal(merged?.status, 'success')
+    assert.deepEqual(merged?.channel_ids, [116, 92])
+    assert.equal(merged?.events, undefined)
+    assert.equal(merged?.request_id, 'request-from-sql')
+  })
+
+  test('preserves compact mode when only a persisted fallback is available', () => {
+    const fallback: ChannelExecutionTraceInfo = {
+      compact: true,
+      status: 'success',
+      channel_ids: [116],
+    }
+
+    assert.equal(mergeExecutionTrace(undefined, fallback)?.compact, true)
+  })
 })

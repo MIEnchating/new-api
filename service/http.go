@@ -15,6 +15,11 @@ import (
 
 const providerRequestIdHeader = "X-Request-Id"
 
+const (
+	upstreamRequestIdSourceOneAPI    = "x-oneapi-request-id"
+	upstreamRequestIdSourceGenericID = "x-request-id"
+)
+
 func appendUpstreamRequestId(c *gin.Context, requestId string) {
 	requestId = strings.TrimSpace(requestId)
 	if requestId == "" {
@@ -29,6 +34,24 @@ func appendUpstreamRequestId(c *gin.Context, requestId string) {
 	c.Set(common.UpstreamRequestIdsKey, append(requestIds, requestId))
 }
 
+func recordUpstreamRequestIdSource(c *gin.Context, requestId string, source string) {
+	requestId = strings.TrimSpace(requestId)
+	if requestId == "" || source == "" {
+		return
+	}
+	sources, _ := c.Get(common.UpstreamRequestIdSourcesKey)
+	sourceByRequestId, _ := sources.(map[string]string)
+	if sourceByRequestId == nil {
+		sourceByRequestId = make(map[string]string)
+	}
+	// The native new-api header is more specific than the generic
+	// X-Request-Id header when an upstream happens to return the same value.
+	if sourceByRequestId[requestId] != upstreamRequestIdSourceOneAPI || source == upstreamRequestIdSourceOneAPI {
+		sourceByRequestId[requestId] = source
+	}
+	c.Set(common.UpstreamRequestIdSourcesKey, sourceByRequestId)
+}
+
 // CaptureUpstreamRequestId records the best available upstream correlation ID.
 // Native new-api IDs take precedence; X-Request-Id supports providers such as
 // sub2api and is used only as a fallback.
@@ -39,12 +62,14 @@ func CaptureUpstreamRequestId(c *gin.Context, header http.Header) string {
 	if requestId := strings.TrimSpace(header.Get(common.RequestIdKey)); requestId != "" {
 		c.Set(common.UpstreamRequestIdKey, requestId)
 		appendUpstreamRequestId(c, requestId)
+		recordUpstreamRequestIdSource(c, requestId, upstreamRequestIdSourceOneAPI)
 		return requestId
 	}
 	requestId := strings.TrimSpace(header.Get(providerRequestIdHeader))
 	if requestId != "" {
 		c.Set(common.UpstreamRequestIdKey, requestId)
 		appendUpstreamRequestId(c, requestId)
+		recordUpstreamRequestIdSource(c, requestId, upstreamRequestIdSourceGenericID)
 	}
 	return requestId
 }

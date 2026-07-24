@@ -75,6 +75,10 @@ func TestFormatUserLogsStripsUpstreamRequestID(t *testing.T) {
 func TestAppendUpstreamRequestIdsAdminInfo(t *testing.T) {
 	c, _ := gin.CreateTestContext(nil)
 	c.Set(common.UpstreamRequestIdsKey, []string{"upstream-1", "upstream-2"})
+	c.Set(common.UpstreamRequestIdSourcesKey, map[string]string{
+		"upstream-1": "x-oneapi-request-id",
+		"upstream-2": "x-request-id",
+	})
 	other := map[string]interface{}{
 		"admin_info": map[string]interface{}{"use_channel": []int{11, 12}},
 	}
@@ -83,6 +87,10 @@ func TestAppendUpstreamRequestIdsAdminInfo(t *testing.T) {
 
 	adminInfo := other["admin_info"].(map[string]interface{})
 	require.Equal(t, []string{"upstream-1", "upstream-2"}, adminInfo["upstream_request_ids"])
+	require.Equal(t, map[string]string{
+		"upstream-1": "x-oneapi-request-id",
+		"upstream-2": "x-request-id",
+	}, adminInfo["upstream_request_id_sources"])
 	require.Equal(t, []int{11, 12}, adminInfo["use_channel"])
 }
 

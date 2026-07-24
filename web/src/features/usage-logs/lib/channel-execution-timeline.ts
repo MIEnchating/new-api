@@ -40,22 +40,82 @@ export type ChannelExecutionAttempt = {
 
 export type ChannelExecutionTimelineItem =
   | ChannelExecutionAttempt
-  | { kind: 'event'; event: ChannelExecutionEvent }
+  | {
+      kind: 'event'
+      event: ChannelExecutionEvent
+      startedAt?: number
+    }
 
-function isSelectionEvent(event: ChannelExecutionEvent) {
-  return event.state === 'affinity_hit' || event.state === 'same_channel_retry'
+type ChannelExecutionTimelineTerminal = {
+  status?: ChannelExecutionTraceInfo['status']
+  endedAt?: number
+}
+
+type CompactTimelineFallback = {
+  channelId?: number
+  channelName?: string
+  startedAt?: number
+  endedAt?: number
 }
 
 function isTerminalEvent(event: ChannelExecutionEvent) {
   return event.state === 'success' || event.state === 'failed'
 }
 
+export function buildCompactChannelExecutionEvents(
+  trace: ChannelExecutionTraceInfo | undefined,
+  fallback: CompactTimelineFallback
+): ChannelExecutionEvent[] {
+  const channelIds = [...new Set(trace?.channel_ids ?? [])]
+  if (
+    trace?.compact !== true ||
+    trace.status !== 'success' ||
+    channelIds.length !== 1
+  ) {
+    return []
+  }
+
+  const channelId = channelIds[0] ?? fallback.channelId
+  if (!channelId) return []
+  const startedAt = trace.started_at ?? fallback.startedAt ?? 0
+  const endedAt = Math.max(trace.updated_at ?? fallback.endedAt ?? 0, startedAt)
+  const base = {
+    group: trace.group,
+    channel_id: channelId,
+    channel_name: fallback.channelName,
+  }
+  const events: ChannelExecutionEvent[] = []
+  if (trace.affinity_hit) {
+    events.push({
+      ...base,
+      sequence: events.length + 1,
+      timestamp: startedAt,
+      state: 'affinity_hit',
+    })
+  }
+  events.push({
+    ...base,
+    sequence: events.length + 1,
+    timestamp: startedAt,
+    state: 'active',
+  })
+  events.push({
+    ...base,
+    sequence: events.length + 1,
+    timestamp: endedAt,
+    state: 'success',
+  })
+  return events
+}
+
 export function buildChannelExecutionTimeline(
-  events: ChannelExecutionEvent[]
+  events: ChannelExecutionEvent[],
+  terminal?: ChannelExecutionTimelineTerminal
 ): ChannelExecutionTimelineItem[] {
   const items: ChannelExecutionTimelineItem[] = []
   let pendingSelection: ChannelExecutionEvent | undefined
   let openAttempt: ChannelExecutionAttempt | undefined
+  let openRequest: ChannelExecutionEvent | undefined
 
   const flushPendingSelection = () => {
     if (!pendingSelection) return
@@ -64,7 +124,23 @@ export function buildChannelExecutionTimeline(
   }
 
   for (const event of events) {
-    if (isSelectionEvent(event) && event.channel_id) {
+    // `finished` is an internal trace terminator used to persist the overall
+    // failure reason and route-group status. It is not a routing decision or
+    // an upstream request, so it must not appear as a timeline node.
+    if (event.state === 'finished') {
+      flushPendingSelection()
+      openAttempt = undefined
+      openRequest = undefined
+      continue
+    }
+
+    if (event.state === 'affinity_hit' && event.channel_id) {
+      flushPendingSelection()
+      items.push({ kind: 'event', event })
+      continue
+    }
+
+    if (event.state === 'same_channel_retry' && event.channel_id) {
       flushPendingSelection()
       pendingSelection = event
       continue
@@ -77,23 +153,27 @@ export function buildChannelExecutionTimeline(
           : undefined
       if (!selection) flushPendingSelection()
 
-      openAttempt = {
-        kind: 'attempt',
-        channelId: event.channel_id,
-        channelName: event.channel_name || selection?.channel_name,
-        group: event.group || selection?.group,
-        priority: event.priority ?? selection?.priority,
-        retryIndex: selection?.retry_index ?? event.retry_index,
-        selectionState: selection?.state as
-          | 'affinity_hit'
-          | 'same_channel_retry'
-          | undefined,
-        selectionReason: selection?.reason,
-        state: 'active',
-        startedAt: event.timestamp,
-        nextIds: event.next_ids,
+      if (selection?.state === 'same_channel_retry') {
+        openAttempt = {
+          kind: 'attempt',
+          channelId: event.channel_id,
+          channelName: event.channel_name || selection.channel_name,
+          group: event.group || selection.group,
+          priority: event.priority ?? selection.priority,
+          retryIndex: selection.retry_index ?? event.retry_index,
+          selectionState: 'same_channel_retry',
+          selectionReason: selection.reason,
+          state: 'active',
+          startedAt: event.timestamp,
+          nextIds: event.next_ids,
+        }
+        items.push(openAttempt)
+        openRequest = undefined
+      } else {
+        openAttempt = undefined
+        openRequest = event
+        items.push({ kind: 'event', event })
       }
-      items.push(openAttempt)
       pendingSelection = undefined
       continue
     }
@@ -111,12 +191,51 @@ export function buildChannelExecutionTimeline(
       continue
     }
 
+    if (isTerminalEvent(event) && event.channel_id) {
+      const startedAt =
+        openRequest?.channel_id === event.channel_id
+          ? openRequest.timestamp
+          : undefined
+      flushPendingSelection()
+      items.push({ kind: 'event', event, startedAt })
+      openRequest = undefined
+      openAttempt = undefined
+      continue
+    }
+
     flushPendingSelection()
     items.push({ kind: 'event', event })
-    if (isTerminalEvent(event)) openAttempt = undefined
   }
 
   flushPendingSelection()
+
+  // A successful consume log is authoritative even if the runtime trace was
+  // persisted one event behind. Keep the initial request/result as separate
+  // steps; only a repeated same-channel attempt remains compact.
+  if (terminal?.status === 'success') {
+    const endedAt = Math.max(
+      terminal.endedAt ?? 0,
+      openAttempt?.startedAt ?? openRequest?.timestamp ?? 0
+    )
+    if (openAttempt?.state === 'active') {
+      openAttempt.state = 'success'
+      openAttempt.endedAt = endedAt
+    } else if (openRequest) {
+      items.push({
+        kind: 'event',
+        event: {
+          sequence: events.length + 1,
+          timestamp: endedAt,
+          group: openRequest.group,
+          channel_id: openRequest.channel_id,
+          channel_name: openRequest.channel_name,
+          priority: openRequest.priority,
+          state: 'success',
+        },
+        startedAt: openRequest.timestamp,
+      })
+    }
+  }
   return items
 }
 
@@ -125,9 +244,15 @@ export function getStandbyChannelIds(items: ChannelExecutionTimelineItem[]) {
   const standby = new Set<number>()
 
   for (const item of items) {
-    if (item.kind !== 'attempt') continue
-    attempted.add(item.channelId)
-    for (const channelId of item.nextIds ?? []) standby.add(channelId)
+    if (item.kind === 'attempt') {
+      attempted.add(item.channelId)
+      for (const channelId of item.nextIds ?? []) standby.add(channelId)
+      continue
+    }
+    if (item.event.channel_id) attempted.add(item.event.channel_id)
+    if (item.event.state === 'active') {
+      for (const channelId of item.event.next_ids ?? []) standby.add(channelId)
+    }
   }
 
   return [...standby].filter((channelId) => !attempted.has(channelId))

@@ -27,6 +27,9 @@ func TestCaptureUpstreamRequestIdFallsBackToProviderHeader(t *testing.T) {
 	require.Equal(t, "sub2api-request-id", requestId)
 	require.Equal(t, "sub2api-request-id", c.GetString(common.UpstreamRequestIdKey))
 	require.Equal(t, []string{"sub2api-request-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
+	require.Equal(t, map[string]string{
+		"sub2api-request-id": upstreamRequestIdSourceGenericID,
+	}, c.MustGet(common.UpstreamRequestIdSourcesKey))
 }
 
 func TestCaptureUpstreamRequestIdPrefersOneapiHeader(t *testing.T) {
@@ -43,6 +46,25 @@ func TestCaptureUpstreamRequestIdPrefersOneapiHeader(t *testing.T) {
 	require.Equal(t, "oneapi-request-id", requestId)
 	require.Equal(t, "oneapi-request-id", c.GetString(common.UpstreamRequestIdKey))
 	require.Equal(t, []string{"sub2api-request-id", "oneapi-request-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
+	require.Equal(t, map[string]string{
+		"sub2api-request-id": upstreamRequestIdSourceGenericID,
+		"oneapi-request-id":  upstreamRequestIdSourceOneAPI,
+	}, c.MustGet(common.UpstreamRequestIdSourcesKey))
+}
+
+func TestCaptureUpstreamRequestIdPrefersSpecificSourceForSameValue(t *testing.T) {
+	c := newUpstreamRequestIdTestContext()
+
+	CaptureUpstreamRequestId(c, http.Header{
+		providerRequestIdHeader: []string{"shared-request-id"},
+	})
+	CaptureUpstreamRequestId(c, http.Header{
+		common.RequestIdKey: []string{"shared-request-id"},
+	})
+
+	require.Equal(t, map[string]string{
+		"shared-request-id": upstreamRequestIdSourceOneAPI,
+	}, c.MustGet(common.UpstreamRequestIdSourcesKey))
 }
 
 func TestCaptureUpstreamRequestIdUpdatesAcrossUpstreamAttempts(t *testing.T) {

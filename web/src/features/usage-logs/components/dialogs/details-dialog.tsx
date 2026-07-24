@@ -69,6 +69,7 @@ import { cn } from '@/lib/utils'
 
 import type { UsageLog } from '../../data/schema'
 import {
+  buildCompactChannelExecutionEvents,
   buildChannelExecutionTimeline,
   getStandbyChannelIds,
 } from '../../lib/channel-execution-timeline'
@@ -383,23 +384,41 @@ function routeGroupStatusLabel(status?: string) {
       return 'Succeeded'
     case 'failed':
       return 'Failed'
+    case 'not_executed':
+      return 'Not executed'
     default:
       return 'Pending'
   }
 }
 
-function routeGroupStatusVariant(status?: string): StatusBadgeProps['variant'] {
+function routeGroupStatusIcon(status?: string) {
   switch (status) {
-    case 'active':
-      return 'info'
-    case 'cooling':
-      return 'warning'
     case 'success':
-      return 'success'
+      return CheckCircle2
     case 'failed':
-      return 'danger'
+      return XCircle
+    case 'cooling':
+      return Snowflake
+    case 'skipped':
+    case 'not_executed':
+      return SkipForward
     default:
-      return 'neutral'
+      return CircleDot
+  }
+}
+
+function routeGroupStatusClass(status?: string) {
+  switch (status) {
+    case 'success':
+      return 'text-emerald-600 dark:text-emerald-400'
+    case 'failed':
+      return 'text-rose-600 dark:text-rose-400'
+    case 'cooling':
+      return 'text-amber-600 dark:text-amber-400'
+    case 'active':
+      return 'text-sky-600 dark:text-sky-400'
+    default:
+      return 'text-muted-foreground'
   }
 }
 
@@ -417,14 +436,34 @@ function RouteGroupChain(props: {
   const statusByGroup = new Map(
     props.statuses?.map((item) => [item.group, item.status]) ?? []
   )
+  const traceFinished =
+    props.traceStatus === 'success' ||
+    props.traceStatus === 'failed' ||
+    props.traceStatus === 'cancelled'
 
   return (
-    <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
+    <span className='flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1.5'>
       {props.groups.map((group, index) => {
-        let status = statusByGroup.get(group)
+        let status: string | undefined = statusByGroup.get(group)
         if (!status && group === props.actualGroup) {
-          status = props.traceStatus === 'success' ? 'success' : 'active'
+          if (props.traceStatus === 'success') {
+            status = 'success'
+          } else if (
+            props.traceStatus === 'failed' ||
+            props.traceStatus === 'cancelled'
+          ) {
+            status = 'failed'
+          } else {
+            status = 'active'
+          }
+        } else if (
+          traceFinished &&
+          group !== props.actualGroup &&
+          (!status || status === 'pending')
+        ) {
+          status = 'not_executed'
         }
+        const StatusIcon = routeGroupStatusIcon(status)
         return (
           <span key={group} className='contents'>
             {index > 0 ? (
@@ -433,23 +472,36 @@ function RouteGroupChain(props: {
                 aria-hidden='true'
               />
             ) : null}
-            <span className='inline-flex min-w-0 items-center gap-1'>
+            <span className='bg-background inline-flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 shadow-xs'>
               <span className='font-mono text-xs font-medium break-all'>
                 {group}
               </span>
-              <StatusBadge
-                variant={routeGroupStatusVariant(status)}
-                size='sm'
-                copyable={false}
+              <span
+                className={cn(
+                  'inline-flex shrink-0 items-center gap-1 text-[11px]',
+                  routeGroupStatusClass(status)
+                )}
               >
+                <StatusIcon className='size-3' aria-hidden='true' />
                 {props.t(routeGroupStatusLabel(status))}
-              </StatusBadge>
+              </span>
             </span>
           </span>
         )
       })}
     </span>
   )
+}
+
+function upstreamRequestIdSourceLabel(t: TFunction, source?: string) {
+  switch (source) {
+    case 'x-oneapi-request-id':
+      return t('New API / One API (X-Oneapi-Request-Id)')
+    case 'x-request-id':
+      return t('Sub2API / other upstream (X-Request-Id)')
+    default:
+      return t('Not recorded')
+  }
 }
 
 function executionTraceVariant(status?: string): StatusBadgeProps['variant'] {
@@ -805,10 +857,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
       Boolean(props.log.request_id),
     staleTime: 0,
     refetchOnMount: 'always',
-    refetchInterval: (query) =>
-      props.open && query.state.data?.data?.status === 'running'
-        ? 1_000
-        : false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: false,
   })
   const fetchedExecutionTrace = fullExecutionTraceQuery.data?.success
@@ -818,14 +868,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
     storedExecutionTrace,
     fetchedExecutionTrace
   )
-  const executionEvents = executionTrace?.events ?? []
-  const executionTimeline = buildChannelExecutionTimeline(executionEvents)
-  const standbyChannelIds = getStandbyChannelIds(executionTimeline)
-  const lastFailedAttemptIndex = executionTimeline.reduce(
-    (lastIndex, item, index) =>
-      item.kind === 'attempt' && item.state === 'failed' ? index : lastIndex,
-    -1
-  )
+  const storedExecutionEvents = executionTrace?.events ?? []
   let executionTraceStatus = executionTrace?.status
   if (executionTraceStatus === 'running') {
     // A persisted consume log is created only after the upstream response is
@@ -836,6 +879,31 @@ export function DetailsDialog(props: DetailsDialogProps) {
       executionTraceStatus = 'failed'
     }
   }
+  const executionEvents =
+    storedExecutionEvents.length > 0
+      ? storedExecutionEvents
+      : buildCompactChannelExecutionEvents(
+          executionTrace
+            ? { ...executionTrace, status: executionTraceStatus }
+            : undefined,
+          {
+            channelId: props.log.channel,
+            channelName: props.log.channel_name ?? undefined,
+            startedAt: Math.max(
+              0,
+              (props.log.created_at - props.log.use_time) * 1000
+            ),
+            endedAt: props.log.created_at * 1000,
+          }
+        )
+  const executionTimeline = buildChannelExecutionTimeline(executionEvents, {
+    status: executionTraceStatus,
+    endedAt: Math.max(
+      executionTrace?.updated_at ?? 0,
+      props.log.created_at * 1000
+    ),
+  })
+  const standbyChannelIds = getStandbyChannelIds(executionTimeline)
   const showExecutionSummary = executionTrace?.compact === true
   const executionSummaryChannelIDs =
     executionTrace?.channel_ids ??
@@ -843,16 +911,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
       .filter((event) => event.state === 'active' && event.channel_id)
       .map((event) => event.channel_id as number)
   const channelStatusByID = new Map<number, ChannelExecutionStatus>()
-  const channelStatusEventIndexByID = new Map<number, number>()
   const channelSelectionEventIndexByID = new Map<number, number>()
   executionEvents.forEach((event, index) => {
     if (!event.channel_id) return
     const status = channelExecutionStatusFromEvent(event.state)
     if (!status) return
     channelStatusByID.set(event.channel_id, status)
-    // Attach the status badge to the latest state event, including terminal
-    // success/failed events rather than the preceding request-start event.
-    channelStatusEventIndexByID.set(event.channel_id, index)
     if (
       event.state === 'active' ||
       event.state === 'affinity_hit' ||
@@ -907,27 +971,18 @@ export function DetailsDialog(props: DetailsDialogProps) {
   let groupDetails: React.ReactNode = null
   if (executionRouteGroups.length > 0) {
     groupDetails = (
-      <>
-        <DetailRow
-          label={t('Group route chain')}
-          value={
-            <RouteGroupChain
-              groups={executionRouteGroups}
-              statuses={executionTrace?.route_group_statuses}
-              actualGroup={actualExecutionGroup}
-              traceStatus={executionTraceStatus}
-              t={t}
-            />
-          }
-        />
-        {actualExecutionGroup ? (
-          <DetailRow
-            label={t('Actual execution group')}
-            value={actualExecutionGroup}
-            mono
+      <DetailRow
+        label={t('Group route chain')}
+        value={
+          <RouteGroupChain
+            groups={executionRouteGroups}
+            statuses={executionTrace?.route_group_statuses}
+            actualGroup={actualExecutionGroup}
+            traceStatus={executionTraceStatus}
+            t={t}
           />
-        ) : null}
-      </>
+        }
+      />
     )
   } else if (props.log.group || other?.group) {
     groupDetails = (
@@ -1109,10 +1164,18 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const useChannel = other?.admin_info?.use_channel
   const channelChain =
     useChannel && useChannel.length > 0 ? useChannel.join(' → ') : undefined
+  const showChannelChain =
+    channelChain &&
+    !(
+      useChannel?.length === 1 &&
+      String(useChannel[0]) === String(props.log.channel)
+    )
   const upstreamRequestIds = getUpstreamRequestIds(
     other?.admin_info?.upstream_request_ids,
     props.log.upstream_request_id
   )
+  const upstreamRequestIdSources =
+    other?.admin_info?.upstream_request_id_sources ?? {}
   let reasoningEffortVariant: StatusBadgeProps['variant'] = 'green'
   if (other?.reasoning_effort === 'high') {
     reasoningEffortVariant = 'orange'
@@ -1187,8 +1250,20 @@ export function DetailsDialog(props: DetailsDialogProps) {
           {props.isAdmin && upstreamRequestIds.length === 1 && (
             <DetailRow
               label={t('Upstream Request ID')}
-              value={upstreamRequestIds[0]}
-              mono
+              value={
+                <span className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5'>
+                  <span className='font-mono break-all'>
+                    {upstreamRequestIds[0]}
+                  </span>
+                  <span className='text-muted-foreground text-[11px]'>
+                    {t('Source')}:{' '}
+                    {upstreamRequestIdSourceLabel(
+                      t,
+                      upstreamRequestIdSources[upstreamRequestIds[0]]
+                    )}
+                  </span>
+                </span>
+              }
             />
           )}
           {props.isAdmin && upstreamRequestIds.length > 1 && (
@@ -1201,7 +1276,16 @@ export function DetailsDialog(props: DetailsDialogProps) {
                       <span className='text-muted-foreground shrink-0 tabular-nums'>
                         {index + 1}.
                       </span>
-                      <span className='min-w-0 break-all'>{requestId}</span>
+                      <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
+                        <span className='min-w-0 break-all'>{requestId}</span>
+                        <span className='text-muted-foreground font-sans text-[11px]'>
+                          {t('Source')}:{' '}
+                          {upstreamRequestIdSourceLabel(
+                            t,
+                            upstreamRequestIdSources[requestId]
+                          )}
+                        </span>
+                      </span>
                     </span>
                   ))}
                 </span>
@@ -1243,7 +1327,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
 
-          {channelChain && props.isAdmin && (
+          {showChannelChain && props.isAdmin && (
             <DetailRow label={t('Retry Chain')} value={channelChain} mono />
           )}
 
@@ -1325,11 +1409,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
                     : 'Traditional retry'
                 )}
               </span>
-              {actualExecutionGroup ? (
-                <StatusBadge variant='neutral' size='sm' copyable={false}>
-                  {t('Actual execution group')}: {actualExecutionGroup}
-                </StatusBadge>
-              ) : null}
               {showExecutionSummary ? (
                 <StatusBadge variant='neutral' size='sm' copyable={false}>
                   {t('Execution summary')}
@@ -1406,10 +1485,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
                     const AttemptIcon = executionEventIcon(item.state)
                     const attemptStatus: ChannelExecutionStatus =
                       item.state === 'active' ? 'running' : item.state
-                    const reasonIsDuplicate =
-                      item.state === 'failed' &&
-                      index === lastFailedAttemptIndex &&
-                      isDuplicateLogDiagnosticMessage(item.reason, details)
                     return (
                       <div
                         key={`attempt-${item.channelId}-${item.startedAt ?? index}`}
@@ -1466,7 +1541,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
                               </span>
                             ) : null}
                           </div>
-                          {item.reason && !reasonIsDuplicate ? (
+                          {item.reason ? (
                             <p className='text-muted-foreground mt-1 text-xs break-all'>
                               {item.reason}
                             </p>
@@ -1540,27 +1615,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
                               </span>
                             )}
                           {event.channel_id ? (
-                            <span className='inline-flex min-w-0 items-center gap-1.5'>
-                              <span className='text-xs font-medium'>
-                                #{event.channel_id} {event.channel_name}
-                              </span>
-                              {channelStatusEventIndexByID.get(
-                                event.channel_id
-                              ) === index ? (
-                                <StatusBadge
-                                  variant={channelExecutionStatusVariant(
-                                    channelStatusByID.get(event.channel_id)
-                                  )}
-                                  size='sm'
-                                  copyable={false}
-                                >
-                                  {t(
-                                    channelExecutionStatusLabel(
-                                      channelStatusByID.get(event.channel_id)
-                                    )
-                                  )}
-                                </StatusBadge>
-                              ) : null}
+                            <span className='text-xs font-medium'>
+                              #{event.channel_id} {event.channel_name}
                             </span>
                           ) : null}
                           {event.timestamp ? (
@@ -1579,10 +1635,20 @@ export function DetailsDialog(props: DetailsDialogProps) {
                             {t(executionEventReasonLabel(event.reason))}
                           </p>
                         ) : null}
-                        {event.priority != null ||
+                        {item.startedAt != null ||
+                        event.priority != null ||
                         (event.retry_index != null && event.retry_index > 0) ||
                         event.cooldown_until ? (
                           <div className='text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]'>
+                            {item.startedAt != null ? (
+                              <span>
+                                {t('Duration')}:{' '}
+                                {formatExecutionDuration(
+                                  item.startedAt,
+                                  event.timestamp
+                                )}
+                              </span>
+                            ) : null}
                             {event.priority != null ? (
                               <span>
                                 {t('Priority')}: {event.priority}

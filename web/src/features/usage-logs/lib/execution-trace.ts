@@ -33,7 +33,13 @@ export function mergeExecutionTrace(
   fetched: ChannelExecutionTraceInfo | undefined
 ): ChannelExecutionTraceInfo | undefined {
   if (!fetched) return stored
-  if (!stored) return { ...fetched, compact: false }
+  if (!stored) return { ...fetched, compact: fetched.compact === true }
+
+  // The endpoint falls back to the persisted SQL summary when the runtime
+  // Redis trace is unavailable (for example, when viewing another instance's
+  // logs). Do not mislabel that fallback as a full trace: an empty full trace
+  // is hidden by the details UI, while a compact trace has a useful summary.
+  const mergedIsCompact = fetched.compact === true
 
   const storedIsTerminalSummary =
     stored.compact === true && isTerminalStatus(stored.status)
@@ -42,7 +48,7 @@ export function mergeExecutionTrace(
     return {
       ...stored,
       ...fetched,
-      compact: false,
+      compact: mergedIsCompact,
       route_groups: fetched.route_groups ?? stored.route_groups,
       route_group_statuses:
         fetched.route_group_statuses ?? stored.route_group_statuses,
@@ -54,7 +60,7 @@ export function mergeExecutionTrace(
   return {
     ...fetched,
     ...stored,
-    compact: false,
+    compact: mergedIsCompact,
     request_id: fetched.request_id ?? stored.request_id,
     model: fetched.model ?? stored.model,
     request_path: fetched.request_path ?? stored.request_path,

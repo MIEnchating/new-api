@@ -136,8 +136,27 @@ func TestGetAndDecodeRejectsTrailingJSON(t *testing.T) {
 	require.ErrorContains(t, err, "trailing JSON")
 }
 
+func TestParseUptimeBadge(t *testing.T) {
+	uptime, err := parseUptimeBadge(strings.NewReader(
+		`<svg xmlns="http://www.w3.org/2000/svg"><title>uptime: 98.76%</title></svg>`,
+	))
+
+	require.NoError(t, err)
+	assert.InDelta(t, 0.9876, uptime, 0.000001)
+}
+
+func TestParseUptimeBadgeRejectsUnavailableValue(t *testing.T) {
+	_, err := parseUptimeBadge(strings.NewReader(
+		`<svg xmlns="http://www.w3.org/2000/svg"><title>uptime: N/A</title></svg>`,
+	))
+
+	require.ErrorContains(t, err, "invalid percentage")
+}
+
 func uptimeLoaderTestSnapshot(degraded bool) uptimeStatusSnapshot {
 	ping := 42
+	uptime30m := 0.97
+	uptime1h := 0.98
 	uptime7 := 0.99
 	return uptimeStatusSnapshot{
 		Degraded: degraded,
@@ -149,6 +168,8 @@ func uptimeLoaderTestSnapshot(degraded bool) uptimeStatusSnapshot {
 						Name:       "api",
 						Status:     1,
 						Ping:       &ping,
+						Uptime30m:  &uptime30m,
+						Uptime1h:   &uptime1h,
 						Uptime7:    &uptime7,
 						Heartbeats: []Heartbeat{{Status: 1, Ping: &ping}},
 					},
@@ -248,6 +269,9 @@ func TestUptimeStatusLoaderReturnsDefensiveCopies(t *testing.T) {
 	first.Results[0].CategoryName = "modified"
 	first.Results[0].Monitors[0].Name = "modified"
 	*first.Results[0].Monitors[0].Ping = 1000
+	*first.Results[0].Monitors[0].Uptime30m = 0
+	*first.Results[0].Monitors[0].Uptime1h = 0
+	*first.Results[0].Monitors[0].Uptime7 = 0
 	*first.Results[0].Monitors[0].Heartbeats[0].Ping = 1000
 
 	second, err := loader.load(context.Background(), groups, fetch)
@@ -255,5 +279,8 @@ func TestUptimeStatusLoaderReturnsDefensiveCopies(t *testing.T) {
 	assert.Equal(t, "primary", second.Results[0].CategoryName)
 	assert.Equal(t, "api", second.Results[0].Monitors[0].Name)
 	assert.Equal(t, 42, *second.Results[0].Monitors[0].Ping)
+	assert.Equal(t, 0.97, *second.Results[0].Monitors[0].Uptime30m)
+	assert.Equal(t, 0.98, *second.Results[0].Monitors[0].Uptime1h)
+	assert.Equal(t, 0.99, *second.Results[0].Monitors[0].Uptime7)
 	assert.Equal(t, 42, *second.Results[0].Monitors[0].Heartbeats[0].Ping)
 }

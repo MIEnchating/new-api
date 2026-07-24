@@ -178,6 +178,8 @@ export interface UptimeHeartbeat {
 export interface UptimeMonitor {
   name: string
   uptime: number
+  uptime30m?: number
+  uptime1h?: number
   uptime24?: number
   uptime7?: number
   status: number

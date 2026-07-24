@@ -1290,14 +1290,14 @@ func TestChannelExecutionPlanAndTraceFollowActualRoute(t *testing.T) {
 
 	adminInfo := map[string]interface{}{}
 	AppendChannelExecutionTraceAdminInfo(ctx, adminInfo)
-	summary, exists := adminInfo["channel_execution_trace"].(ChannelExecutionTraceSummary)
+	persistedTrace, exists := adminInfo["channel_execution_trace"].(ChannelExecutionTrace)
 	require.True(t, exists)
-	assert.True(t, summary.Compact)
-	assert.Equal(t, "route", summary.Mode)
-	assert.Equal(t, "success", summary.Status)
-	assert.Equal(t, "default", summary.Group)
-	assert.Equal(t, []int{1, 2}, summary.ChannelIDs)
-	assert.False(t, summary.AffinityHit)
+	assert.False(t, persistedTrace.Compact)
+	assert.Equal(t, "route", persistedTrace.Mode)
+	assert.Equal(t, "success", persistedTrace.Status)
+	assert.Equal(t, "default", persistedTrace.Group)
+	require.NotEmpty(t, persistedTrace.Events)
+	assert.Equal(t, "success", persistedTrace.Events[len(persistedTrace.Events)-1].State)
 
 	affinityCtx := newChannelRouteContext()
 	affinityCtx.Set(common.RequestIdKey, "request-trace-affinity")
@@ -1308,8 +1308,11 @@ func TestChannelExecutionPlanAndTraceFollowActualRoute(t *testing.T) {
 	AppendChannelExecutionTraceAdminInfo(affinityCtx, affinityAdminInfo)
 	affinitySummary, exists := affinityAdminInfo["channel_execution_trace"].(ChannelExecutionTraceSummary)
 	require.True(t, exists)
+	assert.True(t, affinitySummary.Compact)
 	assert.Equal(t, []int{1}, affinitySummary.ChannelIDs)
 	assert.True(t, affinitySummary.AffinityHit)
+	assert.Positive(t, affinitySummary.StartedAt)
+	assert.GreaterOrEqual(t, affinitySummary.UpdatedAt, affinitySummary.StartedAt)
 
 	failedCtx := newChannelRouteContext()
 	failedCtx.Set(common.RequestIdKey, "request-trace-failed")

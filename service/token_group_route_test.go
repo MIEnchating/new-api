@@ -294,14 +294,16 @@ func TestTokenGroupRouteSkipsFrozenGroupAndReturnsAfterCooldownCleared(t *testin
 	MarkChannelExecutionSuccess(ctx)
 	adminInfo := map[string]interface{}{}
 	AppendChannelExecutionTraceAdminInfo(ctx, adminInfo)
-	summary, exists := adminInfo["channel_execution_trace"].(ChannelExecutionTraceSummary)
+	persistedTrace, exists := adminInfo["channel_execution_trace"].(ChannelExecutionTrace)
 	require.True(t, exists)
-	assert.Equal(t, "fallback", summary.Group)
-	assert.Equal(t, []string{"premium", "fallback"}, summary.RouteGroups)
+	assert.Equal(t, "fallback", persistedTrace.Group)
+	assert.Equal(t, []string{"premium", "fallback"}, persistedTrace.RouteGroups)
 	assert.Equal(t, []ChannelExecutionRouteGroupStatus{
-		{Group: "premium", Status: "skipped", CooldownUntil: summary.RouteGroupStatuses[0].CooldownUntil},
+		{Group: "premium", Status: "skipped", CooldownUntil: persistedTrace.RouteGroupStatuses[0].CooldownUntil},
 		{Group: "fallback", Status: "success"},
-	}, summary.RouteGroupStatuses)
+	}, persistedTrace.RouteGroupStatuses)
+	require.NotEmpty(t, persistedTrace.Events)
+	assert.Equal(t, "success", persistedTrace.Events[len(persistedTrace.Events)-1].State)
 
 	ClearTokenGroupRouteCooldown(11, "premium", tokenRouteTestModel, tokenRouteTestPath)
 	nextCtx := newTokenRouteContext(routes)

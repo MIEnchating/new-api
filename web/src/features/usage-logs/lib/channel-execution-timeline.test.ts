@@ -20,12 +20,49 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import {
+  buildCompactChannelExecutionEvents,
   buildChannelExecutionTimeline,
   getStandbyChannelIds,
 } from './channel-execution-timeline.ts'
 
 describe('channel execution timeline', () => {
-  test('merges affinity selection, request, and result into one attempt', () => {
+  test('reconstructs a simple successful trace from its compact summary', () => {
+    const events = buildCompactChannelExecutionEvents(
+      {
+        compact: true,
+        status: 'success',
+        group: 'codex-special',
+        channel_ids: [116],
+        affinity_hit: true,
+        started_at: 100,
+        updated_at: 370,
+      },
+      { channelId: 116, channelName: 'sub2api' }
+    )
+
+    assert.deepEqual(
+      events.map((event) => event.state),
+      ['affinity_hit', 'active', 'success']
+    )
+    assert.equal(events[0]?.channel_name, 'sub2api')
+    assert.equal(events[1]?.timestamp, 100)
+    assert.equal(events[2]?.timestamp, 370)
+  })
+
+  test('does not reconstruct a multi-channel compact summary', () => {
+    const events = buildCompactChannelExecutionEvents(
+      {
+        compact: true,
+        status: 'success',
+        channel_ids: [116, 92],
+      },
+      {}
+    )
+
+    assert.deepEqual(events, [])
+  })
+
+  test('keeps the initial affinity selection, request, and result visible', () => {
     const timeline = buildChannelExecutionTimeline([
       {
         sequence: 1,
@@ -53,15 +90,55 @@ describe('channel execution timeline', () => {
       },
     ])
 
-    assert.equal(timeline.length, 1)
-    const attempt = timeline[0]
-    assert.equal(attempt.kind, 'attempt')
-    if (attempt.kind !== 'attempt') return
-    assert.equal(attempt.selectionState, 'affinity_hit')
-    assert.equal(attempt.state, 'failed')
-    assert.equal(attempt.startedAt, 120)
-    assert.equal(attempt.endedAt, 370)
-    assert.deepEqual(attempt.nextIds, [153])
+    assert.equal(timeline.length, 3)
+    assert.equal(timeline[0]?.kind, 'event')
+    assert.equal(
+      timeline[0]?.kind === 'event' ? timeline[0].event.state : undefined,
+      'affinity_hit'
+    )
+    assert.equal(
+      timeline[1]?.kind === 'event' ? timeline[1].event.state : undefined,
+      'active'
+    )
+    const result = timeline[2]
+    assert.equal(result?.kind, 'event')
+    if (result?.kind !== 'event') return
+    assert.equal(result.event.state, 'failed')
+    assert.equal(result.startedAt, 120)
+  })
+
+  test('adds a separate initial success when the terminal event is missing', () => {
+    const timeline = buildChannelExecutionTimeline(
+      [
+        {
+          sequence: 1,
+          timestamp: 100,
+          channel_id: 116,
+          channel_name: 'sub2api',
+          state: 'affinity_hit',
+        },
+        {
+          sequence: 2,
+          timestamp: 120,
+          channel_id: 116,
+          channel_name: 'sub2api',
+          state: 'active',
+        },
+      ],
+      { status: 'success', endedAt: 370 }
+    )
+
+    assert.equal(timeline.length, 3)
+    assert.equal(
+      timeline[1]?.kind === 'event' ? timeline[1].event.state : undefined,
+      'active'
+    )
+    const result = timeline[2]
+    assert.equal(result?.kind, 'event')
+    if (result?.kind !== 'event') return
+    assert.equal(result.event.state, 'success')
+    assert.equal(result.startedAt, 120)
+    assert.equal(result.event.timestamp, 370)
   })
 
   test('merges each same-channel retry into its own attempt', () => {
@@ -78,12 +155,39 @@ describe('channel execution timeline', () => {
       { timestamp: 240, channel_id: 167, state: 'failed' },
     ])
 
-    assert.equal(timeline.length, 2)
-    assert.equal(timeline[1]?.kind, 'attempt')
-    if (timeline[1]?.kind !== 'attempt') return
-    assert.equal(timeline[1].selectionState, 'same_channel_retry')
-    assert.equal(timeline[1].retryIndex, 1)
-    assert.equal(timeline[1].endedAt, 240)
+    assert.equal(timeline.length, 3)
+    assert.equal(timeline[0]?.kind, 'event')
+    assert.equal(timeline[1]?.kind, 'event')
+    assert.equal(timeline[2]?.kind, 'attempt')
+    if (timeline[2]?.kind !== 'attempt') return
+    assert.equal(timeline[2].selectionState, 'same_channel_retry')
+    assert.equal(timeline[2].retryIndex, 1)
+    assert.equal(timeline[2].endedAt, 240)
+  })
+
+  test('keeps a missing retry success inside the merged retry attempt', () => {
+    const timeline = buildChannelExecutionTimeline(
+      [
+        { timestamp: 100, channel_id: 167, state: 'active' },
+        { timestamp: 150, channel_id: 167, state: 'failed' },
+        {
+          timestamp: 160,
+          channel_id: 167,
+          state: 'same_channel_retry',
+          retry_index: 1,
+        },
+        { timestamp: 170, channel_id: 167, state: 'active' },
+      ],
+      { status: 'success', endedAt: 240 }
+    )
+
+    assert.equal(timeline.length, 3)
+    const retry = timeline[2]
+    assert.equal(retry?.kind, 'attempt')
+    if (retry?.kind !== 'attempt') return
+    assert.equal(retry.state, 'success')
+    assert.equal(retry.startedAt, 170)
+    assert.equal(retry.endedAt, 240)
   })
 
   test('shows only standby channels that were not later attempted', () => {
@@ -100,5 +204,63 @@ describe('channel execution timeline', () => {
     ])
 
     assert.deepEqual(getStandbyChannelIds(timeline), [120])
+  })
+
+  test('hides the internal finished marker after failed attempts', () => {
+    const timeline = buildChannelExecutionTimeline([
+      {
+        timestamp: 100,
+        channel_id: 116,
+        channel_name: 'us-sub2-codex-special',
+        state: 'active',
+      },
+      {
+        timestamp: 169,
+        channel_id: 116,
+        state: 'failed',
+        reason: 'status_code=503, Service temporarily unavailable',
+      },
+      {
+        timestamp: 170,
+        channel_id: 116,
+        state: 'same_channel_retry',
+        retry_index: 1,
+      },
+      {
+        timestamp: 171,
+        channel_id: 116,
+        state: 'active',
+      },
+      {
+        timestamp: 200,
+        channel_id: 116,
+        state: 'failed',
+        reason: 'status_code=500, upstream error: do request failed',
+      },
+      {
+        timestamp: 201,
+        group: 'codex-special',
+        state: 'finished',
+        reason: 'upstream error: do request failed',
+      },
+    ])
+
+    assert.equal(timeline.length, 3)
+    assert.equal(
+      timeline.some(
+        (item) => item.kind === 'event' && item.event.state === 'finished'
+      ),
+      false
+    )
+    assert.equal(timeline[0]?.kind, 'event')
+    assert.equal(timeline[1]?.kind, 'event')
+    assert.equal(timeline[2]?.kind, 'attempt')
+    const finalAttempt = timeline[2]
+    assert.equal(finalAttempt?.kind, 'attempt')
+    if (finalAttempt?.kind !== 'attempt') return
+    assert.equal(
+      finalAttempt.reason,
+      'status_code=500, upstream error: do request failed'
+    )
   })
 })

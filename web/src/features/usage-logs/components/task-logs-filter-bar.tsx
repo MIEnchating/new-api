@@ -26,6 +26,7 @@ import { CompactDateTimeRangePicker } from '@/components/compact-date-time-range
 import { useDelayedLoading } from '@/hooks/use-delayed-loading'
 
 import { applyLogSearch, buildSearchParams } from '../lib/filter'
+import { isExpiredLegacyLiveRange } from '../lib/time-range'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { DrawingLogFilters, LogCategory, TaskLogFilters } from '../types'
 import {
@@ -41,6 +42,7 @@ const taskLogSearchKeys = [
   'page',
   'startTime',
   'endTime',
+  'timeMode',
   'channel',
   'filter',
 ] as const
@@ -87,6 +89,17 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     const { start, end } = getDefaultTimeRange()
     return { startTime: start, endTime: end }
   })
+  const [timeRangeEdited, setTimeRangeEdited] = useState(false)
+  const hasExplicitTimeRange = Boolean(
+    searchParams.startTime || searchParams.endTime
+  )
+  const legacyLiveRangeExpired =
+    searchParams.timeMode !== 'fixed' &&
+    isExpiredLegacyLiveRange(searchParams.startTime, searchParams.endTime)
+  const useFixedTimeRange =
+    timeRangeEdited ||
+    searchParams.timeMode === 'fixed' ||
+    (hasExplicitTimeRange && !legacyLiveRangeExpired)
 
   useEffect(() => {
     const { start, end } = getDefaultTimeRange()
@@ -111,10 +124,12 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
           }
 
     setFilters(next)
+    setTimeRangeEdited(false)
   }, [
     props.logCategory,
     searchParams.startTime,
     searchParams.endTime,
+    searchParams.timeMode,
     searchParams.channel,
     searchParams.filter,
   ])
@@ -128,6 +143,18 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
 
   const handleApply = useCallback(async () => {
     const filterParams = buildSearchParams(filters, props.logCategory)
+    if (!useFixedTimeRange) {
+      delete filterParams.startTime
+      delete filterParams.endTime
+      const { start, end } = getDefaultTimeRange()
+      setFilters((current) => ({
+        ...current,
+        startTime: start,
+        endTime: end,
+      }))
+    } else {
+      filterParams.timeMode = 'fixed'
+    }
     const nextSearch = {
       ...filterParams,
       page: 1,
@@ -148,20 +175,27 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
           search: nextSearch,
         }),
     })
-  }, [filters, isAdmin, navigate, props.logCategory, queryClient, searchParams])
+  }, [
+    filters,
+    isAdmin,
+    navigate,
+    props.logCategory,
+    queryClient,
+    searchParams,
+    useFixedTimeRange,
+  ])
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
     const resetFilters: TaskLogsFilters = { startTime: start, endTime: end }
     setFilters(resetFilters)
+    setTimeRangeEdited(false)
 
     navigate({
       to: '/usage-logs/$section',
       params: { section: props.logCategory },
       search: {
         page: 1,
-        startTime: start.getTime(),
-        endTime: end.getTime(),
       },
     })
   }, [navigate, props.logCategory])
@@ -195,6 +229,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
         start={filters.startTime}
         end={filters.endTime}
         onChange={({ start, end }) => {
+          setTimeRangeEdited(true)
           handleChange('startTime', start)
           handleChange('endTime', end)
         }}

@@ -102,6 +102,8 @@ type ChannelExecutionTraceSummary struct {
 	Group              string                             `json:"group,omitempty"`
 	RouteGroups        []string                           `json:"route_groups,omitempty"`
 	RouteGroupStatuses []ChannelExecutionRouteGroupStatus `json:"route_group_statuses,omitempty"`
+	StartedAt          int64                              `json:"started_at,omitempty"`
+	UpdatedAt          int64                              `json:"updated_at,omitempty"`
 	ChannelIDs         []int                              `json:"channel_ids,omitempty"`
 	AffinityHit        bool                               `json:"affinity_hit,omitempty"`
 }
@@ -1285,31 +1287,46 @@ func appendChannelExecutionTraceAdminInfo(c *gin.Context, adminInfo map[string]i
 		snapshot.Status = "failed"
 	}
 	updateChannelExecutionRouteGroupStatuses(&snapshot)
-	// Successful SQL logs only need the execution summary. The runtime cache
-	// keeps the complete timeline for the execution-plan UI.
 	if snapshot.Status == "success" {
-		channelIDs := make([]int, 0, len(snapshot.Events))
+		channelIDs := make([]int, 0, 1)
 		affinityHit := false
+		persistFullTrace := false
 		for _, event := range snapshot.Events {
-			if event.State == "active" && event.ChannelID > 0 {
-				channelIDs = append(channelIDs, event.ChannelID)
-			}
-			if event.State == "affinity_hit" {
+			switch event.State {
+			case "affinity_hit":
 				affinityHit = true
+			case "active":
+				if event.ChannelID > 0 {
+					channelIDs = append(channelIDs, event.ChannelID)
+				}
+			case "success":
+			default:
+				// Retries, failures, cooldowns, skipped candidates and other
+				// decisions carry diagnostic information that must be retained.
+				persistFullTrace = true
 			}
 		}
-		adminInfo["channel_execution_trace"] = ChannelExecutionTraceSummary{
-			Compact:            true,
-			Mode:               snapshot.Mode,
-			Status:             snapshot.Status,
-			Group:              snapshot.Group,
-			RouteGroups:        append([]string(nil), snapshot.RouteGroups...),
-			RouteGroupStatuses: append([]ChannelExecutionRouteGroupStatus(nil), snapshot.RouteGroupStatuses...),
-			ChannelIDs:         channelIDs,
-			AffinityHit:        affinityHit,
+		if len(channelIDs) != 1 {
+			persistFullTrace = true
 		}
-		return
+		if !persistFullTrace {
+			adminInfo["channel_execution_trace"] = ChannelExecutionTraceSummary{
+				Compact:            true,
+				Mode:               snapshot.Mode,
+				Status:             snapshot.Status,
+				Group:              snapshot.Group,
+				RouteGroups:        append([]string(nil), snapshot.RouteGroups...),
+				RouteGroupStatuses: append([]ChannelExecutionRouteGroupStatus(nil), snapshot.RouteGroupStatuses...),
+				StartedAt:          snapshot.StartedAt,
+				UpdatedAt:          snapshot.UpdatedAt,
+				ChannelIDs:         channelIDs,
+				AffinityHit:        affinityHit,
+			}
+			return
+		}
 	}
+	// Persist complex success and all failure timelines so their diagnostic
+	// detail survives cross-instance reads and Redis expiry.
 	adminInfo["channel_execution_trace"] = snapshot
 }
 

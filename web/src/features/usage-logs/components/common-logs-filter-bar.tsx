@@ -20,7 +20,7 @@ import { useIsFetching, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, getRouteApi } from '@tanstack/react-router'
 import type { Table } from '@tanstack/react-table'
 import { Eye, EyeOff } from 'lucide-react'
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { CompactDateTimeRangePicker } from '@/components/compact-date-time-range-picker'
@@ -36,6 +36,7 @@ import { useDelayedLoading } from '@/hooks/use-delayed-loading'
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
 import { getUsageLogGroups } from '../group-options-api'
 import { applyLogSearch, buildSearchParams } from '../lib/filter'
+import { isExpiredLegacyLiveRange } from '../lib/time-range'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters } from '../types'
 import { CommonLogsStats } from './common-logs-stats'
@@ -52,6 +53,7 @@ const commonLogSearchKeys = [
   'page',
   'startTime',
   'endTime',
+  'timeMode',
   'channel',
   'model',
   'token',
@@ -97,6 +99,7 @@ function buildSearchSourceKey(values: {
   requestId?: unknown
   upstreamRequestId?: unknown
   type?: unknown
+  timeMode?: unknown
 }) {
   return [
     values.startTime,
@@ -109,6 +112,7 @@ function buildSearchSourceKey(values: {
     values.requestId,
     values.upstreamRequestId,
     Array.isArray(values.type) ? values.type.join(',') : values.type,
+    values.timeMode,
   ]
     .map((value) => String(value ?? ''))
     .join('\u001f')
@@ -148,6 +152,7 @@ export function CommonLogsFilterBar<TData>(
       requestId: searchParams.requestId,
       upstreamRequestId: searchParams.upstreamRequestId,
       type: searchParams.type,
+      timeMode: searchParams.timeMode,
     }
     const filters: CommonLogFilters = {
       startTime: searchParams.startTime
@@ -178,8 +183,25 @@ export function CommonLogsFilterBar<TData>(
     searchParams.requestId,
     searchParams.upstreamRequestId,
     searchParams.type,
+    searchParams.timeMode,
   ])
   const [draft, setDraft] = useState<CommonLogDraft>(() => searchState)
+  const [timeRangeEdited, setTimeRangeEdited] = useState(false)
+  const hasExplicitTimeRange = Boolean(
+    searchParams.startTime || searchParams.endTime
+  )
+  const legacyLiveRangeExpired =
+    searchParams.timeMode !== 'fixed' &&
+    isExpiredLegacyLiveRange(searchParams.startTime, searchParams.endTime)
+  const useFixedTimeRange =
+    timeRangeEdited ||
+    searchParams.timeMode === 'fixed' ||
+    (hasExplicitTimeRange && !legacyLiveRangeExpired)
+
+  useEffect(() => {
+    setTimeRangeEdited(false)
+  }, [searchParams.startTime, searchParams.endTime, searchParams.timeMode])
+
   const activeDraft =
     draft.sourceKey === searchState.sourceKey ? draft : searchState
   const filters = activeDraft.filters
@@ -202,6 +224,17 @@ export function CommonLogsFilterBar<TData>(
 
   const handleApply = useCallback(async () => {
     const filterParams = buildSearchParams(filters, 'common')
+    if (!useFixedTimeRange) {
+      delete filterParams.startTime
+      delete filterParams.endTime
+      const { start, end } = getDefaultTimeRange()
+      setDraft((current) => ({
+        ...current,
+        filters: { ...current.filters, startTime: start, endTime: end },
+      }))
+    } else {
+      filterParams.timeMode = 'fixed'
+    }
     const nextSearch = {
       ...filterParams,
       type: [logType],
@@ -229,16 +262,21 @@ export function CommonLogsFilterBar<TData>(
           search: nextSearch,
         }),
     })
-  }, [filters, isAdmin, logType, navigate, queryClient, searchParams])
+  }, [
+    filters,
+    isAdmin,
+    logType,
+    navigate,
+    queryClient,
+    searchParams,
+    useFixedTimeRange,
+  ])
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
     const resetFilters: CommonLogFilters = { startTime: start, endTime: end }
-    const resetSearch = {
-      type: [LOG_TYPE_ALL_VALUE],
-      startTime: start.getTime(),
-      endTime: end.getTime(),
-    }
+    const resetSearch = { type: [LOG_TYPE_ALL_VALUE] }
+    setTimeRangeEdited(false)
     setDraft({
       sourceKey: buildSearchSourceKey(resetSearch),
       filters: resetFilters,
@@ -338,6 +376,7 @@ export function CommonLogsFilterBar<TData>(
         start={filters.startTime}
         end={filters.endTime}
         onChange={({ start, end }) => {
+          setTimeRangeEdited(true)
           handleChange('startTime', start)
           handleChange('endTime', end)
         }}
