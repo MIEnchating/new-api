@@ -107,6 +107,61 @@ describe('channel execution timeline', () => {
     assert.equal(result.startedAt, 120)
   })
 
+  test('orders a late group affinity decision before one deduplicated channel request', () => {
+    const timeline = buildChannelExecutionTimeline([
+      {
+        sequence: 1,
+        timestamp: 100,
+        channel_id: 92,
+        channel_name: 'us-sub2-plus',
+        state: 'affinity_hit',
+        reason: 'route_affinity',
+      },
+      {
+        sequence: 2,
+        timestamp: 100,
+        channel_id: 92,
+        channel_name: 'us-sub2-plus',
+        state: 'active',
+      },
+      {
+        sequence: 3,
+        timestamp: 100,
+        group: 'codex',
+        state: 'affinity_hit',
+        reason: 'group_affinity',
+      },
+      {
+        sequence: 4,
+        timestamp: 100,
+        channel_id: 92,
+        channel_name: 'us-sub2-plus',
+        state: 'active',
+      },
+      {
+        sequence: 5,
+        timestamp: 23300,
+        channel_id: 92,
+        channel_name: 'us-sub2-plus',
+        state: 'success',
+      },
+    ])
+
+    assert.deepEqual(
+      timeline.map((item) =>
+        item.kind === 'event'
+          ? `${item.event.reason ?? 'request'}:${item.event.state}`
+          : `attempt:${item.state}`
+      ),
+      [
+        'group_affinity:affinity_hit',
+        'route_affinity:affinity_hit',
+        'request:active',
+        'request:success',
+      ]
+    )
+  })
+
   test('adds a separate initial success when the terminal event is missing', () => {
     const timeline = buildChannelExecutionTimeline(
       [

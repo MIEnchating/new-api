@@ -52,6 +52,32 @@ func TestShouldAttemptNextChannelKeepsRouteAndRetryMutuallyExclusive(t *testing.
 	assert.False(t, shouldAttemptNextChannel(c, err, 10, false))
 }
 
+func TestTokenGroupRoutingDoesNotDependOnLegacyRetryBudget(t *testing.T) {
+	oldRouteEnabled := common.ChannelRouteCooldownEnabled
+	t.Cleanup(func() { common.ChannelRouteCooldownEnabled = oldRouteEnabled })
+	common.ChannelRouteCooldownEnabled = false
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	common.SetContextKey(c, constant.ContextKeyTokenGroupRoutes, []model.TokenGroupRoute{
+		{Group: "primary", Priority: 2, CooldownSeconds: 60},
+		{Group: "fallback", Priority: 1, CooldownSeconds: 60},
+	})
+	routeErr := types.NewErrorWithStatusCode(
+		errors.New("upstream unavailable"),
+		types.ErrorCodeChannelInvalidKey,
+		http.StatusInternalServerError,
+	)
+	taskErr := &dto.TaskError{StatusCode: http.StatusInternalServerError}
+
+	assert.True(t, hasManagedRouting(c))
+	assert.True(t, shouldAttemptNextChannel(c, routeErr, 0, true))
+	assert.False(t, shouldAttemptNextChannel(c, routeErr, 10, false))
+	assert.True(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 0, true, true))
+	assert.False(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 10, true, false))
+}
+
 func TestShouldAttemptNextChannelStopsAfterStreamOutput(t *testing.T) {
 	oldRouteEnabled := common.ChannelRouteCooldownEnabled
 	t.Cleanup(func() { common.ChannelRouteCooldownEnabled = oldRouteEnabled })
@@ -64,8 +90,33 @@ func TestShouldAttemptNextChannelStopsAfterStreamOutput(t *testing.T) {
 	err := types.NewOpenAIError(errors.New("stream failed"), types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
 
 	assert.True(t, shouldAttemptNextChannel(c, err, 0, true))
+	helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "ping"}, `{\"type\":\"ping\"}`)
+	assert.True(t, shouldAttemptNextChannel(c, err, 0, true))
 	require.NoError(t, helper.StringData(c, `{\"type\":\"response.output_text.delta\"}`))
 	assert.False(t, shouldAttemptNextChannel(c, err, 10, true))
+}
+
+func TestSameChannelRetryAllowsClaudePingButStopsAfterBusinessOutput(t *testing.T) {
+	oldRouteEnabled := common.ChannelRouteCooldownEnabled
+	oldSameChannelRetries := common.ChannelRouteSameChannelRetries
+	t.Cleanup(func() {
+		common.ChannelRouteCooldownEnabled = oldRouteEnabled
+		common.ChannelRouteSameChannelRetries = oldSameChannelRetries
+	})
+	common.ChannelRouteCooldownEnabled = true
+	common.ChannelRouteSameChannelRetries = 1
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	err := types.NewOpenAIError(errors.New("stream failed"), types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
+
+	assert.True(t, shouldRetrySameChannel(c, err, 0))
+	helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "ping"}, `{"type":"ping"}`)
+	assert.True(t, shouldRetrySameChannel(c, err, 0))
+	helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "message_start"}, `{"type":"message_start"}`)
+	assert.False(t, shouldRetrySameChannel(c, err, 0))
 }
 
 func TestSetRelayResponseRequestIdReplacesUpstreamRequestId(t *testing.T) {
@@ -331,6 +382,48 @@ func TestChannelAndTokenGroupRoutesAdvanceTogether(t *testing.T) {
 	))
 
 	channel, group, err = service.CacheGetRandomSatisfiedChannel(retryParam)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, fallbackID, channel.Id)
+	assert.Equal(t, fallbackGroup, group)
+
+	service.ClearTokenGroupRouteCooldown(tokenID, primaryGroup, modelName, requestPath)
+	common.ChannelRouteCooldownEnabled = false
+	routeOnlyContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	routeOnlyContext.Request = httptest.NewRequest(http.MethodPost, requestPath, nil)
+	common.SetContextKey(routeOnlyContext, constant.ContextKeyTokenId, tokenID)
+	common.SetContextKey(routeOnlyContext, constant.ContextKeyTokenGroupRoutes, []model.TokenGroupRoute{
+		{Group: primaryGroup, Priority: 2, CooldownSeconds: 60},
+		{Group: fallbackGroup, Priority: 1, CooldownSeconds: 60},
+	})
+	routeOnlyRetry := 0
+	routeOnlyParam := &service.RetryParam{
+		Ctx:         routeOnlyContext,
+		TokenGroup:  "default",
+		ModelName:   modelName,
+		RequestPath: requestPath,
+		Retry:       &routeOnlyRetry,
+	}
+
+	channel, group, err = service.CacheGetRandomSatisfiedChannel(routeOnlyParam)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, primaryID, channel.Id)
+	require.Equal(t, primaryGroup, group)
+
+	routeAdvanced = processChannelError(routeOnlyContext, *types.NewChannelError(
+		channel.Id,
+		channel.Type,
+		channel.Name,
+		false,
+		"",
+		false,
+	), routeErr)
+	assert.True(t, routeAdvanced)
+	assert.True(t, shouldAttemptNextChannel(routeOnlyContext, routeErr, 0, routeAdvanced))
+	assert.True(t, service.IsTokenGroupRouteFrozen(tokenID, primaryGroup, modelName, requestPath, common.GetTimestamp()))
+
+	channel, group, err = service.CacheGetRandomSatisfiedChannel(routeOnlyParam)
 	require.NoError(t, err)
 	require.NotNil(t, channel)
 	assert.Equal(t, fallbackID, channel.Id)

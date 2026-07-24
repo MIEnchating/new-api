@@ -454,6 +454,32 @@ func TestChannelExecutionTracePublishesFirstEventWithoutEmptySnapshot(t *testing
 	assert.Equal(t, "active", trace.Events[0].State)
 }
 
+func TestGroupAffinityPrecedesSelectionAndResolvedAttemptIsDeduplicated(t *testing.T) {
+	setupChannelRouteTest(t)
+	ctx := newChannelRouteContext()
+	ctx.Set(common.RequestIdKey, "group-affinity-order")
+	priority := int64(1000)
+	channel := &model.Channel{Id: 92, Name: "us-sub2-plus", Priority: &priority}
+
+	TrackChannelExecutionAffinityHit(ctx, "codex", channelRouteTestModel, "/v1/responses", channel.Id, "route_affinity")
+	TrackChannelExecutionSelection(ctx, "codex", channelRouteTestModel, "/v1/responses", channel, 0)
+	TrackChannelExecutionGroupAffinityHit(ctx, "codex", channelRouteTestModel, "/v1/responses", channel.Id)
+	TrackResolvedChannelExecutionAttempt(ctx, "codex", channelRouteTestModel, "/v1/responses", channel, 0)
+
+	state, exists := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, exists)
+	state.mu.Lock()
+	events := append([]ChannelExecutionEvent(nil), state.trace.Events...)
+	state.mu.Unlock()
+
+	require.Len(t, events, 3)
+	assert.Equal(t, "group_affinity", events[0].Reason)
+	assert.Zero(t, events[0].ChannelID)
+	assert.Equal(t, "route_affinity", events[1].Reason)
+	assert.Equal(t, "active", events[2].State)
+	assert.Equal(t, channel.Id, events[2].ChannelID)
+}
+
 func TestChannelExecutionIndexOnlyRefreshesForNewKeysAndTerminalState(t *testing.T) {
 	now := time.Now().UnixMilli()
 	trace := ChannelExecutionTrace{
@@ -989,6 +1015,47 @@ func TestChannelRouteCanDisableCooldownWhileStillFailingOver(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, next)
 	assert.Equal(t, 1, next.Id)
+}
+
+func TestChannelRouteCooldownZeroExhaustsPrimaryGroupBeforeCoolingAndFallback(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	seedChannelRouteChannel(t, db, 1, "primary", 1)
+	seedChannelRouteChannel(t, db, 2, "primary", 1)
+	seedChannelRouteChannel(t, db, 3, "fallback", 1)
+	model.InitChannelCache()
+	common.ChannelRouteCooldownSeconds = 0
+
+	routes := []model.TokenGroupRoute{
+		{Group: "primary", Priority: 2, CooldownSeconds: 60},
+		{Group: "fallback", Priority: 1, CooldownSeconds: 60},
+	}
+	ctx := newTokenRouteContext(routes)
+	param := newChannelRouteRetryParam(ctx, "default")
+	routeErr := newChannelRouteFailure()
+
+	first, group, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	assert.Equal(t, "primary", group)
+	ctx.Set("use_channel", []string{strconv.Itoa(first.Id)})
+	assert.True(t, MarkChannelRouteFailure(ctx, routeErr))
+	assert.False(t, IsChannelRouteFrozen("primary", first.Id, common.GetTimestamp()))
+
+	second, group, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	assert.Equal(t, "primary", group)
+	assert.NotEqual(t, first.Id, second.Id)
+	ctx.Set("use_channel", []string{strconv.Itoa(first.Id), strconv.Itoa(second.Id)})
+	assert.False(t, MarkChannelRouteFailure(ctx, routeErr))
+	assert.True(t, MarkTokenGroupRouteFailure(ctx, routeErr))
+	assert.True(t, IsTokenGroupRouteFrozen(11, "primary", channelRouteTestModel, "/v1/chat/completions", common.GetTimestamp()))
+
+	fallback, group, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, fallback)
+	assert.Equal(t, "fallback", group)
+	assert.Equal(t, 3, fallback.Id)
 }
 
 func TestChannelRouteSameChannelRetriesThenFailsOverAtSamePriority(t *testing.T) {

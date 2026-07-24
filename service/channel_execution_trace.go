@@ -1089,12 +1089,19 @@ func TrackResolvedChannelExecutionAttempt(c *gin.Context, group string, modelNam
 	}
 	if state, ok := channelExecutionTraceStateFromContext(c); ok {
 		state.mu.Lock()
-		if len(state.trace.Events) > 0 {
-			last := state.trace.Events[len(state.trace.Events)-1]
+		for index := len(state.trace.Events) - 1; index >= 0; index-- {
+			last := state.trace.Events[index]
+			// Group-routing decisions can be recorded after channel selection.
+			// Skip them when checking whether this concrete attempt is already
+			// tracked, otherwise the resolver appends a duplicate active event.
+			if last.ChannelID <= 0 {
+				continue
+			}
 			if last.State == "active" && last.ChannelID == channel.Id && last.RetryIndex == retryIndex {
 				state.mu.Unlock()
 				return
 			}
+			break
 		}
 		if group == "" && state.trace.Group != "" {
 			group = state.trace.Group
@@ -1166,6 +1173,50 @@ func TrackChannelExecutionGroupEvent(c *gin.Context, group string, modelName str
 	appendChannelExecutionEvent(c, "", modelName, requestPath, ChannelExecutionEvent{
 		Group: group, State: state, Reason: reason, CooldownUntil: cooldownUntil,
 	})
+}
+
+func TrackChannelExecutionGroupAffinityHit(c *gin.Context, group string, modelName string, requestPath string, channelID int) {
+	state := ensureChannelExecutionTrace(c, "", modelName, requestPath)
+	if state == nil {
+		return
+	}
+
+	now := time.Now().UnixMilli()
+	event := ChannelExecutionEvent{
+		Timestamp: now,
+		Group:     group,
+		State:     "affinity_hit",
+		Reason:    "group_affinity",
+	}
+
+	state.mu.Lock()
+	insertAt := len(state.trace.Events)
+	for insertAt > 0 {
+		selection := state.trace.Events[insertAt-1]
+		if selection.ChannelID != channelID || (selection.State != "active" && selection.State != "affinity_hit") {
+			break
+		}
+		insertAt--
+	}
+	if insertAt < len(state.trace.Events) {
+		event.Timestamp = state.trace.Events[insertAt].Timestamp
+	}
+	state.trace.Events = append(state.trace.Events, ChannelExecutionEvent{})
+	copy(state.trace.Events[insertAt+1:], state.trace.Events[insertAt:])
+	state.trace.Events[insertAt] = event
+	for index := range state.trace.Events {
+		state.trace.Events[index].Sequence = index + 1
+	}
+	state.trace.UpdatedAt = now
+	updateChannelExecutionRouteGroupStatuses(&state.trace)
+	state.revision++
+	if channelExecutionTraceUsesRedis() {
+		scheduleChannelExecutionTracePublishLocked(state, channelExecutionPublishDebounce)
+		state.mu.Unlock()
+		return
+	}
+	state.mu.Unlock()
+	publishChannelExecutionTraceSnapshot(state, true)
 }
 
 func MarkChannelExecutionSuccess(c *gin.Context) {

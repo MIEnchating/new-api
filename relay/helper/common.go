@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -24,6 +25,15 @@ func markStreamOutputStarted(c *gin.Context) {
 
 func StreamOutputStarted(c *gin.Context) bool {
 	return c != nil && c.GetBool(streamOutputStartedKey)
+}
+
+func markClaudeStreamOutputStarted(c *gin.Context, eventType string) {
+	// Anthropic ping events are protocol keepalives. They can safely precede a
+	// retry or route failover and must not lock the request to a failed stream.
+	if strings.EqualFold(strings.TrimSpace(eventType), "ping") {
+		return
+	}
+	markStreamOutputStarted(c)
 }
 
 func FlushWriter(c *gin.Context) (err error) {
@@ -79,7 +89,7 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 	if err != nil {
 		common.SysError("error marshalling stream response: " + err.Error())
 	} else {
-		markStreamOutputStarted(c)
+		markClaudeStreamOutputStarted(c, resp.Type)
 		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
 	}
@@ -92,7 +102,7 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 		return
 	}
 
-	markStreamOutputStarted(c)
+	markClaudeStreamOutputStarted(c, resp.Type)
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s\n", data)})
 	_ = FlushWriter(c)

@@ -146,6 +146,29 @@ export function buildChannelExecutionTimeline(
       continue
     }
 
+    if (
+      event.state === 'affinity_hit' &&
+      event.reason === 'group_affinity' &&
+      !event.channel_id
+    ) {
+      const item = { kind: 'event' as const, event }
+      let insertAt = items.length
+      while (insertAt > 0) {
+        const previous = items[insertAt - 1]
+        if (
+          previous?.kind !== 'event' ||
+          !previous.event.channel_id ||
+          (previous.event.state !== 'active' &&
+            previous.event.state !== 'affinity_hit')
+        ) {
+          break
+        }
+        insertAt -= 1
+      }
+      items.splice(insertAt, 0, item)
+      continue
+    }
+
     if (event.state === 'active' && event.channel_id) {
       const selection =
         pendingSelection?.channel_id === event.channel_id
@@ -170,6 +193,13 @@ export function buildChannelExecutionTimeline(
         items.push(openAttempt)
         openRequest = undefined
       } else {
+        const alreadyOpen =
+          openRequest?.channel_id === event.channel_id &&
+          (openRequest.retry_index ?? 0) === (event.retry_index ?? 0)
+        if (alreadyOpen) {
+          pendingSelection = undefined
+          continue
+        }
         openAttempt = undefined
         openRequest = event
         items.push({ kind: 'event', event })

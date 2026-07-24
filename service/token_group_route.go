@@ -417,6 +417,7 @@ func setTokenGroupRouteContext(c *gin.Context, index int, route model.TokenGroup
 	common.SetContextKey(c, constant.ContextKeyTokenGroupRouteIndex, index)
 	common.SetContextKey(c, constant.ContextKeyTokenGroupRouteGroup, route.Group)
 	common.SetContextKey(c, constant.ContextKeyTokenGroupRouteCooldown, route.CooldownSeconds)
+	common.SetContextKey(c, constant.ContextKeyTokenGroupRouteStickyHit, false)
 	common.SetContextKey(c, constant.ContextKeyUsingGroup, route.Group)
 	c.Set(ginKeyTokenGroupRouteModel, modelName)
 	c.Set(ginKeyTokenGroupRoutePath, requestPath)
@@ -470,7 +471,7 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 					}
 					if channel != nil {
 						common.SetContextKey(param.Ctx, constant.ContextKeyTokenGroupRouteStickyHit, true)
-						TrackChannelExecutionGroupEvent(param.Ctx, group, param.ModelName, param.RequestPath, "affinity_hit", "group_affinity", 0)
+						TrackChannelExecutionGroupAffinityHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
 						return channel, group, nil
 					}
 					clearTokenGroupRouteStickyScope(tokenID, param.ModelName, param.RequestPath)

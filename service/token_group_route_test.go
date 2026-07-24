@@ -435,4 +435,5 @@ func TestTokenGroupRouteStickyClearsOnFailure(t *testing.T) {
 	require.NotNil(t, channel)
 	assert.Equal(t, "premium", group)
 	assert.Equal(t, 2, channel.Id)
+	assert.False(t, common.GetContextKeyBool(ctx, constant.ContextKeyTokenGroupRouteStickyHit))
 }

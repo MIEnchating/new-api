@@ -192,7 +192,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
-			if !service.IsChannelRouteEnabled() || relayInfo.LastError == nil {
+			if !hasManagedRouting(c) || relayInfo.LastError == nil {
 				newAPIError = channelErr
 			}
 			break
@@ -243,6 +243,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 				streamAPIError := types.NewOpenAIError(streamErr, types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
 				relayInfo.LastError = streamAPIError
 				service.TrackChannelExecutionFailure(c, channel.Id, streamAPIError.ErrorWithStatusCode())
+				if shouldRetrySameChannel(c, streamAPIError, sameChannelRetriesUsed) {
+					sameChannelRetriesUsed++
+					retrySameChannel = channel
+					service.TrackChannelExecutionSameChannelRetry(c, channel, sameChannelRetriesUsed)
+					logger.LogInfo(c, fmt.Sprintf("渠道路由同渠道重试：渠道 #%d（%d/%d）", channel.Id, sameChannelRetriesUsed, common.ChannelRouteSameChannelRetries))
+					continue
+				}
 				routeAdvanced := processChannelError(
 					c,
 					*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
@@ -276,7 +283,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
 		service.TrackChannelExecutionFailure(c, channel.Id, newAPIError.ErrorWithStatusCode())
-		if service.ShouldRetrySameChannelRouteForContext(c, newAPIError, sameChannelRetriesUsed) {
+		if shouldRetrySameChannel(c, newAPIError, sameChannelRetriesUsed) {
 			sameChannelRetriesUsed++
 			retrySameChannel = channel
 			service.TrackChannelExecutionSameChannelRetry(c, channel, sameChannelRetriesUsed)
@@ -501,10 +508,18 @@ func shouldAttemptNextChannel(c *gin.Context, openaiErr *types.NewAPIError, retr
 	if helper.StreamOutputStarted(c) {
 		return false
 	}
-	if service.IsChannelRouteEnabled() {
+	if hasManagedRouting(c) {
 		return routeAdvanced
 	}
 	return shouldRetry(c, openaiErr, retryTimes)
+}
+
+func hasManagedRouting(c *gin.Context) bool {
+	return service.IsChannelRouteEnabled() || service.HasTokenGroupRoutes(c)
+}
+
+func shouldRetrySameChannel(c *gin.Context, err *types.NewAPIError, retriesUsed int) bool {
+	return !helper.StreamOutputStarted(c) && service.ShouldRetrySameChannelRouteForContext(c, err, retriesUsed)
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) bool {
@@ -738,7 +753,7 @@ func RelayTask(c *gin.Context) {
 			channel, channelErr = getChannel(c, relayInfo, retryParam)
 			if channelErr != nil {
 				logger.LogError(c, channelErr.Error())
-				if !service.IsChannelRouteEnabled() || taskErr == nil {
+				if !hasManagedRouting(c) || taskErr == nil {
 					taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "get_channel_failed", http.StatusInternalServerError)
 				}
 				break
@@ -768,7 +783,7 @@ func RelayTask(c *gin.Context) {
 		if !taskErr.LocalError {
 			routeError = types.NewOpenAIError(taskErr.Error, types.ErrorCodeBadResponseStatusCode, taskErr.StatusCode)
 			service.TrackChannelExecutionFailure(c, channel.Id, routeError.ErrorWithStatusCode())
-			if !channelLocked && service.ShouldRetrySameChannelRouteForContext(c, routeError, sameChannelRetriesUsed) {
+			if !channelLocked && shouldRetrySameChannel(c, routeError, sameChannelRetriesUsed) {
 				sameChannelRetriesUsed++
 				retrySameChannel = channel
 				service.TrackChannelExecutionSameChannelRetry(c, channel, sameChannelRetriesUsed)
@@ -896,7 +911,7 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 }
 
 func shouldAttemptNextTaskChannel(c *gin.Context, channelID int, taskErr *dto.TaskError, retryTimes int, routeAdvanced bool, channelRouteAllowed bool) bool {
-	if service.IsChannelRouteEnabled() {
+	if hasManagedRouting(c) {
 		return channelRouteAllowed && routeAdvanced
 	}
 	return shouldRetryTaskRelay(c, channelID, taskErr, retryTimes)

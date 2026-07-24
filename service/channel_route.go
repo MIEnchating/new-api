@@ -410,7 +410,7 @@ func AppendChannelRouteStickyAdminInfo(c *gin.Context, adminInfo map[string]inte
 	adminInfo["channel_route_sticky"] = info
 }
 
-func hasAvailableChannelRouteAlternative(group string, modelName string, requestPath string, channelID int, now int64) (bool, error) {
+func hasAvailableChannelRouteAlternative(c *gin.Context, group string, modelName string, requestPath string, channelID int, now int64) (bool, error) {
 	cooldowns, batched, err := loadChannelRouteCooldownSnapshot(group, modelName, requestPath, now)
 	if err != nil {
 		return false, err
@@ -422,6 +422,7 @@ func hasAvailableChannelRouteAlternative(group string, modelName string, request
 		requestPath,
 		func(candidate *model.Channel) bool {
 			return candidate.Id != channelID &&
+				(IsChannelRouteCooldownEnabled() || !channelWasUsed(c, candidate.Id)) &&
 				candidate.Status == common.ChannelStatusEnabled &&
 				channelRouteCooldownFromSnapshot(cooldowns, batched, group, candidate.Id, now) <= now
 		},
@@ -539,6 +540,7 @@ func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 	}
 	if modelName != "" {
 		hasAlternative, lookupErr := hasAvailableChannelRouteAlternative(
+			c,
 			group,
 			modelName,
 			requestPath,
