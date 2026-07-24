@@ -33,7 +33,6 @@ import {
   UserCog,
   Info,
   LogIn,
-  LoaderCircle,
   Activity,
   CheckCircle2,
   CircleDot,
@@ -73,7 +72,10 @@ import {
   buildChannelExecutionTimeline,
   getStandbyChannelIds,
 } from '../../lib/channel-execution-timeline'
-import { mergeExecutionTrace } from '../../lib/execution-trace'
+import {
+  mergeExecutionTrace,
+  shouldFetchFullExecutionTrace,
+} from '../../lib/execution-trace'
 import {
   parseLogOther,
   getParamOverrideActionLabel,
@@ -847,16 +849,18 @@ export function DetailsDialog(props: DetailsDialogProps) {
     !!props.log.ip && (showTiming || isManage || (props.isAdmin && isTopup))
   const adminInfo = other?.admin_info
   const storedExecutionTrace = adminInfo?.channel_execution_trace
+  const needsFullExecutionTrace =
+    shouldFetchFullExecutionTrace(storedExecutionTrace)
   const fullExecutionTraceQuery = useQuery({
     queryKey: ['channel-execution-trace', props.log.request_id],
     queryFn: () => getChannelExecutionTrace(props.log.request_id),
     enabled:
       props.open &&
       props.isAdmin &&
-      Boolean(storedExecutionTrace) &&
+      needsFullExecutionTrace &&
       Boolean(props.log.request_id),
-    staleTime: 0,
-    refetchOnMount: 'always',
+    staleTime: 5 * 60 * 1000,
+    refetchOnMount: true,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     retry: false,
@@ -1413,15 +1417,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 <StatusBadge variant='neutral' size='sm' copyable={false}>
                   {t('Execution summary')}
                 </StatusBadge>
-              ) : null}
-              {fullExecutionTraceQuery.isFetching ? (
-                <span className='text-muted-foreground inline-flex items-center gap-1 text-xs'>
-                  <LoaderCircle
-                    className='size-3 animate-spin'
-                    aria-hidden='true'
-                  />
-                  {t('Loading')}
-                </span>
               ) : null}
             </div>
             <div className='space-y-2'>

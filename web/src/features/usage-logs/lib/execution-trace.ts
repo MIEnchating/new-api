@@ -22,6 +22,13 @@ function isTerminalStatus(status?: ChannelExecutionTraceInfo['status']) {
   return status === 'success' || status === 'failed' || status === 'cancelled'
 }
 
+export function shouldFetchFullExecutionTrace(
+  trace: ChannelExecutionTraceInfo | undefined
+) {
+  if (!trace) return false
+  return trace.compact === true || !trace.events?.length
+}
+
 /**
  * Merge the compact SQL summary with the full runtime trace. A terminal SQL
  * summary is written after request completion and is authoritative for final

@@ -20,7 +20,10 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import type { ChannelExecutionTraceInfo } from '../types'
-import { mergeExecutionTrace } from './execution-trace.ts'
+import {
+  mergeExecutionTrace,
+  shouldFetchFullExecutionTrace,
+} from './execution-trace.ts'
 
 const storedTerminal: ChannelExecutionTraceInfo = {
   compact: true,
@@ -59,6 +62,18 @@ const staleFetched: ChannelExecutionTraceInfo = {
     },
   ],
 }
+
+describe('execution trace fetch policy', () => {
+  test('fetches only when a stored trace needs event details', () => {
+    assert.equal(shouldFetchFullExecutionTrace(undefined), false)
+    assert.equal(shouldFetchFullExecutionTrace(storedTerminal), true)
+    assert.equal(
+      shouldFetchFullExecutionTrace({ ...staleFetched, events: undefined }),
+      true
+    )
+    assert.equal(shouldFetchFullExecutionTrace(staleFetched), false)
+  })
+})
 
 describe('execution trace merge', () => {
   test('keeps terminal SQL routing metadata over a stale Redis trace', () => {
