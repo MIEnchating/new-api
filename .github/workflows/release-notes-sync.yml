@@ -62,10 +62,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           while IFS= read -r tag; do
-            [[ "$tag" =~ ^[A-Za-z0-9._-]+$ ]] || {
-              echo "Unsupported release tag: $tag" >&2
-              exit 1
-            }
+            node .github/scripts/validate-release-tag.mjs "$tag"
 
             if ! git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
               echo "Tag $tag does not exist yet; tag publishing will create the release later."

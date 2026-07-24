@@ -2,6 +2,8 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { validateReleaseTag } from "./validate-release-tag.mjs";
+
 const args = process.argv.slice(2);
 const tag = args.find((arg) => !arg.startsWith("--")) || process.env.GITHUB_REF_NAME;
 const outputPath = args.filter((arg) => !arg.startsWith("--"))[1] || "release-notes.md";
@@ -10,9 +12,7 @@ const requireSource = args.includes("--require-source");
 if (!tag) {
   throw new Error("Release tag is required");
 }
-if (!/^[A-Za-z0-9._-]+$/.test(tag)) {
-  throw new Error(`Unsupported release tag: ${tag}`);
-}
+validateReleaseTag(tag);
 
 const requiredSections = [
   "版本概览",

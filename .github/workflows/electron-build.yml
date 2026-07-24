@@ -3,9 +3,7 @@ name: Build Electron App
 on:
   push:
     tags:
-      - '*'  # Triggers on version tags like v1.0.0
-      - '!*-*'  # Ignore pre-release tags like v1.0.0-beta
-      - '!*-alpha*' # Ignore alpha tags like v1.0.0-alpha
+      - 'v*'
   workflow_dispatch:  # Allows manual triggering
 
 jobs:
@@ -25,6 +23,10 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+
+      - name: Enforce release version sequence
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node .github/scripts/validate-release-tag.mjs "$GITHUB_REF_NAME"
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0

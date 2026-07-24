@@ -14,8 +14,21 @@ on:
       - "!*-alpha*"
 
 jobs:
+  validate_tag:
+    name: Validate Release Tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Enforce release version sequence
+        if: startsWith(github.ref, 'refs/tags/')
+        run: node .github/scripts/validate-release-tag.mjs "$GITHUB_REF_NAME"
+
   linux:
     name: Linux Release
+    needs: validate_tag
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -59,6 +72,7 @@ jobs:
 
   macos:
     name: macOS Release
+    needs: validate_tag
     runs-on: macos-15-intel
     steps:
       - name: Checkout
@@ -98,6 +112,7 @@ jobs:
 
   windows:
     name: Windows Release
+    needs: validate_tag
     runs-on: windows-latest
     defaults:
       run:

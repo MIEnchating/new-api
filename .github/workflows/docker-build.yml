@@ -44,7 +44,7 @@ jobs:
       - name: Check out
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          fetch-depth: ${{ github.event_name == 'workflow_dispatch' && 0 || 1 }}
+          fetch-depth: 0
           ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Resolve tag & write VERSION
@@ -69,6 +69,7 @@ jobs:
               exit 1
             fi
           fi
+          node .github/scripts/validate-release-tag.mjs "${TAG}"
           printf 'TAG=%s\n' "${TAG}" >> "$GITHUB_ENV"
           printf 'tag=%s\n' "${TAG}" >> "$GITHUB_OUTPUT"
           printf '%s\n' "${TAG}" > VERSION
