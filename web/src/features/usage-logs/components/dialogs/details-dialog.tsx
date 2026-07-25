@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import {
   Copy,
@@ -33,7 +32,6 @@ import {
   UserCog,
   Info,
   LogIn,
-  Activity,
   CheckCircle2,
   CircleDot,
   SkipForward,
@@ -42,20 +40,13 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { ChannelExecutionTimelineList } from '@/components/channel-execution-timeline-list'
 import { Dialog } from '@/components/dialog'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Label } from '@/components/ui/label'
-import { getChannelExecutionTrace } from '@/features/channels/api'
 import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-pricing-breakdown'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
-import {
-  buildCompactChannelExecutionEvents,
-  buildChannelExecutionTimeline,
-  getStandbyChannelIds,
-} from '@/lib/channel-execution-timeline'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import {
   formatLogQuota,
@@ -67,10 +58,6 @@ import { getRoleLabelKey } from '@/lib/roles'
 import { cn } from '@/lib/utils'
 
 import type { UsageLog } from '../../data/schema'
-import {
-  mergeExecutionTrace,
-  shouldFetchFullExecutionTrace,
-} from '../../lib/execution-trace'
 import {
   parseLogOther,
   getParamOverrideActionLabel,
@@ -169,90 +156,6 @@ function DetailSection(props: {
       </div>
     </div>
   )
-}
-
-function executionTraceStatusLabel(status?: string) {
-  switch (status) {
-    case 'running':
-      return 'Running'
-    case 'success':
-      return 'Succeeded'
-    case 'failed':
-      return 'Failed'
-    case 'cancelled':
-      return 'Cancelled'
-    default:
-      return 'Unknown'
-  }
-}
-
-type ChannelExecutionStatus =
-  | 'running'
-  | 'success'
-  | 'failed'
-  | 'cancelled'
-  | 'cooling'
-  | 'skipped'
-
-function channelExecutionStatusFromEvent(
-  state?: string
-): ChannelExecutionStatus | undefined {
-  switch (state) {
-    case 'active':
-    case 'affinity_hit':
-    case 'same_channel_retry':
-      return 'running'
-    case 'success':
-      return 'success'
-    case 'failed':
-      return 'failed'
-    case 'cancelled':
-      return 'cancelled'
-    case 'cooling':
-      return 'cooling'
-    case 'skipped':
-      return 'skipped'
-    default:
-      return undefined
-  }
-}
-
-function channelExecutionStatusLabel(status?: ChannelExecutionStatus) {
-  switch (status) {
-    case 'running':
-      return 'Running'
-    case 'success':
-      return 'Succeeded'
-    case 'failed':
-      return 'Failed'
-    case 'cancelled':
-      return 'Cancelled'
-    case 'cooling':
-      return 'Cooling'
-    case 'skipped':
-      return 'Skipped'
-    default:
-      return 'Unknown'
-  }
-}
-
-function channelExecutionStatusVariant(
-  status?: ChannelExecutionStatus
-): StatusBadgeProps['variant'] {
-  switch (status) {
-    case 'running':
-      return 'info'
-    case 'success':
-      return 'success'
-    case 'failed':
-      return 'danger'
-    case 'cancelled':
-      return 'warning'
-    case 'cooling':
-      return 'warning'
-    default:
-      return 'neutral'
-  }
 }
 
 function routeGroupStatusLabel(status?: string) {
@@ -385,12 +288,6 @@ function upstreamRequestIdSourceLabel(t: TFunction, source?: string) {
     default:
       return t('Not recorded')
   }
-}
-
-function executionTraceVariant(status?: string): StatusBadgeProps['variant'] {
-  if (status === 'success') return 'success'
-  if (status === 'running') return 'info'
-  return 'danger'
 }
 
 function formatRatio(ratio: number | undefined): string {
@@ -730,31 +627,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
     !!props.log.ip && (showTiming || isManage || (props.isAdmin && isTopup))
   const adminInfo = other?.admin_info
   const isRetryIntermediate = adminInfo?.retry_intermediate === true
-  const storedExecutionTrace = adminInfo?.channel_execution_trace
-  const needsFullExecutionTrace =
-    isRetryIntermediate || shouldFetchFullExecutionTrace(storedExecutionTrace)
-  const fullExecutionTraceQuery = useQuery({
-    queryKey: ['channel-execution-trace', props.log.request_id],
-    queryFn: () => getChannelExecutionTrace(props.log.request_id),
-    enabled:
-      props.open &&
-      props.isAdmin &&
-      needsFullExecutionTrace &&
-      Boolean(props.log.request_id),
-    staleTime: isRetryIntermediate ? 0 : 5 * 60 * 1000,
-    refetchOnMount: true,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    retry: false,
-  })
-  const fetchedExecutionTrace = fullExecutionTraceQuery.data?.success
-    ? fullExecutionTraceQuery.data.data
-    : undefined
-  const executionTrace = mergeExecutionTrace(
-    storedExecutionTrace,
-    fetchedExecutionTrace
-  )
-  const storedExecutionEvents = executionTrace?.events ?? []
+  const executionTrace = adminInfo?.channel_execution_trace
   let executionTraceStatus = executionTrace?.status
   if (executionTraceStatus === 'running') {
     // A persisted consume log is created only after the upstream response is
@@ -763,92 +636,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
       executionTraceStatus = 'success'
     } else if (props.log.type === 5) {
       executionTraceStatus = 'failed'
-    }
-  }
-  const executionEvents =
-    storedExecutionEvents.length > 0
-      ? storedExecutionEvents
-      : buildCompactChannelExecutionEvents(
-          executionTrace
-            ? { ...executionTrace, status: executionTraceStatus }
-            : undefined,
-          {
-            channelId: props.log.channel,
-            channelName: props.log.channel_name ?? undefined,
-            startedAt: Math.max(
-              0,
-              (props.log.created_at - props.log.use_time) * 1000
-            ),
-            endedAt: props.log.created_at * 1000,
-          }
-        )
-  const executionTimeline = buildChannelExecutionTimeline(executionEvents, {
-    status: executionTraceStatus,
-    endedAt: Math.max(
-      executionTrace?.updated_at ?? 0,
-      props.log.created_at * 1000
-    ),
-  })
-  const standbyChannelIds = getStandbyChannelIds(executionTimeline)
-  const showExecutionSummary = executionTrace?.compact === true
-  const executionSummaryChannelIDs =
-    executionTrace?.channel_ids ??
-    executionEvents
-      .filter((event) => event.state === 'active' && event.channel_id)
-      .map((event) => event.channel_id as number)
-  const channelStatusByID = new Map<number, ChannelExecutionStatus>()
-  const channelSelectionEventIndexByID = new Map<number, number>()
-  executionEvents.forEach((event, index) => {
-    if (!event.channel_id) return
-    const status = channelExecutionStatusFromEvent(event.state)
-    if (!status) return
-    channelStatusByID.set(event.channel_id, status)
-    if (
-      event.state === 'active' ||
-      event.state === 'affinity_hit' ||
-      event.state === 'same_channel_retry'
-    ) {
-      channelSelectionEventIndexByID.set(event.channel_id, index)
-    }
-  })
-
-  if (executionEvents.length === 0) {
-    const summaryChannelIDs = [...new Set(executionSummaryChannelIDs ?? [])]
-    summaryChannelIDs.forEach((channelID, index) => {
-      const isLastChannel = index === summaryChannelIDs.length - 1
-      let status: ChannelExecutionStatus = 'failed'
-      if (isLastChannel && executionTraceStatus === 'success') {
-        status = 'success'
-      } else if (executionTraceStatus === 'running') {
-        status = 'running'
-      }
-      channelStatusByID.set(channelID, status)
-    })
-  } else if (executionTraceStatus === 'success') {
-    // A compact SQL summary can already be terminal while the cached event
-    // list is one update behind. Treat the latest selected channel as the
-    // successful one and earlier still-active selections as failed attempts.
-    const latestSelectionIndex = Math.max(
-      ...channelSelectionEventIndexByID.values(),
-      -1
-    )
-    for (const [channelID, status] of channelStatusByID) {
-      if (status !== 'running') continue
-      channelStatusByID.set(
-        channelID,
-        channelSelectionEventIndexByID.get(channelID) === latestSelectionIndex
-          ? 'success'
-          : 'failed'
-      )
-    }
-  } else if (
-    executionTraceStatus === 'failed' ||
-    executionTraceStatus === 'cancelled'
-  ) {
-    // A failed/cancelled request can end before a separate terminal event is
-    // published. Mark any still-active channel as failed in that case.
-    for (const [channelID, status] of channelStatusByID) {
-      if (status === 'running') channelStatusByID.set(channelID, 'failed')
     }
   }
   const executionRouteGroups = executionTrace?.route_groups ?? []
@@ -1302,98 +1089,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
         </div>
-
-        {props.isAdmin &&
-        executionTrace &&
-        (executionTrace.compact || executionEvents.length > 0) ? (
-          <DetailSection
-            icon={<Activity className='size-3.5' aria-hidden='true' />}
-            label={t('Channel execution trace')}
-          >
-            <div className='mb-2 flex flex-wrap items-center gap-2 border-b pb-2'>
-              <StatusBadge
-                variant={executionTraceVariant(executionTraceStatus)}
-                size='sm'
-                copyable={false}
-              >
-                {t(executionTraceStatusLabel(executionTraceStatus))}
-              </StatusBadge>
-              <span className='text-muted-foreground text-xs'>
-                {t(
-                  executionTrace.mode === 'route'
-                    ? 'Channel routing'
-                    : 'Traditional retry'
-                )}
-              </span>
-              {showExecutionSummary ? (
-                <StatusBadge variant='neutral' size='sm' copyable={false}>
-                  {t('Execution summary')}
-                </StatusBadge>
-              ) : null}
-            </div>
-            <div className='space-y-2'>
-              {executionEvents.length === 0 &&
-              executionSummaryChannelIDs?.length ? (
-                <DetailRow
-                  label={t('Status')}
-                  value={
-                    <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
-                      {[...new Set(executionSummaryChannelIDs)].map(
-                        (channelID) => {
-                          const status = channelStatusByID.get(channelID)
-                          return (
-                            <StatusBadge
-                              key={channelID}
-                              variant={channelExecutionStatusVariant(status)}
-                              size='sm'
-                              copyable={false}
-                            >
-                              <span className='font-mono'>#{channelID}</span>
-                              <span>
-                                {t(channelExecutionStatusLabel(status))}
-                              </span>
-                            </StatusBadge>
-                          )
-                        }
-                      )}
-                    </span>
-                  }
-                />
-              ) : null}
-              {standbyChannelIds.length > 0 ? (
-                <DetailRow
-                  label={t('Standby channels')}
-                  value={
-                    <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
-                      {standbyChannelIds.map((channelID) => (
-                        <StatusBadge
-                          key={channelID}
-                          variant='neutral'
-                          size='sm'
-                          copyable={false}
-                        >
-                          <span className='font-mono'>#{channelID}</span>
-                        </StatusBadge>
-                      ))}
-                      <span className='text-muted-foreground text-[11px]'>
-                        {t(
-                          'Not executed; used only if the current channel fails'
-                        )}
-                      </span>
-                    </span>
-                  }
-                />
-              ) : null}
-            </div>
-            {executionTimeline.length > 0 ? (
-              <ChannelExecutionTimelineList
-                items={executionTimeline}
-                executionGroup={executionTrace.group}
-                className='mt-3 border-t pt-3'
-              />
-            ) : null}
-          </DetailSection>
-        ) : null}
 
         {/* Request conversion (admin only, not for refund) */}
         {showConversion && (

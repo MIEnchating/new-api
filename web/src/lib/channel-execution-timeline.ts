@@ -195,10 +195,19 @@ export function buildChannelExecutionTimeline(
         items.push(openAttempt)
         openRequest = undefined
       } else {
-        const alreadyOpen =
+        const openRequestGroup = openRequest?.group ?? event.group
+        if (
           openRequest?.channel_id === event.channel_id &&
-          (openRequest.retry_index ?? 0) === (event.retry_index ?? 0)
-        if (alreadyOpen) {
+          openRequestGroup === event.group
+        ) {
+          openRequest.next_ids = [
+            ...new Set([
+              ...(openRequest.next_ids ?? []),
+              ...(event.next_ids ?? []),
+            ]),
+          ]
+          openRequest.priority ??= event.priority
+          openRequest.channel_name ||= event.channel_name
           pendingSelection = undefined
           continue
         }

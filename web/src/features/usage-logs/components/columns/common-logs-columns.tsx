@@ -17,13 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { GitBranch, KeyRound, Sparkles, Workflow } from 'lucide-react'
+import { Activity, GitBranch, KeyRound, Sparkles, Workflow } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Button } from '@/components/ui/button'
 import {
   Popover,
   PopoverContent,
@@ -60,6 +61,7 @@ import {
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
 import { DetailsDialog } from '../dialogs/details-dialog'
+import { ExecutionTraceDialog } from '../dialogs/execution-trace-dialog'
 import { ModelBadge } from '../model-badge'
 import { TimingMetricsCell, StreamTpsCell } from '../timing-metrics-cell'
 import { useUsageLogsContext } from '../usage-logs-provider'
@@ -850,8 +852,13 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
       header: t('Details'),
       cell: function DetailsCell({ row }) {
         const [dialogOpen, setDialogOpen] = useState(false)
+        const [traceDialogOpen, setTraceDialogOpen] = useState(false)
         const log = row.original
         const other = parseLogOther(log.other)
+        const canViewExecutionTrace =
+          isAdmin &&
+          Boolean(log.request_id) &&
+          Boolean(other?.admin_info?.channel_execution_trace)
 
         const segments = buildDetailSegments(log, other, t, isAdmin)
         const primary = segments[0]
@@ -914,27 +921,53 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
         return (
           <>
-            <TooltipProvider delay={300}>
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type='button'
-                      className='group flex w-full max-w-[340px] items-center gap-1 text-left text-xs'
-                      onClick={() => setDialogOpen(true)}
-                      aria-label={`${t('Click to view full details')}: ${fullDetailText}`}
-                    />
-                  }
-                >
-                  {detailPreview}
-                </TooltipTrigger>
-                <TooltipContent
-                  side='top'
-                  className='max-w-md break-words whitespace-pre-wrap'
-                >
-                  {fullDetailText}
-                </TooltipContent>
-              </Tooltip>
+            <TooltipProvider delay={200}>
+              <div className='flex w-full max-w-[340px] items-center gap-1.5'>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type='button'
+                        className='group flex min-w-0 flex-1 items-center gap-1 text-left text-xs'
+                        onClick={() => setDialogOpen(true)}
+                        aria-label={`${t('Click to view full details')}: ${fullDetailText}`}
+                      />
+                    }
+                  >
+                    {detailPreview}
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side='top'
+                    className='max-w-md break-words whitespace-pre-wrap'
+                  >
+                    {fullDetailText}
+                  </TooltipContent>
+                </Tooltip>
+                {canViewExecutionTrace ? (
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          type='button'
+                          size='icon-sm'
+                          variant='ghost'
+                          className='text-muted-foreground hover:text-foreground shrink-0'
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            setTraceDialogOpen(true)
+                          }}
+                          aria-label={t('View execution trace')}
+                        />
+                      }
+                    >
+                      <Activity className='size-3.5' />
+                    </TooltipTrigger>
+                    <TooltipContent side='top'>
+                      {t('View execution trace')}
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </div>
             </TooltipProvider>
             <DetailsDialog
               log={log}
@@ -942,6 +975,13 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               open={dialogOpen}
               onOpenChange={setDialogOpen}
             />
+            {canViewExecutionTrace ? (
+              <ExecutionTraceDialog
+                requestId={log.request_id}
+                open={traceDialogOpen}
+                onOpenChange={setTraceDialogOpen}
+              />
+            ) : null}
           </>
         )
       },

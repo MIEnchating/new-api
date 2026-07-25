@@ -27,7 +27,7 @@ import {
   Trash2,
   WalletCards,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   useFieldArray,
   useForm,
@@ -63,6 +63,7 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Sheet,
   SheetClose,
@@ -74,6 +75,11 @@ import {
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { getUserModels, getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { cn } from '@/lib/utils'
@@ -82,6 +88,7 @@ import { createApiKey, updateApiKey, getApiKey } from '../api'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
   getApiKeyFormSchema,
+  getAutomaticGroupRoutePriorities,
   type ApiKeyFormValues,
   getApiKeyFormDefaultValues,
   transformFormDataToPayload,
@@ -118,6 +125,8 @@ export function ApiKeysMutateDrawer({
   const { triggerRefresh } = useApiKeys()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [autoSortGroupRoutes, setAutoSortGroupRoutes] = useState(false)
+  const manualRoutePrioritiesRef = useRef(new Map<string, number>())
 
   // Fetch models
   const { data: modelsData } = useQuery({
@@ -172,6 +181,10 @@ export function ApiKeysMutateDrawer({
 
   // Load existing data when updating
   useEffect(() => {
+    if (open) {
+      setAutoSortGroupRoutes(false)
+      manualRoutePrioritiesRef.current.clear()
+    }
     if (open && isUpdate && currentRow) {
       void getApiKey(currentRow.id)
         .then((result) => {
@@ -290,6 +303,11 @@ export function ApiKeysMutateDrawer({
   const selectedGroup = form.watch('group')
   const unlimitedQuota = form.watch('unlimited_quota')
   const groupRouteEnabled = form.watch('group_route_enabled')
+  const groupRoutes = form.watch('group_routes') || []
+  const selectedEnabledRouteCount = groupRoutes.filter(
+    (route) => route.enabled !== false && route.group.trim() !== ''
+  ).length
+  const cooldownUnavailable = selectedEnabledRouteCount <= 1
   const groupRoutesMessage = getFormErrorMessage(
     form.formState.errors.group_routes
   )
@@ -301,6 +319,85 @@ export function ApiKeysMutateDrawer({
     }
     return Math.max(Math.max(...priorities) - 1, 0)
   }
+  const nextManualRoutePriority = () => {
+    if (!autoSortGroupRoutes) return nextRoutePriority()
+    const priorities = routeFields.fields.flatMap((field) => {
+      const priority = manualRoutePrioritiesRef.current.get(field.id)
+      return priority == null ? [] : [priority]
+    })
+    return priorities.length > 0 ? Math.max(Math.min(...priorities) - 1, 0) : 1
+  }
+  const setAutomaticRoutePriorities = () => {
+    getAutomaticGroupRoutePriorities(routeFields.fields.length).forEach(
+      (priority, index) => {
+        form.setValue(`group_routes.${index}.priority`, priority, {
+          shouldDirty: true,
+          shouldValidate: true,
+        })
+      }
+    )
+  }
+  const handleAutoSortGroupRoutes = (checked: boolean) => {
+    if (checked) {
+      const routes = form.getValues('group_routes') || []
+      manualRoutePrioritiesRef.current = new Map(
+        routeFields.fields.map((field, index) => [
+          field.id,
+          routes[index]?.priority ?? 1,
+        ])
+      )
+      setAutoSortGroupRoutes(true)
+      setAutomaticRoutePriorities()
+      return
+    }
+
+    routeFields.fields.forEach((field, index) => {
+      const priority = manualRoutePrioritiesRef.current.get(field.id)
+      if (priority == null) return
+      form.setValue(`group_routes.${index}.priority`, priority, {
+        shouldDirty: true,
+        shouldValidate: true,
+      })
+    })
+    manualRoutePrioritiesRef.current.clear()
+    setAutoSortGroupRoutes(false)
+  }
+
+  useEffect(() => {
+    if (!autoSortGroupRoutes) return
+    const currentFieldIds = new Set(routeFields.fields.map((field) => field.id))
+    for (const fieldId of manualRoutePrioritiesRef.current.keys()) {
+      if (!currentFieldIds.has(fieldId)) {
+        manualRoutePrioritiesRef.current.delete(fieldId)
+      }
+    }
+
+    const routes = form.getValues('group_routes') || []
+    const knownPriorities = routeFields.fields.flatMap((field) => {
+      const priority = manualRoutePrioritiesRef.current.get(field.id)
+      return priority == null ? [] : [priority]
+    })
+    let nextPriority =
+      knownPriorities.length > 0
+        ? Math.max(Math.min(...knownPriorities) - 1, 0)
+        : 1
+    routeFields.fields.forEach((field, index) => {
+      if (manualRoutePrioritiesRef.current.has(field.id)) return
+      manualRoutePrioritiesRef.current.set(
+        field.id,
+        routes[index]?.priority ?? nextPriority
+      )
+      nextPriority = Math.max(nextPriority - 1, 0)
+    })
+    getAutomaticGroupRoutePriorities(routeFields.fields.length).forEach(
+      (priority, index) => {
+        form.setValue(`group_routes.${index}.priority`, priority, {
+          shouldDirty: true,
+          shouldValidate: true,
+        })
+      }
+    )
+  }, [autoSortGroupRoutes, form, routeFields.fields])
 
   return (
     <Sheet
@@ -418,6 +515,26 @@ export function ApiKeysMutateDrawer({
                       </FormItem>
                     )}
                   />
+                  <div className={sideDrawerSwitchItemClassName()}>
+                    <div className='flex flex-col gap-0.5'>
+                      <Label
+                        htmlFor='api-key-auto-sort-group-routes'
+                        className='text-sm'
+                      >
+                        {t('Automatic priority sorting')}
+                      </Label>
+                      <p className='text-muted-foreground text-xs'>
+                        {t(
+                          'Assign priorities from highest to lowest based on the group list order. Turning it off restores the previous manual priorities.'
+                        )}
+                      </p>
+                    </div>
+                    <Switch
+                      id='api-key-auto-sort-group-routes'
+                      checked={autoSortGroupRoutes}
+                      onCheckedChange={handleAutoSortGroupRoutes}
+                    />
+                  </div>
                   <div className='flex flex-col gap-3'>
                     {routeFields.fields.map((routeField, index) => (
                       <div
@@ -477,6 +594,7 @@ export function ApiKeysMutateDrawer({
                                     type='number'
                                     min='0'
                                     step='1'
+                                    disabled={autoSortGroupRoutes}
                                     onChange={(e) =>
                                       field.onChange(
                                         Number.parseInt(e.target.value, 10) || 0
@@ -494,21 +612,54 @@ export function ApiKeysMutateDrawer({
                             name={`group_routes.${index}.cooldown_seconds`}
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>{t('Cooldown')}</FormLabel>
-                                <FormControl>
-                                  <Input
-                                    {...field}
-                                    type='number'
-                                    min='1'
-                                    max='31536000'
-                                    step='1'
-                                    onChange={(e) =>
-                                      field.onChange(
-                                        Number.parseInt(e.target.value, 10) || 1
-                                      )
-                                    }
-                                  />
-                                </FormControl>
+                                <FormLabel
+                                  className={cn(
+                                    cooldownUnavailable &&
+                                      'text-muted-foreground'
+                                  )}
+                                >
+                                  {t('Cooldown')}
+                                </FormLabel>
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={<div className='w-full' />}
+                                  >
+                                    <FormControl>
+                                      <Input
+                                        {...field}
+                                        type='number'
+                                        min='0'
+                                        max='31536000'
+                                        step='1'
+                                        disabled={cooldownUnavailable}
+                                        onChange={(event) => {
+                                          const value = Number.parseInt(
+                                            event.target.value,
+                                            10
+                                          )
+                                          field.onChange(
+                                            Number.isNaN(value) ? 1 : value
+                                          )
+                                        }}
+                                      />
+                                    </FormControl>
+                                  </TooltipTrigger>
+                                  {cooldownUnavailable ? (
+                                    <TooltipContent
+                                      side='top'
+                                      className='max-w-xs'
+                                    >
+                                      {t(
+                                        'Cooldown is unavailable when only one route group is enabled because there is no fallback group.'
+                                      )}
+                                    </TooltipContent>
+                                  ) : null}
+                                </Tooltip>
+                                {!cooldownUnavailable ? (
+                                  <FormDescription className='text-xs'>
+                                    {t('Set to 0 to disable cooldown')}
+                                  </FormDescription>
+                                ) : null}
                                 <FormMessage />
                               </FormItem>
                             )}
@@ -540,7 +691,7 @@ export function ApiKeysMutateDrawer({
                       onClick={() =>
                         routeFields.append({
                           group: '',
-                          priority: nextRoutePriority(),
+                          priority: nextManualRoutePriority(),
                           cooldown_seconds: 60,
                           enabled: true,
                         })

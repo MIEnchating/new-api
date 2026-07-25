@@ -162,6 +162,49 @@ describe('channel execution timeline', () => {
     )
   })
 
+  test('deduplicates an open channel request when a later routing event changes only the retry index', () => {
+    const timeline = buildChannelExecutionTimeline([
+      {
+        sequence: 1,
+        timestamp: 100,
+        group: 'codex',
+        channel_id: 92,
+        channel_name: 'us-sub2-plus',
+        priority: 1000,
+        state: 'active',
+      },
+      {
+        sequence: 2,
+        timestamp: 100,
+        group: 'codex',
+        channel_id: 92,
+        channel_name: 'us-sub2-plus',
+        priority: 1000,
+        retry_index: 1,
+        state: 'active',
+      },
+      {
+        sequence: 3,
+        timestamp: 9400,
+        group: 'codex',
+        channel_id: 92,
+        channel_name: 'us-sub2-plus',
+        state: 'success',
+      },
+    ])
+
+    assert.deepEqual(
+      timeline.map((item) =>
+        item.kind === 'event' ? item.event.state : item.state
+      ),
+      ['active', 'success']
+    )
+    const result = timeline[1]
+    assert.equal(result?.kind, 'event')
+    if (result?.kind !== 'event') return
+    assert.equal(result.startedAt, 100)
+  })
+
   test('adds a separate initial success when the terminal event is missing', () => {
     const timeline = buildChannelExecutionTimeline(
       [

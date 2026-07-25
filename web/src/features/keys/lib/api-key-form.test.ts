@@ -24,6 +24,7 @@ import { t } from 'i18next'
 import {
   API_KEY_FORM_DEFAULT_VALUES,
   getApiKeyFormDefaultValues,
+  getAutomaticGroupRoutePriorities,
   getApiKeyFormSchema,
   parseApiKeyGroupRouteConfig,
   transformFormDataToPayload,
@@ -78,7 +79,7 @@ describe('API key form schema', () => {
       name: 'test-key',
       group_route_enabled: true,
       group_routes: [
-        { group: 'default', priority: -1, cooldown_seconds: 0 },
+        { group: 'default', priority: -1, cooldown_seconds: -1 },
         { group: 'default', priority: 1, cooldown_seconds: 31536001 },
       ],
     })
@@ -93,6 +94,23 @@ describe('API key form schema', () => {
     assert.equal(issuePaths.has('group_routes.0.cooldown_seconds'), true)
     assert.equal(issuePaths.has('group_routes.1.group'), true)
     assert.equal(issuePaths.has('group_routes.1.cooldown_seconds'), true)
+  })
+
+  test('allows zero to disable group route cooldown', () => {
+    const result = schema.safeParse({
+      ...API_KEY_FORM_DEFAULT_VALUES,
+      name: 'test-key',
+      group_route_enabled: true,
+      group_routes: [{ group: 'default', priority: 1, cooldown_seconds: 0 }],
+    })
+
+    assert.equal(result.success, true)
+  })
+
+  test('assigns automatic priorities from the list length down to one', () => {
+    assert.deepEqual(getAutomaticGroupRoutePriorities(3), [3, 2, 1])
+    assert.deepEqual(getAutomaticGroupRoutePriorities(1), [1])
+    assert.deepEqual(getAutomaticGroupRoutePriorities(0), [])
   })
 
   test('requires one enabled route group when group routing is enabled', () => {

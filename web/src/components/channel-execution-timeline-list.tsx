@@ -33,6 +33,12 @@ import {
   textColorMap,
   type StatusBadgeProps,
 } from '@/components/status-badge'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import type { ChannelExecutionTimelineItem } from '@/lib/channel-execution-timeline'
 import { formatUseTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -189,15 +195,90 @@ export function ChannelExecutionTimelineList(
   const { t } = useTranslation()
 
   return (
-    <div className={cn('min-w-0', props.className)}>
-      {props.items.map((item, index) => {
-        if (item.kind === 'attempt') {
-          const AttemptIcon = eventIcon(item.state)
-          const attemptStatus: ChannelExecutionStatus =
-            item.state === 'active' ? 'running' : item.state
+    <TooltipProvider delay={100}>
+      <div className={cn('min-w-0', props.className)}>
+        {props.items.map((item, index) => {
+          if (item.kind === 'attempt') {
+            const AttemptIcon = eventIcon(item.state)
+            const attemptStatus: ChannelExecutionStatus =
+              item.state === 'active' ? 'running' : item.state
+            return (
+              <div
+                key={`attempt-${item.channelId}-${item.startedAt ?? index}`}
+                className='relative grid grid-cols-[24px_minmax(0,1fr)] gap-2.5 pb-3 last:pb-0'
+              >
+                {index < props.items.length - 1 && (
+                  <span className='bg-border absolute top-6 bottom-0 left-[11px] w-px' />
+                )}
+                <span
+                  className={cn(
+                    'bg-background z-10 flex size-6 items-center justify-center rounded-full border',
+                    textColorMap[eventVariant(item.state) ?? 'neutral']
+                  )}
+                >
+                  <AttemptIcon className='size-3' />
+                </span>
+                <div className='min-w-0'>
+                  <div className='flex flex-wrap items-center gap-1.5'>
+                    <StatusBadge
+                      variant={eventVariant(item.state)}
+                      size='sm'
+                      copyable={false}
+                    >
+                      {t(statusLabel(attemptStatus))}
+                    </StatusBadge>
+                    {item.selectionState === 'affinity_hit' ? (
+                      <StatusBadge variant='purple' size='sm' copyable={false}>
+                        {t('Affinity hit')}
+                      </StatusBadge>
+                    ) : null}
+                    {item.selectionState === 'same_channel_retry' ? (
+                      <StatusBadge variant='warning' size='sm' copyable={false}>
+                        {t('Same-channel retry')}
+                      </StatusBadge>
+                    ) : null}
+                    <span className='text-xs font-medium'>
+                      #{item.channelId} {item.channelName}
+                    </span>
+                    {item.startedAt ? (
+                      <span className='text-muted-foreground ml-auto font-mono text-[11px] tabular-nums'>
+                        {new Date(item.startedAt).toLocaleTimeString()}
+                      </span>
+                    ) : null}
+                  </div>
+                  {item.reason ? (
+                    <p className='text-muted-foreground mt-1 text-xs break-all'>
+                      {t(eventReasonLabel(item.reason))}
+                    </p>
+                  ) : null}
+                  <div className='text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]'>
+                    <span>
+                      {t('Duration')}:{' '}
+                      {formatDuration(item.startedAt, item.endedAt)}
+                    </span>
+                    {item.retryIndex != null && item.retryIndex > 0 ? (
+                      <span>
+                        {t('Retry')}: {item.retryIndex}
+                      </span>
+                    ) : null}
+                    {item.priority != null ? (
+                      <span>
+                        {t('Priority')}: {item.priority}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            )
+          }
+
+          const event = item.event
+          const EventIcon = eventIcon(event.state)
+          const isGroupEvent = Boolean(event.group && !event.channel_id)
+          const description = eventDescription(event.state, isGroupEvent)
           return (
             <div
-              key={`attempt-${item.channelId}-${item.startedAt ?? index}`}
+              key={`${event.sequence ?? index}-${event.timestamp ?? 0}`}
               className='relative grid grid-cols-[24px_minmax(0,1fr)] gap-2.5 pb-3 last:pb-0'
             >
               {index < props.items.length - 1 && (
@@ -206,155 +287,101 @@ export function ChannelExecutionTimelineList(
               <span
                 className={cn(
                   'bg-background z-10 flex size-6 items-center justify-center rounded-full border',
-                  textColorMap[eventVariant(item.state) ?? 'neutral']
+                  textColorMap[eventVariant(event.state) ?? 'neutral']
                 )}
               >
-                <AttemptIcon className='size-3' />
+                <EventIcon className='size-3' />
               </span>
               <div className='min-w-0'>
                 <div className='flex flex-wrap items-center gap-1.5'>
-                  <StatusBadge
-                    variant={eventVariant(item.state)}
-                    size='sm'
-                    copyable={false}
-                  >
-                    {t(statusLabel(attemptStatus))}
-                  </StatusBadge>
-                  {item.selectionState === 'affinity_hit' ? (
-                    <StatusBadge variant='purple' size='sm' copyable={false}>
-                      {t('Affinity hit')}
+                  {description ? (
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={<span className='inline-flex cursor-help' />}
+                      >
+                        <StatusBadge
+                          variant={eventVariant(event.state)}
+                          size='sm'
+                          copyable={false}
+                        >
+                          {t(eventLabel(event.state, isGroupEvent))}
+                        </StatusBadge>
+                      </TooltipTrigger>
+                      <TooltipContent
+                        side='top'
+                        className='max-w-xs text-xs leading-5'
+                      >
+                        {t(description)}
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <StatusBadge
+                      variant={eventVariant(event.state)}
+                      size='sm'
+                      copyable={false}
+                    >
+                      {t(eventLabel(event.state, isGroupEvent))}
                     </StatusBadge>
+                  )}
+                  {event.group &&
+                    (isGroupEvent || event.group !== props.executionGroup) && (
+                      <span className='text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs'>
+                        <span>{t('Group')}:</span>
+                        <span className='text-foreground font-mono break-all'>
+                          {event.group}
+                        </span>
+                      </span>
+                    )}
+                  {event.channel_id ? (
+                    <span className='text-xs font-medium'>
+                      #{event.channel_id} {event.channel_name}
+                    </span>
                   ) : null}
-                  {item.selectionState === 'same_channel_retry' ? (
-                    <StatusBadge variant='warning' size='sm' copyable={false}>
-                      {t('Same-channel retry')}
-                    </StatusBadge>
-                  ) : null}
-                  <span className='text-xs font-medium'>
-                    #{item.channelId} {item.channelName}
-                  </span>
-                  {item.startedAt ? (
+                  {event.timestamp ? (
                     <span className='text-muted-foreground ml-auto font-mono text-[11px] tabular-nums'>
-                      {new Date(item.startedAt).toLocaleTimeString()}
+                      {new Date(event.timestamp).toLocaleTimeString()}
                     </span>
                   ) : null}
                 </div>
-                {item.reason ? (
+                {event.reason && event.state !== 'affinity_hit' ? (
                   <p className='text-muted-foreground mt-1 text-xs break-all'>
-                    {t(eventReasonLabel(item.reason))}
+                    {t(eventReasonLabel(event.reason))}
                   </p>
                 ) : null}
-                <div className='text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]'>
-                  <span>
-                    {t('Duration')}:{' '}
-                    {formatDuration(item.startedAt, item.endedAt)}
-                  </span>
-                  {item.retryIndex != null && item.retryIndex > 0 ? (
-                    <span>
-                      {t('Retry')}: {item.retryIndex}
-                    </span>
-                  ) : null}
-                  {item.priority != null ? (
-                    <span>
-                      {t('Priority')}: {item.priority}
-                    </span>
-                  ) : null}
-                </div>
+                {item.startedAt != null ||
+                event.priority != null ||
+                (event.retry_index != null && event.retry_index > 0) ||
+                event.cooldown_until ? (
+                  <div className='text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]'>
+                    {item.startedAt != null ? (
+                      <span>
+                        {t('Duration')}:{' '}
+                        {formatDuration(item.startedAt, event.timestamp)}
+                      </span>
+                    ) : null}
+                    {event.priority != null ? (
+                      <span>
+                        {t('Priority')}: {event.priority}
+                      </span>
+                    ) : null}
+                    {event.retry_index != null && event.retry_index > 0 ? (
+                      <span>
+                        {t('Retry')}: {event.retry_index}
+                      </span>
+                    ) : null}
+                    {event.cooldown_until ? (
+                      <span>
+                        {t('Cooldown')}:{' '}
+                        {new Date(event.cooldown_until * 1000).toLocaleString()}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </div>
           )
-        }
-
-        const event = item.event
-        const EventIcon = eventIcon(event.state)
-        const isGroupEvent = Boolean(event.group && !event.channel_id)
-        const description = eventDescription(event.state, isGroupEvent)
-        return (
-          <div
-            key={`${event.sequence ?? index}-${event.timestamp ?? 0}`}
-            className='relative grid grid-cols-[24px_minmax(0,1fr)] gap-2.5 pb-3 last:pb-0'
-          >
-            {index < props.items.length - 1 && (
-              <span className='bg-border absolute top-6 bottom-0 left-[11px] w-px' />
-            )}
-            <span
-              className={cn(
-                'bg-background z-10 flex size-6 items-center justify-center rounded-full border',
-                textColorMap[eventVariant(event.state) ?? 'neutral']
-              )}
-            >
-              <EventIcon className='size-3' />
-            </span>
-            <div className='min-w-0'>
-              <div className='flex flex-wrap items-center gap-1.5'>
-                <StatusBadge
-                  variant={eventVariant(event.state)}
-                  size='sm'
-                  copyable={false}
-                >
-                  {t(eventLabel(event.state, isGroupEvent))}
-                </StatusBadge>
-                {event.group &&
-                  (isGroupEvent || event.group !== props.executionGroup) && (
-                    <span className='font-mono text-xs'>
-                      {isGroupEvent ? `${t('Candidate group')}: ` : ''}
-                      {event.group}
-                    </span>
-                  )}
-                {event.channel_id ? (
-                  <span className='text-xs font-medium'>
-                    #{event.channel_id} {event.channel_name}
-                  </span>
-                ) : null}
-                {event.timestamp ? (
-                  <span className='text-muted-foreground ml-auto font-mono text-[11px] tabular-nums'>
-                    {new Date(event.timestamp).toLocaleTimeString()}
-                  </span>
-                ) : null}
-              </div>
-              {description ? (
-                <p className='text-muted-foreground mt-1 text-xs'>
-                  {t(description)}
-                </p>
-              ) : null}
-              {event.reason && event.state !== 'affinity_hit' ? (
-                <p className='text-muted-foreground mt-1 text-xs break-all'>
-                  {t(eventReasonLabel(event.reason))}
-                </p>
-              ) : null}
-              {item.startedAt != null ||
-              event.priority != null ||
-              (event.retry_index != null && event.retry_index > 0) ||
-              event.cooldown_until ? (
-                <div className='text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]'>
-                  {item.startedAt != null ? (
-                    <span>
-                      {t('Duration')}:{' '}
-                      {formatDuration(item.startedAt, event.timestamp)}
-                    </span>
-                  ) : null}
-                  {event.priority != null ? (
-                    <span>
-                      {t('Priority')}: {event.priority}
-                    </span>
-                  ) : null}
-                  {event.retry_index != null && event.retry_index > 0 ? (
-                    <span>
-                      {t('Retry')}: {event.retry_index}
-                    </span>
-                  ) : null}
-                  {event.cooldown_until ? (
-                    <span>
-                      {t('Cooldown')}:{' '}
-                      {new Date(event.cooldown_until * 1000).toLocaleString()}
-                    </span>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        )
-      })}
-    </div>
+        })}
+      </div>
+    </TooltipProvider>
   )
 }

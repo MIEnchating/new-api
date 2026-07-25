@@ -40,7 +40,7 @@ export function getApiKeyFormSchema(t: TFunction) {
     cooldown_seconds: z
       .number()
       .int()
-      .min(1, t('Cooldown must be greater than 0 seconds'))
+      .min(0, t('Cooldown must be zero or greater'))
       .max(31536000, t('Cooldown cannot exceed 31536000 seconds')),
   })
 
@@ -161,6 +161,10 @@ export function getApiKeyFormDefaultValues(): ApiKeyFormValues {
       { group: '', priority: 1, cooldown_seconds: 60, enabled: true },
     ],
   }
+}
+
+export function getAutomaticGroupRoutePriorities(count: number): number[] {
+  return Array.from({ length: Math.max(0, count) }, (_, index) => count - index)
 }
 
 export function parseApiKeyGroupRouteConfig(

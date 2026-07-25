@@ -63,6 +63,7 @@ import { selectExecutionTrace } from '../../lib/channel-execution-trace'
 
 type ChannelExecutionDialogProps = {
   open: boolean
+  initialView: 'plan' | 'trace'
   onOpenChange: (open: boolean) => void
 }
 
@@ -156,6 +157,7 @@ function queryErrorMessage(error: unknown, fallback: string) {
 
 export function ChannelExecutionDialog({
   open,
+  initialView,
   onOpenChange,
 }: ChannelExecutionDialogProps) {
   const { t } = useTranslation()
@@ -185,6 +187,13 @@ export function ChannelExecutionDialog({
   const [selectedRequestID, setSelectedRequestID] = useState('')
 
   useEffect(() => {
+    if (!open) return
+    setSearchedRequestID('')
+    setRequestID('')
+    setSelectedRequestID('')
+  }, [initialView, open])
+
+  useEffect(() => {
     if (!open || groups.length === 0) return
     if (!groups.some((item) => item.name === group)) {
       setGroup(groups[0].name)
@@ -212,7 +221,7 @@ export function ChannelExecutionDialog({
         path: requestPath.trim(),
         mode,
       }),
-    enabled: open && group !== '' && model !== '',
+    enabled: open && initialView === 'plan' && group !== '' && model !== '',
     retry: false,
   })
 
@@ -224,7 +233,7 @@ export function ChannelExecutionDialog({
         group,
         limit: 20,
       }),
-    enabled: open && group !== '',
+    enabled: open && initialView === 'trace' && group !== '',
     refetchInterval: (query) =>
       query.state.data?.data?.some((item) => item.status === 'running')
         ? 1500
@@ -235,7 +244,7 @@ export function ChannelExecutionDialog({
   const traceQuery = useQuery({
     queryKey: ['channel-execution-trace', searchedRequestID],
     queryFn: () => getChannelExecutionTrace(searchedRequestID),
-    enabled: open && searchedRequestID !== '',
+    enabled: open && initialView === 'trace' && searchedRequestID !== '',
     refetchInterval: (query) =>
       query.state.data?.data?.status === 'running' ? 1000 : false,
     retry: false,
@@ -317,15 +326,21 @@ export function ChannelExecutionDialog({
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title={t('Group execution plan')}
+      title={t(
+        initialView === 'plan'
+          ? 'Group execution plan'
+          : 'Request execution trace'
+      )}
       description={t(
-        'Generate candidate plans by group, model, path, and routing strategy'
+        initialView === 'plan'
+          ? 'Generate candidate plans by group, model, path, and routing strategy'
+          : 'Running and recent requests in the selected group'
       )}
       contentClassName='sm:max-w-4xl'
       contentHeight='min(76dvh, 720px)'
       bodyClassName='space-y-4 pr-1'
     >
-      <section className='space-y-3 border-b pb-4'>
+      <section className={cn('space-y-3', initialView !== 'plan' && 'hidden')}>
         <div className='flex flex-wrap items-center justify-between gap-3'>
           <div className='space-y-0.5'>
             <h3 className='text-sm font-medium'>{t('Strategy preview')}</h3>
@@ -506,7 +521,9 @@ export function ChannelExecutionDialog({
                     <div className='bg-muted/30 flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2.5'>
                       <div className='flex min-w-0 items-center gap-2'>
                         <span className='text-sm font-medium'>
-                          {t('Priority level {{level}}', { level: index + 1 })}
+                          {t('Priority level {{level}}', {
+                            level: index + 1,
+                          })}
                         </span>
                         <StatusBadge
                           variant='neutral'
@@ -606,7 +623,7 @@ export function ChannelExecutionDialog({
         )}
       </section>
 
-      <section className='space-y-3'>
+      <section className={cn('space-y-3', initialView !== 'trace' && 'hidden')}>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div className='space-y-0.5'>
             <h3 className='text-sm font-medium'>
@@ -636,7 +653,34 @@ export function ChannelExecutionDialog({
           </StatusBadge>
         </div>
 
-        <div className='grid gap-2 sm:grid-cols-[minmax(180px,0.75fr)_minmax(0,1.25fr)_auto]'>
+        <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(150px,0.65fr)_minmax(180px,0.75fr)_minmax(0,1.25fr)_auto]'>
+          <Select<string>
+            value={group}
+            items={groups.map((item) => ({
+              value: item.name,
+              label: item.name,
+            }))}
+            onValueChange={(value) => value !== null && setGroup(value)}
+          >
+            <SelectTrigger className='w-full'>
+              <SelectValue
+                placeholder={
+                  channelsQuery.isLoading
+                    ? t('Loading groups...')
+                    : t('Select group')
+                }
+              />
+            </SelectTrigger>
+            <SelectContent alignItemWithTrigger={false}>
+              <SelectGroup>
+                {groups.map((item) => (
+                  <SelectItem key={item.name} value={item.name}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           <Select<number>
             value={channelID}
             items={[
