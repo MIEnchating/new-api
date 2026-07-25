@@ -26,6 +26,7 @@ import {
   sideDrawerFormClassName,
   sideDrawerHeaderClassName,
 } from '@/components/drawer-layout'
+import { JsonCodeEditor } from '@/components/json-code-editor'
 import {
   Accordion,
   AccordionContent,
@@ -282,7 +283,11 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                 <FormItem>
                   <FormLabel>{t('Group display order')}</FormLabel>
                   <FormControl>
-                    <Textarea rows={6} {...field} />
+                    <JsonCodeEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                      heightClassName='h-40 min-h-40 max-h-40'
+                    />
                   </FormControl>
                   <FormDescription>
                     {t(
@@ -301,7 +306,10 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                 <FormItem>
                   <FormLabel>{t('Special usable group rules')}</FormLabel>
                   <FormControl>
-                    <Textarea rows={8} {...field} />
+                    <JsonCodeEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                    />
                   </FormControl>
                   <FormDescription>
                     {t(
