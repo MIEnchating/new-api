@@ -540,184 +540,184 @@ export function ApiKeysMutateDrawer({
                     {routeFields.fields.map((routeField, index) => (
                       <div
                         key={routeField.id}
-                        className='border-border/70 grid gap-3 rounded-md border p-3'
+                        className='border-border/70 grid min-w-0 gap-3 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_5rem] sm:items-start'
                       >
-                        <div className='grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_5rem] sm:items-start'>
-                          <FormField
-                            control={form.control}
-                            name={`group_routes.${index}.group`}
-                            render={({ field }) => (
-                              <FormItem className='min-w-0'>
-                                <FormLabel>{t('Group')}</FormLabel>
-                                <FormControl>
-                                  <ApiKeyGroupCombobox
-                                    options={routableGroups}
-                                    value={field.value}
-                                    onValueChange={field.onChange}
-                                    placeholder={t('Select a group')}
-                                    compact
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
+                        <FormField
+                          control={form.control}
+                          name={`group_routes.${index}.group`}
+                          render={({ field }) => (
+                            <FormItem className='min-w-0 sm:col-span-2'>
+                              <FormLabel className='min-h-5'>
+                                {t('Group')}
+                              </FormLabel>
+                              <FormControl>
+                                <ApiKeyGroupCombobox
+                                  options={routableGroups}
+                                  value={field.value}
+                                  onValueChange={field.onChange}
+                                  placeholder={t('Select a group')}
+                                  compact
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
 
-                          <FormField
-                            control={form.control}
-                            name={`group_routes.${index}.enabled`}
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>{t('Status')}</FormLabel>
-                                <FormControl>
+                        <FormField
+                          control={form.control}
+                          name={`group_routes.${index}.enabled`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className='min-h-5'>
+                                {t('Status')}
+                              </FormLabel>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value !== false}
+                                  onCheckedChange={field.onChange}
+                                  className='my-[4px]'
+                                  aria-label={t('Enabled')}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name={`group_routes.${index}.priority`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel className='min-h-5'>
+                                {t('Priority')}
+                              </FormLabel>
+                              <FormControl>
+                                <Input
+                                  {...field}
+                                  type='number'
+                                  min='0'
+                                  step='1'
+                                  disabled={autoSortGroupRoutes}
+                                  onChange={(e) =>
+                                    field.onChange(
+                                      Number.parseInt(e.target.value, 10) || 0
+                                    )
+                                  }
+                                />
+                              </FormControl>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name={`group_routes.${index}.cooldown_seconds`}
+                          render={({ field }) => (
+                            <FormItem>
+                              <div className='flex min-h-5 items-center justify-between gap-2'>
+                                <FormLabel
+                                  className={cn(
+                                    cooldownUnavailable &&
+                                      'text-muted-foreground'
+                                  )}
+                                >
+                                  {t('Cooldown')}
+                                </FormLabel>
+                                <label className='text-muted-foreground flex cursor-pointer items-center gap-1.5 text-xs'>
+                                  <span>{t('Disable cooldown')}</span>
                                   <Switch
-                                    checked={field.value !== false}
-                                    onCheckedChange={field.onChange}
-                                    className='my-[9px]'
-                                    aria-label={t('Enabled')}
-                                  />
-                                </FormControl>
-                              </FormItem>
-                            )}
-                          />
-                        </div>
-
-                        <div className='grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_2.25rem] sm:items-start'>
-                          <FormField
-                            control={form.control}
-                            name={`group_routes.${index}.priority`}
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>{t('Priority')}</FormLabel>
-                                <FormControl>
-                                  <Input
-                                    {...field}
-                                    type='number'
-                                    min='0'
-                                    step='1'
-                                    disabled={autoSortGroupRoutes}
-                                    onChange={(e) =>
+                                    size='sm'
+                                    checked={field.value === 0}
+                                    disabled={cooldownUnavailable}
+                                    onCheckedChange={(checked) => {
+                                      if (checked) {
+                                        const currentValue = field.value ?? 60
+                                        if (currentValue > 0) {
+                                          enabledRouteCooldownsRef.current.set(
+                                            routeField.id,
+                                            currentValue
+                                          )
+                                        }
+                                        field.onChange(0)
+                                        return
+                                      }
                                       field.onChange(
-                                        Number.parseInt(e.target.value, 10) || 0
+                                        enabledRouteCooldownsRef.current.get(
+                                          routeField.id
+                                        ) ?? 60
                                       )
-                                    }
+                                    }}
                                   />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-
-                          <FormField
-                            control={form.control}
-                            name={`group_routes.${index}.cooldown_seconds`}
-                            render={({ field }) => (
-                              <FormItem>
-                                <div className='flex min-h-5 items-center justify-between gap-2'>
-                                  <FormLabel
-                                    className={cn(
-                                      cooldownUnavailable &&
-                                        'text-muted-foreground'
-                                    )}
+                                </label>
+                              </div>
+                              <TooltipProvider delay={100}>
+                                <Tooltip>
+                                  <TooltipTrigger
+                                    render={<div className='w-full' />}
                                   >
-                                    {t('Cooldown')}
-                                  </FormLabel>
-                                  <label className='text-muted-foreground flex cursor-pointer items-center gap-1.5 text-xs'>
-                                    <span>{t('Disable cooldown')}</span>
-                                    <Switch
-                                      size='sm'
-                                      checked={field.value === 0}
-                                      disabled={cooldownUnavailable}
-                                      onCheckedChange={(checked) => {
-                                        if (checked) {
-                                          const currentValue = field.value ?? 60
-                                          if (currentValue > 0) {
+                                    <FormControl>
+                                      <Input
+                                        {...field}
+                                        type='number'
+                                        min='0'
+                                        max='31536000'
+                                        step='1'
+                                        disabled={
+                                          cooldownUnavailable ||
+                                          field.value === 0
+                                        }
+                                        onChange={(event) => {
+                                          const value = Number.parseInt(
+                                            event.target.value,
+                                            10
+                                          )
+                                          const nextValue = Number.isNaN(value)
+                                            ? 1
+                                            : value
+                                          field.onChange(nextValue)
+                                          if (nextValue > 0) {
                                             enabledRouteCooldownsRef.current.set(
                                               routeField.id,
-                                              currentValue
+                                              nextValue
                                             )
                                           }
-                                          field.onChange(0)
-                                          return
-                                        }
-                                        field.onChange(
-                                          enabledRouteCooldownsRef.current.get(
-                                            routeField.id
-                                          ) ?? 60
-                                        )
-                                      }}
-                                    />
-                                  </label>
-                                </div>
-                                <TooltipProvider delay={100}>
-                                  <Tooltip>
-                                    <TooltipTrigger
-                                      render={<div className='w-full' />}
+                                        }}
+                                      />
+                                    </FormControl>
+                                  </TooltipTrigger>
+                                  {cooldownUnavailable ? (
+                                    <TooltipContent
+                                      side='top'
+                                      className='max-w-xs'
                                     >
-                                      <FormControl>
-                                        <Input
-                                          {...field}
-                                          type='number'
-                                          min='0'
-                                          max='31536000'
-                                          step='1'
-                                          disabled={
-                                            cooldownUnavailable ||
-                                            field.value === 0
-                                          }
-                                          onChange={(event) => {
-                                            const value = Number.parseInt(
-                                              event.target.value,
-                                              10
-                                            )
-                                            const nextValue = Number.isNaN(
-                                              value
-                                            )
-                                              ? 1
-                                              : value
-                                            field.onChange(nextValue)
-                                            if (nextValue > 0) {
-                                              enabledRouteCooldownsRef.current.set(
-                                                routeField.id,
-                                                nextValue
-                                              )
-                                            }
-                                          }}
-                                        />
-                                      </FormControl>
-                                    </TooltipTrigger>
-                                    {cooldownUnavailable ? (
-                                      <TooltipContent
-                                        side='top'
-                                        className='max-w-xs'
-                                      >
-                                        {t(
-                                          'Add and enable at least two group routing rules to configure cooldown.'
-                                        )}
-                                      </TooltipContent>
-                                    ) : null}
-                                  </Tooltip>
-                                </TooltipProvider>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
+                                      {t(
+                                        'Add and enable at least two group routing rules to configure cooldown.'
+                                      )}
+                                    </TooltipContent>
+                                  ) : null}
+                                </Tooltip>
+                              </TooltipProvider>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
 
-                          <div className='grid gap-2'>
-                            <span
-                              aria-hidden='true'
-                              className='hidden h-3.5 sm:block'
-                            />
-                            <Button
-                              type='button'
-                              variant='outline'
-                              size='icon'
-                              onClick={() => routeFields.remove(index)}
-                              aria-label={t('Remove group routing rule')}
-                            >
-                              <Trash2 className='size-4' />
-                            </Button>
-                          </div>
+                        <div className='grid justify-items-start gap-2 sm:col-start-3 sm:row-start-2'>
+                          <span
+                            aria-hidden='true'
+                            className='hidden min-h-5 sm:block'
+                          />
+                          <Button
+                            type='button'
+                            variant='outline'
+                            size='icon'
+                            onClick={() => routeFields.remove(index)}
+                            aria-label={t('Remove group routing rule')}
+                          >
+                            <Trash2 className='size-4' />
+                          </Button>
                         </div>
                       </div>
                     ))}

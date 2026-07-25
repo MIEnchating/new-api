@@ -5375,7 +5375,7 @@
     "Cache analytics": "缓存分析",
     "Cache monitoring unavailable": "缓存监控暂不可用",
     "Cache requests": "缓存判定请求",
-    "Displayed group cache statistics (last 24h)": "显示分组缓存统计（最近 24 小时）",
+    "Displayed group cache statistics (last 24h)": "分组缓存命中率对比（最近 24 小时）",
     "Hits / Requests": "命中 / 请求",
     "Cached tokens": "缓存 Token",
     "Meets baseline": "达到基线",

@@ -79,15 +79,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Slider } from '@/components/ui/slider'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatThroughput } from '@/features/performance-metrics/lib/format'
 import { useIsAdmin } from '@/hooks/use-admin'
 import { cn } from '@/lib/utils'
@@ -118,6 +112,14 @@ function formatTime(timestamp: number) {
     minute: '2-digit',
     hourCycle: 'h23',
   })
+}
+
+function estimateAxisLabelWidth(value: string) {
+  return [...value].reduce(
+    (width, character) =>
+      width + ((character.codePointAt(0) ?? 0) <= 0x7f ? 7 : 12),
+    0
+  )
 }
 
 function CacheMetric(props: {
@@ -289,6 +291,15 @@ function CacheGroupStats(props: {
       color: 'var(--chart-2)',
     },
   }
+  const longestGroupLabelWidth = data.reduce(
+    (longest, group) => Math.max(longest, estimateAxisLabelWidth(group.group)),
+    0
+  )
+  const categoryAxisWidth = Math.min(
+    280,
+    Math.max(112, longestGroupLabelWidth + 20)
+  )
+  const chartHeight = Math.max(256, data.length * 36 + 48)
 
   if (data.length === 0) {
     return (
@@ -299,12 +310,16 @@ function CacheGroupStats(props: {
   }
 
   return (
-    <ChartContainer config={config} className='aspect-auto h-56 w-full sm:h-64'>
+    <ChartContainer
+      config={config}
+      className='aspect-auto w-full'
+      style={{ height: chartHeight }}
+    >
       <BarChart
         accessibilityLayer
         data={data}
         layout='vertical'
-        margin={{ top: 8, right: 24, bottom: 0, left: 4 }}
+        margin={{ top: 8, right: 28, bottom: 0, left: 0 }}
       >
         <CartesianGrid horizontal={false} strokeDasharray='3 3' />
         <XAxis
@@ -317,10 +332,11 @@ function CacheGroupStats(props: {
         <YAxis
           type='category'
           dataKey='group'
-          width='auto'
+          width={categoryAxisWidth}
           tickLine={false}
           axisLine={false}
           tickMargin={8}
+          interval={0}
         />
         <ReferenceLine
           x={props.baseline}
@@ -624,12 +640,12 @@ export function CacheMonitor(props: {
             value={formatCount(selectedGroup.request_count)}
           />
         </div>
-        <div className='mt-5 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(20rem,0.9fr)]'>
+        <div className='mt-5 grid min-w-0 gap-7'>
           <div className='min-w-0'>
-            <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
-              <div className='text-sm font-medium'>
+            <div className='mb-3 flex flex-wrap items-end justify-between gap-2'>
+              <h3 className='text-base font-semibold'>
                 {t('Cache and throughput trend (last 24h)')}
-              </div>
+              </h3>
               <div className='text-muted-foreground flex items-center gap-3 text-xs'>
                 <span className='flex items-center gap-1.5'>
                   <span className='bg-chart-2 size-2 rounded-full' />
@@ -650,9 +666,9 @@ export function CacheMonitor(props: {
             />
           </div>
           <div className='min-w-0'>
-            <div className='mb-3 text-sm font-medium'>
+            <h3 className='mb-3 text-base font-semibold'>
               {t('Displayed group cache statistics (last 24h)')}
-            </div>
+            </h3>
             <CacheGroupStats
               groups={groups}
               activeGroup={activeGroup}
@@ -702,25 +718,6 @@ export function CacheMonitor(props: {
           </div>
 
           <div className='flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto'>
-            {groups.length > 0 ? (
-              <Select
-                value={activeGroup}
-                onValueChange={(value) => {
-                  if (value) setActiveGroup(value)
-                }}
-              >
-                <SelectTrigger className='w-full min-w-44 sm:w-56'>
-                  <SelectValue placeholder={t('Select group')} />
-                </SelectTrigger>
-                <SelectContent alignItemWithTrigger={false}>
-                  {groups.map((group) => (
-                    <SelectItem key={group.group} value={group.group}>
-                      {group.group}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : null}
             {isAdmin ? (
               <Button
                 type='button'
@@ -764,6 +761,29 @@ export function CacheMonitor(props: {
             ) : null}
           </div>
         </div>
+
+        {groups.length > 0 ? (
+          <Tabs
+            value={activeGroup}
+            onValueChange={setActiveGroup}
+            className='mt-4 min-w-0 [scrollbar-width:thin] overflow-x-auto pb-1'
+          >
+            <TabsList
+              aria-label={t('Select group')}
+              className='h-9 w-max min-w-full flex-nowrap justify-start gap-1 p-1 group-data-horizontal/tabs:h-9'
+            >
+              {groups.map((group) => (
+                <TabsTrigger
+                  key={group.group}
+                  value={group.group}
+                  className='h-7 flex-none px-3 py-1 whitespace-nowrap'
+                >
+                  <span>{group.group}</span>
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        ) : null}
 
         {content}
       </section>

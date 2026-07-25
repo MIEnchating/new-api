@@ -5375,7 +5375,7 @@
     "Cache analytics": "快取分析",
     "Cache monitoring unavailable": "快取監控暫不可用",
     "Cache requests": "快取判定請求",
-    "Displayed group cache statistics (last 24h)": "顯示分組快取統計（最近 24 小時）",
+    "Displayed group cache statistics (last 24h)": "分組快取命中率比較（最近 24 小時）",
     "Hits / Requests": "命中 / 請求",
     "Cached tokens": "快取 Token",
     "Meets baseline": "達到基線",
