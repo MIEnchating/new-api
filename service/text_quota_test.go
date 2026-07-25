@@ -743,11 +743,12 @@ func TestCalculateTextQuotaSummaryFixedPriceAppliesImageCountOnceAndAllowsOverri
 
 func TestIsConversationCacheMetricEligible(t *testing.T) {
 	tests := []struct {
-		name     string
-		format   types.RelayFormat
-		usage    *dto.Usage
-		local    bool
-		eligible bool
+		name        string
+		format      types.RelayFormat
+		usage       *dto.Usage
+		local       bool
+		channelTest bool
+		eligible    bool
 	}{
 		{name: "chat usage", format: types.RelayFormatOpenAI, usage: &dto.Usage{}, eligible: true},
 		{name: "responses usage", format: types.RelayFormatOpenAIResponses, usage: &dto.Usage{}, eligible: true},
@@ -755,6 +756,7 @@ func TestIsConversationCacheMetricEligible(t *testing.T) {
 		{name: "claude usage", format: types.RelayFormatClaude, usage: &dto.Usage{}, eligible: true},
 		{name: "gemini usage", format: types.RelayFormatGemini, usage: &dto.Usage{}, eligible: true},
 		{name: "local estimate", format: types.RelayFormatOpenAI, usage: &dto.Usage{}, local: true},
+		{name: "channel test", format: types.RelayFormatOpenAI, usage: &dto.Usage{}, channelTest: true},
 		{name: "billing estimate", format: types.RelayFormatGemini, usage: &dto.Usage{BillingUsage: &dto.BillingUsage{Estimated: true}}},
 		{name: "missing usage", format: types.RelayFormatOpenAI},
 		{name: "embedding usage", format: types.RelayFormatEmbedding, usage: &dto.Usage{}},
@@ -769,7 +771,10 @@ func TestIsConversationCacheMetricEligible(t *testing.T) {
 			if test.local {
 				common.SetContextKey(ctx, constant.ContextKeyLocalCountTokens, true)
 			}
-			info := &relaycommon.RelayInfo{RelayFormat: test.format}
+			info := &relaycommon.RelayInfo{
+				RelayFormat:   test.format,
+				IsChannelTest: test.channelTest,
+			}
 			require.Equal(t, test.eligible, isConversationCacheMetricEligible(ctx, info, test.usage))
 		})
 	}

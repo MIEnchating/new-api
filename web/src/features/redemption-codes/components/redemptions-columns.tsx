@@ -31,7 +31,11 @@ import {
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import { REDEMPTION_FILTER_EXPIRED, REDEMPTION_STATUSES } from '../constants'
-import { isRedemptionExpired, isTimestampExpired } from '../lib'
+import {
+  getRedemptionTypeLabelKey,
+  isRedemptionExpired,
+  isTimestampExpired,
+} from '../lib'
 import type { Redemption } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
@@ -74,7 +78,7 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
     },
     {
       accessorKey: 'name',
-      header: t('Batch'),
+      header: t('Name / Batch'),
       meta: { mobileTitle: true },
       cell: ({ row }) => {
         const redemption = row.original
@@ -93,13 +97,13 @@ export function useRedemptionsColumns(): ColumnDef<Redemption>[] {
     },
     {
       accessorKey: 'limit_one_per_user',
-      header: t('Campaign type'),
+      header: t('Type'),
       meta: { mobileHidden: true },
       cell: ({ row }) => {
         const limited = row.getValue('limit_one_per_user') as boolean
         return (
           <StatusBadge
-            label={limited ? t('Campaign exclusive') : t('Regular')}
+            label={t(getRedemptionTypeLabelKey(limited))}
             variant={limited ? 'info' : 'neutral'}
             copyable={false}
             className='-ml-1.5'

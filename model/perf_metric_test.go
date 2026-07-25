@@ -24,6 +24,8 @@ func TestPerfMetricCacheColumnsUpsertAndGroupAggregation(t *testing.T) {
 			Group:         "default",
 			BucketTs:      bucketTs,
 			RequestCount:  1,
+			OutputTokens:  20,
+			GenerationMs:  1_000,
 			CacheRequests: 1,
 			CacheHits:     1,
 			CachedTokens:  30,
@@ -33,6 +35,8 @@ func TestPerfMetricCacheColumnsUpsertAndGroupAggregation(t *testing.T) {
 			Group:         "default",
 			BucketTs:      bucketTs,
 			RequestCount:  1,
+			OutputTokens:  10,
+			GenerationMs:  1_000,
 			CacheRequests: 1,
 		},
 		{
@@ -40,9 +44,19 @@ func TestPerfMetricCacheColumnsUpsertAndGroupAggregation(t *testing.T) {
 			Group:         "default",
 			BucketTs:      bucketTs,
 			RequestCount:  1,
+			OutputTokens:  30,
+			GenerationMs:  1_000,
 			CacheRequests: 1,
 			CacheHits:     1,
 			CachedTokens:  20,
+		},
+		{
+			ModelName:    "cache-test-throughput-only",
+			Group:        "default",
+			BucketTs:     bucketTs,
+			RequestCount: 1,
+			OutputTokens: 40,
+			GenerationMs: 1_000,
 		},
 		{
 			ModelName:     "cache-test-a",
@@ -65,4 +79,7 @@ func TestPerfMetricCacheColumnsUpsertAndGroupAggregation(t *testing.T) {
 	assert.EqualValues(t, 3, rows[0].CacheRequests)
 	assert.EqualValues(t, 2, rows[0].CacheHits)
 	assert.EqualValues(t, 50, rows[0].CachedTokens)
+	assert.EqualValues(t, 4, rows[0].RequestCount)
+	assert.EqualValues(t, 100, rows[0].OutputTokens)
+	assert.EqualValues(t, 4_000, rows[0].GenerationMs)
 }

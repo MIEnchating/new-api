@@ -112,6 +112,8 @@ const MODELS_SECTIONS = [
           ChannelRouteStickyEnabled: settings.ChannelRouteStickyEnabled,
           ChannelRouteSameChannelRetries:
             settings.ChannelRouteSameChannelRetries,
+          ChannelRouteGroupExclusionsEnabled:
+            settings.ChannelRouteGroupExclusionsEnabled,
           ChannelRouteGroupExclusions: settings.ChannelRouteGroupExclusions,
         }}
       />

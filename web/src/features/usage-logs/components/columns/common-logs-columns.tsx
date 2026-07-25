@@ -17,14 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { Activity, GitBranch, KeyRound, Sparkles, Workflow } from 'lucide-react'
+import { GitBranch, KeyRound, Sparkles, Workflow } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Button } from '@/components/ui/button'
 import {
   Popover,
   PopoverContent,
@@ -49,6 +48,7 @@ import {
   getSecondFactorMethodLabel,
   getTieredBillingSummary,
   hasAnyCacheTokens,
+  getUpstreamRequestIds,
   parseLogOther,
   isViolationFeeLog,
   renderAuditContent,
@@ -859,6 +859,10 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
           isAdmin &&
           Boolean(log.request_id) &&
           Boolean(other?.admin_info?.channel_execution_trace)
+        const upstreamRequestIds = getUpstreamRequestIds(
+          other?.admin_info?.upstream_request_ids,
+          log.upstream_request_id
+        )
 
         const segments = buildDetailSegments(log, other, t, isAdmin)
         const primary = segments[0]
@@ -943,30 +947,6 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                     {fullDetailText}
                   </TooltipContent>
                 </Tooltip>
-                {canViewExecutionTrace ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <Button
-                          type='button'
-                          size='icon-sm'
-                          variant='ghost'
-                          className='text-muted-foreground hover:text-foreground shrink-0'
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            setTraceDialogOpen(true)
-                          }}
-                          aria-label={t('View execution trace')}
-                        />
-                      }
-                    >
-                      <Activity className='size-3.5' />
-                    </TooltipTrigger>
-                    <TooltipContent side='top'>
-                      {t('View execution trace')}
-                    </TooltipContent>
-                  </Tooltip>
-                ) : null}
               </div>
             </TooltipProvider>
             <DetailsDialog
@@ -974,10 +954,25 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
               isAdmin={isAdmin}
               open={dialogOpen}
               onOpenChange={setDialogOpen}
+              onViewExecutionTrace={
+                canViewExecutionTrace
+                  ? () => {
+                      setDialogOpen(false)
+                      setTraceDialogOpen(true)
+                    }
+                  : undefined
+              }
             />
             {canViewExecutionTrace ? (
               <ExecutionTraceDialog
                 requestId={log.request_id}
+                upstreamRequestIds={upstreamRequestIds}
+                upstreamRequestIdSources={
+                  other?.admin_info?.upstream_request_id_sources
+                }
+                isRetryIntermediate={
+                  other?.admin_info?.retry_intermediate === true
+                }
                 open={traceDialogOpen}
                 onOpenChange={setTraceDialogOpen}
               />

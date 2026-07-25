@@ -165,14 +165,25 @@ For commercial licensing, please contact support@quantumnous.com
   display: none;
 }
 
-/* Sonner collapses a dismissed background toast downward after the pointer
- * leaves the stack. Keep top-positioned toast exits moving toward the edge. */
+/* Keep dismissed top-positioned toasts at their current stack position while
+ * fading out. Sonner's default offset math can move tall expanded toasts down. */
+[data-sonner-toaster][data-y-position='top']
+  [data-sonner-toast][data-removed='true'][data-expanded='true'][data-swipe-out='false'] {
+  --y: translateY(var(--offset));
+  transition: opacity 0.18s ease;
+}
+
+[data-sonner-toaster][data-y-position='top']
+  [data-sonner-toast][data-removed='true'][data-front='true'][data-expanded='false'][data-swipe-out='false'] {
+  --y: translateY(0);
+  transition: opacity 0.18s ease;
+}
+
 [data-sonner-toaster][data-y-position='top']
   [data-sonner-toast][data-removed='true'][data-front='false'][data-expanded='false'][data-swipe-out='false'] {
-  --y: translateY(-100%);
-  transition:
-    transform 0.3s ease,
-    opacity 0.2s ease;
+  --y: translateY(calc(var(--lift-amount) * var(--toasts-before)))
+    scale(calc(-1 * var(--scale)));
+  transition: opacity 0.18s ease;
 }
 
 @utility hover-scrollbar {

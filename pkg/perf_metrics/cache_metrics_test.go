@@ -22,8 +22,8 @@ func TestAtomicBucketTracksOnlyCacheEligibleRequests(t *testing.T) {
 func TestBuildCacheQueryResultAggregatesModelsByGroup(t *testing.T) {
 	result := buildCacheQueryResult(map[string]map[int64]counters{
 		"default": {
-			100: {cacheRequests: 2, cacheHits: 1, cachedTokens: 30},
-			200: {cacheRequests: 1, cacheHits: 1, cachedTokens: 20},
+			100: {requestCount: 2, outputTokens: 30, generationMs: 1_000, cacheRequests: 2, cacheHits: 1, cachedTokens: 30},
+			200: {requestCount: 1, outputTokens: 30, generationMs: 1_000, cacheRequests: 1, cacheHits: 1, cachedTokens: 20},
 		},
 		"vip": {
 			100: {cacheRequests: 1, cachedTokens: 0},
@@ -36,10 +36,11 @@ func TestBuildCacheQueryResultAggregatesModelsByGroup(t *testing.T) {
 	assert.EqualValues(t, 2, result.Groups[0].HitCount)
 	assert.EqualValues(t, 50, result.Groups[0].CachedTokens)
 	assert.Equal(t, 66.67, result.Groups[0].CacheHitRate)
+	assert.Equal(t, 30.0, result.Groups[0].AvgTps)
 	require.Len(t, result.Groups[0].Series, 2)
+	assert.Equal(t, 30.0, result.Groups[0].Series[0].AvgTps)
 
-	assert.EqualValues(t, 4, result.Total.RequestCount)
-	assert.EqualValues(t, 2, result.Total.HitCount)
-	assert.EqualValues(t, 50, result.Total.CachedTokens)
-	assert.Equal(t, 50.0, result.Total.CacheHitRate)
+	assert.EqualValues(t, 1, result.Groups[1].RequestCount)
+	assert.EqualValues(t, 0, result.Groups[1].HitCount)
+	assert.Equal(t, 0.0, result.Groups[1].CacheHitRate)
 }

@@ -43,3 +43,9 @@ export function isRedemptionExpired(
 ): boolean {
   return status === 1 && isTimestampExpired(expired_time)
 }
+
+export function getRedemptionTypeLabelKey(
+  limitOnePerUser: boolean
+): 'Campaign' | 'Batch' {
+  return limitOnePerUser ? 'Campaign' : 'Batch'
+}

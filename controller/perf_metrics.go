@@ -65,7 +65,8 @@ func GetCacheMetrics(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"total":            result.Total,
+			"start_ts":         result.StartTs,
+			"end_ts":           result.EndTs,
 			"groups":           result.Groups,
 			"baseline":         perf_metrics_setting.GetCacheHitRateBaseline(),
 			"bucket_seconds":   perf_metrics_setting.GetBucketSeconds(),

@@ -241,6 +241,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	oldChannelRouteCooldownSeconds := common.ChannelRouteCooldownSeconds
 	oldChannelRouteStickyEnabled := common.ChannelRouteStickyEnabled
 	oldChannelRouteSameChannelRetries := common.ChannelRouteSameChannelRetries
+	oldChannelRouteGroupExclusionsEnabled := setting.ChannelRouteGroupExclusionsEnabled
 	oldChannelRouteGroupExclusions := setting.ChannelRouteGroupExclusions2JSONString()
 	oldRetryTimes := common.RetryTimes
 	oldDB := model.DB
@@ -251,6 +252,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	common.ChannelRouteCooldownSeconds = 60
 	common.ChannelRouteStickyEnabled = false
 	common.ChannelRouteSameChannelRetries = 0
+	setting.ChannelRouteGroupExclusionsEnabled = true
 	require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString("{}"))
 	common.RetryTimes = 0
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
@@ -279,6 +281,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 		common.ChannelRouteCooldownSeconds = oldChannelRouteCooldownSeconds
 		common.ChannelRouteStickyEnabled = oldChannelRouteStickyEnabled
 		common.ChannelRouteSameChannelRetries = oldChannelRouteSameChannelRetries
+		setting.ChannelRouteGroupExclusionsEnabled = oldChannelRouteGroupExclusionsEnabled
 		require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString(oldChannelRouteGroupExclusions))
 		common.RetryTimes = oldRetryTimes
 		channelRouteCooldowns = sync.Map{}
@@ -337,14 +340,40 @@ func TestShouldRetrySameChannelRouteHonorsGroupExclusions(t *testing.T) {
 	require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString(`{
 		"no-retry":"same_channel_retry",
 		"no-next":"next_channel",
-		"excluded":"all"
+		"excluded":"all",
+		"disabled":{"mode":"same_channel_retry","enabled":false}
 	}`))
 	routeErr := newChannelRouteFailure()
 
 	assert.False(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "no-retry"))
 	assert.True(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "no-next"))
 	assert.False(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "excluded"))
+	assert.True(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "disabled"))
 	assert.True(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "default"))
+
+	setting.ChannelRouteGroupExclusionsEnabled = false
+	assert.True(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "no-retry"))
+}
+
+func TestNextChannelRouteExclusionHonorsGlobalAndRuleSwitches(t *testing.T) {
+	setupChannelRouteTest(t)
+	require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString(`{
+		"active":{"mode":"next_channel","enabled":true},
+		"disabled":{"mode":"next_channel","enabled":false}
+	}`))
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	common.SetContextKey(c, constant.ContextKeyChannelRouteGroup, "active")
+	assert.True(t, IsNextChannelRouteExcluded(c))
+
+	common.SetContextKey(c, constant.ContextKeyChannelRouteGroup, "disabled")
+	assert.False(t, IsNextChannelRouteExcluded(c))
+
+	setting.ChannelRouteGroupExclusionsEnabled = false
+	common.SetContextKey(c, constant.ContextKeyChannelRouteGroup, "active")
+	assert.False(t, IsNextChannelRouteExcluded(c))
 }
 
 func TestPruneExpiredChannelRouteCooldownsKeepsActiveEntries(t *testing.T) {
@@ -1377,6 +1406,9 @@ func TestChannelExecutionPlanAndTraceFollowActualRoute(t *testing.T) {
 	require.True(t, exists)
 	assert.True(t, affinitySummary.Compact)
 	assert.Equal(t, []int{1}, affinitySummary.ChannelIDs)
+	assert.Equal(t, first.Name, affinitySummary.ChannelName)
+	require.NotNil(t, affinitySummary.Priority)
+	assert.Equal(t, first.GetPriority(), *affinitySummary.Priority)
 	assert.True(t, affinitySummary.AffinityHit)
 	assert.Positive(t, affinitySummary.StartedAt)
 	assert.GreaterOrEqual(t, affinitySummary.UpdatedAt, affinitySummary.StartedAt)

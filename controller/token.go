@@ -280,6 +280,60 @@ func GetTokenRouteStatus(c *gin.Context) {
 	common.ApiSuccess(c, statuses)
 }
 
+func ClearTokenRouteCooldown(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	userId := c.GetInt("id")
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	token, err := model.GetTokenByIds(id, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	requestedGroup := strings.TrimSpace(c.Query("group"))
+	if requestedGroup != "" {
+		_, routes, err := model.NormalizeTokenGroupRouteConfig(token.GroupRouteConfig)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		found := false
+		for _, route := range routes {
+			if route.Group == requestedGroup {
+				found = true
+				break
+			}
+		}
+		if !found {
+			common.ApiErrorMsg(c, "密钥不属于指定的路由分组")
+			return
+		}
+	}
+
+	cooldowns := service.ListTokenGroupRouteCooldowns(token.Id, common.GetTimestamp())
+	cleared := 0
+	for _, cooldown := range cooldowns {
+		if requestedGroup != "" && cooldown.Group != requestedGroup {
+			continue
+		}
+		service.ClearTokenGroupRouteCooldown(
+			token.Id,
+			cooldown.Group,
+			cooldown.ModelName,
+			cooldown.RequestPath,
+		)
+		cleared++
+	}
+	common.ApiSuccess(c, gin.H{
+		"token_id": token.Id,
+		"group":    requestedGroup,
+		"cleared":  cleared,
+	})
+}
+
 func GetTokenKey(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	userId := c.GetInt("id")

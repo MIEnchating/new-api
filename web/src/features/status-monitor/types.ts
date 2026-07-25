@@ -22,6 +22,7 @@ export type CacheMetricPoint = {
   hit_count: number
   cached_tokens: number
   cache_hit_rate: number
+  avg_tps: number
 }
 
 export type CacheMetricGroup = {
@@ -30,6 +31,7 @@ export type CacheMetricGroup = {
   hit_count: number
   cached_tokens: number
   cache_hit_rate: number
+  avg_tps: number
   series: CacheMetricPoint[]
 }
 
@@ -37,7 +39,8 @@ export type CacheMetricsResponse = {
   success: boolean
   message?: string
   data: {
-    total: CacheMetricGroup
+    start_ts: number
+    end_ts: number
     groups: CacheMetricGroup[]
     baseline: number
     bucket_seconds: number
@@ -63,6 +66,16 @@ export type OfficialProviderIncident = {
   message: string
   updated_at: string
   url: string
+  components: OfficialProviderComponent[]
+}
+
+export type OfficialProviderComponent = {
+  id: string
+  name: string
+  status: string
+  updated_at: string
+  group?: boolean
+  group_id?: string
 }
 
 export type OfficialProviderStatus = {
@@ -72,7 +85,11 @@ export type OfficialProviderStatus = {
   description: string
   status_url: string
   subscribe_url: string
+  checked_at: string
+  components: OfficialProviderComponent[]
   incidents: OfficialProviderIncident[]
+  error_code?: string
+  error_message?: string
 }
 
 export type OfficialProviderStatusResponse = {

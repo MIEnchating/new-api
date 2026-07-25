@@ -1759,7 +1759,7 @@ export function ParamOverrideEditorDialog(
       headerClassName='border-b px-6 py-4'
       footerClassName='border-t px-6 py-4'
       contentHeight='min(72vh, 720px)'
-      bodyClassName='space-y-4'
+      bodyClassName='flex h-full min-h-0 flex-col space-y-4'
       footer={
         <>
           <Button

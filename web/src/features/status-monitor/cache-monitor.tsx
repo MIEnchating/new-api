@@ -38,8 +38,6 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import {
-  ChevronLeft,
-  ChevronRight,
   Database,
   Gauge,
   GripVertical,
@@ -48,7 +46,7 @@ import {
   Target,
   Zap,
 } from 'lucide-react'
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Bar,
@@ -81,18 +79,22 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Slider } from '@/components/ui/slider'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { formatThroughput } from '@/features/performance-metrics/lib/format'
 import { useIsAdmin } from '@/hooks/use-admin'
 import { cn } from '@/lib/utils'
 
 import { updateCacheHitRateBaseline, updateCacheMonitorGroups } from './api'
-import type {
-  CacheMetricGroup,
-  CacheMetricPoint,
-  CacheMetricsResponse,
-} from './types'
+import { buildCacheChartSeries } from './cache-series'
+import type { CacheMetricGroup, CacheMetricsResponse } from './types'
 
 const DEFAULT_BASELINE = 85
 const CACHE_GROUP_DRAG_MODIFIERS = [
@@ -118,49 +120,6 @@ function formatTime(timestamp: number) {
   })
 }
 
-type CacheChartPoint = Omit<
-  CacheMetricPoint,
-  'request_count' | 'hit_count' | 'cached_tokens' | 'cache_hit_rate'
-> & {
-  request_count: number | null
-  hit_count: number | null
-  cached_tokens: number | null
-  cache_hit_rate: number | null
-  missing: boolean
-}
-
-function buildCacheChartSeries(
-  series: CacheMetricPoint[],
-  bucketSeconds: number
-): CacheChartPoint[] {
-  if (series.length === 0) return []
-
-  const interval = Math.max(1, bucketSeconds)
-  const sorted = [...series].sort((a, b) => a.ts - b.ts)
-  const result: CacheChartPoint[] = []
-  for (const point of sorted) {
-    const previous = result.at(-1)
-    if (previous) {
-      for (
-        let missingTs = previous.ts + interval;
-        missingTs < point.ts;
-        missingTs += interval
-      ) {
-        result.push({
-          ts: missingTs,
-          request_count: null,
-          hit_count: null,
-          cached_tokens: null,
-          cache_hit_rate: null,
-          missing: true,
-        })
-      }
-    }
-    result.push({ ...point, missing: false })
-  }
-  return result
-}
-
 function CacheMetric(props: {
   icon: typeof Gauge
   label: string
@@ -184,39 +143,48 @@ function CacheTrend(props: {
   group: CacheMetricGroup
   baseline: number
   bucketSeconds: number
+  rangeStart?: number
+  rangeEnd?: number
 }) {
   const { t } = useTranslation()
   const data = useMemo(
     () =>
-      buildCacheChartSeries(props.group.series, props.bucketSeconds).map(
-        (point) => ({
-          ...point,
-          time: formatTime(point.ts),
-          fullTime: new Date(point.ts * 1000).toLocaleString(undefined, {
-            hourCycle: 'h23',
-          }),
-        })
-      ),
-    [props.bucketSeconds, props.group.series]
+      buildCacheChartSeries(
+        props.group.series,
+        props.bucketSeconds,
+        props.rangeStart,
+        props.rangeEnd
+      ).map((point) => ({
+        ...point,
+        time: formatTime(point.ts),
+        fullTime: new Date(point.ts * 1000).toLocaleString(undefined, {
+          hourCycle: 'h23',
+        }),
+      })),
+    [props.bucketSeconds, props.group.series, props.rangeEnd, props.rangeStart]
   )
   const config = {
     cache_hit_rate: {
       label: t('Cache hit rate'),
       color: 'var(--chart-2)',
     },
+    avg_tps: {
+      label: t('Throughput'),
+      color: 'var(--chart-1)',
+    },
   }
 
   if (data.length === 0) {
     return (
-      <div className='text-muted-foreground flex h-48 items-center justify-center border-y border-dashed text-sm sm:h-56'>
+      <div className='text-muted-foreground flex h-56 items-center justify-center text-sm sm:h-64'>
         {t('No data')}
       </div>
     )
   }
 
   return (
-    <ChartContainer config={config} className='aspect-auto h-48 w-full sm:h-56'>
-      <LineChart data={data} margin={{ top: 8, right: 8, left: 4, bottom: 0 }}>
+    <ChartContainer config={config} className='aspect-auto h-56 w-full sm:h-64'>
+      <LineChart data={data} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
         <CartesianGrid vertical={false} strokeDasharray='3 3' />
         <XAxis
           dataKey='time'
@@ -225,13 +193,29 @@ function CacheTrend(props: {
           minTickGap={32}
         />
         <YAxis
+          yAxisId='rate'
           domain={[0, 100]}
           tickLine={false}
           axisLine={false}
           width={42}
           tickFormatter={(value) => `${Math.round(Number(value))}%`}
         />
+        <YAxis
+          yAxisId='throughput'
+          orientation='right'
+          domain={[0, 'auto']}
+          tickLine={false}
+          axisLine={false}
+          width={48}
+          tickFormatter={(value) =>
+            new Intl.NumberFormat(undefined, {
+              notation: 'compact',
+              maximumFractionDigits: 1,
+            }).format(Number(value))
+          }
+        />
         <ReferenceLine
+          yAxisId='rate'
           y={props.baseline}
           stroke='var(--muted-foreground)'
           strokeDasharray='4 4'
@@ -242,18 +226,37 @@ function CacheTrend(props: {
               labelFormatter={(_, payload) =>
                 payload?.[0]?.payload?.fullTime ?? '--'
               }
-              formatter={(value) => (
-                <span className='font-mono font-medium tabular-nums'>
-                  {formatPercent(Number(value))}
-                </span>
+              formatter={(value, name) => (
+                <div className='flex flex-1 items-center justify-between gap-4'>
+                  <span className='text-muted-foreground'>
+                    {name === 'avg_tps' ? t('Throughput') : t('Cache hit rate')}
+                  </span>
+                  <span className='font-mono font-medium tabular-nums'>
+                    {name === 'avg_tps'
+                      ? formatThroughput(Number(value))
+                      : formatPercent(Number(value))}
+                  </span>
+                </div>
               )}
             />
           }
         />
         <Line
-          type='monotone'
+          yAxisId='rate'
+          type='linear'
           dataKey='cache_hit_rate'
           stroke='var(--color-cache_hit_rate)'
+          strokeWidth={2}
+          dot={false}
+          activeDot={{ r: 4 }}
+          connectNulls={false}
+          isAnimationActive={false}
+        />
+        <Line
+          yAxisId='throughput'
+          type='linear'
+          dataKey='avg_tps'
+          stroke='var(--color-avg_tps)'
           strokeWidth={2}
           dot={false}
           activeDot={{ r: 4 }}
@@ -289,14 +292,14 @@ function CacheGroupStats(props: {
 
   if (data.length === 0) {
     return (
-      <div className='text-muted-foreground flex h-64 items-center justify-center border-y border-dashed text-sm sm:h-72'>
+      <div className='text-muted-foreground flex h-56 items-center justify-center text-sm sm:h-64'>
         {t('No data')}
       </div>
     )
   }
 
   return (
-    <ChartContainer config={config} className='aspect-auto h-64 w-full sm:h-72'>
+    <ChartContainer config={config} className='aspect-auto h-56 w-full sm:h-64'>
       <BarChart
         accessibilityLayer
         data={data}
@@ -377,14 +380,12 @@ function CacheGroupStats(props: {
                   ? 'var(--success)'
                   : 'var(--warning)'
             }
-            if (group.group === props.activeGroup) {
-              fill = 'var(--primary)'
-            }
             return (
               <Cell
                 key={group.group}
                 fill={fill}
-                className='cursor-pointer transition-opacity hover:opacity-80'
+                opacity={group.group === props.activeGroup ? 1 : 0.68}
+                className='cursor-pointer transition-opacity hover:opacity-100'
                 onClick={() => props.onSelect(group.group)}
               />
             )
@@ -472,9 +473,6 @@ export function CacheMonitor(props: {
   const [allGroupsDraft, setAllGroupsDraft] = useState(true)
   const [groupDraft, setGroupDraft] = useState<string[]>([])
   const [savingGroups, setSavingGroups] = useState(false)
-  const groupTabsRef = useRef<HTMLDivElement>(null)
-  const [canScrollGroupsLeft, setCanScrollGroupsLeft] = useState(false)
-  const [canScrollGroupsRight, setCanScrollGroupsRight] = useState(false)
   const groupDragSensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
@@ -496,6 +494,7 @@ export function CacheMonitor(props: {
           hit_count: 0,
           cached_tokens: 0,
           cache_hit_rate: 0,
+          avg_tps: 0,
           series: [],
         }
     )
@@ -513,41 +512,6 @@ export function CacheMonitor(props: {
       setActiveGroup(groups[0]?.group ?? '')
     }
   }, [activeGroup, groups])
-
-  const updateGroupScrollState = useCallback(() => {
-    const element = groupTabsRef.current
-    if (!element) return
-    const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth)
-    setCanScrollGroupsLeft(element.scrollLeft > 1)
-    setCanScrollGroupsRight(element.scrollLeft < maxScrollLeft - 1)
-  }, [])
-
-  useEffect(() => {
-    const element = groupTabsRef.current
-    if (!element) return
-
-    const resizeObserver = new ResizeObserver(updateGroupScrollState)
-    resizeObserver.observe(element)
-    element.addEventListener('scroll', updateGroupScrollState, {
-      passive: true,
-    })
-    const frame = window.requestAnimationFrame(updateGroupScrollState)
-
-    return () => {
-      window.cancelAnimationFrame(frame)
-      resizeObserver.disconnect()
-      element.removeEventListener('scroll', updateGroupScrollState)
-    }
-  }, [groups.length, updateGroupScrollState])
-
-  const scrollGroups = (direction: -1 | 1) => {
-    const element = groupTabsRef.current
-    if (!element) return
-    element.scrollBy({
-      left: direction * Math.max(160, element.clientWidth * 0.75),
-      behavior: 'smooth',
-    })
-  }
 
   const handleSaveBaseline = () => {
     setSavingBaseline(true)
@@ -631,7 +595,7 @@ export function CacheMonitor(props: {
     )
   } else if (props.failed) {
     content = (
-      <div className='text-muted-foreground mt-4 border-y border-dashed py-12 text-center text-sm'>
+      <div className='text-muted-foreground mt-4 py-12 text-center text-sm'>
         {t('Cache monitoring unavailable')}
       </div>
     )
@@ -660,15 +624,29 @@ export function CacheMonitor(props: {
             value={formatCount(selectedGroup.request_count)}
           />
         </div>
-        <div className='mt-5 flex min-w-0 flex-col gap-5'>
+        <div className='mt-5 grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(20rem,0.9fr)]'>
           <div className='min-w-0'>
-            <div className='mb-3 text-sm font-medium'>
-              {t('Cache hit trend (last 24h)')}
+            <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+              <div className='text-sm font-medium'>
+                {t('Cache and throughput trend (last 24h)')}
+              </div>
+              <div className='text-muted-foreground flex items-center gap-3 text-xs'>
+                <span className='flex items-center gap-1.5'>
+                  <span className='bg-chart-2 size-2 rounded-full' />
+                  {t('Cache hit rate')}
+                </span>
+                <span className='flex items-center gap-1.5'>
+                  <span className='bg-chart-1 size-2 rounded-full' />
+                  t/s
+                </span>
+              </div>
             </div>
             <CacheTrend
               group={selectedGroup}
               baseline={baseline}
               bucketSeconds={props.response?.data.bucket_seconds ?? 3600}
+              rangeStart={props.response?.data.start_ts}
+              rangeEnd={props.response?.data.end_ts}
             />
           </div>
           <div className='min-w-0'>
@@ -687,7 +665,7 @@ export function CacheMonitor(props: {
     )
   } else {
     content = (
-      <div className='text-muted-foreground mt-4 border-y border-dashed py-12 text-center text-sm'>
+      <div className='text-muted-foreground mt-4 py-12 text-center text-sm'>
         {t('No data')}
       </div>
     )
@@ -695,7 +673,7 @@ export function CacheMonitor(props: {
 
   return (
     <>
-      <section className='min-w-0 border-y py-4 sm:py-5'>
+      <section className='min-w-0 py-1'>
         <div className='flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'>
           <div className='flex min-w-0 items-center gap-3'>
             <span className='bg-info/10 text-info flex size-9 shrink-0 items-center justify-center rounded-md'>
@@ -723,7 +701,26 @@ export function CacheMonitor(props: {
             </div>
           </div>
 
-          <div className='flex w-full items-center justify-end gap-3 sm:w-auto'>
+          <div className='flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto'>
+            {groups.length > 0 ? (
+              <Select
+                value={activeGroup}
+                onValueChange={(value) => {
+                  if (value) setActiveGroup(value)
+                }}
+              >
+                <SelectTrigger className='w-full min-w-44 sm:w-56'>
+                  <SelectValue placeholder={t('Select group')} />
+                </SelectTrigger>
+                <SelectContent alignItemWithTrigger={false}>
+                  {groups.map((group) => (
+                    <SelectItem key={group.group} value={group.group}>
+                      {group.group}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
             {isAdmin ? (
               <Button
                 type='button'
@@ -767,58 +764,6 @@ export function CacheMonitor(props: {
             ) : null}
           </div>
         </div>
-
-        {groups.length > 0 ? (
-          <div className='mt-4 flex min-w-0 items-center gap-1.5'>
-            <Button
-              type='button'
-              variant='outline'
-              size='icon-sm'
-              className='shrink-0 disabled:cursor-not-allowed disabled:opacity-35'
-              onClick={() => scrollGroups(-1)}
-              disabled={!canScrollGroupsLeft}
-              aria-label={t('Previous')}
-              title={t('Previous')}
-            >
-              <ChevronLeft />
-            </Button>
-            <Tabs
-              value={activeGroup}
-              onValueChange={setActiveGroup}
-              className='min-w-0 flex-1'
-            >
-              <TabsList
-                ref={groupTabsRef}
-                className='max-w-full [scrollbar-width:none] flex-nowrap justify-start overflow-x-auto overflow-y-hidden group-data-horizontal/tabs:h-auto [&::-webkit-scrollbar]:hidden'
-              >
-                {groups.map((group) => (
-                  <TabsTrigger
-                    key={group.group}
-                    value={group.group}
-                    className='h-8 flex-none px-3'
-                    title={group.group}
-                  >
-                    <span className='max-w-40 truncate whitespace-nowrap'>
-                      {group.group}
-                    </span>
-                  </TabsTrigger>
-                ))}
-              </TabsList>
-            </Tabs>
-            <Button
-              type='button'
-              variant='outline'
-              size='icon-sm'
-              className='shrink-0 disabled:cursor-not-allowed disabled:opacity-35'
-              onClick={() => scrollGroups(1)}
-              disabled={!canScrollGroupsRight}
-              aria-label={t('Next')}
-              title={t('Next')}
-            >
-              <ChevronRight />
-            </Button>
-          </div>
-        ) : null}
 
         {content}
       </section>

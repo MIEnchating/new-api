@@ -14,27 +14,66 @@ const (
 )
 
 var (
+	ChannelRouteGroupExclusionsEnabled = true
+
 	channelRouteGroupExclusionsMu sync.RWMutex
-	channelRouteGroupExclusions   = map[string]string{}
+	channelRouteGroupExclusions   = map[string]ChannelRouteGroupExclusion{}
 )
 
-func ParseChannelRouteGroupExclusions(jsonString string) (map[string]string, error) {
-	parsed := map[string]string{}
+type ChannelRouteGroupExclusion struct {
+	Mode    string `json:"mode"`
+	Enabled bool   `json:"enabled"`
+}
+
+type channelRouteGroupExclusionJSON struct {
+	Mode    string `json:"mode"`
+	Enabled *bool  `json:"enabled"`
+}
+
+func validChannelRouteGroupExclusionMode(mode string) bool {
+	switch mode {
+	case ChannelRouteExclusionSameChannelRetry, ChannelRouteExclusionNextChannel, ChannelRouteExclusionAll:
+		return true
+	default:
+		return false
+	}
+}
+
+func ParseChannelRouteGroupExclusions(jsonString string) (map[string]ChannelRouteGroupExclusion, error) {
+	parsed := map[string]ChannelRouteGroupExclusion{}
 	if strings.TrimSpace(jsonString) == "" {
 		return parsed, nil
 	}
-	if err := json.Unmarshal([]byte(jsonString), &parsed); err != nil {
+	rawRules := map[string]json.RawMessage{}
+	if err := json.Unmarshal([]byte(jsonString), &rawRules); err != nil {
 		return nil, fmt.Errorf("invalid channel route group exclusions: %w", err)
 	}
-	for group, mode := range parsed {
+	if rawRules == nil {
+		return nil, fmt.Errorf("invalid channel route group exclusions: expected an object")
+	}
+	for group, rawRule := range rawRules {
 		if strings.TrimSpace(group) == "" {
 			return nil, fmt.Errorf("channel route exclusion group cannot be empty")
 		}
-		switch mode {
-		case ChannelRouteExclusionSameChannelRetry, ChannelRouteExclusionNextChannel, ChannelRouteExclusionAll:
-		default:
+
+		var legacyMode string
+		if err := json.Unmarshal(rawRule, &legacyMode); err == nil {
+			if !validChannelRouteGroupExclusionMode(legacyMode) {
+				return nil, fmt.Errorf("invalid channel route exclusion mode for group %s", group)
+			}
+			parsed[group] = ChannelRouteGroupExclusion{Mode: legacyMode, Enabled: true}
+			continue
+		}
+
+		var rule channelRouteGroupExclusionJSON
+		if err := json.Unmarshal(rawRule, &rule); err != nil || !validChannelRouteGroupExclusionMode(rule.Mode) {
 			return nil, fmt.Errorf("invalid channel route exclusion mode for group %s", group)
 		}
+		enabled := true
+		if rule.Enabled != nil {
+			enabled = *rule.Enabled
+		}
+		parsed[group] = ChannelRouteGroupExclusion{Mode: rule.Mode, Enabled: enabled}
 	}
 	return parsed, nil
 }
@@ -52,9 +91,9 @@ func UpdateChannelRouteGroupExclusionsByJSONString(jsonString string) error {
 
 func ChannelRouteGroupExclusions2JSONString() string {
 	channelRouteGroupExclusionsMu.RLock()
-	cloned := make(map[string]string, len(channelRouteGroupExclusions))
-	for group, mode := range channelRouteGroupExclusions {
-		cloned[group] = mode
+	cloned := make(map[string]ChannelRouteGroupExclusion, len(channelRouteGroupExclusions))
+	for group, rule := range channelRouteGroupExclusions {
+		cloned[group] = rule
 	}
 	channelRouteGroupExclusionsMu.RUnlock()
 	encoded, err := json.Marshal(cloned)
@@ -65,10 +104,16 @@ func ChannelRouteGroupExclusions2JSONString() string {
 }
 
 func GetChannelRouteGroupExclusion(group string) string {
+	if !ChannelRouteGroupExclusionsEnabled {
+		return ""
+	}
 	channelRouteGroupExclusionsMu.RLock()
-	mode := channelRouteGroupExclusions[group]
+	rule, ok := channelRouteGroupExclusions[group]
 	channelRouteGroupExclusionsMu.RUnlock()
-	return mode
+	if !ok || !rule.Enabled {
+		return ""
+	}
+	return rule.Mode
 }
 
 func IsChannelRouteSameChannelRetryExcluded(group string) bool {

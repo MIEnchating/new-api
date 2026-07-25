@@ -218,7 +218,7 @@ export function ViewLogsDialog({
       contentClassName='flex h-[calc(100dvh-2rem)] flex-col max-sm:w-screen max-sm:max-w-none max-sm:rounded-none max-sm:p-4 sm:h-[80vh] sm:max-w-4xl'
       titleClassName='flex items-center gap-2'
       contentHeight='min(72vh, 720px)'
-      bodyClassName='space-y-4'
+      bodyClassName='flex h-full min-h-0 flex-col space-y-4'
     >
       <div className='mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3'>
         <div className='text-muted-foreground text-sm'>

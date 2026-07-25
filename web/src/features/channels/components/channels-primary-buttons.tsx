@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  Activity,
   Plus,
   MoreHorizontal,
   Settings2,
@@ -67,7 +66,7 @@ import {
   handleUpdateAllBalances,
 } from '../lib'
 import { useChannels } from './channels-provider'
-import { ChannelExecutionDialog } from './dialogs/channel-execution-dialog'
+import { ChannelExecutionHubDialog } from './dialogs/channel-execution-hub-dialog'
 
 export function ChannelsPrimaryButtons() {
   const { t } = useTranslation()
@@ -88,9 +87,7 @@ export function ChannelsPrimaryButtons() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showConsistencyDialog, setShowConsistencyDialog] = useState(false)
   const [isRepairingConsistency, setIsRepairingConsistency] = useState(false)
-  const [executionDialogView, setExecutionDialogView] = useState<
-    'plan' | 'trace' | null
-  >(null)
+  const [executionDialogOpen, setExecutionDialogOpen] = useState(false)
   const currentUser = useAuthStore((s) => s.auth.user)
   const canEditSensitive = hasPermission(
     currentUser,
@@ -188,41 +185,15 @@ export function ChannelsPrimaryButtons() {
           </div>
         </div>
 
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={() => setExecutionDialogView('plan')}
-              />
-            }
-          >
-            <Workflow className='h-4 w-4' />
-            <span className='max-sm:hidden'>{t('Execution plan')}</span>
-          </TooltipTrigger>
-          <TooltipContent>{t('Execution plan')}</TooltipContent>
-        </Tooltip>
-
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type='button'
-                variant='outline'
-                size='sm'
-                onClick={() => setExecutionDialogView('trace')}
-              />
-            }
-          >
-            <Activity className='h-4 w-4' />
-            <span className='max-sm:hidden'>
-              {t('Request execution trace')}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{t('Request execution trace')}</TooltipContent>
-        </Tooltip>
+        <Button
+          type='button'
+          variant='outline'
+          size='sm'
+          onClick={() => setExecutionDialogOpen(true)}
+        >
+          <Workflow className='h-4 w-4' />
+          <span>{t('Channel execution')}</span>
+        </Button>
 
         {/* Create Channel */}
         <Tooltip>
@@ -406,12 +377,9 @@ export function ChannelsPrimaryButtons() {
         }}
       />
 
-      <ChannelExecutionDialog
-        open={executionDialogView !== null}
-        initialView={executionDialogView ?? 'plan'}
-        onOpenChange={(open) => {
-          if (!open) setExecutionDialogView(null)
-        }}
+      <ChannelExecutionHubDialog
+        open={executionDialogOpen}
+        onOpenChange={setExecutionDialogOpen}
       />
     </>
   )

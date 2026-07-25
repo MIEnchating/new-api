@@ -92,6 +92,8 @@ type ChannelExecutionTrace struct {
 	Events             []ChannelExecutionEvent            `json:"events"`
 	Compact            bool                               `json:"compact,omitempty"`
 	ChannelIDs         []int                              `json:"channel_ids,omitempty"`
+	ChannelName        string                             `json:"channel_name,omitempty"`
+	Priority           *int64                             `json:"priority,omitempty"`
 	AffinityHit        bool                               `json:"affinity_hit,omitempty"`
 }
 
@@ -105,6 +107,8 @@ type ChannelExecutionTraceSummary struct {
 	StartedAt          int64                              `json:"started_at,omitempty"`
 	UpdatedAt          int64                              `json:"updated_at,omitempty"`
 	ChannelIDs         []int                              `json:"channel_ids,omitempty"`
+	ChannelName        string                             `json:"channel_name,omitempty"`
+	Priority           *int64                             `json:"priority,omitempty"`
 	AffinityHit        bool                               `json:"affinity_hit,omitempty"`
 }
 
@@ -824,6 +828,13 @@ func channelExecutionTraceFromLog(logEntry model.Log) (ChannelExecutionTrace, bo
 			updateChannelExecutionRouteGroupStatuses(&trace)
 		}
 	}
+	if trace.Compact && len(trace.ChannelIDs) == 1 && (trace.ChannelName == "" || trace.Priority == nil) {
+		if channel, err := model.CacheGetChannel(trace.ChannelIDs[0]); err == nil && channel != nil {
+			trace.ChannelName = channel.Name
+			priority := channel.GetPriority()
+			trace.Priority = &priority
+		}
+	}
 	return trace, true
 }
 
@@ -1340,6 +1351,8 @@ func appendChannelExecutionTraceAdminInfo(c *gin.Context, adminInfo map[string]i
 	updateChannelExecutionRouteGroupStatuses(&snapshot)
 	if snapshot.Status == "success" {
 		channelIDs := make([]int, 0, 1)
+		channelName := ""
+		var channelPriority *int64
 		affinityHit := false
 		persistFullTrace := false
 		for _, event := range snapshot.Events {
@@ -1349,6 +1362,9 @@ func appendChannelExecutionTraceAdminInfo(c *gin.Context, adminInfo map[string]i
 			case "active":
 				if event.ChannelID > 0 {
 					channelIDs = append(channelIDs, event.ChannelID)
+					channelName = event.ChannelName
+					priority := event.Priority
+					channelPriority = &priority
 				}
 			case "success":
 			default:
@@ -1371,6 +1387,8 @@ func appendChannelExecutionTraceAdminInfo(c *gin.Context, adminInfo map[string]i
 				StartedAt:          snapshot.StartedAt,
 				UpdatedAt:          snapshot.UpdatedAt,
 				ChannelIDs:         channelIDs,
+				ChannelName:        channelName,
+				Priority:           channelPriority,
 				AffinityHit:        affinityHit,
 			}
 			return

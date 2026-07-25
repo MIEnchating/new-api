@@ -229,6 +229,9 @@ func QueryCache(hours int, groups []string) (CacheQueryResult, error) {
 	}
 	for _, row := range rows {
 		mergeCacheGroupBucket(groupBuckets, row.Group, row.BucketTs, counters{
+			requestCount:  row.RequestCount,
+			outputTokens:  row.OutputTokens,
+			generationMs:  row.GenerationMs,
 			cacheRequests: row.CacheRequests,
 			cacheHits:     row.CacheHits,
 			cachedTokens:  row.CachedTokens,
@@ -246,14 +249,17 @@ func QueryCache(hours int, groups []string) (CacheQueryResult, error) {
 			}
 		}
 		snapshot := value.(*atomicBucket).snapshot()
-		if snapshot.cacheRequests == 0 {
+		if snapshot.requestCount == 0 {
 			return true
 		}
 		mergeCacheGroupBucket(groupBuckets, k.group, k.bucketTs, snapshot)
 		return true
 	})
 
-	return buildCacheQueryResult(groupBuckets), nil
+	result := buildCacheQueryResult(groupBuckets)
+	result.StartTs = startTs
+	result.EndTs = endTs
+	return result, nil
 }
 
 func mergeModelTotals(totals map[string]counters, modelName string, value counters) {
@@ -296,13 +302,16 @@ func mergeModelBucket(modelBuckets map[string]map[int64]counters, modelName stri
 }
 
 func mergeCacheGroupBucket(groupBuckets map[string]map[int64]counters, group string, bucketTs int64, value counters) {
-	if value.cacheRequests == 0 {
+	if value.requestCount == 0 && value.cacheRequests == 0 {
 		return
 	}
 	if _, ok := groupBuckets[group]; !ok {
 		groupBuckets[group] = map[int64]counters{}
 	}
 	current := groupBuckets[group][bucketTs]
+	current.requestCount += value.requestCount
+	current.outputTokens += value.outputTokens
+	current.generationMs += value.generationMs
 	current.cacheRequests += value.cacheRequests
 	current.cacheHits += value.cacheHits
 	current.cachedTokens += value.cachedTokens
@@ -374,22 +383,13 @@ func buildCacheQueryResult(groupBuckets map[string]map[int64]counters) CacheQuer
 	}
 	sort.Strings(groupNames)
 
-	allBuckets := map[int64]counters{}
 	results := make([]CacheGroupResult, 0, len(groupNames))
 	for _, group := range groupNames {
 		result := buildCacheGroupResult(group, groupBuckets[group])
 		results = append(results, result)
-		for ts, value := range groupBuckets[group] {
-			current := allBuckets[ts]
-			current.cacheRequests += value.cacheRequests
-			current.cacheHits += value.cacheHits
-			current.cachedTokens += value.cachedTokens
-			allBuckets[ts] = current
-		}
 	}
 
 	return CacheQueryResult{
-		Total:  buildCacheGroupResult("all", allBuckets),
 		Groups: results,
 	}
 }
@@ -405,6 +405,9 @@ func buildCacheGroupResult(group string, buckets map[int64]counters) CacheGroupR
 	series := make([]CacheBucketPoint, 0, len(timestamps))
 	for _, ts := range timestamps {
 		value := buckets[ts]
+		total.requestCount += value.requestCount
+		total.outputTokens += value.outputTokens
+		total.generationMs += value.generationMs
 		total.cacheRequests += value.cacheRequests
 		total.cacheHits += value.cacheHits
 		total.cachedTokens += value.cachedTokens
@@ -414,6 +417,7 @@ func buildCacheGroupResult(group string, buckets map[int64]counters) CacheGroupR
 			HitCount:     value.cacheHits,
 			CachedTokens: value.cachedTokens,
 			CacheHitRate: cacheHitRate(value),
+			AvgTps:       math.Round(avgTps(value)*100) / 100,
 		})
 	}
 
@@ -423,6 +427,7 @@ func buildCacheGroupResult(group string, buckets map[int64]counters) CacheGroupR
 		HitCount:     total.cacheHits,
 		CachedTokens: total.cachedTokens,
 		CacheHitRate: cacheHitRate(total),
+		AvgTps:       math.Round(avgTps(total)*100) / 100,
 		Series:       series,
 	}
 }

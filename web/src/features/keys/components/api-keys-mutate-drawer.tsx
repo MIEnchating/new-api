@@ -78,6 +78,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { getUserModels, getUserGroups } from '@/lib/api'
@@ -87,6 +88,7 @@ import { cn } from '@/lib/utils'
 import { createApiKey, updateApiKey, getApiKey } from '../api'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
+  canConfigureGroupRouteCooldown,
   getApiKeyFormSchema,
   getAutomaticGroupRoutePriorities,
   type ApiKeyFormValues,
@@ -127,6 +129,7 @@ export function ApiKeysMutateDrawer({
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [autoSortGroupRoutes, setAutoSortGroupRoutes] = useState(false)
   const manualRoutePrioritiesRef = useRef(new Map<string, number>())
+  const enabledRouteCooldownsRef = useRef(new Map<string, number>())
 
   // Fetch models
   const { data: modelsData } = useQuery({
@@ -184,6 +187,7 @@ export function ApiKeysMutateDrawer({
     if (open) {
       setAutoSortGroupRoutes(false)
       manualRoutePrioritiesRef.current.clear()
+      enabledRouteCooldownsRef.current.clear()
     }
     if (open && isUpdate && currentRow) {
       void getApiKey(currentRow.id)
@@ -304,10 +308,7 @@ export function ApiKeysMutateDrawer({
   const unlimitedQuota = form.watch('unlimited_quota')
   const groupRouteEnabled = form.watch('group_route_enabled')
   const groupRoutes = form.watch('group_routes') || []
-  const selectedEnabledRouteCount = groupRoutes.filter(
-    (route) => route.enabled !== false && route.group.trim() !== ''
-  ).length
-  const cooldownUnavailable = selectedEnabledRouteCount <= 1
+  const cooldownUnavailable = !canConfigureGroupRouteCooldown(groupRoutes)
   const groupRoutesMessage = getFormErrorMessage(
     form.formState.errors.group_routes
   )
@@ -612,54 +613,91 @@ export function ApiKeysMutateDrawer({
                             name={`group_routes.${index}.cooldown_seconds`}
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel
-                                  className={cn(
-                                    cooldownUnavailable &&
-                                      'text-muted-foreground'
-                                  )}
-                                >
-                                  {t('Cooldown')}
-                                </FormLabel>
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={<div className='w-full' />}
+                                <div className='flex min-h-5 items-center justify-between gap-2'>
+                                  <FormLabel
+                                    className={cn(
+                                      cooldownUnavailable &&
+                                        'text-muted-foreground'
+                                    )}
                                   >
-                                    <FormControl>
-                                      <Input
-                                        {...field}
-                                        type='number'
-                                        min='0'
-                                        max='31536000'
-                                        step='1'
-                                        disabled={cooldownUnavailable}
-                                        onChange={(event) => {
-                                          const value = Number.parseInt(
-                                            event.target.value,
-                                            10
-                                          )
-                                          field.onChange(
-                                            Number.isNaN(value) ? 1 : value
-                                          )
-                                        }}
-                                      />
-                                    </FormControl>
-                                  </TooltipTrigger>
-                                  {cooldownUnavailable ? (
-                                    <TooltipContent
-                                      side='top'
-                                      className='max-w-xs'
+                                    {t('Cooldown')}
+                                  </FormLabel>
+                                  <label className='text-muted-foreground flex cursor-pointer items-center gap-1.5 text-xs'>
+                                    <span>{t('Disable cooldown')}</span>
+                                    <Switch
+                                      size='sm'
+                                      checked={field.value === 0}
+                                      disabled={cooldownUnavailable}
+                                      onCheckedChange={(checked) => {
+                                        if (checked) {
+                                          const currentValue = field.value ?? 60
+                                          if (currentValue > 0) {
+                                            enabledRouteCooldownsRef.current.set(
+                                              routeField.id,
+                                              currentValue
+                                            )
+                                          }
+                                          field.onChange(0)
+                                          return
+                                        }
+                                        field.onChange(
+                                          enabledRouteCooldownsRef.current.get(
+                                            routeField.id
+                                          ) ?? 60
+                                        )
+                                      }}
+                                    />
+                                  </label>
+                                </div>
+                                <TooltipProvider delay={100}>
+                                  <Tooltip>
+                                    <TooltipTrigger
+                                      render={<div className='w-full' />}
                                     >
-                                      {t(
-                                        'Cooldown is unavailable when only one route group is enabled because there is no fallback group.'
-                                      )}
-                                    </TooltipContent>
-                                  ) : null}
-                                </Tooltip>
-                                {!cooldownUnavailable ? (
-                                  <FormDescription className='text-xs'>
-                                    {t('Set to 0 to disable cooldown')}
-                                  </FormDescription>
-                                ) : null}
+                                      <FormControl>
+                                        <Input
+                                          {...field}
+                                          type='number'
+                                          min='0'
+                                          max='31536000'
+                                          step='1'
+                                          disabled={
+                                            cooldownUnavailable ||
+                                            field.value === 0
+                                          }
+                                          onChange={(event) => {
+                                            const value = Number.parseInt(
+                                              event.target.value,
+                                              10
+                                            )
+                                            const nextValue = Number.isNaN(
+                                              value
+                                            )
+                                              ? 1
+                                              : value
+                                            field.onChange(nextValue)
+                                            if (nextValue > 0) {
+                                              enabledRouteCooldownsRef.current.set(
+                                                routeField.id,
+                                                nextValue
+                                              )
+                                            }
+                                          }}
+                                        />
+                                      </FormControl>
+                                    </TooltipTrigger>
+                                    {cooldownUnavailable ? (
+                                      <TooltipContent
+                                        side='top'
+                                        className='max-w-xs'
+                                      >
+                                        {t(
+                                          'Add and enable at least two group routing rules to configure cooldown.'
+                                        )}
+                                      </TooltipContent>
+                                    ) : null}
+                                  </Tooltip>
+                                </TooltipProvider>
                                 <FormMessage />
                               </FormItem>
                             )}

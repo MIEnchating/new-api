@@ -68,6 +68,7 @@ type CacheBucketPoint struct {
 	HitCount     int64   `json:"hit_count"`
 	CachedTokens int64   `json:"cached_tokens"`
 	CacheHitRate float64 `json:"cache_hit_rate"`
+	AvgTps       float64 `json:"avg_tps"`
 }
 
 type CacheGroupResult struct {
@@ -76,12 +77,14 @@ type CacheGroupResult struct {
 	HitCount     int64              `json:"hit_count"`
 	CachedTokens int64              `json:"cached_tokens"`
 	CacheHitRate float64            `json:"cache_hit_rate"`
+	AvgTps       float64            `json:"avg_tps"`
 	Series       []CacheBucketPoint `json:"series"`
 }
 
 type CacheQueryResult struct {
-	Total  CacheGroupResult   `json:"total"`
-	Groups []CacheGroupResult `json:"groups"`
+	StartTs int64              `json:"start_ts"`
+	EndTs   int64              `json:"end_ts"`
+	Groups  []CacheGroupResult `json:"groups"`
 }
 
 type bucketKey struct {

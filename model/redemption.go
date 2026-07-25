@@ -293,6 +293,31 @@ func DeleteRedemptionById(id int) (err error) {
 	return redemption.Delete()
 }
 
+func BatchDeleteRedemptions(ids []int) (int64, error) {
+	if len(ids) == 0 {
+		return 0, errors.New("兑换码 ID 不能为空")
+	}
+	if len(ids) > 1000 {
+		return 0, errors.New("单次最多删除 1000 个兑换码")
+	}
+
+	uniqueIds := make([]int, 0, len(ids))
+	seen := make(map[int]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			return 0, errors.New("兑换码 ID 无效")
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		uniqueIds = append(uniqueIds, id)
+	}
+
+	result := DB.Where("id IN ?", uniqueIds).Delete(&Redemption{})
+	return result.RowsAffected, result.Error
+}
+
 func DeleteInvalidRedemptions() (int64, error) {
 	now := common.GetTimestamp()
 	result := DB.Where("status IN ? OR (status = ? AND expired_time != 0 AND expired_time < ?)", []int{common.RedemptionCodeStatusUsed, common.RedemptionCodeStatusDisabled}, common.RedemptionCodeStatusEnabled, now).Delete(&Redemption{})

@@ -22,6 +22,7 @@ import { describe, test } from 'node:test'
 import {
   buildCompactChannelExecutionEvents,
   buildChannelExecutionTimeline,
+  getFailedChannelExecutionConclusion,
   getStandbyChannelIds,
 } from '../../../lib/channel-execution-timeline.ts'
 
@@ -33,6 +34,8 @@ describe('channel execution timeline', () => {
         status: 'success',
         group: 'codex-special',
         channel_ids: [116],
+        channel_name: 'us-sub2-codex-special',
+        priority: 900,
         affinity_hit: true,
         started_at: 100,
         updated_at: 370,
@@ -44,7 +47,10 @@ describe('channel execution timeline', () => {
       events.map((event) => event.state),
       ['affinity_hit', 'active', 'success']
     )
-    assert.equal(events[0]?.channel_name, 'sub2api')
+    assert.equal(events[0]?.channel_name, 'us-sub2-codex-special')
+    assert.equal(events[0]?.priority, 900)
+    assert.equal(events[1]?.priority, 900)
+    assert.equal(events[2]?.priority, 900)
     assert.equal(events[1]?.timestamp, 100)
     assert.equal(events[2]?.timestamp, 370)
   })
@@ -302,6 +308,45 @@ describe('channel execution timeline', () => {
     ])
 
     assert.deepEqual(getStandbyChannelIds(timeline), [120])
+  })
+
+  test('summarizes the final failed channel execution result', () => {
+    const conclusion = getFailedChannelExecutionConclusion([
+      {
+        state: 'active',
+        channel_id: 116,
+        channel_name: 'primary',
+      },
+      {
+        state: 'failed',
+        channel_id: 116,
+        channel_name: 'primary',
+        reason: 'status_code=503',
+      },
+      {
+        state: 'active',
+        channel_id: 116,
+        channel_name: 'primary',
+      },
+      {
+        state: 'failed',
+        channel_id: 116,
+        channel_name: 'primary',
+        reason: 'status_code=500',
+      },
+      {
+        state: 'finished',
+        reason: 'request_finished_without_success',
+      },
+    ])
+
+    assert.deepEqual(conclusion, {
+      reason: 'status_code=500',
+      channelId: 116,
+      channelName: 'primary',
+      attemptCount: 2,
+      channelCount: 1,
+    })
   })
 
   test('hides the internal finished marker after failed attempts', () => {

@@ -374,6 +374,8 @@ const OPTION_KEY_LABELS: Record<string, string> = {
   ChannelRouteCooldownSeconds: 'Cooldown time (seconds)',
   ChannelRouteStickyEnabled: 'Channel route affinity',
   ChannelRouteSameChannelRetries: 'Same-channel retries',
+  ChannelRouteGroupExclusionsEnabled: 'Route exclusion groups',
+  ChannelRouteGroupExclusions: 'Route exclusion groups',
   ChannelDisableThreshold: 'Channel disable threshold',
   AutomaticDisableChannelEnabled: 'Automatic channel disabling',
   AutomaticEnableChannelEnabled: 'Automatic channel recovery',
@@ -693,6 +695,7 @@ const AUDIT_TEMPLATES: Record<string, string> = {
     'Returned invoice marker for top-up order {{trade_no}}',
   'redemption.update': 'Updated a redemption code',
   'redemption.delete': 'Deleted a redemption code',
+  'redemption.delete_batch': 'Batch deleted {{count}} redemption codes',
   'redemption.delete_invalid': 'Deleted invalid redemption codes',
   // Prefill groups
   'prefill_group.create': 'Created a prefill group',

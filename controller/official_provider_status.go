@@ -3,8 +3,10 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -41,22 +43,61 @@ var officialStatusSources = []officialStatusSource{
 }
 
 type officialProviderIncident struct {
+	Name       string                      `json:"name"`
+	Status     string                      `json:"status"`
+	Impact     string                      `json:"impact"`
+	Message    string                      `json:"message"`
+	UpdatedAt  string                      `json:"updated_at"`
+	URL        string                      `json:"url"`
+	Components []officialProviderComponent `json:"components"`
+}
+
+type officialProviderComponent struct {
+	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Status    string `json:"status"`
-	Impact    string `json:"impact"`
-	Message   string `json:"message"`
 	UpdatedAt string `json:"updated_at"`
-	URL       string `json:"url"`
+	Group     bool   `json:"group"`
+	GroupID   string `json:"group_id"`
 }
 
 type officialProviderStatus struct {
-	Provider     string                     `json:"provider"`
-	Available    bool                       `json:"available"`
-	Indicator    string                     `json:"indicator"`
-	Description  string                     `json:"description"`
-	StatusURL    string                     `json:"status_url"`
-	SubscribeURL string                     `json:"subscribe_url"`
-	Incidents    []officialProviderIncident `json:"incidents"`
+	Provider     string                      `json:"provider"`
+	Available    bool                        `json:"available"`
+	Indicator    string                      `json:"indicator"`
+	Description  string                      `json:"description"`
+	StatusURL    string                      `json:"status_url"`
+	SubscribeURL string                      `json:"subscribe_url"`
+	CheckedAt    string                      `json:"checked_at"`
+	Components   []officialProviderComponent `json:"components"`
+	Incidents    []officialProviderIncident  `json:"incidents"`
+	ErrorCode    string                      `json:"error_code,omitempty"`
+	ErrorMessage string                      `json:"error_message,omitempty"`
+}
+
+type statuspageComponent struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+	UpdatedAt string `json:"updated_at"`
+	Group     bool   `json:"group"`
+	GroupID   string `json:"group_id"`
+}
+
+type statuspageIncidentUpdate struct {
+	Body               string                `json:"body"`
+	UpdatedAt          string                `json:"updated_at"`
+	AffectedComponents []statuspageComponent `json:"affected_components"`
+}
+
+type statuspageIncident struct {
+	Name       string                     `json:"name"`
+	Status     string                     `json:"status"`
+	Impact     string                     `json:"impact"`
+	Shortlink  string                     `json:"shortlink"`
+	UpdatedAt  string                     `json:"updated_at"`
+	Components []statuspageComponent      `json:"components"`
+	Updates    []statuspageIncidentUpdate `json:"incident_updates"`
 }
 
 type statuspageSummary struct {
@@ -64,17 +105,9 @@ type statuspageSummary struct {
 		Indicator   string `json:"indicator"`
 		Description string `json:"description"`
 	} `json:"status"`
-	Incidents []struct {
-		Name      string `json:"name"`
-		Status    string `json:"status"`
-		Impact    string `json:"impact"`
-		Shortlink string `json:"shortlink"`
-		UpdatedAt string `json:"updated_at"`
-		Updates   []struct {
-			Body      string `json:"body"`
-			UpdatedAt string `json:"updated_at"`
-		} `json:"incident_updates"`
-	} `json:"incidents"`
+	Components            []statuspageComponent `json:"components"`
+	Incidents             []statuspageIncident  `json:"incidents"`
+	ScheduledMaintenances []statuspageIncident  `json:"scheduled_maintenances"`
 }
 
 var officialProviderStatusCache struct {
@@ -83,38 +116,183 @@ var officialProviderStatusCache struct {
 	providers []officialProviderStatus
 }
 
+type officialStatusFetchError struct {
+	code    string
+	message string
+}
+
+func (e *officialStatusFetchError) Error() string {
+	return e.message
+}
+
+func officialStatusErrorDetails(err error) (string, string) {
+	var fetchErr *officialStatusFetchError
+	if errors.As(err, &fetchErr) {
+		return fetchErr.code, fetchErr.message
+	}
+	return "network_error", "Unable to connect to official status service"
+}
+
+func isOfficialStatusTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var networkErr net.Error
+	return errors.As(err, &networkErr) && networkErr.Timeout()
+}
+
+func newOfficialStatusTransportError(err error) error {
+	if isOfficialStatusTimeout(err) {
+		return &officialStatusFetchError{
+			code:    "timeout",
+			message: "Official status request timed out",
+		}
+	}
+	return &officialStatusFetchError{
+		code:    "network_error",
+		message: "Unable to connect to official status service",
+	}
+}
+
+func newUnavailableOfficialProviderStatus(source officialStatusSource, err error) officialProviderStatus {
+	errorCode, errorMessage := officialStatusErrorDetails(err)
+	return officialProviderStatus{
+		Provider:     source.Provider,
+		Available:    false,
+		StatusURL:    source.StatusURL,
+		SubscribeURL: source.SubscribeURL,
+		CheckedAt:    time.Now().UTC().Format(time.RFC3339),
+		Components:   []officialProviderComponent{},
+		Incidents:    []officialProviderIncident{},
+		ErrorCode:    errorCode,
+		ErrorMessage: errorMessage,
+	}
+}
+
 func cloneOfficialProviderStatuses(providers []officialProviderStatus) []officialProviderStatus {
 	cloned := make([]officialProviderStatus, len(providers))
 	for i, provider := range providers {
 		cloned[i] = provider
+		cloned[i].Components = append(
+			make([]officialProviderComponent, 0, len(provider.Components)),
+			provider.Components...,
+		)
 		cloned[i].Incidents = append(
 			make([]officialProviderIncident, 0, len(provider.Incidents)),
 			provider.Incidents...,
 		)
+		for incidentIndex := range cloned[i].Incidents {
+			cloned[i].Incidents[incidentIndex].Components = append(
+				make([]officialProviderComponent, 0, len(provider.Incidents[incidentIndex].Components)),
+				provider.Incidents[incidentIndex].Components...,
+			)
+		}
 	}
 	return cloned
+}
+
+func normalizeOfficialComponents(components []statuspageComponent) []officialProviderComponent {
+	result := make([]officialProviderComponent, 0, len(components))
+	indexes := make(map[string]int, len(components))
+	for _, component := range components {
+		key := component.ID
+		if key == "" {
+			key = component.Name
+		}
+		if key == "" {
+			continue
+		}
+		normalized := officialProviderComponent{
+			ID:        component.ID,
+			Name:      component.Name,
+			Status:    component.Status,
+			UpdatedAt: component.UpdatedAt,
+			Group:     component.Group,
+			GroupID:   component.GroupID,
+		}
+		if index, exists := indexes[key]; exists {
+			// Statuspage incident updates repeat affected components. The latest
+			// occurrence carries the current state and must replace the snapshot.
+			result[index] = normalized
+			continue
+		}
+		indexes[key] = len(result)
+		result = append(result, normalized)
+	}
+	return result
+}
+
+func latestOfficialIncidentUpdate(updates []statuspageIncidentUpdate) statuspageIncidentUpdate {
+	latest := updates[0]
+	latestTime, latestTimeValid := time.Parse(time.RFC3339Nano, latest.UpdatedAt)
+	for _, update := range updates[1:] {
+		updatedAt, err := time.Parse(time.RFC3339Nano, update.UpdatedAt)
+		if err != nil {
+			continue
+		}
+		if latestTimeValid != nil || updatedAt.After(latestTime) {
+			latest = update
+			latestTime = updatedAt
+			latestTimeValid = nil
+		}
+	}
+	return latest
+}
+
+func normalizeOfficialIncident(incident statuspageIncident) officialProviderIncident {
+	message := ""
+	updatedAt := incident.UpdatedAt
+	components := incident.Components
+	if len(incident.Updates) > 0 {
+		latestUpdate := latestOfficialIncidentUpdate(incident.Updates)
+		message = latestUpdate.Body
+		if latestUpdate.UpdatedAt != "" {
+			updatedAt = latestUpdate.UpdatedAt
+		}
+		if len(latestUpdate.AffectedComponents) > 0 {
+			components = append(components, latestUpdate.AffectedComponents...)
+		}
+	}
+	return officialProviderIncident{
+		Name:       incident.Name,
+		Status:     incident.Status,
+		Impact:     incident.Impact,
+		Message:    message,
+		UpdatedAt:  updatedAt,
+		URL:        incident.Shortlink,
+		Components: normalizeOfficialComponents(components),
+	}
 }
 
 func fetchOfficialProviderStatus(ctx context.Context, client *http.Client, source officialStatusSource) (officialProviderStatus, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, source.SummaryURL, nil)
 	if err != nil {
-		return officialProviderStatus{}, err
+		return officialProviderStatus{}, newOfficialStatusTransportError(err)
 	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("User-Agent", "new-api-status-monitor")
 
 	response, err := client.Do(request)
 	if err != nil {
-		return officialProviderStatus{}, err
+		return officialProviderStatus{}, newOfficialStatusTransportError(err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return officialProviderStatus{}, fmt.Errorf("official status returned HTTP %d", response.StatusCode)
+		return officialProviderStatus{}, &officialStatusFetchError{
+			code:    "http_status",
+			message: fmt.Sprintf("Official status service returned HTTP %d", response.StatusCode),
+		}
 	}
 
 	var summary statuspageSummary
 	if err := json.NewDecoder(io.LimitReader(response.Body, 2<<20)).Decode(&summary); err != nil {
-		return officialProviderStatus{}, err
+		if isOfficialStatusTimeout(err) {
+			return officialProviderStatus{}, newOfficialStatusTransportError(err)
+		}
+		return officialProviderStatus{}, &officialStatusFetchError{
+			code:    "invalid_json",
+			message: "Official status service returned invalid JSON",
+		}
 	}
 
 	result := officialProviderStatus{
@@ -124,25 +302,15 @@ func fetchOfficialProviderStatus(ctx context.Context, client *http.Client, sourc
 		Description:  summary.Status.Description,
 		StatusURL:    source.StatusURL,
 		SubscribeURL: source.SubscribeURL,
-		Incidents:    make([]officialProviderIncident, 0, len(summary.Incidents)),
+		CheckedAt:    time.Now().UTC().Format(time.RFC3339),
+		Components:   normalizeOfficialComponents(summary.Components),
+		Incidents:    make([]officialProviderIncident, 0, len(summary.Incidents)+len(summary.ScheduledMaintenances)),
 	}
 	for _, incident := range summary.Incidents {
-		message := ""
-		updatedAt := incident.UpdatedAt
-		if len(incident.Updates) > 0 {
-			message = incident.Updates[0].Body
-			if incident.Updates[0].UpdatedAt != "" {
-				updatedAt = incident.Updates[0].UpdatedAt
-			}
-		}
-		result.Incidents = append(result.Incidents, officialProviderIncident{
-			Name:      incident.Name,
-			Status:    incident.Status,
-			Impact:    incident.Impact,
-			Message:   message,
-			UpdatedAt: updatedAt,
-			URL:       incident.Shortlink,
-		})
+		result.Incidents = append(result.Incidents, normalizeOfficialIncident(incident))
+	}
+	for _, maintenance := range summary.ScheduledMaintenances {
+		result.Incidents = append(result.Incidents, normalizeOfficialIncident(maintenance))
 	}
 	return result, nil
 }
@@ -163,13 +331,7 @@ func loadOfficialProviderStatuses(ctx context.Context) []officialProviderStatus 
 		group.Go(func() error {
 			provider, err := fetchOfficialProviderStatus(groupCtx, client, source)
 			if err != nil {
-				providers[i] = officialProviderStatus{
-					Provider:     source.Provider,
-					Available:    false,
-					StatusURL:    source.StatusURL,
-					SubscribeURL: source.SubscribeURL,
-					Incidents:    []officialProviderIncident{},
-				}
+				providers[i] = newUnavailableOfficialProviderStatus(source, err)
 				return nil
 			}
 			providers[i] = provider

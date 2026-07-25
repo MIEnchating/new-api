@@ -319,3 +319,38 @@ func TestCreateRedemptionsCreatesOneAtomicBatch(t *testing.T) {
 		assert.Equal(t, keys[i], redemption.Key)
 	}
 }
+
+func TestBatchDeleteRedemptions(t *testing.T) {
+	require.NoError(t, DB.AutoMigrate(&Redemption{}))
+	require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
+	t.Cleanup(func() {
+		require.NoError(t, DB.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&Redemption{}).Error)
+	})
+
+	redemptions := []Redemption{
+		{Name: "batch-delete-1", Key: common.GetUUID(), Status: common.RedemptionCodeStatusEnabled},
+		{Name: "batch-delete-2", Key: common.GetUUID(), Status: common.RedemptionCodeStatusEnabled},
+		{Name: "batch-keep", Key: common.GetUUID(), Status: common.RedemptionCodeStatusEnabled},
+	}
+	require.NoError(t, DB.Create(&redemptions).Error)
+
+	count, err := BatchDeleteRedemptions([]int{redemptions[0].Id, redemptions[1].Id, redemptions[0].Id})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), count)
+
+	var remaining []Redemption
+	require.NoError(t, DB.Order("id").Find(&remaining).Error)
+	require.Len(t, remaining, 1)
+	assert.Equal(t, redemptions[2].Id, remaining[0].Id)
+}
+
+func TestBatchDeleteRedemptionsRejectsInvalidIDs(t *testing.T) {
+	_, err := BatchDeleteRedemptions(nil)
+	require.Error(t, err)
+
+	_, err = BatchDeleteRedemptions([]int{0})
+	require.Error(t, err)
+
+	_, err = BatchDeleteRedemptions(make([]int, 1001))
+	require.Error(t, err)
+}

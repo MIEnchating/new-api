@@ -110,6 +110,8 @@ const UNKNOWN_STATUS_META: MonitorStatusMeta = {
 
 const AUTO_REFRESH_SECONDS = 60
 const ALL_GROUP_KEY = 'all'
+type StatusMonitorTab = 'site-status' | 'cache-analytics' | 'official-status'
+type FetchMode = 'initial' | 'refresh'
 
 function getStatusMeta(status: number) {
   return STATUS_META[status] ?? UNKNOWN_STATUS_META
@@ -269,31 +271,39 @@ function RefreshControl(props: {
   )
 }
 
-function SummaryTile(props: {
+function SummaryMetric(props: {
   label: string
   value: string
   icon: LucideIcon
   tone?: 'default' | 'success' | 'warning'
+  className?: string
 }) {
   const Icon = props.icon
   return (
-    <div className='rounded-lg border p-3 sm:p-4'>
-      <div className='flex items-center justify-between gap-3'>
-        <span className='text-muted-foreground text-sm'>{props.label}</span>
-        <span
-          className={cn(
-            'flex size-8 shrink-0 items-center justify-center rounded-md',
-            props.tone === 'success' && 'bg-success/10 text-status-success',
-            props.tone === 'warning' && 'bg-warning/10 text-status-warning',
-            (!props.tone || props.tone === 'default') &&
-              'bg-muted text-muted-foreground'
-          )}
-        >
-          <Icon className='size-4' />
-        </span>
-      </div>
-      <div className='mt-2 text-xl font-semibold tabular-nums sm:text-2xl'>
-        {props.value}
+    <div
+      className={cn(
+        'bg-card flex min-w-0 items-center gap-3 px-3 py-3 sm:px-4',
+        props.className
+      )}
+    >
+      <span
+        className={cn(
+          'flex size-8 shrink-0 items-center justify-center rounded-md',
+          props.tone === 'success' && 'bg-success/10 text-status-success',
+          props.tone === 'warning' && 'bg-warning/10 text-status-warning',
+          (!props.tone || props.tone === 'default') &&
+            'bg-muted text-muted-foreground'
+        )}
+      >
+        <Icon className='size-4' />
+      </span>
+      <div className='min-w-0'>
+        <div className='truncate text-lg font-semibold tabular-nums'>
+          {props.value}
+        </div>
+        <div className='text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs'>
+          <span className='truncate'>{props.label}</span>
+        </div>
       </div>
     </div>
   )
@@ -419,7 +429,7 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
 
 function MetricItem(props: { label: string; value: string }) {
   return (
-    <div className='min-w-0 rounded-md border px-3 py-2'>
+    <div className='bg-card min-w-0 px-3 py-2.5 sm:px-3.5 sm:py-3'>
       <div className='text-muted-foreground truncate text-xs'>
         {props.label}
       </div>
@@ -472,7 +482,7 @@ const MonitorRow = memo(function MonitorRow(props: {
           </div>
         </div>
 
-        <div className='mt-3 grid min-w-0 grid-cols-2 gap-2 sm:mt-4 sm:grid-cols-3'>
+        <div className='bg-border mt-3 grid min-w-0 grid-cols-2 gap-px border-y sm:mt-4 sm:grid-cols-3'>
           <MetricItem
             label={t('30-minute uptime')}
             value={formatOptionalUptime(props.monitor.uptime30m)}
@@ -500,7 +510,7 @@ const MonitorRow = memo(function MonitorRow(props: {
         </div>
       </button>
 
-      <div className='border-t px-3 py-3 sm:px-4 sm:py-4'>
+      <div className='px-3 py-3 sm:px-4 sm:py-4'>
         <HeartbeatTimeline heartbeats={props.monitor.heartbeats} />
       </div>
     </article>
@@ -544,11 +554,19 @@ function EmptyState(props: { title: string; description?: string }) {
 
 export function StatusMonitor() {
   const { t } = useTranslation()
+  const [activeTab, setActiveTab] = useState<StatusMonitorTab>('site-status')
   const [groups, setGroups] = useState<UptimeGroupResult[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [failed, setFailed] = useState(false)
+  const [cacheLoading, setCacheLoading] = useState(false)
+  const [cacheRefreshing, setCacheRefreshing] = useState(false)
+  const [cacheLoaded, setCacheLoaded] = useState(false)
   const [cacheFailed, setCacheFailed] = useState(false)
+  const [providerStatusLoading, setProviderStatusLoading] = useState(false)
+  const [providerStatusRefreshing, setProviderStatusRefreshing] =
+    useState(false)
+  const [providerStatusLoaded, setProviderStatusLoaded] = useState(false)
   const [providerStatusFailed, setProviderStatusFailed] = useState(false)
   const [cacheMetrics, setCacheMetrics] = useState<CacheMetricsResponse | null>(
     null
@@ -556,61 +574,114 @@ export function StatusMonitor() {
   const [providerStatuses, setProviderStatuses] =
     useState<OfficialProviderStatusResponse | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [cacheLastUpdated, setCacheLastUpdated] = useState<Date | null>(null)
+  const [providerStatusLastUpdated, setProviderStatusLastUpdated] =
+    useState<Date | null>(null)
   const [activeGroupKey, setActiveGroupKey] = useState(ALL_GROUP_KEY)
   const [selectedMonitor, setSelectedMonitor] = useState<UptimeMonitor | null>(
     null
   )
   const [monitorDetailsOpen, setMonitorDetailsOpen] = useState(false)
-
-  const fetchStatus = useCallback((mode: 'initial' | 'refresh') => {
+  const fetchSiteStatus = useCallback(async (mode: FetchMode) => {
     if (mode === 'initial') {
       setLoading(true)
     } else {
       setRefreshing(true)
     }
     setFailed(false)
-    setCacheFailed(false)
-    setProviderStatusFailed(false)
-    return Promise.allSettled([
-      getUptimeStatus(),
-      getCacheMetrics(),
-      getOfficialProviderStatuses(),
-    ])
-      .then(([uptimeResult, cacheResult, providerStatusResult]) => {
-        if (uptimeResult.status === 'fulfilled') {
-          setGroups(uptimeResult.value?.data ?? [])
-        } else {
-          setGroups([])
-          setFailed(true)
-        }
+    try {
+      const uptimeResult = await getUptimeStatus()
+      setGroups(uptimeResult?.data ?? [])
+      setLastUpdated(new Date())
+    } catch {
+      setGroups([])
+      setFailed(true)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }, [])
 
-        if (cacheResult.status === 'fulfilled' && cacheResult.value.success) {
-          setCacheMetrics(cacheResult.value)
-        } else {
+  const fetchCacheStatus = useCallback((mode: FetchMode) => {
+    if (mode === 'initial') {
+      setCacheLoading(true)
+    } else {
+      setCacheRefreshing(true)
+    }
+    setCacheFailed(false)
+    return getCacheMetrics()
+      .then((response) => {
+        if (!response.success) {
           setCacheMetrics(null)
           setCacheFailed(true)
+          return
         }
-
-        if (
-          providerStatusResult.status === 'fulfilled' &&
-          providerStatusResult.value.success
-        ) {
-          setProviderStatuses(providerStatusResult.value)
-        } else {
-          setProviderStatuses(null)
-          setProviderStatusFailed(true)
-        }
-        setLastUpdated(new Date())
+        setCacheMetrics(response)
+        setCacheLastUpdated(new Date())
+      })
+      .catch(() => {
+        setCacheMetrics(null)
+        setCacheFailed(true)
       })
       .finally(() => {
-        setLoading(false)
-        setRefreshing(false)
+        setCacheLoaded(true)
+        setCacheLoading(false)
+        setCacheRefreshing(false)
+      })
+  }, [])
+
+  const fetchProviderStatus = useCallback((mode: FetchMode) => {
+    if (mode === 'initial') {
+      setProviderStatusLoading(true)
+    } else {
+      setProviderStatusRefreshing(true)
+    }
+    setProviderStatusFailed(false)
+    return getOfficialProviderStatuses()
+      .then((response) => {
+        if (!response.success) {
+          setProviderStatuses(null)
+          setProviderStatusFailed(true)
+          return
+        }
+        setProviderStatuses(response)
+        setProviderStatusLastUpdated(new Date())
+      })
+      .catch(() => {
+        setProviderStatuses(null)
+        setProviderStatusFailed(true)
+      })
+      .finally(() => {
+        setProviderStatusLoaded(true)
+        setProviderStatusLoading(false)
+        setProviderStatusRefreshing(false)
       })
   }, [])
 
   useEffect(() => {
-    fetchStatus('initial')
-  }, [fetchStatus])
+    void fetchSiteStatus('initial')
+  }, [fetchSiteStatus])
+
+  useEffect(() => {
+    if (activeTab === 'cache-analytics' && !cacheLoaded && !cacheLoading) {
+      void fetchCacheStatus('initial')
+    }
+    if (
+      activeTab === 'official-status' &&
+      !providerStatusLoaded &&
+      !providerStatusLoading
+    ) {
+      void fetchProviderStatus('initial')
+    }
+  }, [
+    activeTab,
+    cacheLoaded,
+    cacheLoading,
+    fetchCacheStatus,
+    fetchProviderStatus,
+    providerStatusLoaded,
+    providerStatusLoading,
+  ])
 
   const monitors = useMemo(() => flattenMonitors(groups), [groups])
   const monitorItems = useMemo(
@@ -699,13 +770,36 @@ export function StatusMonitor() {
   }, [visibleMonitors])
 
   const handleManualRefresh = useCallback(() => {
-    fetchStatus('refresh')
-  }, [fetchStatus])
+    switch (activeTab) {
+      case 'cache-analytics':
+        void fetchCacheStatus('refresh')
+        break
+      case 'official-status':
+        void fetchProviderStatus('refresh')
+        break
+      case 'site-status':
+        void fetchSiteStatus('refresh')
+        break
+    }
+  }, [activeTab, fetchCacheStatus, fetchProviderStatus, fetchSiteStatus])
 
   const handleMonitorSelect = useCallback((monitor: UptimeMonitor) => {
     setSelectedMonitor(monitor)
     setMonitorDetailsOpen(true)
   }, [])
+
+  let activeLoading = loading
+  let activeRefreshing = refreshing
+  let activeLastUpdated = lastUpdated
+  if (activeTab === 'cache-analytics') {
+    activeLoading = cacheLoading
+    activeRefreshing = cacheRefreshing
+    activeLastUpdated = cacheLastUpdated
+  } else if (activeTab === 'official-status') {
+    activeLoading = providerStatusLoading
+    activeRefreshing = providerStatusRefreshing
+    activeLastUpdated = providerStatusLastUpdated
+  }
 
   let content = null
   if (loading) {
@@ -777,14 +871,27 @@ export function StatusMonitor() {
         <SectionPageLayout.Title>{t('Status Monitor')}</SectionPageLayout.Title>
         <SectionPageLayout.Actions>
           <RefreshControl
-            loading={loading}
-            refreshing={refreshing}
-            lastUpdated={lastUpdated}
+            key={activeTab}
+            loading={activeLoading}
+            refreshing={activeRefreshing}
+            lastUpdated={activeLastUpdated}
             onRefresh={handleManualRefresh}
           />
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
-          <Tabs defaultValue='site-status' className='min-w-0 gap-4'>
+          <Tabs
+            value={activeTab}
+            onValueChange={(value) => {
+              if (
+                value === 'site-status' ||
+                value === 'cache-analytics' ||
+                value === 'official-status'
+              ) {
+                setActiveTab(value)
+              }
+            }}
+            className='min-w-0 gap-4'
+          >
             <TabsList className='grid w-full max-w-lg grid-cols-3'>
               <TabsTrigger value='site-status'>
                 <Activity />
@@ -805,25 +912,25 @@ export function StatusMonitor() {
               keepMounted
               className='min-w-0 space-y-4'
             >
-              <div className='grid min-w-0 grid-cols-2 gap-2 sm:gap-3 xl:grid-cols-4'>
-                <SummaryTile
+              <div className='bg-border grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-lg border lg:grid-cols-4'>
+                <SummaryMetric
                   label={t('Total monitors')}
                   value={String(summary.total)}
                   icon={Activity}
                 />
-                <SummaryTile
+                <SummaryMetric
                   label={t('Operational')}
                   value={String(summary.operational)}
                   icon={CheckCircle2}
                   tone='success'
                 />
-                <SummaryTile
+                <SummaryMetric
                   label={t('Affected monitors')}
                   value={String(summary.affected)}
                   icon={AlertTriangle}
                   tone={summary.affected > 0 ? 'warning' : 'default'}
                 />
-                <SummaryTile
+                <SummaryMetric
                   label={t('Average uptime')}
                   value={formatUptime(summary.average)}
                   icon={CircleDashed}
@@ -836,7 +943,7 @@ export function StatusMonitor() {
             <TabsContent value='cache-analytics' className='min-w-0'>
               <CacheMonitor
                 response={cacheMetrics}
-                loading={loading}
+                loading={cacheLoading}
                 failed={cacheFailed}
                 onRefresh={handleManualRefresh}
               />
@@ -845,7 +952,7 @@ export function StatusMonitor() {
             <TabsContent value='official-status' className='min-w-0'>
               <OfficialProviderStatuses
                 response={providerStatuses}
-                loading={loading}
+                loading={providerStatusLoading}
                 failed={providerStatusFailed}
               />
             </TabsContent>

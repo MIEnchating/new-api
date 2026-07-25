@@ -98,7 +98,7 @@ export function Dialog({
         >
           <div
             className={cn(
-              'min-w-0 px-1 py-1',
+              'h-full min-w-0 px-1 py-1',
               '[&_form]:overflow-x-visible',
               '[&_[data-slot=scroll-area-viewport]]:px-1 [&_[data-slot=scroll-area-viewport]]:py-1',
               bodyClassName

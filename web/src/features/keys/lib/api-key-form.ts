@@ -29,6 +29,10 @@ import {
   type ApiKeyGroupRoute,
 } from '../types'
 
+export function canConfigureGroupRouteCooldown(routes: ApiKeyGroupRoute[]) {
+  return routes.filter((route) => route.enabled !== false).length >= 2
+}
+
 // ============================================================================
 // Form Schema
 // ============================================================================

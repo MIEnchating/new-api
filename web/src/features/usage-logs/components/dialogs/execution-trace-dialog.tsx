@@ -17,25 +17,39 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { Activity, Loader2, RefreshCcw } from 'lucide-react'
+import {
+  Activity,
+  CheckCircle2,
+  Info,
+  ListTree,
+  Loader2,
+  RefreshCcw,
+  Route,
+  SkipForward,
+  XCircle,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { ChannelExecutionTimelineList } from '@/components/channel-execution-timeline-list'
 import { Dialog } from '@/components/dialog'
-import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
+import { RouteGroupProgressChain } from '@/components/route-group-progress-chain'
+import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import {
-  getChannelExecutionTrace,
-  type ChannelExecutionRouteGroupStatus,
-} from '@/features/channels/api'
+import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
+import { getChannelExecutionTrace } from '@/features/channels/api'
 import {
   buildCompactChannelExecutionEvents,
   buildChannelExecutionTimeline,
+  getFailedChannelExecutionConclusion,
   getStandbyChannelIds,
 } from '@/lib/channel-execution-timeline'
+import { resolveRouteGroupProgress } from '@/lib/route-group-progress'
 
 type ExecutionTraceDialogProps = {
   requestId: string
+  upstreamRequestIds?: string[]
+  upstreamRequestIdSources?: Record<string, string>
+  isRetryIntermediate?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
 }
@@ -55,47 +69,31 @@ function traceStatusLabel(status?: string) {
   }
 }
 
-function traceStatusVariant(status?: string): StatusBadgeProps['variant'] {
+function traceStatusIcon(status?: string) {
+  if (status === 'success') return CheckCircle2
+  if (status === 'failed') return XCircle
+  if (status === 'cancelled') return SkipForward
+  return Activity
+}
+
+function traceStatusTone(status?: string): IconBadgeTone {
   if (status === 'success') return 'success'
-  if (status === 'running') return 'info'
+  if (status === 'failed') return 'destructive'
   if (status === 'cancelled') return 'warning'
-  return 'danger'
+  return 'info'
 }
 
-function routeGroupStatusLabel(
-  status: ChannelExecutionRouteGroupStatus['status']
+function upstreamRequestIdSourceLabel(
+  t: (key: string) => string,
+  source?: string
 ) {
-  switch (status) {
-    case 'active':
-      return 'Active'
-    case 'cooling':
-      return 'Cooling'
-    case 'skipped':
-      return 'Skipped'
-    case 'success':
-      return 'Succeeded'
-    case 'failed':
-      return 'Failed'
-    default:
-      return 'Pending'
+  if (source === 'x-oneapi-request-id') {
+    return t('New API / One API (X-Oneapi-Request-Id)')
   }
-}
-
-function routeGroupStatusVariant(
-  status: ChannelExecutionRouteGroupStatus['status']
-): StatusBadgeProps['variant'] {
-  switch (status) {
-    case 'active':
-      return 'info'
-    case 'cooling':
-      return 'warning'
-    case 'success':
-      return 'success'
-    case 'failed':
-      return 'danger'
-    default:
-      return 'neutral'
+  if (source === 'x-request-id') {
+    return t('Sub2API / other upstream (X-Request-Id)')
   }
+  return t('Not recorded')
 }
 
 function queryErrorMessage(error: unknown, fallback: string) {
@@ -139,7 +137,14 @@ export function ExecutionTraceDialog(props: ExecutionTraceDialogProps) {
     status: trace?.status,
     endedAt: trace?.updated_at,
   })
+  const routeGroupProgress = trace ? resolveRouteGroupProgress(trace) : []
+  const TraceStatusIcon = traceStatusIcon(trace?.status)
+  const upstreamRequestIds = props.upstreamRequestIds ?? []
   const standbyChannelIds = getStandbyChannelIds(timeline)
+  const failedConclusion =
+    trace?.status === 'failed'
+      ? getFailedChannelExecutionConclusion(events)
+      : undefined
   const errorMessage = traceQuery.isError
     ? queryErrorMessage(traceQuery.error, t('Execution trace not found'))
     : traceQuery.data && !traceQuery.data.success
@@ -187,83 +192,125 @@ export function ExecutionTraceDialog(props: ExecutionTraceDialogProps) {
         </div>
       ) : (
         <div className='min-w-0 space-y-4 py-1'>
-          <div className='space-y-3 border-b pb-3'>
-            <div className='flex flex-wrap items-center gap-2'>
-              <StatusBadge
-                variant={traceStatusVariant(trace.status)}
-                pulse={trace.status === 'running'}
-                copyable={false}
-              >
-                {t(traceStatusLabel(trace.status))}
-              </StatusBadge>
-              <span className='text-muted-foreground text-xs'>
-                {t(
-                  trace.mode === 'route'
-                    ? 'Channel routing'
-                    : 'Traditional retry'
-                )}
-              </span>
-              {trace.compact ? (
-                <StatusBadge variant='neutral' size='sm' copyable={false}>
-                  {t('Execution summary')}
-                </StatusBadge>
-              ) : null}
+          <div className='space-y-3 border-b pb-4'>
+            <div className='bg-muted/25 grid gap-px overflow-hidden rounded-md border sm:grid-cols-3'>
+              <div className='bg-background flex min-w-0 items-center gap-2.5 px-3 py-2.5'>
+                <IconBadge size='sm' tone={traceStatusTone(trace.status)}>
+                  <TraceStatusIcon />
+                </IconBadge>
+                <div className='min-w-0'>
+                  <div className='text-muted-foreground text-[11px]'>
+                    {t('Status')}
+                  </div>
+                  <div className='truncate text-xs font-medium'>
+                    {t(traceStatusLabel(trace.status))}
+                  </div>
+                </div>
+              </div>
+              <div className='bg-background flex min-w-0 items-center gap-2.5 px-3 py-2.5'>
+                <IconBadge size='sm' tone='primary'>
+                  {trace.mode === 'route' ? <Route /> : <RefreshCcw />}
+                </IconBadge>
+                <div className='min-w-0'>
+                  <div className='text-muted-foreground text-[11px]'>
+                    {t('Mode')}
+                  </div>
+                  <div className='truncate text-xs font-medium'>
+                    {t(
+                      trace.mode === 'route'
+                        ? 'Channel routing'
+                        : 'Traditional retry'
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className='bg-background flex min-w-0 items-center gap-2.5 px-3 py-2.5'>
+                <IconBadge size='sm' tone='neutral'>
+                  <ListTree />
+                </IconBadge>
+                <div className='min-w-0'>
+                  <div className='text-muted-foreground text-[11px]'>
+                    {t('Details')}
+                  </div>
+                  <div className='truncate text-xs font-medium'>
+                    {t(
+                      trace.compact
+                        ? 'Execution summary'
+                        : 'Request execution trace'
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
+
+            {props.isRetryIntermediate ? (
+              <div
+                role='status'
+                className='flex min-w-0 gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100'
+              >
+                <Info className='mt-0.5 size-4 shrink-0' aria-hidden='true' />
+                <div className='min-w-0 text-xs leading-5'>
+                  <div className='font-medium'>
+                    {t('Intermediate retry error')}
+                  </div>
+                  <div className='text-amber-800 dark:text-amber-200'>
+                    {t(
+                      'This entry records an intermediate channel failure. The execution trace may include later attempts and the final state of the same request.'
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <dl className='bg-muted/30 grid gap-2 rounded-md border p-3 sm:grid-cols-2'>
               {[
                 [t('Request ID'), trace.request_id],
-                [t('Group'), trace.group],
+                [t('Actual execution group'), trace.group],
                 [t('Model'), trace.model],
                 [t('Path'), trace.request_path],
+                ...(trace.priority != null
+                  ? [[t('Priority'), trace.priority]]
+                  : []),
               ].map(([label, value]) => (
-                <div key={label} className='min-w-0'>
+                <div key={String(label)} className='min-w-0'>
                   <dt className='text-muted-foreground text-[11px]'>{label}</dt>
                   <dd className='font-mono text-xs break-all'>
-                    {value || '-'}
+                    {value == null || value === '' ? '-' : value}
+                  </dd>
+                </div>
+              ))}
+              {upstreamRequestIds.map((requestId, index) => (
+                <div key={requestId} className='min-w-0 sm:col-span-2'>
+                  <dt className='text-muted-foreground text-[11px]'>
+                    {t(
+                      upstreamRequestIds.length === 1
+                        ? 'Upstream Request ID'
+                        : 'Upstream Request ID Chain'
+                    )}
+                    {upstreamRequestIds.length > 1 ? ` ${index + 1}` : ''}
+                  </dt>
+                  <dd className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5'>
+                    <span className='font-mono text-xs break-all'>
+                      {requestId}
+                    </span>
+                    <span className='text-muted-foreground text-[11px]'>
+                      {t('Source')}:{' '}
+                      {upstreamRequestIdSourceLabel(
+                        t,
+                        props.upstreamRequestIdSources?.[requestId]
+                      )}
+                    </span>
                   </dd>
                 </div>
               ))}
             </dl>
 
-            {trace.route_groups && trace.route_groups.length > 1 ? (
+            {routeGroupProgress.length > 1 ? (
               <div className='space-y-1.5'>
                 <div className='text-muted-foreground text-xs'>
                   {t('Group route chain')}
                 </div>
-                <div className='flex flex-wrap items-center gap-1.5'>
-                  {trace.route_groups.map((group, index) => (
-                    <span key={`${group}-${index}`} className='contents'>
-                      {index > 0 ? (
-                        <span className='text-muted-foreground text-xs'>→</span>
-                      ) : null}
-                      <StatusBadge variant='neutral' size='sm' copyable={false}>
-                        <span className='font-mono'>{group}</span>
-                      </StatusBadge>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {trace.route_group_statuses?.length ? (
-              <div className='space-y-1.5'>
-                <div className='text-muted-foreground text-xs'>
-                  {t('Group route status')}
-                </div>
-                <div className='flex flex-wrap gap-1.5'>
-                  {trace.route_group_statuses.map((item) => (
-                    <StatusBadge
-                      key={item.group}
-                      variant={routeGroupStatusVariant(item.status)}
-                      size='sm'
-                      copyable={false}
-                    >
-                      <span className='font-mono'>{item.group}</span>
-                      <span>{t(routeGroupStatusLabel(item.status))}</span>
-                    </StatusBadge>
-                  ))}
-                </div>
+                <RouteGroupProgressChain items={routeGroupProgress} />
               </div>
             ) : null}
           </div>
@@ -296,6 +343,52 @@ export function ExecutionTraceDialog(props: ExecutionTraceDialogProps) {
               {t('Execution trace not found')}
             </p>
           )}
+
+          {failedConclusion ? (
+            <div
+              role='status'
+              className='border-destructive/30 bg-destructive/5 space-y-2 rounded-md border px-3 py-2.5'
+            >
+              <div className='flex flex-wrap items-center gap-2'>
+                <IconBadge size='sm' tone='destructive'>
+                  <XCircle />
+                </IconBadge>
+                <span className='text-sm font-semibold'>
+                  {t('Final conclusion')}
+                </span>
+                <StatusBadge variant='danger' size='sm' copyable={false}>
+                  {t('Request failed')}
+                </StatusBadge>
+              </div>
+              <p className='text-muted-foreground text-xs'>
+                {t(
+                  'All channel attempts failed and the request did not receive a successful response.'
+                )}
+              </p>
+              {failedConclusion.reason ? (
+                <div className='bg-background/70 rounded border px-2.5 py-2 text-xs break-all'>
+                  <span className='text-muted-foreground'>
+                    {t('Final error')}:{' '}
+                  </span>
+                  {failedConclusion.reason}
+                </div>
+              ) : null}
+              <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-[11px]'>
+                {failedConclusion.channelId ? (
+                  <span>
+                    {t('Last channel')}: #{failedConclusion.channelId}{' '}
+                    {failedConclusion.channelName}
+                  </span>
+                ) : null}
+                <span>
+                  {t('Attempts')}: {failedConclusion.attemptCount}
+                </span>
+                <span>
+                  {t('Channels')}: {failedConclusion.channelCount}
+                </span>
+              </div>
+            </div>
+          ) : null}
         </div>
       )}
     </Dialog>

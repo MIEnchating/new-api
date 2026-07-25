@@ -18,7 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
 
-import type { OfficialProviderIncident, OfficialProviderStatus } from './types'
+import type {
+  OfficialProviderComponent,
+  OfficialProviderIncident,
+  OfficialProviderStatus,
+} from './types'
 
 const INCIDENT_STATUS_LABELS: Record<string, string> = {
   investigating: 'Investigating',
@@ -37,6 +41,14 @@ const FINISHED_INCIDENT_STATUSES = new Set([
   'postmortem',
 ])
 
+const COMPONENT_STATUS_LABELS: Record<string, string> = {
+  operational: 'Operational',
+  degraded_performance: 'Degraded performance',
+  partial_outage: 'Partial outage',
+  major_outage: 'Major outage',
+  under_maintenance: 'Under maintenance',
+}
+
 function normalizeStatus(value: string) {
   return value
     .trim()
@@ -52,28 +64,65 @@ export function getActiveOfficialIncidents(provider: OfficialProviderStatus) {
   return provider.incidents.filter(isOfficialIncidentActive)
 }
 
+export function isOfficialComponentAffected(
+  component: OfficialProviderComponent
+) {
+  return normalizeStatus(component.status) !== 'operational'
+}
+
+export function getAffectedOfficialComponents(
+  provider: OfficialProviderStatus
+) {
+  return provider.components.filter(isOfficialComponentAffected)
+}
+
 export function getEffectiveOfficialIndicator(
   provider: OfficialProviderStatus
 ) {
   const declaredIndicator =
     normalizeStatus(provider.indicator || 'none') || 'none'
-  if (declaredIndicator !== 'none') return declaredIndicator
-
   const activeIncidents = getActiveOfficialIncidents(provider)
-  if (activeIncidents.length === 0) return 'none'
+  const affectedComponents = getAffectedOfficialComponents(provider)
+  const severityOrder = ['none', 'maintenance', 'minor', 'major', 'critical']
+  const candidates = [declaredIndicator]
 
-  const impacts = new Set(
-    activeIncidents.map((incident) => normalizeStatus(incident.impact))
-  )
-  if (impacts.has('critical')) return 'critical'
-  if (impacts.has('major')) return 'major'
-  if (impacts.has('minor')) return 'minor'
-
-  const hasMaintenance = activeIncidents.some((incident) => {
+  for (const incident of activeIncidents) {
+    const impact = normalizeStatus(incident.impact)
+    if (impact !== 'none' && severityOrder.includes(impact)) {
+      candidates.push(impact)
+      continue
+    }
     const status = normalizeStatus(incident.status)
-    return status === 'scheduled' || status === 'in_progress'
-  })
-  return hasMaintenance ? 'maintenance' : 'minor'
+    candidates.push(
+      status === 'scheduled' || status === 'in_progress'
+        ? 'maintenance'
+        : 'minor'
+    )
+  }
+
+  for (const component of affectedComponents) {
+    switch (normalizeStatus(component.status)) {
+      case 'major_outage':
+        candidates.push('major')
+        break
+      case 'under_maintenance':
+        candidates.push('maintenance')
+        break
+      default:
+        candidates.push('minor')
+        break
+    }
+  }
+
+  const knownCandidates = candidates.filter((indicator) =>
+    severityOrder.includes(indicator)
+  )
+  if (knownCandidates.length === 0) return declaredIndicator || 'unknown'
+  return knownCandidates.reduce((highest, indicator) =>
+    severityOrder.indexOf(indicator) > severityOrder.indexOf(highest)
+      ? indicator
+      : highest
+  )
 }
 
 export function isOfficialProviderAffected(provider: OfficialProviderStatus) {
@@ -104,5 +153,15 @@ export function formatIncidentStatus(value: string, t: TFunction) {
 
   const normalized = value.trim().replaceAll(/[_-]+/g, ' ')
   if (!normalized) return ''
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1)
+}
+
+export function formatComponentStatus(value: string, t: TFunction) {
+  const normalizedKey = normalizeStatus(value)
+  const translationKey = COMPONENT_STATUS_LABELS[normalizedKey]
+  if (translationKey) return t(translationKey)
+
+  const normalized = value.trim().replaceAll(/[_-]+/g, ' ')
+  if (!normalized) return t('Unknown status')
   return normalized.charAt(0).toUpperCase() + normalized.slice(1)
 }

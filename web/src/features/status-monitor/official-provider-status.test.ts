@@ -22,9 +22,11 @@ import { describe, test } from 'node:test'
 import type { TFunction } from 'i18next'
 
 import {
+  formatComponentStatus,
   formatIncidentStatus,
   formatOfficialTime,
   getActiveOfficialIncidents,
+  getAffectedOfficialComponents,
   getEffectiveOfficialIndicator,
   isOfficialProviderAffected,
 } from './official-provider-status-utils'
@@ -50,6 +52,8 @@ function createProvider(
     description: 'All Systems Operational',
     status_url: 'https://status.example.com',
     subscribe_url: '',
+    checked_at: '2026-07-17T00:00:00Z',
+    components: [],
     incidents: [],
     ...overrides,
   }
@@ -63,6 +67,7 @@ function createIncident(status: string, impact: string) {
     message: '',
     updated_at: '2026-07-17T00:00:00Z',
     url: '',
+    components: [],
   }
 }
 
@@ -78,6 +83,14 @@ describe('official provider status formatting', () => {
     assert.equal(
       formatIncidentStatus('custom_state', translate),
       'Custom state'
+    )
+  })
+
+  test('formats official component states', () => {
+    assert.equal(formatComponentStatus('operational', translate), 'Operational')
+    assert.equal(
+      formatComponentStatus('degraded_performance', translate),
+      'Degraded performance'
     )
   })
 
@@ -113,6 +126,39 @@ describe('official provider status formatting', () => {
     })
 
     assert.equal(getEffectiveOfficialIndicator(provider), 'major')
+  })
+
+  test('does not let a declared minor state hide a critical incident', () => {
+    const provider = createProvider({
+      indicator: 'minor',
+      incidents: [createIncident('investigating', 'critical')],
+    })
+
+    assert.equal(getEffectiveOfficialIndicator(provider), 'critical')
+  })
+
+  test('keeps an unknown declared state distinguishable from unavailable', () => {
+    const provider = createProvider({ indicator: 'custom_status' })
+
+    assert.equal(getEffectiveOfficialIndicator(provider), 'custom_status')
+    assert.equal(isOfficialProviderAffected(provider), true)
+  })
+
+  test('uses degraded component state when the summary says none', () => {
+    const provider = createProvider({
+      components: [
+        {
+          id: 'responses',
+          name: 'Responses',
+          status: 'degraded_performance',
+          updated_at: '2026-07-17T00:00:00Z',
+        },
+      ],
+    })
+
+    assert.equal(getEffectiveOfficialIndicator(provider), 'minor')
+    assert.equal(getAffectedOfficialComponents(provider).length, 1)
+    assert.equal(isOfficialProviderAffected(provider), true)
   })
 
   test('does not count completed incidents as active', () => {

@@ -18,9 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
-import { Clock, Edit, Network } from 'lucide-react'
+import { Clock, Edit, Loader2, Network, RotateCcw } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
@@ -33,8 +34,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 
-import { getApiKeyRouteStatus } from '../api'
+import { clearApiKeyRouteCooldown, getApiKeyRouteStatus } from '../api'
 import { parseApiKeyGroupRouteConfig } from '../lib'
 import type { RouteStatus } from '../types'
 import { useApiKeys } from './api-keys-provider'
@@ -71,9 +78,11 @@ function getRouteCooldownRemaining(
 export function ApiKeyRouteDetailDialog() {
   const { t } = useTranslation()
   const { open, setOpen, currentRow } = useApiKeys()
+  const [isResettingAllCooldowns, setIsResettingAllCooldowns] = useState(false)
+  const [resettingGroup, setResettingGroup] = useState<string | null>(null)
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
   const routes = parseApiKeyGroupRouteConfig(currentRow?.group_route_config)
-  const { data: routeStatusData } = useQuery({
+  const { data: routeStatusData, refetch: refetchRouteStatus } = useQuery({
     queryKey: ['api-key-route-status', currentRow?.id],
     queryFn: () => getApiKeyRouteStatus(currentRow?.id ?? 0),
     enabled: open === 'route-detail' && !!currentRow?.id,
@@ -88,6 +97,9 @@ export function ApiKeyRouteDetailDialog() {
     }
     return statusesByGroup
   }, [routeStatusData?.data])
+  const hasActiveCooldown = (routeStatusData?.data ?? []).some(
+    (status) => getRouteCooldownRemaining(status, now) > 0
+  )
 
   useEffect(() => {
     if (open !== 'route-detail') {
@@ -99,6 +111,30 @@ export function ApiKeyRouteDetailDialog() {
     }, 1000)
     return () => window.clearInterval(timer)
   }, [open])
+
+  const handleResetCooldown = async (group?: string) => {
+    if (!currentRow?.id || isResettingAllCooldowns || resettingGroup) return
+    if (group) {
+      setResettingGroup(group)
+    } else {
+      setIsResettingAllCooldowns(true)
+    }
+    try {
+      const result = await clearApiKeyRouteCooldown(currentRow.id, group)
+      if (!result.success) {
+        toast.error(result.message || t('Failed to reset cooldown'))
+        return
+      }
+      setNow(Math.floor(Date.now() / 1000))
+      await refetchRouteStatus()
+      toast.success(t('Cooldown reset'))
+    } catch {
+      toast.error(t('Failed to reset cooldown'))
+    } finally {
+      setIsResettingAllCooldowns(false)
+      setResettingGroup(null)
+    }
+  }
 
   return (
     <Dialog open={open === 'route-detail'} onOpenChange={() => setOpen(null)}>
@@ -162,16 +198,51 @@ export function ApiKeyRouteDetailDialog() {
                     </div>
                   </div>
 
-                  <div className='text-right'>
-                    <div className='flex items-center justify-end gap-1.5 text-sm font-medium tabular-nums'>
-                      <Clock className='text-muted-foreground size-3.5' />
-                      {cooling
-                        ? coolingStatuses.length
-                        : formatCooldown(route.cooldown_seconds, t)}
+                  <div className='flex items-center justify-end gap-1.5 text-right'>
+                    <div>
+                      <div className='flex items-center justify-end gap-1.5 text-sm font-medium tabular-nums'>
+                        <Clock className='text-muted-foreground size-3.5' />
+                        {cooling
+                          ? coolingStatuses.length
+                          : formatCooldown(route.cooldown_seconds, t)}
+                      </div>
+                      <div className='text-muted-foreground text-xs'>
+                        {cooling ? t('Cooling') : t('Cooldown')}
+                      </div>
                     </div>
-                    <div className='text-muted-foreground text-xs'>
-                      {cooling ? t('Cooling') : t('Cooldown')}
-                    </div>
+                    <TooltipProvider delay={100}>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={<span className='inline-flex' />}
+                        >
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='icon-sm'
+                            onClick={() =>
+                              void handleResetCooldown(route.group)
+                            }
+                            disabled={
+                              !cooling ||
+                              isResettingAllCooldowns ||
+                              !!resettingGroup
+                            }
+                            aria-label={t('Reset group cooldown')}
+                          >
+                            {resettingGroup === route.group ? (
+                              <Loader2 className='size-3.5 animate-spin' />
+                            ) : (
+                              <RotateCcw className='size-3.5' />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {cooling
+                            ? t('Reset group cooldown')
+                            : t('No active cooldown for this group')}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
                   </div>
 
                   {cooling && (
@@ -211,6 +282,21 @@ export function ApiKeyRouteDetailDialog() {
         )}
 
         <DialogFooter>
+          <Button
+            type='button'
+            variant='outline'
+            onClick={() => void handleResetCooldown()}
+            disabled={
+              !hasActiveCooldown || isResettingAllCooldowns || !!resettingGroup
+            }
+          >
+            {isResettingAllCooldowns ? (
+              <Loader2 className='size-4 animate-spin' />
+            ) : (
+              <RotateCcw className='size-4' />
+            )}
+            {t('Reset all cooldowns')}
+          </Button>
           <Button type='button' variant='outline' onClick={() => setOpen(null)}>
             {t('Close')}
           </Button>

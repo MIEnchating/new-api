@@ -348,6 +348,9 @@ func isConversationCacheMetricEligible(ctx *gin.Context, relayInfo *relaycommon.
 	if ctx == nil || relayInfo == nil || usage == nil {
 		return false
 	}
+	if relayInfo.IsChannelTest {
+		return false
+	}
 	if common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens) ||
 		(usage.BillingUsage != nil && usage.BillingUsage.Estimated) {
 		return false

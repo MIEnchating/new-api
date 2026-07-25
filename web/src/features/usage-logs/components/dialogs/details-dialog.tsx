@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { TFunction } from 'i18next'
 import {
+  Activity,
   Copy,
   Check,
   ChevronRight,
@@ -600,6 +601,7 @@ interface DetailsDialogProps {
   isAdmin: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
+  onViewExecutionTrace?: () => void
 }
 
 export function DetailsDialog(props: DetailsDialogProps) {
@@ -871,15 +873,24 @@ export function DetailsDialog(props: DetailsDialogProps) {
         <>
           {t('Log Details')}
           <StatusBadge
-            label={t(
-              isRetryIntermediate
-                ? 'Intermediate retry error'
-                : typeConfig.label
-            )}
+            label={t(typeConfig.label)}
             variant={typeConfig.color as StatusBadgeProps['variant']}
             size='sm'
             copyable={false}
           />
+          {props.isAdmin && executionTrace && props.onViewExecutionTrace ? (
+            <Button
+              type='button'
+              size='sm'
+              variant='outline'
+              className='h-7 gap-1.5 px-2 text-xs'
+              onClick={props.onViewExecutionTrace}
+              aria-label={t('View execution trace')}
+            >
+              <Activity className='size-3.5' aria-hidden='true' />
+              <span>{t('View execution trace')}</span>
+            </Button>
+          ) : null}
         </>
       }
       description={t('View the complete details for this log entry')}
@@ -889,28 +900,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
         dialogWidthClass
       )}
       headerClassName='max-sm:gap-1'
-      titleClassName='flex items-center gap-2 text-base'
+      titleClassName='flex min-w-0 flex-wrap items-center gap-2 pr-8 text-base'
       descriptionClassName='sr-only'
       contentHeight='min(72dvh, 720px)'
       bodyClassName='pr-2 sm:pr-4'
     >
       <div className='w-full max-w-full min-w-0 space-y-2.5 overflow-x-hidden py-1 sm:space-y-3'>
-        {isRetryIntermediate ? (
-          <div
-            role='status'
-            className='flex min-w-0 gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100'
-          >
-            <Info className='mt-0.5 size-4 shrink-0' aria-hidden='true' />
-            <div className='min-w-0 text-xs leading-5'>
-              <div className='font-medium'>{t('Intermediate retry error')}</div>
-              <div className='text-amber-800 dark:text-amber-200'>
-                {t(
-                  'This entry records an intermediate channel failure. The execution trace may include later attempts and the final state of the same request.'
-                )}
-              </div>
-            </div>
-          </div>
-        ) : null}
         {/* Overview section - key identifiers */}
         <div className='min-w-0 space-y-1'>
           <DetailRow

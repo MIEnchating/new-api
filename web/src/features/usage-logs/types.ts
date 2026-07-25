@@ -116,6 +116,8 @@ export interface ChannelExecutionTraceInfo {
   started_at?: number
   updated_at?: number
   channel_ids?: number[]
+  channel_name?: string
+  priority?: number
   affinity_hit?: boolean
   events?: Array<{
     sequence?: number

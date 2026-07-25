@@ -83,6 +83,7 @@ func TestBuildOptionAuditParamsOnlyIncludesAllowlistedValues(t *testing.T) {
 		"ChannelRouteCooldownSeconds",
 		"ChannelRouteStickyEnabled",
 		"ChannelRouteSameChannelRetries",
+		"ChannelRouteGroupExclusionsEnabled",
 		"ChannelRouteGroupExclusions",
 	}
 	for _, key := range allowlistedKeys {

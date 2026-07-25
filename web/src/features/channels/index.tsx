@@ -18,11 +18,17 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Route, Settings2 } from 'lucide-react'
+import {
+  Link2,
+  RefreshCw,
+  Route,
+  Settings2,
+  TimerOff,
+  TimerReset,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
-import { Badge } from '@/components/ui/badge'
 import {
   Tooltip,
   TooltipContent,
@@ -56,44 +62,83 @@ export function Channels() {
   const channelRouteSameChannelRetries =
     channelOps?.channel_route_same_channel_retries
   const retryTimes = channelOpsQuery.data?.data?.retry_times
-  let summaryLabel: string | null = null
-  if (channelRouteEnabled) {
-    summaryLabel = [
-      t('Channel routing'),
-      typeof channelRouteCooldownSeconds === 'number'
-        ? `${channelRouteCooldownSeconds}s`
-        : null,
-      channelRouteStickyEnabled ? t('Route affinity') : null,
-      typeof channelRouteSameChannelRetries === 'number' &&
-      channelRouteSameChannelRetries > 0
-        ? `${t('Same-channel retries')} ${channelRouteSameChannelRetries}`
-        : null,
-    ]
-      .filter(Boolean)
-      .join(' · ')
-  } else if (typeof retryTimes === 'number') {
-    summaryLabel = `${t('Max Retries')}: ${retryTimes}`
-  }
   const summaryAriaLabel = channelRouteEnabled
     ? t('Channel routing')
     : t('Retry Settings')
   let opsBadge = null
-  if (summaryLabel) {
-    const badgeContent = (
-      <>
-        {channelRouteEnabled ? <Route data-icon='inline-start' /> : null}
-        <span>{summaryLabel}</span>
-        {isRoot ? <Settings2 data-icon='inline-end' /> : null}
-      </>
+  if (channelRouteEnabled || typeof retryTimes === 'number') {
+    const cooldownDisabled =
+      typeof channelRouteCooldownSeconds === 'number' &&
+      channelRouteCooldownSeconds === 0
+    const sameChannelRetries = channelRouteSameChannelRetries ?? 0
+    const summaryContent = (
+      <span className='border-border bg-muted/20 inline-flex h-7 max-w-full items-center overflow-hidden rounded-md border text-xs font-medium'>
+        {channelRouteEnabled ? (
+          <>
+            <span className='text-success flex h-full shrink-0 items-center gap-1.5 px-2'>
+              <Route className='size-3.5' />
+              <span>{t('Channel routing')}</span>
+            </span>
+            <span className='border-border text-muted-foreground flex h-full shrink-0 items-center gap-1.5 border-l px-2'>
+              {cooldownDisabled ? (
+                <TimerOff className='size-3.5' />
+              ) : (
+                <TimerReset className='size-3.5' />
+              )}
+              <span>
+                {t('Cooldown')}:{' '}
+                {cooldownDisabled
+                  ? t('Disabled')
+                  : typeof channelRouteCooldownSeconds === 'number'
+                    ? `${channelRouteCooldownSeconds}s`
+                    : '-'}
+              </span>
+            </span>
+            <span className='border-border flex h-full shrink-0 items-center gap-1.5 border-l px-2'>
+              <Link2
+                className={
+                  channelRouteStickyEnabled
+                    ? 'text-info size-3.5'
+                    : 'text-muted-foreground size-3.5'
+                }
+              />
+              <span>
+                {t('Route affinity')}:{' '}
+                {t(channelRouteStickyEnabled ? 'Enabled' : 'Disabled')}
+              </span>
+            </span>
+            <span className='border-border flex h-full shrink-0 items-center gap-1.5 border-l px-2'>
+              <RefreshCw className='text-muted-foreground size-3.5' />
+              <span>
+                {t('Retry')}: {sameChannelRetries}
+              </span>
+            </span>
+          </>
+        ) : (
+          <span className='flex h-full shrink-0 items-center gap-1.5 px-2'>
+            <RefreshCw className='text-muted-foreground size-3.5' />
+            <span>
+              {t('Max Retries')}: {retryTimes}
+            </span>
+          </span>
+        )}
+        {isRoot ? (
+          <span className='border-border text-muted-foreground group-hover:text-foreground flex h-full w-7 shrink-0 items-center justify-center border-l transition-colors'>
+            <Settings2 className='size-3.5' />
+          </span>
+        ) : null}
+      </span>
     )
     const tooltipContent = channelRouteEnabled ? (
       <div className='space-y-1'>
         <p className='font-medium'>{t('Channel routing')}</p>
         <p>
           {t('Channel route cooldown')}:{' '}
-          {typeof channelRouteCooldownSeconds === 'number'
-            ? `${channelRouteCooldownSeconds}s`
-            : '-'}
+          {cooldownDisabled
+            ? t('Disabled')
+            : typeof channelRouteCooldownSeconds === 'number'
+              ? `${channelRouteCooldownSeconds}s`
+              : '-'}
         </p>
         <p>
           {t('Channel route affinity')}:{' '}
@@ -114,31 +159,24 @@ export function Channels() {
       <Tooltip>
         <TooltipTrigger
           render={
-            <Badge
-              variant='outline'
-              className='shrink-0 cursor-pointer'
+            <Link
+              className='group focus-visible:ring-ring shrink-0 cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-offset-2'
               aria-label={summaryAriaLabel}
-              render={
-                <Link
-                  to='/system-settings/models/$section'
-                  params={{
-                    section: channelRouteEnabled
-                      ? 'channel-routing'
-                      : 'routing-reliability',
-                  }}
-                />
-              }
+              to='/system-settings/models/$section'
+              params={{
+                section: channelRouteEnabled
+                  ? 'channel-routing'
+                  : 'routing-reliability',
+              }}
             />
           }
         >
-          {badgeContent}
+          {summaryContent}
         </TooltipTrigger>
         <TooltipContent>{tooltipContent}</TooltipContent>
       </Tooltip>
     ) : (
-      <Badge variant='outline' className='shrink-0'>
-        {badgeContent}
-      </Badge>
+      summaryContent
     )
   }
 
@@ -146,7 +184,7 @@ export function Channels() {
     <ChannelsProvider>
       <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>
-          <span className='flex min-w-0 items-center gap-2'>
+          <span className='flex min-w-0 items-center gap-2.5'>
             <span className='truncate'>{t('Channels')}</span>
             {opsBadge}
           </span>

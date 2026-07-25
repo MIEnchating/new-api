@@ -139,6 +139,8 @@ export type ChannelExecutionTrace = {
   updated_at: number
   compact?: boolean
   channel_ids?: number[]
+  channel_name?: string
+  priority?: number
   affinity_hit?: boolean
   events?: ChannelExecutionEvent[]
 }

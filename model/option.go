@@ -51,6 +51,7 @@ func InitOptionMap() {
 	common.OptionMap["ChannelRouteCooldownSeconds"] = strconv.Itoa(common.ChannelRouteCooldownSeconds)
 	common.OptionMap["ChannelRouteStickyEnabled"] = strconv.FormatBool(common.ChannelRouteStickyEnabled)
 	common.OptionMap["ChannelRouteSameChannelRetries"] = strconv.Itoa(common.ChannelRouteSameChannelRetries)
+	common.OptionMap["ChannelRouteGroupExclusionsEnabled"] = strconv.FormatBool(setting.ChannelRouteGroupExclusionsEnabled)
 	common.OptionMap["ChannelRouteGroupExclusions"] = setting.ChannelRouteGroupExclusions2JSONString()
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
 	common.OptionMap["DisplayInCurrencyEnabled"] = strconv.FormatBool(common.DisplayInCurrencyEnabled)
@@ -324,6 +325,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.ChannelRouteCooldownEnabled = boolValue
 		case "ChannelRouteStickyEnabled":
 			common.ChannelRouteStickyEnabled = boolValue
+		case "ChannelRouteGroupExclusionsEnabled":
+			setting.ChannelRouteGroupExclusionsEnabled = boolValue
 		case "LogConsumeEnabled":
 			common.LogConsumeEnabled = boolValue
 		case "DisplayInCurrencyEnabled":

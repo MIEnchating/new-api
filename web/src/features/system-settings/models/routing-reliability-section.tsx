@@ -17,14 +17,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Plus, Trash2 } from 'lucide-react'
-import { useMemo, useRef } from 'react'
+import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { useMemo, useRef, useState } from 'react'
 import { useFieldArray, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import * as z from 'zod'
 
 import { Button } from '@/components/ui/button'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import {
   Form,
   FormControl,
@@ -480,6 +485,9 @@ export function RoutingReliabilitySection({
   const customErrorResponsesEnabled = form.watch(
     'error_response_setting.enabled'
   )
+  const [expandedErrorRuleIndex, setExpandedErrorRuleIndex] = useState<
+    number | null
+  >(0)
   const autoDisableParsed = useMemo(
     () => parseHttpStatusCodeRules(autoDisableStatusCodes),
     [autoDisableStatusCodes]
@@ -509,6 +517,34 @@ export function RoutingReliabilitySection({
     }
 
     baselineRef.current = normalized
+  }
+
+  const addCustomErrorRule = () => {
+    const nextIndex = errorRuleFields.fields.length
+    errorRuleFields.append({
+      name: t('Rule {{number}}', { number: nextIndex + 1 }),
+      description: '',
+      priority: nextIndex,
+      enabled: true,
+      match_mode: 'any',
+      status_codes: '429,500-599',
+      message_contains: '',
+      message_match_mode: 'contains',
+      response_status_code: 429,
+      response_message: t('Upstream request failed. Please try again later.'),
+      pass_through_status_code: false,
+      pass_through_message: false,
+    })
+    setExpandedErrorRuleIndex(nextIndex)
+  }
+
+  const removeCustomErrorRule = (index: number) => {
+    errorRuleFields.remove(index)
+    setExpandedErrorRuleIndex((current) => {
+      if (current === null) return null
+      if (current === index) return null
+      return current > index ? current - 1 : current
+    })
   }
 
   return (
@@ -857,50 +893,77 @@ export function RoutingReliabilitySection({
 
           {view === 'custom-errors' ? (
             <div className='flex min-w-0 flex-col gap-4'>
-              <div className='flex flex-col gap-1'>
-                <h4 className='text-sm font-medium'>
-                  {t('Custom error responses')}
-                </h4>
+              <div className='overflow-hidden rounded-md border'>
+                <FormField
+                  control={form.control}
+                  name='error_response_setting.enabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem className='px-3 py-3'>
+                      <SettingsSwitchContent>
+                        <FormLabel>
+                          {t('Enable custom error responses')}
+                        </FormLabel>
+                        <FormDescription>
+                          {t(
+                            'Rewrite matched relay errors before returning them to users'
+                          )}
+                        </FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+                <div className='bg-muted/20 flex items-center justify-between gap-3 border-t px-3 py-2.5'>
+                  <span className='text-muted-foreground text-xs'>
+                    {t('{{count}} custom error response rules', {
+                      count: errorRuleFields.fields.length,
+                    })}
+                  </span>
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    disabled={!customErrorResponsesEnabled}
+                    onClick={addCustomErrorRule}
+                  >
+                    <Plus data-icon='inline-start' />
+                    {t('Add rule')}
+                  </Button>
+                </div>
               </div>
 
-              <FormField
-                control={form.control}
-                name='error_response_setting.enabled'
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>
-                        {t('Enable custom error responses')}
-                      </FormLabel>
-                      <FormDescription>
-                        {t(
-                          'Rewrite matched relay errors before returning them to users'
-                        )}
-                      </FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                      />
-                    </FormControl>
-                  </SettingsSwitchItem>
-                )}
-              />
-
               {customErrorResponsesEnabled ? (
-                <div className='flex min-w-0 flex-col gap-3'>
+                <div className='grid min-w-0 items-start gap-3 xl:grid-cols-2'>
                   {errorRuleFields.fields.length === 0 ? (
-                    <div className='border-border/70 text-muted-foreground rounded-md border border-dashed p-4 text-sm'>
+                    <div className='border-border/70 text-muted-foreground rounded-md border border-dashed p-4 text-sm xl:col-span-2'>
                       {t('No custom error response rules')}
                     </div>
                   ) : (
                     errorRuleFields.fields.map((ruleField, index) => {
-                      const ruleName = form.watch(
-                        `error_response_setting.rules.${index}.name`
+                      const ruleName = String(
+                        form.watch(
+                          `error_response_setting.rules.${index}.name`
+                        ) ?? ''
                       )
-                      const rulePriority = form.watch(
-                        `error_response_setting.rules.${index}.priority`
+                      const rulePriority = Number(
+                        form.watch(
+                          `error_response_setting.rules.${index}.priority`
+                        ) ?? 0
+                      )
+                      const ruleDescription = String(
+                        form.watch(
+                          `error_response_setting.rules.${index}.description`
+                        ) ?? ''
+                      )
+                      const ruleStatusCodes = String(
+                        form.watch(
+                          `error_response_setting.rules.${index}.status_codes`
+                        ) ?? ''
                       )
                       const passThroughStatus = form.watch(
                         `error_response_setting.rules.${index}.pass_through_status_code`
@@ -910,413 +973,444 @@ export function RoutingReliabilitySection({
                       )
 
                       return (
-                        <div
+                        <Collapsible
                           key={ruleField.id}
-                          className='border-border/70 grid min-w-0 gap-4 rounded-md border p-3'
+                          open={expandedErrorRuleIndex === index}
+                          onOpenChange={(open) =>
+                            setExpandedErrorRuleIndex(open ? index : null)
+                          }
+                          className='border-border/70 min-w-0 overflow-hidden rounded-md border'
                         >
-                          <div className='flex min-w-0 items-center justify-between gap-3'>
-                            <FormField
-                              control={form.control}
-                              name={
-                                `error_response_setting.rules.${index}.enabled` as const
+                          <div
+                            className={
+                              expandedErrorRuleIndex === index
+                                ? 'bg-muted/20 grid min-h-14 min-w-0 grid-cols-[minmax(0,1fr)_4.75rem] items-center gap-2 px-2 py-2'
+                                : 'grid min-h-14 min-w-0 grid-cols-[minmax(0,1fr)_4.75rem] items-center gap-2 px-2 py-2'
+                            }
+                          >
+                            <CollapsibleTrigger
+                              render={
+                                <button
+                                  type='button'
+                                  data-press-animation='none'
+                                  className='group grid min-h-10 min-w-0 grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-2.5 rounded px-1 text-left outline-none focus-visible:ring-2'
+                                />
                               }
-                              render={({ field }) => (
-                                <SettingsSwitchItem className='flex-1 py-0'>
-                                  <SettingsSwitchContent>
-                                    <FormLabel>
-                                      {ruleName ||
-                                        t('Rule {{number}}', {
-                                          number: index + 1,
-                                        })}
-                                    </FormLabel>
-                                    <FormDescription>
-                                      {t(
-                                        'Priority {{number}} · lower numbers match first',
-                                        { number: rulePriority }
-                                      )}
-                                    </FormDescription>
-                                  </SettingsSwitchContent>
-                                  <FormControl>
-                                    <Switch
-                                      checked={field.value}
-                                      onCheckedChange={field.onChange}
-                                    />
-                                  </FormControl>
-                                </SettingsSwitchItem>
-                              )}
-                            />
-
-                            <Button
-                              type='button'
-                              variant='outline'
-                              size='icon'
-                              aria-label={t(
-                                'Remove custom error response rule'
-                              )}
-                              onClick={() => errorRuleFields.remove(index)}
                             >
-                              <Trash2 className='size-4' />
-                            </Button>
-                          </div>
+                              <span className='bg-background group-hover:bg-muted flex size-7 shrink-0 items-center justify-center rounded-md border transition-colors'>
+                                {expandedErrorRuleIndex === index ? (
+                                  <ChevronDown className='text-muted-foreground size-3.5' />
+                                ) : (
+                                  <ChevronRight className='text-muted-foreground size-3.5' />
+                                )}
+                              </span>
+                              <span className='min-w-0 flex-1'>
+                                <span className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
+                                  <span className='truncate text-sm font-medium'>
+                                    {ruleName ||
+                                      t('Rule {{number}}', {
+                                        number: index + 1,
+                                      })}
+                                  </span>
+                                  <span className='bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[11px]'>
+                                    {t('Priority')} {rulePriority}
+                                  </span>
+                                  <span className='bg-muted text-muted-foreground max-w-40 truncate rounded px-1.5 py-0.5 font-mono text-[11px]'>
+                                    {ruleStatusCodes || '*'}
+                                  </span>
+                                </span>
+                                {ruleDescription ? (
+                                  <span className='text-muted-foreground mt-0.5 block truncate text-xs'>
+                                    {ruleDescription}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </CollapsibleTrigger>
 
-                          <div className='grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_10rem]'>
-                            <FormField
-                              control={form.control}
-                              name={
-                                `error_response_setting.rules.${index}.name` as const
-                              }
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>{t('Rule name')}</FormLabel>
-                                  <FormControl>
-                                    <Input
-                                      placeholder={t(
-                                        'e.g. Context window exceeded'
-                                      )}
-                                      {...field}
-                                    />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-
-                            <FormField
-                              control={form.control}
-                              name={
-                                `error_response_setting.rules.${index}.priority` as const
-                              }
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>{t('Priority')}</FormLabel>
-                                  <FormControl>
-                                    <Input
-                                      type='number'
-                                      step={1}
-                                      {...safeNumberFieldProps(field)}
-                                    />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                          </div>
-
-                          <FormField
-                            control={form.control}
-                            name={
-                              `error_response_setting.rules.${index}.description` as const
-                            }
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>{t('Rule description')}</FormLabel>
-                                <FormControl>
-                                  <Input
-                                    placeholder={t(
-                                      'Describe when and why this rule is used'
-                                    )}
-                                    {...field}
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-
-                          <div className='text-sm font-medium'>
-                            {t('Match conditions')}
-                          </div>
-                          <div className='grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4'>
-                            <FormField
-                              control={form.control}
-                              name={
-                                `error_response_setting.rules.${index}.match_mode` as const
-                              }
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>{t('Match mode')}</FormLabel>
-                                  <Select
-                                    items={[
-                                      {
-                                        value: 'any',
-                                        label: t('Any condition'),
-                                      },
-                                      {
-                                        value: 'all',
-                                        label: t('All conditions'),
-                                      },
-                                    ]}
-                                    value={field.value}
-                                    onValueChange={(value) =>
-                                      field.onChange(
-                                        normalizeErrorResponseMatchMode(value)
-                                      )
-                                    }
-                                  >
-                                    <FormControl>
-                                      <SelectTrigger>
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent alignItemWithTrigger={false}>
-                                      <SelectGroup>
-                                        <SelectItem value='any'>
-                                          {t('Any condition')}
-                                        </SelectItem>
-                                        <SelectItem value='all'>
-                                          {t('All conditions')}
-                                        </SelectItem>
-                                      </SelectGroup>
-                                    </SelectContent>
-                                  </Select>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-
-                            <FormField
-                              control={form.control}
-                              name={
-                                `error_response_setting.rules.${index}.status_codes` as const
-                              }
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>
-                                    {t('Match status codes')}
-                                  </FormLabel>
-                                  <FormControl>
-                                    <Input
-                                      placeholder={t('e.g. 429, 500-599')}
-                                      value={field.value}
-                                      onChange={(event) =>
-                                        field.onChange(event.target.value)
-                                      }
-                                    />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-
-                            <FormField
-                              control={form.control}
-                              name={
-                                `error_response_setting.rules.${index}.message_match_mode` as const
-                              }
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>
-                                    {t('Error message match mode')}
-                                  </FormLabel>
-                                  <Select
-                                    items={[
-                                      {
-                                        value: 'contains',
-                                        label: t('Fuzzy contains'),
-                                      },
-                                      {
-                                        value: 'exact',
-                                        label: t('Exact message'),
-                                      },
-                                    ]}
-                                    value={field.value}
-                                    onValueChange={(value) =>
-                                      field.onChange(
-                                        normalizeErrorMessageMatchMode(value)
-                                      )
-                                    }
-                                  >
-                                    <FormControl>
-                                      <SelectTrigger>
-                                        <SelectValue />
-                                      </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent alignItemWithTrigger={false}>
-                                      <SelectGroup>
-                                        <SelectItem value='contains'>
-                                          {t('Fuzzy contains')}
-                                        </SelectItem>
-                                        <SelectItem value='exact'>
-                                          {t('Exact message')}
-                                        </SelectItem>
-                                      </SelectGroup>
-                                    </SelectContent>
-                                  </Select>
-                                  <FormDescription>
-                                    {t('Message matching is case-insensitive')}
-                                  </FormDescription>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-
-                            <FormField
-                              control={form.control}
-                              name={
-                                `error_response_setting.rules.${index}.message_contains` as const
-                              }
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>
-                                    {t('Match error message')}
-                                  </FormLabel>
-                                  <FormControl>
-                                    <Input
-                                      placeholder={t('e.g. rate limit')}
-                                      value={field.value}
-                                      onChange={(event) =>
-                                        field.onChange(event.target.value)
-                                      }
-                                    />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-                          </div>
-
-                          <div className='text-sm font-medium'>
-                            {t('Response behavior')}
-                          </div>
-                          <div className='grid min-w-0 gap-3 lg:grid-cols-2 xl:grid-cols-[1fr_12rem_1fr]'>
-                            <FormField
-                              control={form.control}
-                              name={
-                                `error_response_setting.rules.${index}.pass_through_status_code` as const
-                              }
-                              render={({ field }) => (
-                                <SettingsSwitchItem>
-                                  <SettingsSwitchContent>
-                                    <FormLabel>
-                                      {t('Pass through upstream status')}
+                            <div className='flex h-9 w-[4.75rem] shrink-0 items-center justify-end gap-1 border-l pl-2'>
+                              <FormField
+                                control={form.control}
+                                name={
+                                  `error_response_setting.rules.${index}.enabled` as const
+                                }
+                                render={({ field }) => (
+                                  <FormItem className='shrink-0 px-1'>
+                                    <FormLabel className='sr-only'>
+                                      {t('Enabled')}
                                     </FormLabel>
-                                    <FormDescription>
-                                      {t(
-                                        'Return the original upstream HTTP status code'
-                                      )}
-                                    </FormDescription>
-                                  </SettingsSwitchContent>
-                                  <FormControl>
-                                    <Switch
-                                      checked={field.value}
-                                      onCheckedChange={field.onChange}
-                                    />
-                                  </FormControl>
-                                </SettingsSwitchItem>
-                              )}
-                            />
+                                    <FormControl>
+                                      <Switch
+                                        size='sm'
+                                        checked={field.value}
+                                        onCheckedChange={field.onChange}
+                                      />
+                                    </FormControl>
+                                  </FormItem>
+                                )}
+                              />
 
-                            <FormField
-                              control={form.control}
-                              name={
-                                `error_response_setting.rules.${index}.response_status_code` as const
-                              }
-                              render={({ field }) => (
-                                <FormItem>
-                                  <FormLabel>
-                                    {t('Response status code')}
-                                  </FormLabel>
-                                  <FormControl>
-                                    <Input
-                                      type='number'
-                                      min={100}
-                                      max={599}
-                                      step={1}
-                                      disabled={passThroughStatus}
-                                      {...safeNumberFieldProps(field)}
-                                    />
-                                  </FormControl>
-                                  <FormMessage />
-                                </FormItem>
-                              )}
-                            />
-
-                            <FormField
-                              control={form.control}
-                              name={
-                                `error_response_setting.rules.${index}.pass_through_message` as const
-                              }
-                              render={({ field }) => (
-                                <SettingsSwitchItem>
-                                  <SettingsSwitchContent>
-                                    <FormLabel>
-                                      {t('Pass through upstream message')}
-                                    </FormLabel>
-                                    <FormDescription>
-                                      {t(
-                                        'Return the original upstream error message'
-                                      )}
-                                    </FormDescription>
-                                  </SettingsSwitchContent>
-                                  <FormControl>
-                                    <Switch
-                                      checked={field.value}
-                                      onCheckedChange={field.onChange}
-                                    />
-                                  </FormControl>
-                                </SettingsSwitchItem>
-                              )}
-                            />
+                              <Button
+                                type='button'
+                                variant='ghost'
+                                size='icon-sm'
+                                className='text-destructive'
+                                aria-label={t(
+                                  'Remove custom error response rule'
+                                )}
+                                onClick={() => removeCustomErrorRule(index)}
+                              >
+                                <Trash2 className='size-4' />
+                              </Button>
+                            </div>
                           </div>
 
-                          <FormField
-                            control={form.control}
-                            name={
-                              `error_response_setting.rules.${index}.response_message` as const
-                            }
-                            render={({ field }) => (
-                              <FormItem>
-                                <FormLabel>{t('Response message')}</FormLabel>
-                                <FormControl>
-                                  <Textarea
-                                    rows={3}
-                                    disabled={passThroughMessage}
-                                    placeholder={t(
-                                      'Upstream request failed. Please try again later.'
-                                    )}
-                                    {...field}
-                                    onChange={(event) =>
-                                      field.onChange(event.target.value)
-                                    }
-                                  />
-                                </FormControl>
-                                <FormMessage />
-                              </FormItem>
-                            )}
-                          />
-                        </div>
+                          <CollapsibleContent className='CollapsibleContent'>
+                            <div className='grid min-w-0 gap-4 border-t p-3'>
+                              <div className='grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_10rem]'>
+                                <FormField
+                                  control={form.control}
+                                  name={
+                                    `error_response_setting.rules.${index}.name` as const
+                                  }
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>{t('Rule name')}</FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          placeholder={t(
+                                            'e.g. Context window exceeded'
+                                          )}
+                                          {...field}
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={
+                                    `error_response_setting.rules.${index}.priority` as const
+                                  }
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>{t('Priority')}</FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type='number'
+                                          step={1}
+                                          {...safeNumberFieldProps(field)}
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+
+                              <FormField
+                                control={form.control}
+                                name={
+                                  `error_response_setting.rules.${index}.description` as const
+                                }
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Rule description')}
+                                    </FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        placeholder={t(
+                                          'Describe when and why this rule is used'
+                                        )}
+                                        {...field}
+                                      />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <div className='text-sm font-medium'>
+                                {t('Match conditions')}
+                              </div>
+                              <div className='grid min-w-0 gap-3 md:grid-cols-2'>
+                                <FormField
+                                  control={form.control}
+                                  name={
+                                    `error_response_setting.rules.${index}.match_mode` as const
+                                  }
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>{t('Match mode')}</FormLabel>
+                                      <Select
+                                        items={[
+                                          {
+                                            value: 'any',
+                                            label: t('Any condition'),
+                                          },
+                                          {
+                                            value: 'all',
+                                            label: t('All conditions'),
+                                          },
+                                        ]}
+                                        value={field.value}
+                                        onValueChange={(value) =>
+                                          field.onChange(
+                                            normalizeErrorResponseMatchMode(
+                                              value
+                                            )
+                                          )
+                                        }
+                                      >
+                                        <FormControl>
+                                          <SelectTrigger>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent
+                                          alignItemWithTrigger={false}
+                                        >
+                                          <SelectGroup>
+                                            <SelectItem value='any'>
+                                              {t('Any condition')}
+                                            </SelectItem>
+                                            <SelectItem value='all'>
+                                              {t('All conditions')}
+                                            </SelectItem>
+                                          </SelectGroup>
+                                        </SelectContent>
+                                      </Select>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={
+                                    `error_response_setting.rules.${index}.status_codes` as const
+                                  }
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Match status codes')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          placeholder={t('e.g. 429, 500-599')}
+                                          value={field.value}
+                                          onChange={(event) =>
+                                            field.onChange(event.target.value)
+                                          }
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={
+                                    `error_response_setting.rules.${index}.message_match_mode` as const
+                                  }
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Error message match mode')}
+                                      </FormLabel>
+                                      <Select
+                                        items={[
+                                          {
+                                            value: 'contains',
+                                            label: t('Fuzzy contains'),
+                                          },
+                                          {
+                                            value: 'exact',
+                                            label: t('Exact message'),
+                                          },
+                                        ]}
+                                        value={field.value}
+                                        onValueChange={(value) =>
+                                          field.onChange(
+                                            normalizeErrorMessageMatchMode(
+                                              value
+                                            )
+                                          )
+                                        }
+                                      >
+                                        <FormControl>
+                                          <SelectTrigger>
+                                            <SelectValue />
+                                          </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent
+                                          alignItemWithTrigger={false}
+                                        >
+                                          <SelectGroup>
+                                            <SelectItem value='contains'>
+                                              {t('Fuzzy contains')}
+                                            </SelectItem>
+                                            <SelectItem value='exact'>
+                                              {t('Exact message')}
+                                            </SelectItem>
+                                          </SelectGroup>
+                                        </SelectContent>
+                                      </Select>
+                                      <FormDescription>
+                                        {t(
+                                          'Message matching is case-insensitive'
+                                        )}
+                                      </FormDescription>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={
+                                    `error_response_setting.rules.${index}.message_contains` as const
+                                  }
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Match error message')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          placeholder={t('e.g. rate limit')}
+                                          value={field.value}
+                                          onChange={(event) =>
+                                            field.onChange(event.target.value)
+                                          }
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+                              </div>
+
+                              <div className='text-sm font-medium'>
+                                {t('Response behavior')}
+                              </div>
+                              <div className='grid min-w-0 gap-3 md:grid-cols-2'>
+                                <FormField
+                                  control={form.control}
+                                  name={
+                                    `error_response_setting.rules.${index}.pass_through_status_code` as const
+                                  }
+                                  render={({ field }) => (
+                                    <SettingsSwitchItem>
+                                      <SettingsSwitchContent>
+                                        <FormLabel>
+                                          {t('Pass through upstream status')}
+                                        </FormLabel>
+                                        <FormDescription>
+                                          {t(
+                                            'Return the original upstream HTTP status code'
+                                          )}
+                                        </FormDescription>
+                                      </SettingsSwitchContent>
+                                      <FormControl>
+                                        <Switch
+                                          checked={field.value}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </SettingsSwitchItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={
+                                    `error_response_setting.rules.${index}.response_status_code` as const
+                                  }
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>
+                                        {t('Response status code')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          type='number'
+                                          min={100}
+                                          max={599}
+                                          step={1}
+                                          disabled={passThroughStatus}
+                                          {...safeNumberFieldProps(field)}
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={
+                                    `error_response_setting.rules.${index}.pass_through_message` as const
+                                  }
+                                  render={({ field }) => (
+                                    <SettingsSwitchItem>
+                                      <SettingsSwitchContent>
+                                        <FormLabel>
+                                          {t('Pass through upstream message')}
+                                        </FormLabel>
+                                        <FormDescription>
+                                          {t(
+                                            'Return the original upstream error message'
+                                          )}
+                                        </FormDescription>
+                                      </SettingsSwitchContent>
+                                      <FormControl>
+                                        <Switch
+                                          checked={field.value}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </SettingsSwitchItem>
+                                  )}
+                                />
+                              </div>
+
+                              <FormField
+                                control={form.control}
+                                name={
+                                  `error_response_setting.rules.${index}.response_message` as const
+                                }
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('Response message')}
+                                    </FormLabel>
+                                    <FormControl>
+                                      <Textarea
+                                        rows={3}
+                                        disabled={passThroughMessage}
+                                        placeholder={t(
+                                          'Upstream request failed. Please try again later.'
+                                        )}
+                                        {...field}
+                                        onChange={(event) =>
+                                          field.onChange(event.target.value)
+                                        }
+                                      />
+                                    </FormControl>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
                       )
                     })
                   )}
-
-                  <Button
-                    type='button'
-                    variant='outline'
-                    className='w-full justify-center gap-2'
-                    onClick={() =>
-                      errorRuleFields.append({
-                        name: t('Rule {{number}}', {
-                          number: errorRuleFields.fields.length + 1,
-                        }),
-                        description: '',
-                        priority: errorRuleFields.fields.length,
-                        enabled: true,
-                        match_mode: 'any',
-                        status_codes: '429,500-599',
-                        message_contains: '',
-                        message_match_mode: 'contains',
-                        response_status_code: 429,
-                        response_message: t(
-                          'Upstream request failed. Please try again later.'
-                        ),
-                        pass_through_status_code: false,
-                        pass_through_message: false,
-                      })
-                    }
-                  >
-                    <Plus className='size-4' />
-                    {t('Add custom error response rule')}
-                  </Button>
                 </div>
               ) : null}
             </div>

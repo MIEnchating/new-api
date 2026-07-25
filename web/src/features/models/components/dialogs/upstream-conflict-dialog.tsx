@@ -444,7 +444,7 @@ export function UpstreamConflictDialog({
       )}
       contentClassName='w-full sm:max-w-5xl'
       contentHeight='min(72vh, 720px)'
-      bodyClassName='flex flex-col gap-4'
+      bodyClassName='flex h-full min-h-0 flex-col gap-4'
       initialFocus={!isMobile}
       footerClassName='sm:justify-between'
       footer={

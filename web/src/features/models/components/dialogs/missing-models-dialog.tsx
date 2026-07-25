@@ -121,7 +121,7 @@ export function MissingModelsDialog({
       contentClassName='flex max-h-[85vh] max-w-2xl flex-col gap-3 p-4'
       headerClassName='flex-shrink-0 text-start'
       contentHeight='min(74vh, 760px)'
-      bodyClassName='space-y-4'
+      bodyClassName='flex h-full min-h-0 flex-col space-y-4'
       initialFocus={!isMobile}
     >
       {isLoading ? (

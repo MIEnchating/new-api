@@ -14,8 +14,11 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -569,6 +572,80 @@ func TestGetTokenModelsDoesNotFallbackWhenAllRouteGroupsDisabled(t *testing.T) {
 	if models := decodeTokenModelsResponse(t, recorder); len(models) != 0 {
 		t.Fatalf("expected no models when every route is disabled, got %v", models)
 	}
+}
+
+func TestClearTokenRouteCooldownRequiresOwnership(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	token := seedToken(t, db, 1, "route-cooldown-token", "cooldown1234token5678")
+	require.NoError(t, db.Model(token).Update(
+		"group_route_config",
+		`[{"group":"primary","priority":2,"cooldown_seconds":60},{"group":"fallback","priority":1,"cooldown_seconds":60}]`,
+	).Error)
+	t.Cleanup(func() {
+		service.ClearTokenGroupRouteState(token.Id)
+	})
+
+	service.FreezeTokenGroupRoute(token.Id, "primary", "gpt-test", "/v1/responses", 60)
+	service.FreezeTokenGroupRoute(token.Id, "fallback", "gpt-test", "/v1/responses", 60)
+	require.Len(t, service.ListTokenGroupRouteCooldowns(token.Id, common.GetTimestamp()), 2)
+
+	unauthorizedCtx, unauthorizedRecorder := newAuthenticatedContext(
+		t,
+		http.MethodPost,
+		"/api/token/"+strconv.Itoa(token.Id)+"/route/cooldown/clear",
+		nil,
+		2,
+	)
+	unauthorizedCtx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
+	ClearTokenRouteCooldown(unauthorizedCtx)
+
+	unauthorizedResponse := decodeAPIResponse(t, unauthorizedRecorder)
+	assert.False(t, unauthorizedResponse.Success)
+	assert.Len(t, service.ListTokenGroupRouteCooldowns(token.Id, common.GetTimestamp()), 2)
+
+	authorizedCtx, authorizedRecorder := newAuthenticatedContext(
+		t,
+		http.MethodPost,
+		"/api/token/"+strconv.Itoa(token.Id)+"/route/cooldown/clear?group=primary",
+		nil,
+		1,
+	)
+	authorizedCtx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
+	ClearTokenRouteCooldown(authorizedCtx)
+
+	authorizedResponse := decodeAPIResponse(t, authorizedRecorder)
+	assert.True(t, authorizedResponse.Success)
+	remainingCooldowns := service.ListTokenGroupRouteCooldowns(token.Id, common.GetTimestamp())
+	require.Len(t, remainingCooldowns, 1)
+	assert.Equal(t, "fallback", remainingCooldowns[0].Group)
+
+	invalidGroupCtx, invalidGroupRecorder := newAuthenticatedContext(
+		t,
+		http.MethodPost,
+		"/api/token/"+strconv.Itoa(token.Id)+"/route/cooldown/clear?group=unknown",
+		nil,
+		1,
+	)
+	invalidGroupCtx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
+	ClearTokenRouteCooldown(invalidGroupCtx)
+
+	invalidGroupResponse := decodeAPIResponse(t, invalidGroupRecorder)
+	assert.False(t, invalidGroupResponse.Success)
+	assert.Len(t, service.ListTokenGroupRouteCooldowns(token.Id, common.GetTimestamp()), 1)
+
+	clearAllCtx, clearAllRecorder := newAuthenticatedContext(
+		t,
+		http.MethodPost,
+		"/api/token/"+strconv.Itoa(token.Id)+"/route/cooldown/clear",
+		nil,
+		1,
+	)
+	clearAllCtx.Params = gin.Params{{Key: "id", Value: strconv.Itoa(token.Id)}}
+	ClearTokenRouteCooldown(clearAllCtx)
+
+	clearAllResponse := decodeAPIResponse(t, clearAllRecorder)
+	assert.True(t, clearAllResponse.Success)
+	assert.Empty(t, service.ListTokenGroupRouteCooldowns(token.Id, common.GetTimestamp()))
 }
 
 func TestUpdateTokenMasksKeyInResponse(t *testing.T) {

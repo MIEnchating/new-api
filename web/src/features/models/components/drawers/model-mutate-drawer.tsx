@@ -208,6 +208,7 @@ export function ModelMutateDrawer({
       ChannelRouteCooldownSeconds: 60,
       ChannelRouteStickyEnabled: false,
       ChannelRouteSameChannelRetries: 0,
+      ChannelRouteGroupExclusionsEnabled: true,
       ChannelRouteGroupExclusions: '{}',
       ChannelDisableThreshold: '',
       AutomaticDisableChannelEnabled: false,

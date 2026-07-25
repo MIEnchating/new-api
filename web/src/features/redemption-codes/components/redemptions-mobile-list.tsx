@@ -35,7 +35,7 @@ import { formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { REDEMPTION_STATUS, REDEMPTION_STATUSES } from '../constants'
-import { isRedemptionExpired } from '../lib'
+import { getRedemptionTypeLabelKey, isRedemptionExpired } from '../lib'
 import type { Redemption } from '../types'
 import { DataTableRowActions } from './data-table-row-actions'
 
@@ -171,13 +171,9 @@ export function RedemptionsMobileList(props: RedemptionsMobileListProps) {
             </div>
 
             <div className='flex items-center justify-between gap-2 text-xs'>
-              <span className='text-muted-foreground'>
-                {t('Campaign type')}
-              </span>
+              <span className='text-muted-foreground'>{t('Type')}</span>
               <span className='font-medium'>
-                {redemption.limit_one_per_user
-                  ? t('Campaign exclusive')
-                  : t('Regular')}
+                {t(getRedemptionTypeLabelKey(redemption.limit_one_per_user))}
               </span>
             </div>
           </div>

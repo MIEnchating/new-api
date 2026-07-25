@@ -71,6 +71,17 @@ export function getApiKeyRouteStatus(
     .then((res) => res.data)
 }
 
+export function clearApiKeyRouteCooldown(
+  id: number,
+  group?: string
+): Promise<ApiResponse<{ token_id: number; cleared: number }>> {
+  return api
+    .post(`/api/token/${id}/route/cooldown/clear`, undefined, {
+      params: group ? { group } : undefined,
+    })
+    .then((res) => res.data)
+}
+
 export function getApiKeyModels(id: number): Promise<ApiResponse<string[]>> {
   return api.get(`/api/token/${id}/models`).then((res) => res.data)
 }

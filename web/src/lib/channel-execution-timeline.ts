@@ -46,6 +46,14 @@ export type ChannelExecutionTimelineItem =
       startedAt?: number
     }
 
+export type FailedChannelExecutionConclusion = {
+  reason?: string
+  channelId?: number
+  channelName?: string
+  attemptCount: number
+  channelCount: number
+}
+
 type ChannelExecutionTimelineTerminal = {
   status?: ChannelExecutionTraceInfo['status']
   endedAt?: number
@@ -86,7 +94,8 @@ export function buildCompactChannelExecutionEvents(
   const base = {
     group: trace.group,
     channel_id: channelId,
-    channel_name: fallback.channelName,
+    channel_name: trace.channel_name || fallback.channelName,
+    priority: trace.priority,
   }
   const events: ChannelExecutionEvent[] = []
   if (trace.affinity_hit) {
@@ -322,4 +331,43 @@ export function getStandbyChannelIds(items: ChannelExecutionTimelineItem[]) {
   }
 
   return [...standby].filter((channelId) => !attempted.has(channelId))
+}
+
+export function getFailedChannelExecutionConclusion(
+  events: ChannelExecutionEvent[]
+): FailedChannelExecutionConclusion {
+  const requestEvents = events.filter(
+    (event) => event.state === 'active' && Boolean(event.channel_id)
+  )
+  const channelIds = new Set(
+    requestEvents
+      .map((event) => event.channel_id)
+      .filter((channelId): channelId is number => Boolean(channelId))
+  )
+  const reversedEvents = [...events].reverse()
+  const lastChannelEvent = reversedEvents.find(
+    (event) =>
+      Boolean(event.channel_id) &&
+      (event.state === 'failed' ||
+        event.state === 'cancelled' ||
+        event.state === 'active')
+  )
+  const terminalReason = reversedEvents.find(
+    (event) => event.state === 'finished' && event.reason
+  )?.reason
+  const lastFailureReason = reversedEvents.find(
+    (event) =>
+      (event.state === 'failed' || event.state === 'cancelled') && event.reason
+  )?.reason
+
+  return {
+    reason:
+      terminalReason && terminalReason !== 'request_finished_without_success'
+        ? terminalReason
+        : lastFailureReason,
+    channelId: lastChannelEvent?.channel_id,
+    channelName: lastChannelEvent?.channel_name,
+    attemptCount: requestEvents.length,
+    channelCount: channelIds.size,
+  }
 }

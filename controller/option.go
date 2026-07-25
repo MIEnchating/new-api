@@ -124,13 +124,14 @@ type OptionUpdateRequest struct {
 // optionAuditValueKeys is deliberately allowlisted: only non-sensitive routing
 // values may be persisted in audit metadata.
 var optionAuditValueKeys = map[string]struct{}{
-	"RetryTimes":                     {},
-	"AutomaticRetryStatusCodes":      {},
-	"ChannelRouteCooldownEnabled":    {},
-	"ChannelRouteCooldownSeconds":    {},
-	"ChannelRouteStickyEnabled":      {},
-	"ChannelRouteSameChannelRetries": {},
-	"ChannelRouteGroupExclusions":    {},
+	"RetryTimes":                         {},
+	"AutomaticRetryStatusCodes":          {},
+	"ChannelRouteCooldownEnabled":        {},
+	"ChannelRouteCooldownSeconds":        {},
+	"ChannelRouteStickyEnabled":          {},
+	"ChannelRouteSameChannelRetries":     {},
+	"ChannelRouteGroupExclusionsEnabled": {},
+	"ChannelRouteGroupExclusions":        {},
 }
 
 func buildOptionAuditParams(key string, previousValue string, currentValue string) map[string]interface{} {

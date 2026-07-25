@@ -23,6 +23,7 @@ import { t } from 'i18next'
 
 import {
   API_KEY_FORM_DEFAULT_VALUES,
+  canConfigureGroupRouteCooldown,
   getApiKeyFormDefaultValues,
   getAutomaticGroupRoutePriorities,
   getApiKeyFormSchema,
@@ -111,6 +112,35 @@ describe('API key form schema', () => {
     assert.deepEqual(getAutomaticGroupRoutePriorities(3), [3, 2, 1])
     assert.deepEqual(getAutomaticGroupRoutePriorities(1), [1])
     assert.deepEqual(getAutomaticGroupRoutePriorities(0), [])
+  })
+
+  test('enables cooldown for two enabled route rows before groups are selected', () => {
+    assert.equal(
+      canConfigureGroupRouteCooldown([
+        { group: '', priority: 2, cooldown_seconds: 60, enabled: true },
+        { group: '', priority: 1, cooldown_seconds: 60, enabled: true },
+      ]),
+      true
+    )
+    assert.equal(
+      canConfigureGroupRouteCooldown([
+        { group: 'primary', priority: 2, cooldown_seconds: 60, enabled: true },
+        {
+          group: 'fallback',
+          priority: 1,
+          cooldown_seconds: 60,
+          enabled: false,
+        },
+      ]),
+      false
+    )
+    assert.equal(
+      canConfigureGroupRouteCooldown([
+        { group: 'primary', priority: 2, cooldown_seconds: 60, enabled: true },
+        { group: 'fallback', priority: 1, cooldown_seconds: 60 },
+      ]),
+      true
+    )
   })
 
   test('requires one enabled route group when group routing is enabled', () => {
