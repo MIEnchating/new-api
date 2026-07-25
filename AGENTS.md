@@ -133,12 +133,6 @@ Do NOT directly import or call `encoding/json` in business code. `json.RawMessag
 - In React components, use `useTranslation()` and call `t('English key')` for user-facing text.
 - Follow `web/AGENTS.md` for detailed frontend conventions, including TypeScript, component structure, styling, accessibility, testing, and build checks.
 
-### User Workflow Preference
-
-- Unless the user explicitly requests a different workflow, after code changes are complete, start the development service and verify the changed behavior in the running application.
-- When publishing completed changes, commit and push the source branch, create and push the next valid release tag, and verify the remote references.
-- After verification and publishing are complete, stop every development service started for the task while leaving shared database, Redis, Nginx, and unrelated project services running.
-
 ### Project Governance
 
 **Protected project information:** The following project-related information is strictly protected and MUST NOT be modified, deleted, replaced, or removed under any circumstances:
