@@ -19,7 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react'
 
+import { IconSub2api } from '@/assets/custom/icon-sub2api'
+
 type LobeIconComponent = ComponentType<Record<string, unknown>>
+
+const CUSTOM_ICONS: Record<string, ComponentType<{ size?: number }>> = {
+  Sub2API: IconSub2api,
+}
 
 type LoadedIcon = {
   baseKey: string
@@ -134,15 +140,16 @@ function LobeIcon({
   const trimmedName = iconName?.trim() ?? ''
   const segments = trimmedName.split('.')
   const baseKey = segments[0] ?? ''
+  const CustomIcon = CUSTOM_ICONS[baseKey]
   const validBaseKey = /^[A-Za-z][A-Za-z0-9]*$/.test(baseKey)
   const [loadedIcon, setLoadedIcon] = useState<LoadedIcon | null>(() =>
-    validBaseKey ? getLoadedIcon(baseKey) : null
+    validBaseKey && !CustomIcon ? getLoadedIcon(baseKey) : null
   )
   const [failedBaseKey, setFailedBaseKey] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
-    if (!validBaseKey) return
+    if (!validBaseKey || CustomIcon) return
 
     const cachedIcon = getLoadedIcon(baseKey)
     if (cachedIcon) {
@@ -165,7 +172,7 @@ function LobeIcon({
     return () => {
       cancelled = true
     }
-  }, [baseKey, validBaseKey])
+  }, [baseKey, CustomIcon, validBaseKey])
 
   if (!iconName || typeof iconName !== 'string') {
     return <IconFallback size={size} />
@@ -173,6 +180,10 @@ function LobeIcon({
 
   if (!trimmedName || !validBaseKey) {
     return <IconFallback iconName={trimmedName} size={size} />
+  }
+
+  if (CustomIcon) {
+    return <CustomIcon size={size} />
   }
 
   if (failedBaseKey === baseKey) {
