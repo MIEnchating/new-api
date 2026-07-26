@@ -126,6 +126,7 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
       await updateOption.mutateAsync({
         key: 'console_setting.faq_enabled',
         value: checked,
+        notificationMode: 'silent',
       })
       setIsEnabled(checked)
       toast.success(t('Setting saved'))
@@ -210,6 +211,7 @@ export function FAQSection({ enabled, data }: FAQSectionProps) {
       await updateOption.mutateAsync({
         key: 'console_setting.faq',
         value: JSON.stringify(faqList),
+        notificationMode: 'silent',
       })
       setHasChanges(false)
       toast.success(t('FAQ saved successfully'))

@@ -21,7 +21,28 @@ import i18next from 'i18next'
 import { toast } from 'sonner'
 
 import { updateSystemOption } from '../api'
-import type { UpdateOptionRequest } from '../types'
+import type { UpdateOptionRequest, UpdateOptionResponse } from '../types'
+
+export const SYSTEM_OPTION_TOAST_ID = 'system-option-update'
+
+export type UpdateOptionMutationRequest = UpdateOptionRequest & {
+  notificationMode?: 'default' | 'silent'
+}
+
+export function shouldShowUpdateOptionNotification(
+  request: UpdateOptionMutationRequest
+): boolean {
+  return request.notificationMode !== 'silent'
+}
+
+export function requireSuccessfulOptionUpdate(
+  response: UpdateOptionResponse
+): UpdateOptionResponse {
+  if (!response.success) {
+    throw new Error(response.message || i18next.t('Failed to update setting'))
+  }
+  return response
+}
 
 // Configuration keys that require status refresh
 const STATUS_RELATED_KEYS = new Set([
@@ -50,29 +71,37 @@ export function useUpdateOption() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (request: UpdateOptionRequest) => updateSystemOption(request),
-    onSuccess: (data, variables) => {
-      if (data.success) {
-        // Always refresh system-options
-        queryClient.invalidateQueries({ queryKey: ['system-options'] })
+    mutationFn: async ({
+      notificationMode: _,
+      ...request
+    }: UpdateOptionMutationRequest) =>
+      requireSuccessfulOptionUpdate(await updateSystemOption(request)),
+    onSuccess: (_data, variables) => {
+      // Always refresh system-options
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
 
-        // If updating frontend-display-related config, also refresh status
-        if (shouldRefreshStatusForOption(variables.key)) {
-          queryClient.invalidateQueries({ queryKey: ['status'] })
-          try {
-            window.localStorage.removeItem('status')
-          } catch {
-            /* empty */
-          }
+      // If updating frontend-display-related config, also refresh status
+      if (shouldRefreshStatusForOption(variables.key)) {
+        queryClient.invalidateQueries({ queryKey: ['status'] })
+        try {
+          window.localStorage.removeItem('status')
+        } catch {
+          /* empty */
         }
+      }
 
-        toast.success(i18next.t('Setting updated successfully'))
-      } else {
-        toast.error(data.message || i18next.t('Failed to update setting'))
+      if (shouldShowUpdateOptionNotification(variables)) {
+        toast.success(i18next.t('Setting updated successfully'), {
+          id: SYSTEM_OPTION_TOAST_ID,
+        })
       }
     },
-    onError: (error: Error) => {
-      toast.error(error.message || i18next.t('Failed to update setting'))
+    onError: (error: Error, variables) => {
+      if (shouldShowUpdateOptionNotification(variables)) {
+        toast.error(error.message || i18next.t('Failed to update setting'), {
+          id: SYSTEM_OPTION_TOAST_ID,
+        })
+      }
     },
   })
 }

@@ -19,7 +19,14 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { shouldRefreshStatusForOption } from './use-update-option'
+import { toast } from 'sonner'
+
+import {
+  requireSuccessfulOptionUpdate,
+  shouldRefreshStatusForOption,
+  shouldShowUpdateOptionNotification,
+  SYSTEM_OPTION_TOAST_ID,
+} from './use-update-option'
 
 describe('system option status refresh', () => {
   test('refreshes visible branding after it is saved', () => {
@@ -30,5 +37,54 @@ describe('system option status refresh', () => {
 
   test('does not refresh status for unrelated private options', () => {
     assert.equal(shouldRefreshStatusForOption('GitHubClientSecret'), false)
+  })
+})
+
+describe('system option notifications', () => {
+  test('replaces the previous result during a multi-option save', () => {
+    toast.success('first option saved', { id: SYSTEM_OPTION_TOAST_ID })
+    toast.success('all options saved', { id: SYSTEM_OPTION_TOAST_ID })
+
+    const matchingToasts = toast
+      .getHistory()
+      .filter((item) => item.id === SYSTEM_OPTION_TOAST_ID)
+
+    assert.equal(matchingToasts.length, 1)
+    assert.ok(matchingToasts[0] && 'title' in matchingToasts[0])
+    assert.equal(matchingToasts[0].title, 'all options saved')
+  })
+
+  test('shows notifications by default', () => {
+    assert.equal(
+      shouldShowUpdateOptionNotification({ key: 'GroupRatio', value: '{}' }),
+      true
+    )
+  })
+
+  test('allows flows with a dedicated result message to stay silent', () => {
+    assert.equal(
+      shouldShowUpdateOptionNotification({
+        key: 'GroupRatio',
+        value: '{}',
+        notificationMode: 'silent',
+      }),
+      false
+    )
+  })
+
+  test('treats an unsuccessful API response as a failed mutation', () => {
+    assert.throws(
+      () =>
+        requireSuccessfulOptionUpdate({
+          success: false,
+          message: 'save failed',
+        }),
+      /save failed/
+    )
+  })
+
+  test('returns successful API responses unchanged', () => {
+    const response = { success: true, message: '' }
+    assert.equal(requireSuccessfulOptionUpdate(response), response)
   })
 })

@@ -154,6 +154,7 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
       await updateOption.mutateAsync({
         key: 'console_setting.api_info_enabled',
         value: checked,
+        notificationMode: 'silent',
       })
       setIsEnabledDraft(checked)
       toast.success(t('Setting saved'))
@@ -238,13 +239,13 @@ export function ApiInfoSection({ enabled, data }: ApiInfoSectionProps) {
 
   const handleSaveAll = async () => {
     try {
-      const result = await updateOption.mutateAsync({
+      await updateOption.mutateAsync({
         key: 'console_setting.api_info',
         value: JSON.stringify(apiInfoList),
+        notificationMode: 'silent',
       })
-      if (result.success) {
-        setDraftApiInfoList(null)
-      }
+      setDraftApiInfoList(null)
+      toast.success(t('Setting saved'))
     } catch {
       toast.error(t('Failed to save API info'))
     }

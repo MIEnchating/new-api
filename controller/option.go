@@ -279,6 +279,14 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case "GroupDescriptions":
+		if _, err = setting.ParseGroupDescriptions(option.Value.(string)); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	case "ImageRatio":
 		err = ratio_setting.UpdateImageRatioByJSONString(option.Value.(string))
 		if err != nil {

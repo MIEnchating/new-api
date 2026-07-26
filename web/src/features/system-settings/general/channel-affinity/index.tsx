@@ -320,7 +320,10 @@ export function ChannelAffinitySection(props: Props) {
       }
 
       for (const u of updates) {
-        await updateOption.mutateAsync(u)
+        await updateOption.mutateAsync({
+          ...u,
+          notificationMode: 'silent',
+        })
       }
       toast.success(t('Saved successfully'))
     } catch {

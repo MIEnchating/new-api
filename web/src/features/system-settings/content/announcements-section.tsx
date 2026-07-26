@@ -180,6 +180,7 @@ export function AnnouncementsSection({
       await updateOption.mutateAsync({
         key: 'console_setting.announcements_enabled',
         value: checked,
+        notificationMode: 'silent',
       })
       setIsEnabled(checked)
       toast.success(t('Setting saved'))
@@ -270,6 +271,7 @@ export function AnnouncementsSection({
       await updateOption.mutateAsync({
         key: 'console_setting.announcements',
         value: JSON.stringify(announcements),
+        notificationMode: 'silent',
       })
       setHasChanges(false)
       toast.success(t('Announcements saved successfully'))

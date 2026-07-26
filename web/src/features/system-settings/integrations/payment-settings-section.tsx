@@ -56,7 +56,10 @@ import {
 } from '../components/settings-form-layout'
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
-import { useUpdateOption } from '../hooks/use-update-option'
+import {
+  SYSTEM_OPTION_TOAST_ID,
+  useUpdateOption,
+} from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import { AmountDiscountVisualEditor } from './amount-discount-visual-editor'
 import { AmountOptionsVisualEditor } from './amount-options-visual-editor'
@@ -722,12 +725,19 @@ export function PaymentSettingsSection({
     }
 
     if (!sanitized.WaffoPancakeMerchantID) {
-      toast.error(t('Merchant ID is required'))
+      toast.error(t('Merchant ID is required'), {
+        id: SYSTEM_OPTION_TOAST_ID,
+      })
       return
     }
 
     if (!waffoPancakeSelection.storeID || !waffoPancakeSelection.productID) {
-      toast.error(t('Pick or create both a store and a product before saving.'))
+      toast.error(
+        t('Pick or create both a store and a product before saving.'),
+        {
+          id: SYSTEM_OPTION_TOAST_ID,
+        }
+      )
       return
     }
 
@@ -753,7 +763,9 @@ export function PaymentSettingsSection({
         setWaffoPancakeSavedBinding(savedBinding)
         setWaffoPancakeSelection(savedBinding)
         queryClient.invalidateQueries({ queryKey: ['system-options'] })
-        toast.success(t('Waffo Pancake settings saved'))
+        toast.success(t('Waffo Pancake settings saved'), {
+          id: SYSTEM_OPTION_TOAST_ID,
+        })
         return
       }
 
@@ -761,13 +773,15 @@ export function PaymentSettingsSection({
       toast.error(
         reason
           ? `${t('Waffo Pancake save failed')}: ${reason}`
-          : t('Waffo Pancake save failed')
+          : t('Waffo Pancake save failed'),
+        { id: SYSTEM_OPTION_TOAST_ID }
       )
     } catch (error) {
       toast.error(
         `${t('Waffo Pancake save failed')}: ${
           error instanceof Error ? error.message : String(error)
-        }`
+        }`,
+        { id: SYSTEM_OPTION_TOAST_ID }
       )
     }
   }

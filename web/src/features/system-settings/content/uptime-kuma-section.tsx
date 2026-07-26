@@ -135,6 +135,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
       await updateOption.mutateAsync({
         key: 'console_setting.uptime_kuma_enabled',
         value: checked,
+        notificationMode: 'silent',
       })
       setIsEnabled(checked)
       toast.success(t('Setting saved'))
@@ -219,6 +220,7 @@ export function UptimeKumaSection({ enabled, data }: UptimeKumaSectionProps) {
       await updateOption.mutateAsync({
         key: 'console_setting.uptime_kuma_groups',
         value: JSON.stringify(groups),
+        notificationMode: 'silent',
       })
       setHasChanges(false)
       toast.success(t('Uptime Kuma groups saved successfully'))

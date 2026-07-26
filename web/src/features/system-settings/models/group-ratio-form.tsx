@@ -63,6 +63,7 @@ import { GroupRatioVisualEditor } from './group-ratio-visual-editor'
 type GroupFormValues = {
   GroupRatio: string
   TopupGroupRatio: string
+  GroupDescriptions: string
   UserUsableGroups: string
   GroupGroupRatio: string
   AutoGroups: string
@@ -162,6 +163,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
             <GroupRatioVisualEditor
               groupRatio={form.watch('GroupRatio')}
               topupGroupRatio={form.watch('TopupGroupRatio')}
+              groupDescriptions={form.watch('GroupDescriptions')}
               userUsableGroups={form.watch('UserUsableGroups')}
               groupGroupRatio={form.watch('GroupGroupRatio')}
               autoGroups={form.watch('AutoGroups')}
@@ -246,6 +248,32 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   <FormDescription>
                     {t(
                       'JSON map of group → description exposed when users create API keys.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='GroupDescriptions'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Group descriptions')}</FormLabel>
+                  <FormControl>
+                    <JsonCodeEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      textareaRef={field.ref}
+                      heightClassName='h-40 min-h-40 max-h-40'
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON map used to preserve group descriptions when key creation visibility is disabled.'
                     )}
                   </FormDescription>
                   <FormMessage />

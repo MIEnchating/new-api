@@ -29,7 +29,6 @@ import { useTranslation } from 'react-i18next'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import {
-  Card,
   CardContent,
   CardDescription,
   CardHeader,
@@ -49,6 +48,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+
+import { GroupSettingsSectionCard } from './group-settings-section-card'
 
 const sectionCardClassName =
   'relative shadow-sm ring-0 before:pointer-events-none before:absolute before:inset-0 before:rounded-xl before:border before:border-border/90'
@@ -408,7 +409,7 @@ export function GroupSpecialUsableRulesEditor(
   }, [grouped, props.groupOptions])
 
   return (
-    <Card className={sectionCardClassName}>
+    <GroupSettingsSectionCard className={sectionCardClassName}>
       <CardHeader className={sectionHeaderClassName}>
         <CardTitle>{t('Special usable group rules')}</CardTitle>
         <CardDescription>
@@ -449,6 +450,6 @@ export function GroupSpecialUsableRulesEditor(
           </div>
         </div>
       </CardContent>
-    </Card>
+    </GroupSettingsSectionCard>
   )
 }

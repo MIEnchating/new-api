@@ -203,6 +203,14 @@ For commercial licensing, please contact support@quantumnous.com
   display: none;
 }
 
+/* Sonner positions its close button with transform. Keep the global button
+ * press effect from replacing that transform and shifting the control. */
+[data-sonner-toaster]
+  [data-sonner-toast][data-styled='true']
+  button[data-close-button]:active {
+  transform: var(--toast-close-button-transform);
+}
+
 /* Keep dismissed top-positioned toasts at their current stack position while
  * fading out. Sonner's default offset math can move tall expanded toasts down. */
 [data-sonner-toaster][data-y-position='top']
@@ -560,7 +568,9 @@ For commercial licensing, please contact support@quantumnous.com
     }
   }
 
-  button:not(:disabled):not([data-press-animation='none']):active,
+  button:not(:disabled):not([data-press-animation='none']):not(
+    [data-close-button]
+  ):active,
   [role='button']:not(:disabled):not([data-press-animation='none']):active {
     transform: scale(0.98);
   }
