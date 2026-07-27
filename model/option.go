@@ -1,6 +1,7 @@
 package model
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -269,12 +270,62 @@ func UpdateOptionsBulk(values map[string]string) error {
 	if err != nil {
 		return err
 	}
-	for k, v := range values {
-		if err := updateOptionMap(k, v); err != nil {
+	handled, err := updateSnapshotConfigOptionsBulk(values)
+	if err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if _, ok := handled[key]; !ok {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		if err := updateOptionMap(key, values[key]); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// updateSnapshotConfigOptionsBulk publishes each request-path configuration as
+// one immutable snapshot. This prevents a bulk save from exposing a new enabled
+// flag with an old rule set (or the reverse) between per-key updates.
+func updateSnapshotConfigOptionsBulk(values map[string]string) (map[string]struct{}, error) {
+	type snapshotConfigUpdate struct {
+		prefix string
+		apply  func(map[string]string) error
+	}
+	configs := []snapshotConfigUpdate{
+		{prefix: "request_error_routing_setting.", apply: operation_setting.UpdateRequestErrorRoutingSetting},
+		{prefix: "error_response_setting.", apply: operation_setting.UpdateErrorResponseSetting},
+	}
+	handled := make(map[string]struct{})
+	for _, cfg := range configs {
+		configMap := make(map[string]string)
+		fullKeys := make([]string, 0, 2)
+		for key, value := range values {
+			if !strings.HasPrefix(key, cfg.prefix) {
+				continue
+			}
+			configMap[strings.TrimPrefix(key, cfg.prefix)] = value
+			fullKeys = append(fullKeys, key)
+		}
+		if len(configMap) == 0 {
+			continue
+		}
+		if err := cfg.apply(configMap); err != nil {
+			return nil, err
+		}
+		common.OptionMapRWMutex.Lock()
+		for _, key := range fullKeys {
+			common.OptionMap[key] = values[key]
+			handled[key] = struct{}{}
+		}
+		common.OptionMapRWMutex.Unlock()
+	}
+	return handled, nil
 }
 
 func updateOptionMap(key string, value string) (err error) {
@@ -645,11 +696,19 @@ func handleConfigUpdate(key, value string) bool {
 		return false // 未注册的配置
 	}
 
-	// 更新配置
 	configMap := map[string]string{
 		configKey: value,
 	}
-	config.UpdateConfigFromMap(cfg, configMap)
+	// The two request-path settings publish immutable runtime snapshots. Their
+	// dedicated writers keep reflection updates and publication atomic.
+	switch configName {
+	case "request_error_routing_setting":
+		_ = operation_setting.UpdateRequestErrorRoutingSetting(configMap)
+	case "error_response_setting":
+		_ = operation_setting.UpdateErrorResponseSetting(configMap)
+	default:
+		config.UpdateConfigFromMap(cfg, configMap)
+	}
 
 	// 特定配置的后处理
 	if configName == "performance_setting" {

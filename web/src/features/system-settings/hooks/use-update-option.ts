@@ -20,8 +20,12 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 
-import { updateSystemOption } from '../api'
-import type { UpdateOptionRequest, UpdateOptionResponse } from '../types'
+import { updateSystemOption, updateSystemOptionsBulk } from '../api'
+import type {
+  UpdateOptionRequest,
+  UpdateOptionResponse,
+  UpdateOptionsBulkRequest,
+} from '../types'
 
 export const SYSTEM_OPTION_TOAST_ID = 'system-option-update'
 
@@ -102,6 +106,18 @@ export function useUpdateOption() {
           id: SYSTEM_OPTION_TOAST_ID,
         })
       }
+    },
+  })
+}
+
+export function useUpdateOptionsBulk() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (request: UpdateOptionsBulkRequest) =>
+      requireSuccessfulOptionUpdate(await updateSystemOptionsBulk(request)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
     },
   })
 }

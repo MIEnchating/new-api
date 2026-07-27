@@ -45,6 +45,8 @@ describe('routing reliability menu merge', () => {
       ChannelRouteSameChannelRetries: 2,
       ChannelRouteGroupExclusionsEnabled: true,
       ChannelRouteGroupExclusions: '{"batch":{"mode":"all"}}',
+      'request_error_routing_setting.enabled': true,
+      'request_error_routing_setting.rules': '[]',
     } as ModelSettings
 
     const section = getModelsSectionContent(
@@ -57,6 +59,8 @@ describe('routing reliability menu merge', () => {
         ChannelRouteSameChannelRetries: number
         ChannelRouteGroupExclusionsEnabled: boolean
         ChannelRouteGroupExclusions: string
+        'request_error_routing_setting.enabled': boolean
+        'request_error_routing_setting.rules': string
       }
     }>
 
@@ -72,5 +76,21 @@ describe('routing reliability menu merge', () => {
       section.props.defaultValues.ChannelRouteGroupExclusions,
       '{"batch":{"mode":"all"}}'
     )
+    assert.equal(
+      section.props.defaultValues['request_error_routing_setting.enabled'],
+      true
+    )
+    assert.equal(
+      section.props.defaultValues['request_error_routing_setting.rules'],
+      '[]'
+    )
+
+    const customErrorSection = getModelsSectionContent(
+      'custom-error-responses',
+      settings
+    ) as ReactElement
+    assert.equal(section.key, 'routing-reliability')
+    assert.equal(customErrorSection.key, 'custom-error-responses')
+    assert.notEqual(section.key, customErrorSection.key)
   })
 })

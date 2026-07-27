@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -44,12 +46,53 @@ var errorResponseSetting = ErrorResponseSetting{
 	Rules:   []CustomErrorResponseRule{},
 }
 
+var errorResponseRuntime atomic.Pointer[ErrorResponseSetting]
+var errorResponseSettingMutex sync.Mutex
+
 func init() {
+	RefreshErrorResponseSnapshot()
 	config.GlobalConfig.Register("error_response_setting", &errorResponseSetting)
 }
 
 func GetErrorResponseSetting() *ErrorResponseSetting {
 	return &errorResponseSetting
+}
+
+func cloneErrorResponseSetting(setting ErrorResponseSetting) *ErrorResponseSetting {
+	clone := setting
+	clone.Rules = append([]CustomErrorResponseRule(nil), setting.Rules...)
+	return &clone
+}
+
+func publishErrorResponseSnapshot(setting ErrorResponseSetting) {
+	errorResponseRuntime.Store(cloneErrorResponseSetting(setting))
+}
+
+// UpdateErrorResponseSetting serializes updates to the mutable config object
+// and publishes the resulting immutable runtime view before unlocking.
+func UpdateErrorResponseSetting(configMap map[string]string) error {
+	errorResponseSettingMutex.Lock()
+	defer errorResponseSettingMutex.Unlock()
+
+	if err := config.UpdateConfigFromMap(&errorResponseSetting, configMap); err != nil {
+		return err
+	}
+	publishErrorResponseSnapshot(errorResponseSetting)
+	return nil
+}
+
+func RefreshErrorResponseSnapshot() {
+	errorResponseSettingMutex.Lock()
+	defer errorResponseSettingMutex.Unlock()
+	publishErrorResponseSnapshot(errorResponseSetting)
+}
+
+func currentErrorResponseSetting() *ErrorResponseSetting {
+	setting := errorResponseRuntime.Load()
+	if setting != nil {
+		return setting
+	}
+	return cloneErrorResponseSetting(errorResponseSetting)
 }
 
 func ValidateCustomErrorResponseRulesJSON(raw string) error {
@@ -122,11 +165,12 @@ func ApplyCustomErrorResponse(err *types.NewAPIError) bool {
 // the message, allowing the relay layer to expose an original final error only
 // when the configured rule chose message passthrough.
 func ApplyCustomErrorResponseWithResult(err *types.NewAPIError) (matched bool, messageReplaced bool) {
-	if err == nil || !errorResponseSetting.Enabled {
+	setting := currentErrorResponseSetting()
+	if err == nil || !setting.Enabled {
 		return false, false
 	}
 
-	rule, matched := matchingCustomErrorResponseRule(err)
+	rule, matched := matchingCustomErrorResponseRule(setting, err)
 	if !matched {
 		return false, false
 	}
@@ -145,15 +189,16 @@ func ApplyCustomErrorResponseWithResult(err *types.NewAPIError) (matched bool, m
 }
 
 func HasMatchingCustomErrorResponse(err *types.NewAPIError) bool {
-	if err == nil || !errorResponseSetting.Enabled {
+	setting := currentErrorResponseSetting()
+	if err == nil || !setting.Enabled {
 		return false
 	}
-	_, matched := matchingCustomErrorResponseRule(err)
+	_, matched := matchingCustomErrorResponseRule(setting, err)
 	return matched
 }
 
-func matchingCustomErrorResponseRule(err *types.NewAPIError) (CustomErrorResponseRule, bool) {
-	rules := append([]CustomErrorResponseRule(nil), errorResponseSetting.Rules...)
+func matchingCustomErrorResponseRule(setting *ErrorResponseSetting, err *types.NewAPIError) (CustomErrorResponseRule, bool) {
+	rules := append([]CustomErrorResponseRule(nil), setting.Rules...)
 	sort.SliceStable(rules, func(i, j int) bool {
 		return rules[i].Priority < rules[j].Priority
 	})
@@ -225,7 +270,14 @@ func collectErrorMessages(err *types.NewAPIError) []string {
 		return nil
 	}
 
-	messages := []string{err.Error()}
+	responseMessage := err.Error()
+	messages := []string{responseMessage}
+	if internalErr := err.InternalError(); internalErr != nil {
+		internalMessage := internalErr.Error()
+		if internalMessage != "" && internalMessage != responseMessage {
+			messages = append(messages, internalMessage)
+		}
+	}
 	switch relayError := err.RelayError.(type) {
 	case types.OpenAIError:
 		messages = append(messages, relayError.Message, relayError.Type, fmt.Sprint(relayError.Code))

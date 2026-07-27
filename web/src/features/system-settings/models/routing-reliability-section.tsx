@@ -18,18 +18,25 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery } from '@tanstack/react-query'
+import type { TFunction } from 'i18next'
 import {
   ArrowDown,
   ArrowRight,
   ChevronDown,
   ChevronRight,
+  HeartPulse,
+  ListChecks,
   Plus,
   RefreshCcw,
   Route,
   Trash2,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useFieldArray, useForm } from 'react-hook-form'
+import {
+  useFieldArray,
+  useForm,
+  type SubmitErrorHandler,
+} from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import * as z from 'zod'
@@ -73,10 +80,19 @@ import {
 import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
-import { useUpdateOption } from '../hooks/use-update-option'
+import { useUpdateOptionsBulk } from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import { ChannelRouteExclusionEditor } from './channel-route-exclusion-editor'
-import { resolveRouteCooldownToggle } from './route-cooldown'
+import { RequestErrorRoutingEditor } from './request-error-routing-editor'
+import {
+  parseRequestErrorRoutingRules,
+  serializeRequestErrorRoutingRules,
+  validateRequestErrorRoutingRulesWithTranslator,
+} from './request-error-routing-rules'
+import {
+  resolveRouteCooldownToggle,
+  resolveSameChannelRetryToggle,
+} from './route-cooldown'
 import {
   parseGroupExclusions,
   serializeGroupExclusions,
@@ -91,86 +107,166 @@ const numericString = z.string().refine((value) => {
 const channelTestModes = ['scheduled_all', 'passive_recovery'] as const
 type ChannelTestMode = (typeof channelTestModes)[number]
 
+const routingReliabilityViews = ['strategy', 'errors', 'health'] as const
+type RoutingReliabilityView = (typeof routingReliabilityViews)[number]
+type RoutingReliabilitySectionView = 'routing' | 'custom-errors'
+
 const errorResponseMatchModes = ['any', 'all'] as const
 type ErrorResponseMatchMode = (typeof errorResponseMatchModes)[number]
 const errorMessageMatchModes = ['contains', 'exact'] as const
 type ErrorMessageMatchMode = (typeof errorMessageMatchModes)[number]
 
 const customErrorResponseRuleSchema = z.object({
-  name: z.string().trim().min(1).max(100),
-  description: z.string().max(500),
-  priority: z.coerce.number().int(),
+  name: z.string(),
+  description: z.string(),
+  priority: z.coerce.number(),
   enabled: z.boolean(),
   match_mode: z.enum(errorResponseMatchModes),
   status_codes: z.string(),
   message_contains: z.string(),
   message_match_mode: z.enum(errorMessageMatchModes),
-  response_status_code: z.coerce.number().int().min(0).max(599),
+  response_status_code: z.coerce.number(),
   response_message: z.string(),
   pass_through_status_code: z.boolean(),
   pass_through_message: z.boolean(),
 })
 
-const routingReliabilitySchema = z
-  .object({
-    RetryTimes: z.coerce.number().min(0).max(10),
-    ChannelRouteCooldownEnabled: z.boolean(),
-    ChannelRouteCooldownSeconds: z.coerce
+const routingReliabilitySchema = z.object({
+  RetryTimes: z.coerce.number(),
+  ChannelRouteCooldownEnabled: z.boolean(),
+  ChannelRouteCooldownSeconds: z.coerce.number(),
+  ChannelRouteSameChannelRetries: z.coerce.number(),
+  ChannelRouteGroupExclusionsEnabled: z.boolean(),
+  ChannelRouteGroupExclusions: z.string(),
+  ChannelDisableThreshold: z.string(),
+  AutomaticDisableChannelEnabled: z.boolean(),
+  AutomaticEnableChannelEnabled: z.boolean(),
+  AutomaticDisableKeywords: z.string(),
+  AutomaticDisableStatusCodes: z.string(),
+  AutomaticRetryStatusCodes: z.string(),
+  monitor_setting: z.object({
+    auto_test_channel_enabled: z.boolean(),
+    auto_test_channel_minutes: z.coerce.number(),
+    channel_test_mode: z.enum(channelTestModes),
+  }),
+  error_response_setting: z.object({
+    enabled: z.boolean(),
+    rules: z.array(customErrorResponseRuleSchema),
+  }),
+  request_error_routing_setting: z.object({
+    enabled: z.boolean(),
+    rules: z.string(),
+  }),
+})
+
+const routingFieldsValidationSchema = z.object({
+  RetryTimes: z.number().int().min(0).max(10),
+  ChannelRouteCooldownSeconds: z
+    .number()
+    .int()
+    .min(0)
+    .max(31536000, 'Cooldown cannot exceed 31536000 seconds'),
+  ChannelRouteSameChannelRetries: z.number().int().min(0).max(10),
+  ChannelDisableThreshold: numericString,
+  monitor_setting: z.object({
+    auto_test_channel_minutes: z
       .number()
       .int()
-      .min(0)
-      .max(31536000, 'Cooldown cannot exceed 31536000 seconds'),
-    ChannelRouteSameChannelRetries: z.coerce.number().int().min(0).max(10),
-    ChannelRouteGroupExclusionsEnabled: z.boolean(),
-    ChannelRouteGroupExclusions: z.string(),
-    ChannelDisableThreshold: numericString,
-    AutomaticDisableChannelEnabled: z.boolean(),
-    AutomaticEnableChannelEnabled: z.boolean(),
-    AutomaticDisableKeywords: z.string(),
-    AutomaticDisableStatusCodes: z.string(),
-    AutomaticRetryStatusCodes: z.string(),
-    monitor_setting: z.object({
-      auto_test_channel_enabled: z.boolean(),
-      auto_test_channel_minutes: z.coerce
-        .number()
-        .int()
-        .min(1, 'Interval must be at least 1 minute'),
-      channel_test_mode: z.enum(channelTestModes),
-    }),
-    error_response_setting: z.object({
-      enabled: z.boolean(),
-      rules: z.array(customErrorResponseRuleSchema),
-    }),
-  })
-  .superRefine((values, ctx) => {
-    const disableParsed = parseHttpStatusCodeRules(
-      values.AutomaticDisableStatusCodes
-    )
-    if (!disableParsed.ok) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['AutomaticDisableStatusCodes'],
-        message: `Invalid status code rules: ${disableParsed.invalidTokens.join(
-          ', '
-        )}`,
-      })
+      .min(1, 'Interval must be at least 1 minute'),
+  }),
+})
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function createRoutingReliabilitySchema(
+  view: RoutingReliabilitySectionView,
+  t: TFunction
+) {
+  return routingReliabilitySchema.superRefine((values, ctx) => {
+    if (view === 'routing') {
+      const routingFieldsValidation =
+        routingFieldsValidationSchema.safeParse(values)
+      if (!routingFieldsValidation.success) {
+        for (const issue of routingFieldsValidation.error.issues) {
+          ctx.addIssue({
+            code: 'custom',
+            path: issue.path,
+            message: issue.message,
+          })
+        }
+      }
+
+      const disableParsed = parseHttpStatusCodeRules(
+        values.AutomaticDisableStatusCodes
+      )
+      if (!disableParsed.ok) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['AutomaticDisableStatusCodes'],
+          message: `${t('Invalid status code rules')}: ${disableParsed.invalidTokens.join(', ')}`,
+        })
+      }
+
+      const retryParsed = parseHttpStatusCodeRules(
+        values.AutomaticRetryStatusCodes
+      )
+      if (!retryParsed.ok) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['AutomaticRetryStatusCodes'],
+          message: `${t('Invalid status code rules')}: ${retryParsed.invalidTokens.join(', ')}`,
+        })
+      }
+
+      const requestErrorRoutingValidation = values.request_error_routing_setting
+        .enabled
+        ? validateRequestErrorRoutingRulesWithTranslator(
+            values.request_error_routing_setting.rules,
+            t
+          )
+        : null
+      if (requestErrorRoutingValidation) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['request_error_routing_setting', 'rules'],
+          message: requestErrorRoutingValidation,
+        })
+      }
+      return
     }
 
-    const retryParsed = parseHttpStatusCodeRules(
-      values.AutomaticRetryStatusCodes
-    )
-    if (!retryParsed.ok) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['AutomaticRetryStatusCodes'],
-        message: `Invalid status code rules: ${retryParsed.invalidTokens.join(
-          ', '
-        )}`,
-      })
-    }
+    if (!values.error_response_setting.enabled) return
 
     values.error_response_setting.rules.forEach((rule, index) => {
       if (!rule.enabled) return
+
+      if (!Number.isInteger(rule.priority)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['error_response_setting', 'rules', index, 'priority'],
+          message: 'Priority must be an integer',
+        })
+      }
+
+      if (!rule.name.trim()) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['error_response_setting', 'rules', index, 'name'],
+          message: 'Rule name is required',
+        })
+      } else if (rule.name.trim().length > 100) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['error_response_setting', 'rules', index, 'name'],
+          message: 'Rule name cannot exceed 100 characters',
+        })
+      }
+      if (rule.description.trim().length > 500) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['error_response_setting', 'rules', index, 'description'],
+          message: 'Rule description cannot exceed 500 characters',
+        })
+      }
 
       const hasStatusCondition = rule.status_codes.trim() !== ''
       const hasMessageCondition = rule.message_contains.trim() !== ''
@@ -195,7 +291,9 @@ const routingReliabilitySchema = z
 
       if (
         !rule.pass_through_status_code &&
-        (rule.response_status_code < 100 || rule.response_status_code > 599)
+        (!Number.isInteger(rule.response_status_code) ||
+          rule.response_status_code < 100 ||
+          rule.response_status_code > 599)
       ) {
         ctx.addIssue({
           code: 'custom',
@@ -220,6 +318,7 @@ const routingReliabilitySchema = z
       }
     })
   })
+}
 
 type RoutingReliabilityFormValues = z.output<typeof routingReliabilitySchema>
 type RoutingReliabilityFormInput = z.input<typeof routingReliabilitySchema>
@@ -228,7 +327,7 @@ type CustomErrorResponseRuleFormValues = z.output<
 >
 
 type RoutingReliabilitySectionProps = {
-  view?: 'routing' | 'custom-errors'
+  view?: RoutingReliabilitySectionView
   defaultValues: {
     RetryTimes: number
     ChannelRouteCooldownEnabled: boolean
@@ -247,6 +346,8 @@ type RoutingReliabilitySectionProps = {
     'monitor_setting.channel_test_mode': ChannelTestMode
     'error_response_setting.enabled': boolean
     'error_response_setting.rules': string
+    'request_error_routing_setting.enabled': boolean
+    'request_error_routing_setting.rules': string
   }
 }
 
@@ -364,6 +465,51 @@ type NormalizedRoutingReliabilityValues = {
   'monitor_setting.channel_test_mode': ChannelTestMode
   'error_response_setting.enabled': boolean
   'error_response_setting.rules': string
+  'request_error_routing_setting.enabled': boolean
+  'request_error_routing_setting.rules': string
+}
+
+const customErrorResponseOptionKeys = new Set<
+  keyof NormalizedRoutingReliabilityValues
+>(['error_response_setting.enabled', 'error_response_setting.rules'])
+
+function optionBelongsToView(
+  key: keyof NormalizedRoutingReliabilityValues,
+  view: RoutingReliabilitySectionView
+) {
+  const isCustomErrorResponseOption = customErrorResponseOptionKeys.has(key)
+  return view === 'custom-errors'
+    ? isCustomErrorResponseOption
+    : !isCustomErrorResponseOption
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function optionShouldBeSaved(
+  key: string,
+  view: RoutingReliabilitySectionView,
+  values: {
+    'error_response_setting.enabled': boolean
+    'request_error_routing_setting.enabled': boolean
+  }
+) {
+  if (
+    !optionBelongsToView(key as keyof NormalizedRoutingReliabilityValues, view)
+  ) {
+    return false
+  }
+  if (
+    key === 'error_response_setting.rules' &&
+    !values['error_response_setting.enabled']
+  ) {
+    return false
+  }
+  if (
+    key === 'request_error_routing_setting.rules' &&
+    !values['request_error_routing_setting.enabled']
+  ) {
+    return false
+  }
+  return true
 }
 
 function normalizeChannelTestMode(value?: string): ChannelTestMode {
@@ -407,6 +553,10 @@ const buildFormDefaults = (
       defaults['error_response_setting.rules']
     ),
   },
+  request_error_routing_setting: {
+    enabled: defaults['request_error_routing_setting.enabled'],
+    rules: defaults['request_error_routing_setting.rules'],
+  },
 })
 
 const normalizeDefaults = (
@@ -444,6 +594,14 @@ const normalizeDefaults = (
   'error_response_setting.rules': normalizeCustomErrorResponseRules(
     parseCustomErrorResponseRules(defaults['error_response_setting.rules'])
   ),
+  'request_error_routing_setting.enabled':
+    defaults['request_error_routing_setting.enabled'],
+  'request_error_routing_setting.rules': serializeRequestErrorRoutingRules(
+    parseRequestErrorRoutingRules(
+      defaults['request_error_routing_setting.rules']
+    ),
+    true
+  ),
 })
 
 const normalizeFormValues = (
@@ -478,6 +636,12 @@ const normalizeFormValues = (
   'error_response_setting.rules': normalizeCustomErrorResponseRules(
     values.error_response_setting.rules
   ),
+  'request_error_routing_setting.enabled':
+    values.request_error_routing_setting.enabled,
+  'request_error_routing_setting.rules': serializeRequestErrorRoutingRules(
+    parseRequestErrorRoutingRules(values.request_error_routing_setting.rules),
+    true
+  ),
 })
 
 export function RoutingReliabilitySection({
@@ -485,7 +649,7 @@ export function RoutingReliabilitySection({
   view = 'routing',
 }: RoutingReliabilitySectionProps) {
   const { t } = useTranslation()
-  const updateOption = useUpdateOption()
+  const updateOptions = useUpdateOptionsBulk()
   const baselineRef = useRef<NormalizedRoutingReliabilityValues>(
     normalizeDefaults(defaultValues)
   )
@@ -494,10 +658,19 @@ export function RoutingReliabilitySection({
     () => buildFormDefaults(defaultValues),
     [defaultValues]
   )
+  const formSchema = useMemo(
+    () => createRoutingReliabilitySchema(view, t),
+    [t, view]
+  )
   const enabledCooldownSecondsRef = useRef(
     defaultValues.ChannelRouteCooldownSeconds > 0
       ? defaultValues.ChannelRouteCooldownSeconds
       : 60
+  )
+  const enabledSameChannelRetriesRef = useRef(
+    defaultValues.ChannelRouteSameChannelRetries > 0
+      ? defaultValues.ChannelRouteSameChannelRetries
+      : 1
   )
 
   const form = useForm<
@@ -505,7 +678,7 @@ export function RoutingReliabilitySection({
     unknown,
     RoutingReliabilityFormValues
   >({
-    resolver: zodResolver(routingReliabilitySchema),
+    resolver: zodResolver(formSchema),
     defaultValues: formDefaults,
   })
   const errorRuleFields = useFieldArray({
@@ -522,6 +695,13 @@ export function RoutingReliabilitySection({
     }
   }, [defaultValues.ChannelRouteCooldownSeconds])
 
+  useEffect(() => {
+    if (defaultValues.ChannelRouteSameChannelRetries > 0) {
+      enabledSameChannelRetriesRef.current =
+        defaultValues.ChannelRouteSameChannelRetries
+    }
+  }, [defaultValues.ChannelRouteSameChannelRetries])
+
   const groupOptionsQuery = useQuery({
     queryKey: ['channel-route-group-options'],
     queryFn: () => getChannelFilterGroups(true),
@@ -532,6 +712,9 @@ export function RoutingReliabilitySection({
   const autoDisableStatusCodes = form.watch('AutomaticDisableStatusCodes')
   const autoRetryStatusCodes = form.watch('AutomaticRetryStatusCodes')
   const channelRouteCooldownEnabled = form.watch('ChannelRouteCooldownEnabled')
+  const sameChannelRetries = Number(
+    form.watch('ChannelRouteSameChannelRetries') ?? 0
+  )
   const groupExclusionsEnabled = form.watch(
     'ChannelRouteGroupExclusionsEnabled'
   )
@@ -539,6 +722,12 @@ export function RoutingReliabilitySection({
   const customErrorResponsesEnabled = form.watch(
     'error_response_setting.enabled'
   )
+  const requestErrorRoutingEnabled = form.watch(
+    'request_error_routing_setting.enabled'
+  )
+  const [activeRoutingView, setActiveRoutingView] =
+    useState<RoutingReliabilityView>('strategy')
+  const [routeExclusionsOpen, setRouteExclusionsOpen] = useState(false)
   const [expandedErrorRuleIndex, setExpandedErrorRuleIndex] = useState<
     number | null
   >(0)
@@ -555,23 +744,66 @@ export function RoutingReliabilitySection({
     const normalized = normalizeFormValues(values)
     const updates = (
       Object.keys(normalized) as Array<keyof NormalizedRoutingReliabilityValues>
-    ).filter((key) => normalized[key] !== baselineRef.current[key])
+    ).filter(
+      (key) =>
+        optionShouldBeSaved(key, view, normalized) &&
+        normalized[key] !== baselineRef.current[key]
+    )
 
     if (updates.length === 0) {
       toast.info(t('No changes to save'))
       return
     }
 
-    for (const key of updates) {
-      const value = normalized[key]
-      await updateOption.mutateAsync({
-        key,
-        value,
+    try {
+      await updateOptions.mutateAsync({
+        options: updates.map((key) => ({ key, value: normalized[key] })),
       })
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t('Failed to update setting')
+      )
+      return
     }
 
-    baselineRef.current = normalized
+    const nextBaseline = { ...baselineRef.current }
+    for (const key of updates) {
+      Object.assign(nextBaseline, { [key]: normalized[key] })
+    }
+    baselineRef.current = nextBaseline
+    toast.success(t('Setting updated successfully'))
   }
+
+  const onInvalid: SubmitErrorHandler<RoutingReliabilityFormInput> = (
+    errors
+  ) => {
+    toast.error(t('Please fix the highlighted validation errors'))
+    if (view !== 'routing') return
+
+    if (
+      errors.request_error_routing_setting ||
+      errors.AutomaticRetryStatusCodes
+    ) {
+      setActiveRoutingView('errors')
+      return
+    }
+
+    if (
+      errors.monitor_setting ||
+      errors.AutomaticDisableChannelEnabled ||
+      errors.AutomaticEnableChannelEnabled ||
+      errors.AutomaticDisableStatusCodes ||
+      errors.AutomaticDisableKeywords ||
+      errors.ChannelDisableThreshold
+    ) {
+      setActiveRoutingView('health')
+      return
+    }
+
+    setActiveRoutingView('strategy')
+  }
+
+  const submitForm = form.handleSubmit(onSubmit, onInvalid)
 
   const addCustomErrorRule = () => {
     const nextIndex = errorRuleFields.fields.length
@@ -610,99 +842,284 @@ export function RoutingReliabilitySection({
       )}
     >
       <Form {...form}>
-        <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
+        <SettingsForm onSubmit={submitForm}>
           <SettingsPageFormActions
-            onSave={form.handleSubmit(onSubmit)}
-            isSaving={updateOption.isPending}
+            onSave={submitForm}
+            isSaving={updateOptions.isPending}
           />
 
           {view === 'routing' ? (
-            <>
-              <div className='min-w-0 space-y-6'>
-                <div className='flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between'>
-                  <div className='min-w-0 space-y-0.5'>
-                    <h4 className='text-sm font-medium'>
-                      {t('Routing strategy')}
-                    </h4>
-                    <p className='text-muted-foreground text-xs'>
-                      {t('Choose one strategy for handling failed requests.')}
-                    </p>
-                  </div>
-                  <div className='w-full shrink-0 lg:w-auto'>
-                    <FormField
-                      control={form.control}
-                      name='ChannelRouteCooldownEnabled'
-                      render={({ field }) => (
-                        <FormItem>
-                          <Tabs
-                            value={field.value ? 'routing' : 'standard'}
-                            onValueChange={(value) => {
-                              const routeEnabled = value === 'routing'
-                              field.onChange(routeEnabled)
-                              if (routeEnabled) {
-                                form.setValue('RetryTimes', 0, {
-                                  shouldDirty: true,
-                                  shouldValidate: true,
-                                })
-                              }
-                            }}
-                          >
-                            <TabsList className='grid h-9 w-full grid-cols-2 lg:w-[30rem]'>
-                              <TabsTrigger value='standard'>
-                                <RefreshCcw />
-                                {t('Standard request retry')}
-                              </TabsTrigger>
-                              <TabsTrigger value='routing'>
-                                <Route />
-                                {t('Channel routing')}
-                              </TabsTrigger>
-                            </TabsList>
-                          </Tabs>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </div>
+            <div className='min-w-0 space-y-6'>
+              <Tabs
+                value={activeRoutingView}
+                onValueChange={(value) => {
+                  if (
+                    routingReliabilityViews.includes(
+                      value as RoutingReliabilityView
+                    )
+                  ) {
+                    setActiveRoutingView(value as RoutingReliabilityView)
+                  }
+                }}
+              >
+                <TabsList
+                  variant='line'
+                  className='grid h-10 w-full grid-cols-3 justify-stretch lg:w-[32rem]'
+                >
+                  <TabsTrigger
+                    id='routing-reliability-tab-strategy'
+                    value='strategy'
+                    aria-controls='routing-reliability-panel'
+                  >
+                    <Route />
+                    <span className='sm:hidden'>{t('Strategy')}</span>
+                    <span className='hidden sm:inline'>
+                      {t('Execution strategy')}
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    id='routing-reliability-tab-errors'
+                    value='errors'
+                    aria-controls='routing-reliability-panel'
+                  >
+                    <ListChecks />
+                    <span className='sm:hidden'>{t('Errors')}</span>
+                    <span className='hidden sm:inline'>
+                      {t('Error decisions')}
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger
+                    id='routing-reliability-tab-health'
+                    value='health'
+                    aria-controls='routing-reliability-panel'
+                  >
+                    <HeartPulse />
+                    <span className='sm:hidden'>{t('Health')}</span>
+                    <span className='hidden sm:inline'>
+                      {t('Channel health')}
+                    </span>
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
 
-                <FormField
-                  control={form.control}
-                  name='AutomaticRetryStatusCodes'
-                  render={({ field }) => (
-                    <FormItem className='border-border/70 border-y py-4'>
-                      <FormLabel>
-                        {t('Failure handling status codes')}
-                      </FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder={t('e.g. 401, 403, 429, 500-599')}
-                          value={field.value}
-                          onChange={(event) =>
-                            field.onChange(event.target.value)
-                          }
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {t(
-                          'A failed request enters the selected retry strategy only when its status code matches this shared list.'
-                        )}{' '}
-                        {t(
-                          'Accepts comma-separated status codes and inclusive ranges.'
-                        )}{' '}
-                        {autoRetryParsed.ok &&
-                          autoRetryParsed.normalized &&
-                          autoRetryParsed.normalized !== field.value.trim() && (
-                            <span className='text-muted-foreground'>
-                              {t('Normalized:')} {autoRetryParsed.normalized}
-                            </span>
+              <div
+                id='routing-reliability-panel'
+                role='tabpanel'
+                aria-labelledby={`routing-reliability-tab-${activeRoutingView}`}
+                className='min-w-0 space-y-6'
+              >
+                {activeRoutingView === 'strategy' ? (
+                  <>
+                    <div className='flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-6'>
+                      <div className='min-w-0 space-y-0.5'>
+                        <h4 className='text-sm font-medium'>
+                          {t('Routing strategy')}
+                        </h4>
+                        <p className='text-muted-foreground text-xs'>
+                          {t(
+                            'Choose one strategy for handling failed requests.'
                           )}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                        </p>
+                      </div>
+                      <FormField
+                        control={form.control}
+                        name='ChannelRouteCooldownEnabled'
+                        render={({ field }) => (
+                          <FormItem className='w-full shrink-0 lg:w-[36rem] lg:max-w-[65%]'>
+                            <FormLabel className='sr-only'>
+                              {t('Active request strategy')}
+                            </FormLabel>
+                            <Tabs
+                              value={field.value ? 'routing' : 'standard'}
+                              onValueChange={(value) =>
+                                field.onChange(value === 'routing')
+                              }
+                            >
+                              <TabsList className='border-border/70 bg-muted/40 grid w-full grid-cols-2 overflow-hidden rounded-md border p-1 group-data-horizontal/tabs:h-11'>
+                                <TabsTrigger
+                                  value='standard'
+                                  className='data-active:bg-primary data-active:text-primary-foreground dark:data-active:bg-primary dark:data-active:text-primary-foreground rounded-md px-3 data-active:shadow-none'
+                                >
+                                  <RefreshCcw />
+                                  <span className='sm:hidden'>
+                                    {t('Retry')}
+                                  </span>
+                                  <span className='hidden sm:inline'>
+                                    {t('Standard request retry')}
+                                  </span>
+                                </TabsTrigger>
+                                <TabsTrigger
+                                  value='routing'
+                                  className='data-active:bg-primary data-active:text-primary-foreground dark:data-active:bg-primary dark:data-active:text-primary-foreground rounded-md px-3 data-active:shadow-none'
+                                >
+                                  <Route />
+                                  <span className='sm:hidden'>
+                                    {t('Route')}
+                                  </span>
+                                  <span className='hidden sm:inline'>
+                                    {t('Channel routing')}
+                                  </span>
+                                </TabsTrigger>
+                              </TabsList>
+                            </Tabs>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
 
-                {!channelRouteCooldownEnabled ? (
+                    <div className='border-border/70 bg-border/70 grid min-w-0 gap-px overflow-hidden rounded-md border sm:grid-cols-3'>
+                      <div className='bg-background min-w-0 px-3 py-2.5'>
+                        <div className='text-muted-foreground text-xs'>
+                          {t('Active request strategy')}
+                        </div>
+                        <div className='mt-0.5 truncate text-sm font-medium'>
+                          {channelRouteCooldownEnabled
+                            ? t('Channel routing')
+                            : t('Standard request retry')}
+                        </div>
+                      </div>
+                      <div className='bg-background min-w-0 px-3 py-2.5'>
+                        <div className='text-muted-foreground text-xs'>
+                          {channelRouteCooldownEnabled
+                            ? t('Same-channel retries')
+                            : t('Retry Times')}
+                        </div>
+                        <div className='mt-0.5 text-sm font-medium tabular-nums'>
+                          {channelRouteCooldownEnabled
+                            ? sameChannelRetries
+                            : Number(form.watch('RetryTimes') ?? 0)}
+                        </div>
+                      </div>
+                      <div className='bg-background min-w-0 px-3 py-2.5'>
+                        <div className='text-muted-foreground text-xs'>
+                          {t('Route exclusion groups')}
+                        </div>
+                        <div className='mt-0.5 text-sm font-medium'>
+                          {channelRouteCooldownEnabled && groupExclusionsEnabled
+                            ? t('Enabled')
+                            : t('Disabled')}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+
+                {activeRoutingView === 'errors' ? (
+                  <div className='min-w-0 space-y-7'>
+                    <section className='min-w-0 space-y-3'>
+                      <FormField
+                        control={form.control}
+                        name='request_error_routing_setting.enabled'
+                        render={({ field }) => (
+                          <FormItem className='border-border/70 flex min-w-0 items-start justify-between gap-4 border-b pb-4'>
+                            <div className='flex min-w-0 items-start gap-3'>
+                              <span className='bg-primary text-primary-foreground mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold'>
+                                1
+                              </span>
+                              <div className='min-w-0 space-y-0.5'>
+                                <FormLabel>
+                                  {t('Request error routing rules')}
+                                </FormLabel>
+                                <FormDescription>
+                                  {t(
+                                    'Matched rules take precedence over failure handling status codes.'
+                                  )}
+                                </FormDescription>
+                              </div>
+                            </div>
+                            <div className='flex shrink-0 items-center gap-1.5'>
+                              <span className='text-muted-foreground text-xs'>
+                                {field.value ? t('Enabled') : t('Disabled')}
+                              </span>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </div>
+                          </FormItem>
+                        )}
+                      />
+                      <FormField
+                        control={form.control}
+                        name='request_error_routing_setting.rules'
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormControl>
+                              <RequestErrorRoutingEditor
+                                value={field.value}
+                                onChange={field.onChange}
+                                disabled={!requestErrorRoutingEnabled}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </section>
+
+                    <section className='border-border/70 min-w-0 space-y-3 border-t pt-5'>
+                      <div className='flex min-w-0 items-start gap-3'>
+                        <span className='bg-muted text-muted-foreground mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold'>
+                          2
+                        </span>
+                        <div className='min-w-0 space-y-0.5'>
+                          <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                            <h4 className='text-sm font-medium'>
+                              {t('Failure handling status codes')}
+                            </h4>
+                            <span className='bg-muted text-muted-foreground rounded-sm px-1.5 py-0.5 text-[11px]'>
+                              {t('Fallback')}
+                            </span>
+                          </div>
+                          <p className='text-muted-foreground text-xs'>
+                            {t(
+                              'A failed request enters the selected retry strategy only when its status code matches this shared list.'
+                            )}{' '}
+                            {t(
+                              'Accepts comma-separated status codes and inclusive ranges.'
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      <FormField
+                        control={form.control}
+                        name='AutomaticRetryStatusCodes'
+                        render={({ field }) => (
+                          <FormItem className='max-w-5xl pl-8'>
+                            <FormLabel className='sr-only'>
+                              {t('Failure handling status codes')}
+                            </FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder={t('e.g. 401, 403, 429, 500-599')}
+                                value={field.value}
+                                onChange={(event) =>
+                                  field.onChange(event.target.value)
+                                }
+                              />
+                            </FormControl>
+                            {autoRetryParsed.ok &&
+                            autoRetryParsed.normalized &&
+                            autoRetryParsed.normalized !==
+                              field.value.trim() ? (
+                              <FormDescription>
+                                {t('Normalized:')} {autoRetryParsed.normalized}
+                              </FormDescription>
+                            ) : null}
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </section>
+                  </div>
+                ) : null}
+
+                {activeRoutingView === 'strategy' &&
+                !channelRouteCooldownEnabled ? (
                   <div className='min-w-0 space-y-4'>
                     <div className='space-y-0.5'>
                       <h4 className='text-sm font-medium'>
@@ -747,7 +1164,8 @@ export function RoutingReliabilitySection({
                   </div>
                 ) : null}
 
-                {channelRouteCooldownEnabled ? (
+                {activeRoutingView === 'strategy' &&
+                channelRouteCooldownEnabled ? (
                   <div className='min-w-0 space-y-5'>
                     <div className='space-y-0.5'>
                       <h4 className='text-sm font-medium'>
@@ -761,11 +1179,11 @@ export function RoutingReliabilitySection({
                     </div>
                     <div className='grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center md:gap-4'>
                       <div className='border-primary/30 min-w-0 border-l-2 pl-4'>
-                        <div className='mb-3 flex items-center gap-2'>
+                        <div className='mb-3 flex min-h-7 items-center gap-2'>
                           <span className='bg-primary text-primary-foreground flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold'>
                             1
                           </span>
-                          <span className='text-sm font-medium'>
+                          <span className='truncate text-sm font-medium'>
                             {t('Retry current channel')}
                           </span>
                         </div>
@@ -782,16 +1200,46 @@ export function RoutingReliabilitySection({
 
                             return (
                               <FormItem>
-                                <FormLabel>
-                                  {t('Same-channel retries')}
-                                </FormLabel>
+                                <div className='flex min-h-5 items-center justify-between gap-2'>
+                                  <FormLabel>
+                                    {t('Same-channel retries')}
+                                  </FormLabel>
+                                  <label className='text-muted-foreground flex shrink-0 cursor-pointer items-center gap-1.5 text-xs'>
+                                    <span>{t('Enable')}</span>
+                                    <Switch
+                                      size='sm'
+                                      checked={sameChannelRetries > 0}
+                                      onCheckedChange={(enabled) => {
+                                        const next =
+                                          resolveSameChannelRetryToggle(
+                                            sameChannelRetries,
+                                            !enabled,
+                                            enabledSameChannelRetriesRef.current
+                                          )
+                                        enabledSameChannelRetriesRef.current =
+                                          next.lastEnabledRetries
+                                        field.onChange(next.value)
+                                      }}
+                                    />
+                                  </label>
+                                </div>
                                 <FormControl>
                                   <Input
                                     type='number'
                                     min={0}
                                     max={10}
                                     step={1}
+                                    disabled={sameChannelRetries === 0}
                                     {...safeNumberFieldProps(field)}
+                                    onChange={(event) => {
+                                      const value = event.target.valueAsNumber
+                                      if (!Number.isFinite(value)) return
+                                      field.onChange(value)
+                                      if (value > 0) {
+                                        enabledSameChannelRetriesRef.current =
+                                          value
+                                      }
+                                    }}
                                   />
                                 </FormControl>
                                 <FormDescription>
@@ -813,11 +1261,11 @@ export function RoutingReliabilitySection({
                       </div>
 
                       <div className='border-primary/30 min-w-0 border-l-2 pl-4'>
-                        <div className='mb-3 flex items-center gap-2'>
+                        <div className='mb-3 flex min-h-7 items-center gap-2'>
                           <span className='bg-primary text-primary-foreground flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold'>
                             2
                           </span>
-                          <span className='text-sm font-medium'>
+                          <span className='truncate text-sm font-medium'>
                             {t('Switch candidate channel')}
                           </span>
                         </div>
@@ -836,16 +1284,15 @@ export function RoutingReliabilitySection({
                                   <FormLabel>
                                     {t('Cooldown time (seconds)')}
                                   </FormLabel>
-                                  <label className='text-muted-foreground flex cursor-pointer items-center gap-1.5 text-xs'>
-                                    <span>{t('Disable cooldown')}</span>
+                                  <label className='text-muted-foreground flex shrink-0 cursor-pointer items-center gap-1.5 text-xs'>
+                                    <span>{t('Enable')}</span>
                                     <Switch
                                       size='sm'
-                                      checked={cooldownSeconds === 0}
-                                      disabled={!channelRouteCooldownEnabled}
-                                      onCheckedChange={(disabled) => {
+                                      checked={cooldownSeconds > 0}
+                                      onCheckedChange={(enabled) => {
                                         const next = resolveRouteCooldownToggle(
                                           cooldownSeconds,
-                                          disabled,
+                                          !enabled,
                                           enabledCooldownSecondsRef.current
                                         )
                                         enabledCooldownSecondsRef.current =
@@ -890,309 +1337,358 @@ export function RoutingReliabilitySection({
                       </div>
                     </div>
 
-                    <div className='border-border/70 space-y-3 border-t pt-4'>
-                      <FormField
-                        control={form.control}
-                        name='ChannelRouteGroupExclusionsEnabled'
-                        render={({ field }) => (
-                          <SettingsSwitchItem className='py-0'>
-                            <SettingsSwitchContent>
-                              <FormLabel>
+                    <Collapsible
+                      open={routeExclusionsOpen}
+                      onOpenChange={setRouteExclusionsOpen}
+                      className='border-border/70 min-w-0 overflow-hidden rounded-md border'
+                    >
+                      <div className='grid min-h-14 min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2'>
+                        <CollapsibleTrigger
+                          render={
+                            <button
+                              type='button'
+                              data-press-animation='none'
+                              className='group grid min-w-0 grid-cols-[1.75rem_minmax(0,1fr)] items-center gap-2.5 rounded text-left outline-none focus-visible:ring-2'
+                            />
+                          }
+                        >
+                          <span className='bg-background group-hover:bg-muted flex size-7 items-center justify-center rounded-md border transition-colors'>
+                            {routeExclusionsOpen ? (
+                              <ChevronDown className='text-muted-foreground size-3.5' />
+                            ) : (
+                              <ChevronRight className='text-muted-foreground size-3.5' />
+                            )}
+                          </span>
+                          <span className='min-w-0'>
+                            <span className='block truncate text-sm font-medium'>
+                              {t('Route exclusion groups')}
+                            </span>
+                            <span className='text-muted-foreground mt-0.5 block truncate text-xs'>
+                              {t(
+                                'Override the two routing steps for selected groups: skip current-channel retries, candidate failover, or both.'
+                              )}
+                            </span>
+                          </span>
+                        </CollapsibleTrigger>
+
+                        <FormField
+                          control={form.control}
+                          name='ChannelRouteGroupExclusionsEnabled'
+                          render={({ field }) => (
+                            <FormItem className='flex items-center gap-1.5'>
+                              <FormLabel className='sr-only'>
                                 {t('Route exclusion groups')}
                               </FormLabel>
-                              <FormDescription>
-                                {t(
-                                  'Override the two routing steps for selected groups: skip current-channel retries, candidate failover, or both.'
-                                )}
-                              </FormDescription>
-                            </SettingsSwitchContent>
-                            <FormControl>
-                              <Switch
-                                checked={field.value}
-                                onCheckedChange={field.onChange}
-                              />
-                            </FormControl>
-                          </SettingsSwitchItem>
-                        )}
-                      />
+                              <span className='text-muted-foreground text-xs'>
+                                {field.value ? t('Enabled') : t('Disabled')}
+                              </span>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={(enabled) => {
+                                    field.onChange(enabled)
+                                    if (enabled) setRouteExclusionsOpen(true)
+                                  }}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
 
-                      <FormField
-                        control={form.control}
-                        name='ChannelRouteGroupExclusions'
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormControl>
-                              <ChannelRouteExclusionEditor
-                                value={field.value}
-                                groupOptions={groupOptions}
-                                disabled={
-                                  !groupExclusionsEnabled ||
-                                  groupOptionsQuery.isLoading
-                                }
-                                onChange={field.onChange}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
+                      <CollapsibleContent>
+                        <div className='border-t p-3'>
+                          <FormField
+                            control={form.control}
+                            name='ChannelRouteGroupExclusions'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormControl>
+                                  <ChannelRouteExclusionEditor
+                                    value={field.value}
+                                    groupOptions={groupOptions}
+                                    disabled={
+                                      !groupExclusionsEnabled ||
+                                      groupOptionsQuery.isLoading
+                                    }
+                                    onChange={field.onChange}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
                   </div>
                 ) : null}
-              </div>
 
-              <Separator />
-
-              <div className='flex min-w-0 flex-col gap-4'>
-                <div className='flex flex-col gap-1'>
-                  <h4 className='text-sm font-medium'>
-                    {t('Channel health checks')}
-                  </h4>
-                </div>
-                <div className='grid min-w-0 gap-6 lg:grid-cols-3'>
-                  <FormField
-                    control={form.control}
-                    name='monitor_setting.auto_test_channel_enabled'
-                    render={({ field }) => (
-                      <SettingsSwitchItem>
-                        <SettingsSwitchContent>
-                          <FormLabel>{t('Scheduled channel tests')}</FormLabel>
-                          <FormDescription>
-                            {t(
-                              'Automatically probe all channels in the background'
-                            )}
-                          </FormDescription>
-                        </SettingsSwitchContent>
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                      </SettingsSwitchItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name='monitor_setting.channel_test_mode'
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>{t('Channel test mode')}</FormLabel>
-                        <Select
-                          items={[
-                            {
-                              value: 'scheduled_all',
-                              label: t('Scheduled full test'),
-                            },
-                            {
-                              value: 'passive_recovery',
-                              label: t('Passive recovery only'),
-                            },
-                          ]}
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
-                          <FormControl>
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent alignItemWithTrigger={false}>
-                            <SelectGroup>
-                              <SelectItem value='scheduled_all'>
-                                {t('Scheduled full test')}
-                              </SelectItem>
-                              <SelectItem value='passive_recovery'>
-                                {t('Passive recovery only')}
-                              </SelectItem>
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
-                        <FormDescription>
-                          {t(
-                            'Scheduled full test probes non-manually-disabled channels; passive recovery only checks auto-disabled channels after real request failures.'
+                {activeRoutingView === 'health' ? (
+                  <>
+                    <div className='flex min-w-0 flex-col gap-4'>
+                      <div className='flex flex-col gap-1'>
+                        <h4 className='text-sm font-medium'>
+                          {t('Channel health checks')}
+                        </h4>
+                      </div>
+                      <div className='grid min-w-0 gap-6 lg:grid-cols-3'>
+                        <FormField
+                          control={form.control}
+                          name='monitor_setting.auto_test_channel_enabled'
+                          render={({ field }) => (
+                            <SettingsSwitchItem>
+                              <SettingsSwitchContent>
+                                <FormLabel>
+                                  {t('Scheduled channel tests')}
+                                </FormLabel>
+                                <FormDescription>
+                                  {t(
+                                    'Automatically probe all channels in the background'
+                                  )}
+                                </FormDescription>
+                              </SettingsSwitchContent>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </SettingsSwitchItem>
                           )}
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                        />
 
-                  <FormField
-                    control={form.control}
-                    name='monitor_setting.auto_test_channel_minutes'
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>{t('Test interval (minutes)')}</FormLabel>
-                        <FormControl>
-                          <Input
-                            type='number'
-                            min={1}
-                            step={1}
-                            {...safeNumberFieldProps(field)}
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          {channelTestMode === 'passive_recovery'
-                            ? t(
-                                'How frequently the system checks auto-disabled channels for recovery'
-                              )
-                            : t('How frequently the system tests all channels')}
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name='AutomaticEnableChannelEnabled'
-                    render={({ field }) => (
-                      <SettingsSwitchItem>
-                        <SettingsSwitchContent>
-                          <FormLabel>{t('Re-enable on success')}</FormLabel>
-                          <FormDescription>
-                            {t(
-                              'Bring channels back online after successful checks'
-                            )}
-                          </FormDescription>
-                        </SettingsSwitchContent>
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                      </SettingsSwitchItem>
-                    )}
-                  />
-                </div>
-              </div>
-
-              <Separator />
-
-              <div className='flex min-w-0 flex-col gap-4'>
-                <div className='flex flex-col gap-1'>
-                  <h4 className='text-sm font-medium'>
-                    {t('Auto-disable rules')}
-                  </h4>
-                </div>
-                <div className='grid min-w-0 gap-6 lg:grid-cols-2'>
-                  <FormField
-                    control={form.control}
-                    name='AutomaticDisableChannelEnabled'
-                    render={({ field }) => (
-                      <SettingsSwitchItem>
-                        <SettingsSwitchContent>
-                          <FormLabel>{t('Disable on failure')}</FormLabel>
-                          <FormDescription>
-                            {t(
-                              'Automatically disable channels when tests fail'
-                            )}
-                          </FormDescription>
-                        </SettingsSwitchContent>
-                        <FormControl>
-                          <Switch
-                            checked={field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                      </SettingsSwitchItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name='ChannelDisableThreshold'
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>
-                          {t('Disable threshold (seconds)')}
-                        </FormLabel>
-                        <FormControl>
-                          <Input
-                            type='number'
-                            min={0}
-                            step={1}
-                            value={field.value}
-                            onChange={(event) =>
-                              field.onChange(event.target.value)
-                            }
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          {t(
-                            'Automatically disable channels exceeding this response time'
+                        <FormField
+                          control={form.control}
+                          name='monitor_setting.channel_test_mode'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Channel test mode')}</FormLabel>
+                              <Select
+                                items={[
+                                  {
+                                    value: 'scheduled_all',
+                                    label: t('Scheduled full test'),
+                                  },
+                                  {
+                                    value: 'passive_recovery',
+                                    label: t('Passive recovery only'),
+                                  },
+                                ]}
+                                value={field.value}
+                                onValueChange={field.onChange}
+                              >
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent alignItemWithTrigger={false}>
+                                  <SelectGroup>
+                                    <SelectItem value='scheduled_all'>
+                                      {t('Scheduled full test')}
+                                    </SelectItem>
+                                    <SelectItem value='passive_recovery'>
+                                      {t('Passive recovery only')}
+                                    </SelectItem>
+                                  </SelectGroup>
+                                </SelectContent>
+                              </Select>
+                              <FormDescription>
+                                {t(
+                                  'Scheduled full test probes non-manually-disabled channels; passive recovery only checks auto-disabled channels after real request failures.'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
                           )}
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
+                        />
 
-                  <FormField
-                    control={form.control}
-                    name='AutomaticDisableStatusCodes'
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>{t('Auto-disable status codes')}</FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder={t('e.g. 401, 403, 429, 500-599')}
-                            value={field.value}
-                            onChange={(event) =>
-                              field.onChange(event.target.value)
-                            }
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          {t(
-                            'Accepts comma-separated status codes and inclusive ranges.'
-                          )}{' '}
-                          {autoDisableParsed.ok &&
-                            autoDisableParsed.normalized &&
-                            autoDisableParsed.normalized !==
-                              field.value.trim() && (
-                              <span className='text-muted-foreground'>
-                                {t('Normalized:')}{' '}
-                                {autoDisableParsed.normalized}
-                              </span>
-                            )}
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name='AutomaticDisableKeywords'
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>{t('Failure keywords')}</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            rows={6}
-                            placeholder={t('one keyword per line')}
-                            {...field}
-                            onChange={(event) =>
-                              field.onChange(event.target.value)
-                            }
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          {t(
-                            'If an upstream error contains any of these keywords (case insensitive), the channel will be disabled automatically.'
+                        <FormField
+                          control={form.control}
+                          name='monitor_setting.auto_test_channel_minutes'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>
+                                {t('Test interval (minutes)')}
+                              </FormLabel>
+                              <FormControl>
+                                <Input
+                                  type='number'
+                                  min={1}
+                                  step={1}
+                                  {...safeNumberFieldProps(field)}
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {channelTestMode === 'passive_recovery'
+                                  ? t(
+                                      'How frequently the system checks auto-disabled channels for recovery'
+                                    )
+                                  : t(
+                                      'How frequently the system tests all channels'
+                                    )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
                           )}
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='AutomaticEnableChannelEnabled'
+                          render={({ field }) => (
+                            <SettingsSwitchItem>
+                              <SettingsSwitchContent>
+                                <FormLabel>
+                                  {t('Re-enable on success')}
+                                </FormLabel>
+                                <FormDescription>
+                                  {t(
+                                    'Bring channels back online after successful checks'
+                                  )}
+                                </FormDescription>
+                              </SettingsSwitchContent>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </SettingsSwitchItem>
+                          )}
+                        />
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    <div className='flex min-w-0 flex-col gap-4'>
+                      <div className='flex flex-col gap-1'>
+                        <h4 className='text-sm font-medium'>
+                          {t('Auto-disable rules')}
+                        </h4>
+                      </div>
+                      <div className='grid min-w-0 gap-6 lg:grid-cols-2'>
+                        <FormField
+                          control={form.control}
+                          name='AutomaticDisableChannelEnabled'
+                          render={({ field }) => (
+                            <SettingsSwitchItem>
+                              <SettingsSwitchContent>
+                                <FormLabel>{t('Disable on failure')}</FormLabel>
+                                <FormDescription>
+                                  {t(
+                                    'Automatically disable channels when tests fail'
+                                  )}
+                                </FormDescription>
+                              </SettingsSwitchContent>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </SettingsSwitchItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='ChannelDisableThreshold'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>
+                                {t('Disable threshold (seconds)')}
+                              </FormLabel>
+                              <FormControl>
+                                <Input
+                                  type='number'
+                                  min={0}
+                                  step={1}
+                                  value={field.value}
+                                  onChange={(event) =>
+                                    field.onChange(event.target.value)
+                                  }
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Automatically disable channels exceeding this response time'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='AutomaticDisableStatusCodes'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>
+                                {t('Auto-disable status codes')}
+                              </FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder={t('e.g. 401, 403, 429, 500-599')}
+                                  value={field.value}
+                                  onChange={(event) =>
+                                    field.onChange(event.target.value)
+                                  }
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Accepts comma-separated status codes and inclusive ranges.'
+                                )}{' '}
+                                {autoDisableParsed.ok &&
+                                  autoDisableParsed.normalized &&
+                                  autoDisableParsed.normalized !==
+                                    field.value.trim() && (
+                                    <span className='text-muted-foreground'>
+                                      {t('Normalized:')}{' '}
+                                      {autoDisableParsed.normalized}
+                                    </span>
+                                  )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='AutomaticDisableKeywords'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Failure keywords')}</FormLabel>
+                              <FormControl>
+                                <Textarea
+                                  rows={6}
+                                  placeholder={t('one keyword per line')}
+                                  {...field}
+                                  onChange={(event) =>
+                                    field.onChange(event.target.value)
+                                  }
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'If an upstream error contains any of these keywords (case insensitive), the channel will be disabled automatically.'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+                    </div>
+                  </>
+                ) : null}
               </div>
-            </>
+            </div>
           ) : null}
 
           {view === 'custom-errors' ? (

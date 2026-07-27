@@ -342,11 +342,55 @@ describe('channel execution timeline', () => {
 
     assert.deepEqual(conclusion, {
       reason: 'status_code=500',
+      originalError: undefined,
+      userVisibleError: undefined,
+      customErrorApplied: false,
       channelId: 116,
       channelName: 'primary',
       attemptCount: 2,
       channelCount: 1,
     })
+  })
+
+  test('keeps original and user-visible final errors in the same conclusion', () => {
+    const conclusion = getFailedChannelExecutionConclusion(
+      [
+        {
+          state: 'active',
+          channel_id: 116,
+          channel_name: 'primary',
+        },
+        {
+          state: 'failed',
+          channel_id: 116,
+          channel_name: 'primary',
+          reason: 'status_code=502, raw upstream failure',
+        },
+      ],
+      {
+        status: 'failed',
+        original_final_error: {
+          status_code: 502,
+          message: 'raw upstream failure',
+        },
+        user_visible_final_error: {
+          status_code: 503,
+          message: 'configured user response',
+        },
+        custom_error_applied: true,
+      }
+    )
+
+    assert.deepEqual(conclusion.originalError, {
+      status_code: 502,
+      message: 'raw upstream failure',
+    })
+    assert.deepEqual(conclusion.userVisibleError, {
+      status_code: 503,
+      message: 'configured user response',
+    })
+    assert.equal(conclusion.customErrorApplied, true)
+    assert.equal(conclusion.reason, 'status_code=502, raw upstream failure')
   })
 
   test('hides the internal finished marker after failed attempts', () => {

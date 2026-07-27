@@ -158,9 +158,17 @@ func GetChannelWithFilter(group string, model string, retry int, requestPath str
 }
 
 func getChannelWithFilter(group string, model string, retry int, requestPath string, filter ChannelCandidateFilter) (*Channel, error) {
+	snapshot, err := loadSatisfiedChannelSelectionSnapshotFromDB(group, model, requestPath)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot.Select(retry, filter)
+}
+
+func loadSatisfiedChannelSelectionSnapshotFromDB(group string, model string, requestPath string) (*ChannelSelectionSnapshot, error) {
 	var abilities []Ability
 
-	channelQuery := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true)
+	channelQuery := DB.Where(&Ability{Group: group, Model: model, Enabled: true})
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) || common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
 		err := channelQuery.Order("priority DESC, weight DESC").Find(&abilities).Error
 		if err != nil {
@@ -172,9 +180,8 @@ func getChannelWithFilter(group string, model string, retry int, requestPath str
 			return nil, err
 		}
 	}
-	abilities = filterAbilitiesByRequestPathAndModel(abilities, requestPath, model)
 	if len(abilities) == 0 {
-		return nil, nil
+		return newChannelSelectionSnapshot(nil, false), nil
 	}
 
 	channelIds := make([]int, 0, len(abilities))
@@ -195,6 +202,10 @@ func getChannelWithFilter(group string, model string, retry int, requestPath str
 	for _, channel := range channels {
 		channelMap[channel.Id] = channel
 	}
+	abilities = filterAbilitiesByRequestPathAndModelWithChannels(abilities, channelMap, requestPath, model)
+	if len(abilities) == 0 {
+		return newChannelSelectionSnapshot(nil, false), nil
+	}
 
 	candidates := make([]*Channel, 0, len(abilities))
 	seenCandidates := make(map[int]struct{}, len(abilities))
@@ -206,14 +217,11 @@ func getChannelWithFilter(group string, model string, retry int, requestPath str
 		if !exists {
 			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", ability.ChannelId)
 		}
-		if filter != nil && !filter(channel) {
-			continue
-		}
 		seenCandidates[ability.ChannelId] = struct{}{}
 		candidates = append(candidates, channel)
 	}
 
-	return selectRandomChannelByPriority(candidates, retry)
+	return newChannelSelectionSnapshot(candidates, false), nil
 }
 
 // filterAbilitiesByRequestPathAndModel restricts candidates by request path and
@@ -242,10 +250,22 @@ func filterAbilitiesByRequestPathAndModel(abilities []Ability, requestPath strin
 		return abilities
 	}
 
-	advancedConfigs := make(map[int]*dto.AdvancedCustomConfig)
+	channelMap := make(map[int]*Channel, len(channels))
 	for _, channel := range channels {
-		if channel.Type == constant.ChannelTypeAdvancedCustom {
-			advancedConfigs[channel.Id] = channel.GetOtherSettings().AdvancedCustom
+		channelMap[channel.Id] = channel
+	}
+	return filterAbilitiesByRequestPathAndModelWithChannels(abilities, channelMap, requestPath, model)
+}
+
+func filterAbilitiesByRequestPathAndModelWithChannels(abilities []Ability, channels map[int]*Channel, requestPath string, model string) []Ability {
+	if requestPath == "" || len(abilities) == 0 {
+		return abilities
+	}
+
+	advancedConfigs := make(map[int]*dto.AdvancedCustomConfig)
+	for channelID, channel := range channels {
+		if channel != nil && channel.Type == constant.ChannelTypeAdvancedCustom {
+			advancedConfigs[channelID] = channel.GetOtherSettings().AdvancedCustom
 		}
 	}
 

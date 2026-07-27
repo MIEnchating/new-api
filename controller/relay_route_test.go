@@ -162,7 +162,10 @@ func TestWriteRelayErrorResponseAppliesCustomRuleBeforeJSON(t *testing.T) {
 	current := operation_setting.GetErrorResponseSetting()
 	original := *current
 	original.Rules = append([]operation_setting.CustomErrorResponseRule(nil), current.Rules...)
-	t.Cleanup(func() { *current = original })
+	t.Cleanup(func() {
+		*current = original
+		operation_setting.RefreshErrorResponseSnapshot()
+	})
 	*current = operation_setting.ErrorResponseSetting{
 		Enabled: true,
 		Rules: []operation_setting.CustomErrorResponseRule{
@@ -174,30 +177,65 @@ func TestWriteRelayErrorResponseAppliesCustomRuleBeforeJSON(t *testing.T) {
 			},
 		},
 	}
+	operation_setting.RefreshErrorResponseSnapshot()
 
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set(common.RequestIdKey, "custom-response-trace")
+	service.TrackChannelExecutionGroupEvent(
+		c,
+		"default",
+		"gpt-test",
+		"/v1/responses",
+		"failed",
+		"status_code=503, original intermediate failure",
+		0,
+	)
+	service.MarkChannelExecutionFailed(c, "status_code=500, original final failure")
 	apiErr := types.NewError(
 		errors.New(`Post "https://internal.example/v1/responses?key=must-not-leak": EOF`),
 		types.ErrorCodeDoRequestFailed,
 		types.ErrOptionWithHideErrMsg("upstream error: do request failed"),
 	)
 
+	prepared := prepareRelayErrorResponse(c, apiErr, "local-id")
 	writeRelayErrorResponse(c, nil, types.RelayFormatOpenAIResponses, apiErr, "local-id")
 
+	assert.Same(t, apiErr, prepared.Err)
 	assert.Equal(t, http.StatusTooManyRequests, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "服务繁忙")
 	assert.Contains(t, recorder.Body.String(), "local-id")
 	assert.NotContains(t, recorder.Body.String(), "must-not-leak")
+	logStatusCode, logContent := relayErrorLogDetails(c, apiErr)
+	assert.Equal(t, http.StatusTooManyRequests, logStatusCode)
+	assert.Contains(t, logContent, "服务繁忙")
+	assert.NotContains(t, logContent, "must-not-leak")
+
+	trace, found, traceErr := service.GetChannelExecutionTrace("custom-response-trace")
+	require.NoError(t, traceErr)
+	require.True(t, found)
+	require.NotNil(t, trace.OriginalFinalError)
+	assert.Equal(t, http.StatusInternalServerError, trace.OriginalFinalError.StatusCode)
+	assert.Contains(t, trace.OriginalFinalError.Message, "must-not-leak")
+	require.NotNil(t, trace.UserVisibleError)
+	assert.Equal(t, http.StatusTooManyRequests, trace.UserVisibleError.StatusCode)
+	assert.Contains(t, trace.UserVisibleError.Message, "服务繁忙")
+	assert.Contains(t, trace.UserVisibleError.Message, "local-id")
+	assert.True(t, trace.CustomErrorApplied)
+	require.NotEmpty(t, trace.Events)
+	assert.Equal(t, "status_code=503, original intermediate failure", trace.Events[0].Reason)
 }
 
 func TestWriteRelayErrorResponseExposesOriginalWhenCustomRulePassesThroughMessage(t *testing.T) {
 	current := operation_setting.GetErrorResponseSetting()
 	originalSetting := *current
 	originalSetting.Rules = append([]operation_setting.CustomErrorResponseRule(nil), current.Rules...)
-	t.Cleanup(func() { *current = originalSetting })
+	t.Cleanup(func() {
+		*current = originalSetting
+		operation_setting.RefreshErrorResponseSnapshot()
+	})
 	*current = operation_setting.ErrorResponseSetting{
 		Enabled: true,
 		Rules: []operation_setting.CustomErrorResponseRule{
@@ -209,6 +247,7 @@ func TestWriteRelayErrorResponseExposesOriginalWhenCustomRulePassesThroughMessag
 			},
 		},
 	}
+	operation_setting.RefreshErrorResponseSnapshot()
 
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -231,8 +270,12 @@ func TestWriteRelayErrorResponseExposesOnlyFinalOriginalTransportError(t *testin
 	current := operation_setting.GetErrorResponseSetting()
 	originalSetting := *current
 	originalSetting.Rules = append([]operation_setting.CustomErrorResponseRule(nil), current.Rules...)
-	t.Cleanup(func() { *current = originalSetting })
+	t.Cleanup(func() {
+		*current = originalSetting
+		operation_setting.RefreshErrorResponseSnapshot()
+	})
 	*current = operation_setting.ErrorResponseSetting{Enabled: false}
+	operation_setting.RefreshErrorResponseSnapshot()
 
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -258,7 +301,10 @@ func TestWriteRelayErrorResponseUsesSSEAfterHeadersCommitted(t *testing.T) {
 	current := operation_setting.GetErrorResponseSetting()
 	original := *current
 	original.Rules = append([]operation_setting.CustomErrorResponseRule(nil), current.Rules...)
-	t.Cleanup(func() { *current = original })
+	t.Cleanup(func() {
+		*current = original
+		operation_setting.RefreshErrorResponseSnapshot()
+	})
 	*current = operation_setting.ErrorResponseSetting{
 		Enabled: true,
 		Rules: []operation_setting.CustomErrorResponseRule{
@@ -270,6 +316,7 @@ func TestWriteRelayErrorResponseUsesSSEAfterHeadersCommitted(t *testing.T) {
 			},
 		},
 	}
+	operation_setting.RefreshErrorResponseSnapshot()
 
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()

@@ -15,7 +15,6 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
 )
@@ -85,7 +84,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 
 	var usage = &dto.Usage{}
 	var responseTextBuilder strings.Builder
-	var matchedStreamError *types.NewAPIError
+	var streamError *types.NewAPIError
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
 
@@ -98,8 +97,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
-		if streamErr := newResponsesStreamError(streamResponse); streamErr != nil && operation_setting.HasMatchingCustomErrorResponse(streamErr) {
-			matchedStreamError = streamErr
+		if streamErr := newResponsesStreamError(streamResponse); streamErr != nil {
+			streamError = streamErr
 			sr.Stop(streamErr)
 			return
 		}
@@ -166,8 +165,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
-	if matchedStreamError != nil {
-		return usage, matchedStreamError
+	if streamError != nil {
+		return usage, streamError
 	}
 
 	if usage.CompletionTokens == 0 {

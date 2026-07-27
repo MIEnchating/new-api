@@ -181,6 +181,15 @@ func loadChannelRouteCooldownSnapshot(group string, modelName string, requestPat
 	return getChannelRouteCooldownsUntil(group, channelIDs, now), true, nil
 }
 
+func channelRouteCooldownSnapshotForCandidates(group string, candidates []model.ChannelSelectionCandidate, now int64, extraChannelIDs ...int) map[int]int64 {
+	channelIDs := make([]int, 0, len(candidates)+len(extraChannelIDs))
+	for _, candidate := range candidates {
+		channelIDs = append(channelIDs, candidate.ChannelID)
+	}
+	channelIDs = append(channelIDs, extraChannelIDs...)
+	return getChannelRouteCooldownsUntil(group, channelIDs, now)
+}
+
 func channelRouteCooldownFromSnapshot(cooldowns map[int]int64, batched bool, group string, channelID int, now int64) int64 {
 	if batched {
 		return cooldowns[channelID]
@@ -234,20 +243,61 @@ func ShouldFreezeChannelRoute(err *types.NewAPIError) bool {
 		operation_setting.ShouldDisableByStatusCode(err.StatusCode)
 }
 
+func ShouldSwitchChannelRoute(err *types.NewAPIError) bool {
+	if actions, matched := operation_setting.ResolveRequestErrorRouting(err); matched {
+		return actions.SwitchChannel
+	}
+	return ShouldFreezeChannelRoute(err)
+}
+
+func ShouldSwitchChannelRouteForContext(c *gin.Context, err *types.NewAPIError) bool {
+	if actions, matched := ResolveRequestErrorRoutingForContext(c, err); matched {
+		return actions.SwitchChannel
+	}
+	return ShouldFreezeChannelRoute(err)
+}
+
+func ShouldCooldownChannelRoute(err *types.NewAPIError) bool {
+	if actions, matched := operation_setting.ResolveRequestErrorRouting(err); matched {
+		return actions.Cooldown
+	}
+	return ShouldFreezeChannelRoute(err)
+}
+
+func ShouldCooldownChannelRouteForContext(c *gin.Context, err *types.NewAPIError) bool {
+	if actions, matched := ResolveRequestErrorRoutingForContext(c, err); matched {
+		return actions.Cooldown
+	}
+	return ShouldFreezeChannelRoute(err)
+}
+
 func ShouldRetrySameChannelRoute(err *types.NewAPIError, retriesUsed int) bool {
 	return ShouldRetrySameChannelRouteForGroup(err, retriesUsed, "")
 }
 
 func ShouldRetrySameChannelRouteForGroup(err *types.NewAPIError, retriesUsed int, group string) bool {
-	return IsChannelRouteEnabled() &&
-		!setting.IsChannelRouteSameChannelRetryExcluded(group) &&
-		common.ChannelRouteSameChannelRetries > retriesUsed &&
-		ShouldFreezeChannelRoute(err)
+	if !IsChannelRouteEnabled() ||
+		setting.IsChannelRouteSameChannelRetryExcluded(group) ||
+		common.ChannelRouteSameChannelRetries <= retriesUsed {
+		return false
+	}
+	if actions, matched := operation_setting.ResolveRequestErrorRouting(err); matched {
+		return actions.RetrySameChannel
+	}
+	return ShouldFreezeChannelRoute(err)
 }
 
 func ShouldRetrySameChannelRouteForContext(c *gin.Context, err *types.NewAPIError, retriesUsed int) bool {
 	group := common.GetContextKeyString(c, constant.ContextKeyChannelRouteGroup)
-	return ShouldRetrySameChannelRouteForGroup(err, retriesUsed, group)
+	if !IsChannelRouteEnabled() ||
+		setting.IsChannelRouteSameChannelRetryExcluded(group) ||
+		common.ChannelRouteSameChannelRetries <= retriesUsed {
+		return false
+	}
+	if actions, matched := ResolveRequestErrorRoutingForContext(c, err); matched {
+		return actions.RetrySameChannel
+	}
+	return ShouldFreezeChannelRoute(err)
 }
 
 func IsNextChannelRouteExcluded(c *gin.Context) bool {
@@ -282,20 +332,19 @@ func channelWasUsed(c *gin.Context, channelID int) bool {
 }
 
 func hasAvailableChannelRouteAlternative(c *gin.Context, group string, modelName string, requestPath string, channelID int, now int64) (bool, error) {
-	cooldowns, batched, err := loadChannelRouteCooldownSnapshot(group, modelName, requestPath, now)
+	snapshot, err := model.LoadSatisfiedChannelSelectionSnapshot(group, modelName, requestPath)
 	if err != nil {
 		return false, err
 	}
-	channel, err := model.GetRandomSatisfiedChannelWithFilter(
-		group,
-		modelName,
+	candidates := snapshot.Candidates()
+	cooldowns := channelRouteCooldownSnapshotForCandidates(group, candidates, now)
+	channel, err := snapshot.Select(
 		0,
-		requestPath,
 		func(candidate *model.Channel) bool {
 			return candidate.Id != channelID &&
-				(IsChannelRouteCooldownEnabled() || !channelWasUsed(c, candidate.Id)) &&
+				!channelWasUsed(c, candidate.Id) &&
 				candidate.Status == common.ChannelStatusEnabled &&
-				channelRouteCooldownFromSnapshot(cooldowns, batched, group, candidate.Id, now) <= now
+				cooldowns[candidate.Id] <= now
 		},
 	)
 	return channel != nil, err
@@ -347,6 +396,28 @@ func getSatisfiedChannelAffinityCandidate(
 	return channel, nil
 }
 
+func getSatisfiedChannelAffinityCandidateFromSnapshot(
+	param *RetryParam,
+	group string,
+	channelID int,
+	snapshot *model.ChannelSelectionSnapshot,
+) (*model.Channel, error) {
+	channel, err := snapshot.Select(0, func(candidate *model.Channel) bool {
+		return candidate.Id == channelID && candidate.Status == common.ChannelStatusEnabled
+	})
+	if err != nil {
+		return nil, err
+	}
+	if channel == nil {
+		if !ShouldKeepChannelAffinityOnChannelDisabled() {
+			ClearCurrentChannelAffinityCache(param.Ctx)
+		}
+		return nil, nil
+	}
+	MarkChannelAffinityUsed(param.Ctx, group, channel.Id)
+	return channel, nil
+}
+
 func markPostGroupChannelSelected(param *RetryParam, channel *model.Channel) {
 	if channel != nil && shouldResolveChannelAffinityAfterGroup(param) {
 		markChannelAffinityFirstPickComplete(param.Ctx)
@@ -360,6 +431,31 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 	}
 	affinityChannelID, selectAffinity := resolvePostGroupChannelAffinity(param, group)
 	if !IsChannelRouteEnabled() {
+		if common.MemoryCacheEnabled {
+			snapshot, err := model.LoadSatisfiedChannelSelectionSnapshot(group, param.ModelName, param.RequestPath)
+			if err != nil {
+				return nil, err
+			}
+			candidates := snapshot.Candidates()
+			if selectAffinity {
+				channel, affinityErr := getSatisfiedChannelAffinityCandidateFromSnapshot(param, group, affinityChannelID, snapshot)
+				if affinityErr != nil {
+					return nil, affinityErr
+				}
+				if channel != nil {
+					TrackChannelExecutionAffinityHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id, "channel_affinity")
+					trackChannelExecutionSelectionWithCandidates(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, candidates, nil)
+					markPostGroupChannelSelected(param, channel)
+					return channel, nil
+				}
+			}
+			channel, selectErr := snapshot.Select(retry, nil)
+			if selectErr == nil && channel != nil {
+				trackChannelExecutionSelectionWithCandidates(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, candidates, nil)
+				markPostGroupChannelSelected(param, channel)
+			}
+			return channel, selectErr
+		}
 		if selectAffinity {
 			channel, err := getSatisfiedChannelAffinityCandidate(param, group, affinityChannelID)
 			if err != nil {
@@ -381,22 +477,18 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 	}
 
 	now := common.GetTimestamp()
+	snapshot, snapshotErr := model.LoadSatisfiedChannelSelectionSnapshot(group, param.ModelName, param.RequestPath)
+	if snapshotErr != nil {
+		return nil, snapshotErr
+	}
+	candidates := snapshot.Candidates()
 	extraChannelID := 0
 	if selectAffinity {
 		extraChannelID = affinityChannelID
 	}
-	cooldowns, batchedCooldowns, snapshotErr := loadChannelRouteCooldownSnapshot(
-		group,
-		param.ModelName,
-		param.RequestPath,
-		now,
-		extraChannelID,
-	)
-	if snapshotErr != nil {
-		return nil, snapshotErr
-	}
+	cooldowns := channelRouteCooldownSnapshotForCandidates(group, candidates, now, extraChannelID)
 	cooldownUntil := func(channelID int) int64 {
-		return channelRouteCooldownFromSnapshot(cooldowns, batchedCooldowns, group, channelID, now)
+		return cooldowns[channelID]
 	}
 
 	if selectAffinity {
@@ -406,14 +498,14 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 				TrackChannelExecutionSkipped(param.Ctx, group, param.ModelName, param.RequestPath, affinityChannel, "affinity_cooling", affinityCooldownUntil)
 			}
 		} else {
-			channel, err := getSatisfiedChannelAffinityCandidate(param, group, affinityChannelID)
+			channel, err := getSatisfiedChannelAffinityCandidateFromSnapshot(param, group, affinityChannelID, snapshot)
 			if err != nil {
 				return nil, err
 			}
 			if channel != nil {
 				TrackChannelRouteSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
 				TrackChannelExecutionAffinityHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id, "channel_affinity")
-				trackChannelExecutionSelectionWithCooldowns(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, cooldowns)
+				trackChannelExecutionSelectionWithCandidates(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, candidates, cooldowns)
 				markPostGroupChannelSelected(param, channel)
 				logger.LogDebug(param.Ctx, "channel route selected request-affinity channel: group=%s channel=%d", group, channel.Id)
 				return channel, nil
@@ -421,13 +513,10 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 		}
 	}
 
-	channel, err := model.GetRandomSatisfiedChannelWithFilter(
-		group,
-		param.ModelName,
+	channel, err := snapshot.Select(
 		0,
-		param.RequestPath,
 		func(channel *model.Channel) bool {
-			if !IsChannelRouteCooldownEnabled() && channelWasUsed(param.Ctx, channel.Id) {
+			if channelWasUsed(param.Ctx, channel.Id) {
 				return false
 			}
 			until := cooldownUntil(channel.Id)
@@ -441,14 +530,25 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 	)
 	if err == nil && channel != nil {
 		TrackChannelRouteSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
-		trackChannelExecutionSelectionWithCooldowns(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, cooldowns)
+		trackChannelExecutionSelectionWithCandidates(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, candidates, cooldowns)
 		markPostGroupChannelSelected(param, channel)
 	}
 	return channel, err
 }
 
 func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
-	if !IsChannelRouteEnabled() || !ShouldFreezeChannelRoute(err) {
+	if !IsChannelRouteEnabled() {
+		return false
+	}
+	actions, matched := ResolveRequestErrorRoutingForContext(c, err)
+	switchChannel := actions.SwitchChannel
+	cooldown := actions.Cooldown
+	if !matched {
+		fallback := ShouldFreezeChannelRoute(err)
+		switchChannel = fallback
+		cooldown = fallback
+	}
+	if !switchChannel && !cooldown {
 		return false
 	}
 	group := common.GetContextKeyString(c, constant.ContextKeyChannelRouteGroup)
@@ -479,15 +579,15 @@ func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 			return false
 		}
 	}
-	if cooldownSeconds <= 0 {
+	if !cooldown || cooldownSeconds <= 0 {
 		logger.LogDebug(c, "channel route cooldown disabled: group=%s channel=%d", group, channelID)
-		return true
+		return switchChannel
 	}
 	until := FreezeChannelRoute(group, channelID, cooldownSeconds)
 	TrackChannelExecutionCooling(c, group, channelID, until)
 	logger.LogWarn(c, fmt.Sprintf("channel route frozen: group=%s channel=%d cooldown=%ds until=%d",
 		group, channelID, cooldownSeconds, until))
-	return true
+	return switchChannel
 }
 
 func MarkChannelRouteSuccess(c *gin.Context) {

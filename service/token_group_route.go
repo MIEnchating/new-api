@@ -212,6 +212,64 @@ func GetTokenGroupRouteCooldownUntil(tokenID int, group string, modelName string
 	return GetTokenGroupRouteCooldownUntilInMemory(tokenID, group, modelName, requestPath, now)
 }
 
+// getTokenGroupRouteCooldownsUntil snapshots every configured group cooldown
+// for one route selection. Redis values take precedence while missing, invalid,
+// and expired entries retain the existing per-group in-memory fallback.
+func getTokenGroupRouteCooldownsUntil(tokenID int, routes []model.TokenGroupRoute, modelName string, requestPath string, now int64) map[string]int64 {
+	cooldowns := make(map[string]int64, len(routes))
+	if tokenID <= 0 || modelName == "" || len(routes) == 0 {
+		return cooldowns
+	}
+
+	refs := make([]tokenGroupRouteStateRef, 0, len(routes))
+	keys := make([]string, 0, len(routes))
+	seen := make(map[string]struct{}, len(routes))
+	for _, route := range routes {
+		if route.Group == "" {
+			continue
+		}
+		if _, exists := seen[route.Group]; exists {
+			continue
+		}
+		seen[route.Group] = struct{}{}
+		ref := tokenGroupRouteStateRef{
+			TokenID:     tokenID,
+			Kind:        tokenGroupRouteStateCooldown,
+			Group:       route.Group,
+			ModelName:   modelName,
+			RequestPath: requestPath,
+		}
+		refs = append(refs, ref)
+		keys = append(keys, tokenGroupRouteCooldownKey(tokenID, route.Group, modelName, requestPath))
+		cooldowns[route.Group] = 0
+	}
+
+	if common.RedisEnabled && common.RDB != nil && len(keys) > 0 {
+		values, err := common.RDB.MGet(context.Background(), keys...).Result()
+		if err == nil {
+			for index, ref := range refs {
+				if index < len(values) && values[index] != nil {
+					if until, parseErr := strconv.ParseInt(fmt.Sprint(values[index]), 10, 64); parseErr == nil && until > now {
+						cooldowns[ref.Group] = until
+						continue
+					}
+				}
+				if until := GetTokenGroupRouteCooldownUntilInMemory(tokenID, ref.Group, modelName, requestPath, now); until > now {
+					cooldowns[ref.Group] = until
+				}
+			}
+			return cooldowns
+		}
+	}
+
+	for _, ref := range refs {
+		if until := GetTokenGroupRouteCooldownUntilInMemory(tokenID, ref.Group, modelName, requestPath, now); until > now {
+			cooldowns[ref.Group] = until
+		}
+	}
+	return cooldowns
+}
+
 func FreezeTokenGroupRoute(tokenID int, group string, modelName string, requestPath string, cooldownSeconds int) int64 {
 	if tokenID <= 0 || group == "" || modelName == "" || cooldownSeconds <= 0 {
 		return 0
@@ -346,8 +404,44 @@ func ShouldFreezeTokenGroupRoute(err *types.NewAPIError) bool {
 		operation_setting.ShouldDisableByStatusCode(err.StatusCode)
 }
 
+func ShouldSwitchTokenGroupRoute(err *types.NewAPIError) bool {
+	if actions, matched := operation_setting.ResolveRequestErrorRouting(err); matched {
+		return actions.SwitchGroup
+	}
+	return ShouldFreezeTokenGroupRoute(err)
+}
+
+func ShouldSwitchTokenGroupRouteForContext(c *gin.Context, err *types.NewAPIError) bool {
+	if actions, matched := ResolveRequestErrorRoutingForContext(c, err); matched {
+		return actions.SwitchGroup
+	}
+	return ShouldFreezeTokenGroupRoute(err)
+}
+
+func ShouldCooldownTokenGroupRoute(err *types.NewAPIError) bool {
+	if actions, matched := operation_setting.ResolveRequestErrorRouting(err); matched {
+		return actions.Cooldown
+	}
+	return ShouldFreezeTokenGroupRoute(err)
+}
+
+func ShouldCooldownTokenGroupRouteForContext(c *gin.Context, err *types.NewAPIError) bool {
+	if actions, matched := ResolveRequestErrorRoutingForContext(c, err); matched {
+		return actions.Cooldown
+	}
+	return ShouldFreezeTokenGroupRoute(err)
+}
+
 func MarkTokenGroupRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
-	if !ShouldFreezeTokenGroupRoute(err) {
+	actions, matched := ResolveRequestErrorRoutingForContext(c, err)
+	switchGroup := actions.SwitchGroup
+	cooldown := actions.Cooldown
+	if !matched {
+		fallback := ShouldFreezeTokenGroupRoute(err)
+		switchGroup = fallback
+		cooldown = fallback
+	}
+	if !switchGroup && !cooldown {
 		return false
 	}
 	routes := getTokenGroupRoutes(c)
@@ -370,24 +464,30 @@ func MarkTokenGroupRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 			}
 		}
 	}
-	if cooldownSeconds <= 0 {
-		return false
+	until := int64(0)
+	if cooldown && cooldownSeconds > 0 {
+		until = FreezeTokenGroupRoute(tokenID, group, modelName, requestPath, cooldownSeconds)
+		TrackChannelExecutionGroupEvent(c, group, modelName, requestPath, "cooling", "group_route_failure", until)
+	} else if switchGroup {
+		TrackChannelExecutionGroupEvent(c, group, modelName, requestPath, "failed", "group_route_failure", 0)
 	}
-	until := FreezeTokenGroupRoute(tokenID, group, modelName, requestPath, cooldownSeconds)
-	TrackChannelExecutionGroupEvent(c, group, modelName, requestPath, "cooling", "group_route_failure", until)
 	stickyHit := common.GetContextKeyBool(c, constant.ContextKeyTokenGroupRouteStickyHit)
-	if IsTokenGroupRouteStickyEnabled(c) {
+	if (switchGroup || cooldown) && IsTokenGroupRouteStickyEnabled(c) {
 		clearTokenGroupRouteStickyScope(tokenID, modelName, requestPath)
 	}
-	index := common.GetContextKeyInt(c, constant.ContextKeyTokenGroupRouteIndex)
-	if stickyHit {
-		common.SetContextKey(c, constant.ContextKeyTokenGroupRouteIndex, 0)
-	} else {
-		common.SetContextKey(c, constant.ContextKeyTokenGroupRouteIndex, index+1)
+	if switchGroup {
+		index := common.GetContextKeyInt(c, constant.ContextKeyTokenGroupRouteIndex)
+		if stickyHit {
+			common.SetContextKey(c, constant.ContextKeyTokenGroupRouteIndex, 0)
+		} else {
+			common.SetContextKey(c, constant.ContextKeyTokenGroupRouteIndex, index+1)
+		}
 	}
-	logger.LogWarn(c, fmt.Sprintf("token group route frozen: token=%d group=%s model=%s path=%s cooldown=%ds until=%d",
-		tokenID, group, modelName, requestPath, cooldownSeconds, until))
-	return true
+	if until > 0 {
+		logger.LogWarn(c, fmt.Sprintf("token group route frozen: token=%d group=%s model=%s path=%s cooldown=%ds until=%d",
+			tokenID, group, modelName, requestPath, cooldownSeconds, until))
+	}
+	return switchGroup
 }
 
 func MarkTokenGroupRouteSuccess(c *gin.Context) {
@@ -450,6 +550,7 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 	}
 
 	now := common.GetTimestamp()
+	cooldowns := getTokenGroupRouteCooldownsUntil(tokenID, routes, param.ModelName, param.RequestPath, now)
 	selectGroup := routes[startGroupIndex].Group
 	skippedCooldown := false
 	if IsTokenGroupRouteStickyEnabled(param.Ctx) && startGroupIndex == 0 {
@@ -460,7 +561,7 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 				clearTokenGroupRouteStickyScope(tokenID, param.ModelName, param.RequestPath)
 			} else {
 				stickyRoute := routes[stickyIndex]
-				if IsTokenGroupRouteFrozen(tokenID, stickyRoute.Group, param.ModelName, param.RequestPath, now) {
+				if cooldowns[stickyRoute.Group] > now {
 					skippedCooldown = true
 					clearTokenGroupRouteStickyScope(tokenID, param.ModelName, param.RequestPath)
 					logger.LogDebug(param.Ctx, "Token group route sticky group is cooling: %s", stickyRoute.Group)
@@ -485,9 +586,9 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 	for i := startGroupIndex; i < len(routes); i++ {
 		route := routes[i]
 		selectGroup = route.Group
-		if IsTokenGroupRouteFrozen(tokenID, route.Group, param.ModelName, param.RequestPath, now) {
+		if until := cooldowns[route.Group]; until > now {
 			skippedCooldown = true
-			TrackChannelExecutionGroupEvent(param.Ctx, route.Group, param.ModelName, param.RequestPath, "skipped", "group_cooling", GetTokenGroupRouteCooldownUntil(tokenID, route.Group, param.ModelName, param.RequestPath, now))
+			TrackChannelExecutionGroupEvent(param.Ctx, route.Group, param.ModelName, param.RequestPath, "skipped", "group_cooling", until)
 			logger.LogDebug(param.Ctx, "Token group route skipped cooldown group: %s", route.Group)
 			continue
 		}

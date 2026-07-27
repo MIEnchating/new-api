@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"container/list"
 	"context"
 	"errors"
 	"fmt"
@@ -259,10 +260,18 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	channelRouteCooldownWrites.Store(0)
 	channelExecutionTraceCacheOnce = sync.Once{}
 	channelExecutionTraceCache = nil
+	channelExecutionRecentMu.Lock()
 	channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
-	channelExecutionFallback = make(map[string]ChannelExecutionTrace)
-	channelExecutionFallbackOrder = make([]string, 0, channelExecutionFallbackSize)
+	channelExecutionFallback = make(map[string]*channelExecutionFallbackEntry)
+	channelExecutionFallbackOrder = list.New()
 	channelExecutionRecentWrites = 0
+	channelExecutionRecentMu.Unlock()
+	channelExecutionInputQueueSaturation.Store(0)
+	channelExecutionPendingQueueSaturation.Store(0)
+	channelExecutionTerminalRetryAttempts.Store(0)
+	channelExecutionTerminalRetryQueued.Store(0)
+	channelExecutionTerminalRecovered.Store(0)
+	channelExecutionTerminalEvicted.Store(0)
 	tokenGroupRouteCooldowns = sync.Map{}
 
 	db, err := gorm.Open(sqlite.Open("file:"+strings.ReplaceAll(t.Name(), "/", "_")+"?mode=memory&cache=shared"), &gorm.Config{})
@@ -272,6 +281,12 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Log{}))
 
 	t.Cleanup(func() {
+		channelExecutionRecentMu.Lock()
+		channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
+		channelExecutionFallback = make(map[string]*channelExecutionFallbackEntry)
+		channelExecutionFallbackOrder = list.New()
+		channelExecutionRecentWrites = 0
+		channelExecutionRecentMu.Unlock()
 		common.RedisEnabled = oldRedisEnabled
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
 		common.ChannelRouteCooldownEnabled = oldChannelRouteCooldownEnabled
@@ -284,10 +299,6 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 		channelRouteCooldownWrites.Store(0)
 		channelExecutionTraceCacheOnce = sync.Once{}
 		channelExecutionTraceCache = nil
-		channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
-		channelExecutionFallback = make(map[string]ChannelExecutionTrace)
-		channelExecutionFallbackOrder = make([]string, 0, channelExecutionFallbackSize)
-		channelExecutionRecentWrites = 0
 		tokenGroupRouteCooldowns = sync.Map{}
 		model.DB = oldDB
 		model.LOG_DB = oldLogDB
@@ -332,8 +343,10 @@ func TestShouldRetrySameChannelRouteHonorsLimitAndDisable(t *testing.T) {
 		Type:    "upstream_error",
 	}, http.StatusBadGateway)
 	assert.False(t, ShouldRetrySameChannelRoute(contextWindowErr, 0))
-	assert.False(t, ShouldFreezeChannelRoute(contextWindowErr))
-	assert.False(t, ShouldFreezeTokenGroupRoute(contextWindowErr))
+	assert.True(t, ShouldSwitchChannelRoute(contextWindowErr))
+	assert.True(t, ShouldSwitchTokenGroupRoute(contextWindowErr))
+	assert.False(t, ShouldCooldownChannelRoute(contextWindowErr))
+	assert.False(t, ShouldCooldownTokenGroupRoute(contextWindowErr))
 }
 
 func TestShouldRetrySameChannelRouteHonorsGroupExclusions(t *testing.T) {
@@ -443,6 +456,31 @@ func TestLoadChannelRouteCooldownSnapshotSkipsCandidateQueryWithoutMemoryCache(t
 	require.NoError(t, err)
 	assert.False(t, batched)
 	assert.Nil(t, cooldowns)
+}
+
+func TestChannelRouteSelectionReusesDatabaseCandidateSnapshotForTrace(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	seedChannelRouteChannel(t, db, 1, "default", 2)
+	seedChannelRouteChannel(t, db, 2, "default", 1)
+	common.MemoryCacheEnabled = false
+
+	queryCount := 0
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register(
+		"test:count_channel_route_candidate_queries",
+		func(*gorm.DB) { queryCount++ },
+	))
+
+	ctx := newChannelRouteContext()
+	channel, err := selectSatisfiedChannel(newChannelRouteRetryParam(ctx, "default"), "default", 0)
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, 1, channel.Id)
+	assert.Equal(t, 2, queryCount, "candidate abilities and channels should each be loaded once")
+	state, exists := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, exists)
+	require.Len(t, state.trace.Events, 1)
+	assert.Equal(t, []int{2}, state.trace.Events[0].NextIDs)
 }
 
 func TestBuildChannelExecutionPlanMarksBatchedCooldowns(t *testing.T) {
@@ -604,14 +642,17 @@ func TestChannelExecutionTraceDebouncesRunningRedisPublishes(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 
 	MarkChannelExecutionSuccess(ctx)
-	assert.Equal(t, 2, hook.pipelineCount())
 	state, exists := channelExecutionTraceStateFromContext(ctx)
 	require.True(t, exists)
+	require.Eventually(t, func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return hook.pipelineCount() == 2 && state.revision == state.publishedRevision
+	}, time.Second, 10*time.Millisecond)
 	state.mu.Lock()
 	assert.Equal(t, "success", state.trace.Status)
 	require.Len(t, state.trace.Events, 6)
 	assert.Equal(t, "success", state.trace.Events[5].State)
-	assert.Equal(t, state.revision, state.publishedRevision)
 	state.mu.Unlock()
 }
 
@@ -649,16 +690,21 @@ func TestChannelExecutionTraceTerminalPublishCannotBeOverwrittenByRunningSnapsho
 	}()
 	select {
 	case <-terminalDone:
-		t.Fatal("terminal publish bypassed the in-flight running publish")
+		// Terminal persistence is queued and must not delay the request on an
+		// in-flight running snapshot.
 	case <-time.After(25 * time.Millisecond):
+		t.Fatal("terminal trace update blocked on Redis persistence")
 	}
 	close(hook.releaseFirst)
-	select {
-	case <-terminalDone:
-	case <-time.After(time.Second):
-		t.Fatal("terminal publish did not complete")
-	}
-
+	state, exists := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, exists)
+	require.Eventually(t, func() bool {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		return len(hook.snapshotStatuses()) == 2 &&
+			state.revision == state.publishedRevision &&
+			!state.publishQueued
+	}, time.Second, 10*time.Millisecond)
 	assert.Equal(t, []string{"running", "success"}, hook.snapshotStatuses())
 }
 
@@ -677,11 +723,13 @@ func TestChannelExecutionTraceTerminalPublishRetriesAfterRedisRecovery(t *testin
 	require.NotNil(t, state)
 
 	MarkChannelExecutionSuccess(ctx)
-	require.Equal(t, 1, hook.pipelineCount())
 	fallbackTrace, found, err := GetChannelExecutionTrace("terminal-publish-recovery")
 	require.NoError(t, err)
 	require.True(t, found)
 	assert.Equal(t, "success", fallbackTrace.Status)
+	require.Eventually(t, func() bool {
+		return hook.pipelineCount() >= 1
+	}, time.Second, 10*time.Millisecond)
 	recent, err := ListChannelExecutionTraces(0, "default", 20)
 	require.NoError(t, err)
 	require.Len(t, recent, 1)
@@ -793,7 +841,7 @@ func TestChannelExecutionTraceFallbackIsBoundedWithoutRecentIndexAmplification(t
 	channelExecutionRecentMu.Lock()
 	defer channelExecutionRecentMu.Unlock()
 	assert.Len(t, channelExecutionFallback, channelExecutionFallbackSize)
-	assert.Len(t, channelExecutionFallbackOrder, channelExecutionFallbackSize)
+	assert.Equal(t, channelExecutionFallbackSize, channelExecutionFallbackOrder.Len())
 	assert.NotContains(t, channelExecutionFallback, "bounded-fallback-0")
 	assert.Contains(t, channelExecutionFallback, fmt.Sprintf("bounded-fallback-%d", channelExecutionFallbackSize))
 	assert.Empty(t, channelExecutionRecent)
@@ -1096,6 +1144,66 @@ func TestChannelRouteCanDisableCooldownWhileStillFailingOver(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, next)
 	assert.Equal(t, 1, next.Id)
+}
+
+func TestContextLimitSwitchesChannelWithoutCooldown(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	seedChannelRouteChannel(t, db, 1, "default", 2)
+	seedChannelRouteChannel(t, db, 2, "default", 1)
+	model.InitChannelCache()
+	common.ChannelRouteSameChannelRetries = 2
+
+	ctx := newChannelRouteContext()
+	param := newChannelRouteRetryParam(ctx, "default")
+	first, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Equal(t, 1, first.Id)
+	ctx.Set("use_channel", []string{"1"})
+
+	contextLimitErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "Your input exceeds the context window of this model.",
+		Code:    "context_length_exceeded",
+	}, http.StatusBadGateway)
+	require.False(t, ShouldRetrySameChannelRoute(contextLimitErr, 0))
+	require.True(t, MarkChannelRouteFailure(ctx, contextLimitErr))
+	require.False(t, IsChannelRouteFrozen("default", 1, common.GetTimestamp()))
+
+	param.SetRetry(1)
+	second, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	require.Equal(t, 2, second.Id)
+}
+
+func TestContextLimitStopsChannelFailoverAfterUnusedCandidatesAreExhausted(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	seedChannelRouteChannel(t, db, 1, "default", 2)
+	seedChannelRouteChannel(t, db, 2, "default", 1)
+	model.InitChannelCache()
+
+	ctx := newChannelRouteContext()
+	param := newChannelRouteRetryParam(ctx, "default")
+	first, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Equal(t, 1, first.Id)
+	ctx.Set("use_channel", []string{"1"})
+
+	contextLimitErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "context length exceeded",
+		Code:    "context_length_exceeded",
+	}, http.StatusBadGateway)
+	require.True(t, MarkChannelRouteFailure(ctx, contextLimitErr))
+
+	param.SetRetry(1)
+	second, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	require.Equal(t, 2, second.Id)
+	ctx.Set("use_channel", []string{"1", "2"})
+
+	require.False(t, MarkChannelRouteFailure(ctx, contextLimitErr))
 }
 
 func TestChannelRouteCooldownZeroExhaustsPrimaryGroupBeforeCoolingAndFallback(t *testing.T) {
@@ -1537,11 +1645,26 @@ func TestChannelExecutionPlanAndTraceFollowActualRoute(t *testing.T) {
 	failedCtx.Set(common.RequestIdKey, "request-trace-failed")
 	TrackChannelExecutionSelection(failedCtx, "default", channelRouteTestModel, "/v1/chat/completions", first, 0)
 	TrackChannelExecutionFailure(failedCtx, first.Id, "upstream failed")
+	RecordChannelExecutionFinalOutcome(
+		failedCtx,
+		http.StatusBadGateway,
+		"raw upstream failure",
+		http.StatusServiceUnavailable,
+		"configured user response",
+		true,
+	)
 	errorAdminInfo := map[string]interface{}{}
 	AppendChannelExecutionTraceErrorAdminInfo(failedCtx, errorAdminInfo)
 	errorTrace, exists := errorAdminInfo["channel_execution_trace"].(ChannelExecutionTrace)
 	require.True(t, exists)
 	assert.Equal(t, "failed", errorTrace.Status)
+	require.NotNil(t, errorTrace.OriginalFinalError)
+	assert.Equal(t, http.StatusBadGateway, errorTrace.OriginalFinalError.StatusCode)
+	assert.Equal(t, "raw upstream failure", errorTrace.OriginalFinalError.Message)
+	require.NotNil(t, errorTrace.UserVisibleError)
+	assert.Equal(t, http.StatusServiceUnavailable, errorTrace.UserVisibleError.StatusCode)
+	assert.Equal(t, "configured user response", errorTrace.UserVisibleError.Message)
+	assert.True(t, errorTrace.CustomErrorApplied)
 	runningState, exists := channelExecutionTraceStateFromContext(failedCtx)
 	require.True(t, exists)
 	assert.Equal(t, "running", runningState.trace.Status)
@@ -1552,6 +1675,9 @@ func TestChannelExecutionPlanAndTraceFollowActualRoute(t *testing.T) {
 	fullTrace, exists := failedAdminInfo["channel_execution_trace"].(ChannelExecutionTrace)
 	require.True(t, exists)
 	assert.Equal(t, "failed", fullTrace.Status)
+	require.NotNil(t, fullTrace.OriginalFinalError)
+	require.NotNil(t, fullTrace.UserVisibleError)
+	assert.True(t, fullTrace.CustomErrorApplied)
 	require.NotEmpty(t, fullTrace.Events)
 	assert.Equal(t, "finished", fullTrace.Events[len(fullTrace.Events)-1].State)
 }

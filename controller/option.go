@@ -122,6 +122,96 @@ type OptionUpdateRequest struct {
 	Value any    `json:"value"`
 }
 
+type OptionBulkUpdateRequest struct {
+	Options []OptionUpdateRequest `json:"options"`
+}
+
+var routingReliabilityBulkOptionKeys = map[string]struct{}{
+	"RetryTimes":                                {},
+	"ChannelRouteCooldownEnabled":               {},
+	"ChannelRouteCooldownSeconds":               {},
+	"ChannelRouteSameChannelRetries":            {},
+	"ChannelRouteGroupExclusionsEnabled":        {},
+	"ChannelRouteGroupExclusions":               {},
+	"ChannelDisableThreshold":                   {},
+	"AutomaticDisableChannelEnabled":            {},
+	"AutomaticEnableChannelEnabled":             {},
+	"AutomaticDisableKeywords":                  {},
+	"AutomaticDisableStatusCodes":               {},
+	"AutomaticRetryStatusCodes":                 {},
+	"monitor_setting.auto_test_channel_enabled": {},
+	"monitor_setting.auto_test_channel_minutes": {},
+	"monitor_setting.channel_test_mode":         {},
+	"error_response_setting.enabled":            {},
+	"error_response_setting.rules":              {},
+	"request_error_routing_setting.enabled":     {},
+	"request_error_routing_setting.rules":       {},
+}
+
+func optionValueToString(value any) string {
+	switch typedValue := value.(type) {
+	case bool:
+		return common.Interface2String(typedValue)
+	case float64:
+		return common.Interface2String(typedValue)
+	case int:
+		return common.Interface2String(typedValue)
+	default:
+		return fmt.Sprintf("%v", value)
+	}
+}
+
+func validateRoutingReliabilityOption(key string, value string) error {
+	switch key {
+	case "AutomaticDisableStatusCodes", "AutomaticRetryStatusCodes":
+		_, err := operation_setting.ParseHTTPStatusCodeRanges(value)
+		return err
+	case "ChannelRouteCooldownSeconds":
+		seconds, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || seconds < 0 || seconds > 31536000 {
+			return fmt.Errorf("渠道路由冷却时间必须在 0 到 31536000 秒之间")
+		}
+	case "ChannelRouteSameChannelRetries":
+		retries, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || retries < 0 || retries > 10 {
+			return fmt.Errorf("同渠道重试次数必须在 0 到 10 之间")
+		}
+	case "ChannelRouteGroupExclusions":
+		_, err := setting.ParseChannelRouteGroupExclusions(value)
+		return err
+	case "error_response_setting.rules":
+		return operation_setting.ValidateCustomErrorResponseRulesJSON(value)
+	case "request_error_routing_setting.rules":
+		return operation_setting.ValidateRequestErrorRoutingRulesJSON(value)
+	}
+	return nil
+}
+
+func prepareRoutingReliabilityOptionUpdates(options []OptionUpdateRequest) (map[string]string, error) {
+	if len(options) == 0 {
+		return nil, fmt.Errorf("至少需要提交一项设置")
+	}
+	if len(options) > len(routingReliabilityBulkOptionKeys) {
+		return nil, fmt.Errorf("一次提交的设置项过多")
+	}
+
+	updates := make(map[string]string, len(options))
+	for _, option := range options {
+		if _, allowed := routingReliabilityBulkOptionKeys[option.Key]; !allowed {
+			return nil, fmt.Errorf("设置项 %s 不支持批量更新", option.Key)
+		}
+		if _, duplicated := updates[option.Key]; duplicated {
+			return nil, fmt.Errorf("设置项 %s 重复提交", option.Key)
+		}
+		value := optionValueToString(option.Value)
+		if err := validateRoutingReliabilityOption(option.Key, value); err != nil {
+			return nil, fmt.Errorf("设置项 %s 无效: %w", option.Key, err)
+		}
+		updates[option.Key] = value
+	}
+	return updates, nil
+}
+
 // optionAuditValueKeys is deliberately allowlisted: only non-sensitive routing
 // values may be persisted in audit metadata.
 var optionAuditValueKeys = map[string]struct{}{
@@ -155,16 +245,7 @@ func UpdateOption(c *gin.Context) {
 		})
 		return
 	}
-	switch option.Value.(type) {
-	case bool:
-		option.Value = common.Interface2String(option.Value.(bool))
-	case float64:
-		option.Value = common.Interface2String(option.Value.(float64))
-	case int:
-		option.Value = common.Interface2String(option.Value.(int))
-	default:
-		option.Value = fmt.Sprintf("%v", option.Value)
-	}
+	option.Value = optionValueToString(option.Value)
 	if option.Key == "TrustedSiteOrigins" {
 		normalized, normalizeErr := service.NormalizeTrustedSiteOrigins(option.Value.(string))
 		if normalizeErr != nil {
@@ -175,6 +256,13 @@ func UpdateOption(c *gin.Context) {
 			return
 		}
 		option.Value = normalized
+	}
+	if err = validateRoutingReliabilityOption(option.Key, option.Value.(string)); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
 	}
 	switch option.Key {
 	case "QuotaForInviter", "QuotaForInvitee", "InviteRechargeRebateRatio":
@@ -359,65 +447,12 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
-	case "AutomaticDisableStatusCodes":
-		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
-			return
-		}
-	case "AutomaticRetryStatusCodes":
-		_, err = operation_setting.ParseHTTPStatusCodeRanges(option.Value.(string))
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
-			return
-		}
-	case "ChannelRouteCooldownSeconds":
-		seconds, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
-		if parseErr != nil || seconds < 0 || seconds > 31536000 {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "渠道路由冷却时间必须在 0 到 31536000 秒之间",
-			})
-			return
-		}
-	case "ChannelRouteSameChannelRetries":
-		retries, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
-		if parseErr != nil || retries < 0 || retries > 10 {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "同渠道重试次数必须在 0 到 10 之间",
-			})
-			return
-		}
-	case "ChannelRouteGroupExclusions":
-		if _, parseErr := setting.ParseChannelRouteGroupExclusions(option.Value.(string)); parseErr != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": parseErr.Error(),
-			})
-			return
-		}
 	case "perf_metrics_setting.cache_hit_rate_baseline":
 		baseline, parseErr := strconv.Atoi(strings.TrimSpace(option.Value.(string)))
 		if parseErr != nil || validateCacheHitRateBaseline(baseline) != nil {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
 				"message": "缓存命中率基线必须在 0 到 100 之间",
-			})
-			return
-		}
-	case "error_response_setting.rules":
-		err = operation_setting.ValidateCustomErrorResponseRulesJSON(option.Value.(string))
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
 			})
 			return
 		}
@@ -472,6 +507,50 @@ func UpdateOption(c *gin.Context) {
 	}
 	// 仅白名单中的非敏感路由配置记录前后值，其余配置只记录名称。
 	recordManageAudit(c, "option.update", buildOptionAuditParams(option.Key, previousValue, currentValue))
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+	})
+}
+
+func UpdateOptionsBulk(c *gin.Context) {
+	var request OptionBulkUpdateRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "无效的参数",
+		})
+		return
+	}
+
+	updates, err := prepareRoutingReliabilityOptionUpdates(request.Options)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	previousValues := make(map[string]string, len(updates))
+	common.OptionMapRWMutex.RLock()
+	for key := range updates {
+		previousValues[key] = common.OptionMap[key]
+	}
+	common.OptionMapRWMutex.RUnlock()
+
+	if err = model.UpdateOptionsBulk(updates); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	for _, option := range request.Options {
+		recordManageAudit(c, "option.update", buildOptionAuditParams(
+			option.Key,
+			previousValues[option.Key],
+			updates[option.Key],
+		))
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

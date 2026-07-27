@@ -70,6 +70,7 @@ const MODELS_SECTIONS = [
     titleKey: 'Routing Reliability',
     build: (settings: ModelSettings) => (
       <RoutingReliabilitySection
+        key='routing-reliability'
         view='routing'
         defaultValues={{
           RetryTimes: settings.RetryTimes,
@@ -97,6 +98,10 @@ const MODELS_SECTIONS = [
             settings['error_response_setting.enabled'],
           'error_response_setting.rules':
             settings['error_response_setting.rules'],
+          'request_error_routing_setting.enabled':
+            settings['request_error_routing_setting.enabled'],
+          'request_error_routing_setting.rules':
+            settings['request_error_routing_setting.rules'],
         }}
       />
     ),
@@ -106,6 +111,7 @@ const MODELS_SECTIONS = [
     titleKey: 'Custom error responses',
     build: (settings: ModelSettings) => (
       <RoutingReliabilitySection
+        key='custom-error-responses'
         view='custom-errors'
         defaultValues={{
           RetryTimes: settings.RetryTimes,
@@ -133,6 +139,10 @@ const MODELS_SECTIONS = [
             settings['error_response_setting.enabled'],
           'error_response_setting.rules':
             settings['error_response_setting.rules'],
+          'request_error_routing_setting.enabled':
+            settings['request_error_routing_setting.enabled'],
+          'request_error_routing_setting.rules':
+            settings['request_error_routing_setting.rules'],
         }}
       />
     ),

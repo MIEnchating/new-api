@@ -121,6 +121,89 @@ type ChannelSelectionCandidate struct {
 	Status      int    `json:"status"`
 }
 
+// ChannelSelectionSnapshot is a single-attempt view of the channels eligible
+// for a group/model/path. Callers may reuse it for cooldown checks, weighted
+// selection and diagnostics without reloading the candidate set. A new
+// snapshot must be loaded for every retry so channel updates remain visible.
+type ChannelSelectionSnapshot struct {
+	channels    []*Channel
+	candidates  []ChannelSelectionCandidate
+	cacheBacked bool
+}
+
+func newChannelSelectionSnapshot(channels []*Channel, cacheBacked bool) *ChannelSelectionSnapshot {
+	candidates := make([]ChannelSelectionCandidate, 0, len(channels))
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		candidates = append(candidates, ChannelSelectionCandidate{
+			ChannelID:   channel.Id,
+			ChannelName: channel.Name,
+			Priority:    channel.GetPriority(),
+			Weight:      channel.GetWeight(),
+			Status:      channel.Status,
+		})
+	}
+	return &ChannelSelectionSnapshot{channels: channels, candidates: candidates, cacheBacked: cacheBacked}
+}
+
+func (snapshot *ChannelSelectionSnapshot) Candidates() []ChannelSelectionCandidate {
+	if snapshot == nil {
+		return nil
+	}
+	return append([]ChannelSelectionCandidate(nil), snapshot.candidates...)
+}
+
+func (snapshot *ChannelSelectionSnapshot) Select(retry int, filter ChannelCandidateFilter) (*Channel, error) {
+	if snapshot == nil {
+		return nil, nil
+	}
+	if snapshot.cacheBacked {
+		channelSyncLock.RLock()
+		defer channelSyncLock.RUnlock()
+	}
+	channels := snapshot.channels
+	if filter != nil {
+		channels = make([]*Channel, 0, len(snapshot.channels))
+		for _, channel := range snapshot.channels {
+			if filter(channel) {
+				channels = append(channels, channel)
+			}
+		}
+	}
+	return selectRandomChannelByPriority(channels, retry)
+}
+
+// LoadSatisfiedChannelSelectionSnapshot loads the exact candidate set used by
+// filtered channel selection. The database path intentionally preserves the
+// existing exact-model behavior; the cache path retains its normalized-model
+// fallback.
+func LoadSatisfiedChannelSelectionSnapshot(group string, modelName string, requestPath string) (*ChannelSelectionSnapshot, error) {
+	if !common.MemoryCacheEnabled {
+		return loadSatisfiedChannelSelectionSnapshotFromDB(group, modelName, requestPath)
+	}
+
+	channelSyncLock.RLock()
+	defer channelSyncLock.RUnlock()
+
+	channelIDs := filterChannelsByRequestPathAndModel(group2model2channels[group][modelName], requestPath, modelName)
+	if len(channelIDs) == 0 {
+		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
+		channelIDs = filterChannelsByRequestPathAndModel(group2model2channels[group][normalizedModel], requestPath, modelName)
+	}
+
+	channels := make([]*Channel, 0, len(channelIDs))
+	for _, channelID := range channelIDs {
+		channel, ok := channelsIDM[channelID]
+		if !ok {
+			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelID)
+		}
+		channels = append(channels, channel)
+	}
+	return newChannelSelectionSnapshot(channels, true), nil
+}
+
 // ListSatisfiedChannelCandidates returns the deterministic candidate snapshot
 // used to explain routing decisions. It never performs weighted selection.
 func ListSatisfiedChannelCandidates(group string, modelName string, requestPath string) ([]ChannelSelectionCandidate, error) {
@@ -224,35 +307,11 @@ func GetRandomSatisfiedChannelWithFilter(group string, model string, retry int, 
 	if !common.MemoryCacheEnabled {
 		return GetChannelWithFilter(group, model, retry, requestPath, filter)
 	}
-
-	channelSyncLock.RLock()
-	defer channelSyncLock.RUnlock()
-
-	// First, try to find channels with the exact model name.
-	channels := filterChannelsByRequestPathAndModel(group2model2channels[group][model], requestPath, model)
-
-	// If no channels found, try to find channels with the normalized model name.
-	if len(channels) == 0 {
-		normalizedModel := ratio_setting.FormatMatchingModelName(model)
-		channels = filterChannelsByRequestPathAndModel(group2model2channels[group][normalizedModel], requestPath, model)
+	snapshot, err := LoadSatisfiedChannelSelectionSnapshot(group, model, requestPath)
+	if err != nil {
+		return nil, err
 	}
-
-	if len(channels) == 0 {
-		return nil, nil
-	}
-
-	candidates := make([]*Channel, 0, len(channels))
-	for _, channelId := range channels {
-		channel, ok := channelsIDM[channelId]
-		if !ok {
-			return nil, fmt.Errorf("数据库一致性错误，渠道# %d 不存在，请联系管理员修复", channelId)
-		}
-		if filter != nil && !filter(channel) {
-			continue
-		}
-		candidates = append(candidates, channel)
-	}
-	return selectRandomChannelByPriority(candidates, retry)
+	return snapshot.Select(retry, filter)
 }
 
 func selectRandomChannelByPriority(channels []*Channel, retry int) (*Channel, error) {

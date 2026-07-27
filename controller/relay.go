@@ -180,7 +180,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	var retrySameChannel *model.Channel
 	sameChannelRetriesUsed := 0
 	var lastFailedChannelError *types.NewAPIError
-	finalErrorLogged := false
 
 	for {
 		relayInfo.RetryIndex = retryParam.GetRetry()
@@ -259,16 +258,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 					*types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()),
 					streamAPIError,
 				)
+				sameChannelRetriesUsed = 0
 				newAPIError = streamAPIError
 				lastFailedChannelError = streamAPIError
 				willRetry := shouldAttemptNextChannel(c, streamAPIError, common.RetryTimes-retryParam.GetRetry(), routeAdvanced)
-				recordChannelErrorLog(c, streamAPIError, relayInfo, willRetry)
-				finalErrorLogged = !willRetry
 				if willRetry {
+					recordChannelErrorLog(c, streamAPIError, relayInfo, true)
 					retryParam.IncreaseRetry()
 					continue
 				}
-				return
+				break
 			}
 			relayInfo.LastError = nil
 			service.MarkChannelRouteSuccess(c)
@@ -300,13 +299,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		sameChannelRetriesUsed = 0
 		lastFailedChannelError = newAPIError
 		willRetry := shouldAttemptNextChannel(c, newAPIError, common.RetryTimes-retryParam.GetRetry(), routeAdvanced)
-		recordChannelErrorLog(c, newAPIError, relayInfo, willRetry)
-		finalErrorLogged = !willRetry
-
-		if !willRetry {
-			break
+		if willRetry {
+			recordChannelErrorLog(c, newAPIError, relayInfo, true)
+			retryParam.IncreaseRetry()
+			continue
 		}
-		retryParam.IncreaseRetry()
+		break
 	}
 
 	useChannel := c.GetStringSlice("use_channel")
@@ -318,11 +316,13 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		retryLogStr := fmt.Sprintf("%s：%s", mode, strings.Trim(strings.Join(strings.Fields(fmt.Sprint(useChannel)), "->"), "[]"))
 		logger.LogInfo(c, retryLogStr)
 	}
-	if newAPIError != nil && !finalErrorLogged && lastFailedChannelError != nil {
-		recordChannelErrorLog(c, newAPIError, relayInfo, false)
-	}
 	if newAPIError != nil {
-		service.MarkChannelExecutionFailed(c, channelExecutionErrorReason(newAPIError))
+		finalReason := channelExecutionErrorReason(newAPIError)
+		prepareRelayErrorResponse(c, newAPIError, requestId)
+		service.MarkChannelExecutionFailed(c, finalReason)
+		if lastFailedChannelError != nil {
+			recordChannelErrorLog(c, newAPIError, relayInfo, false)
+		}
 		gopool.Go(func() {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
@@ -333,14 +333,9 @@ func writeRelayErrorResponse(c *gin.Context, ws *websocket.Conn, relayFormat typ
 	if err == nil {
 		return
 	}
-	logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(err.Error())))
-	_, messageReplaced := operation_setting.ApplyCustomErrorResponseWithResult(err)
-	if messageReplaced {
-		err.DisableResponseMasking()
-	} else {
-		err.ExposeOriginalErrorForResponse()
-	}
-	setRelayResponseRequestId(err, requestId)
+	preparation := prepareRelayErrorResponse(c, err, requestId)
+	err = preparation.Err
+	logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(preparation.LogMessage)))
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
 		helper.WssError(c, ws, err.ToOpenAIError())
@@ -402,6 +397,18 @@ var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		return true // 允许跨域
 	},
+}
+
+const relayErrorResponsePreparationKey = "relay_error_response_preparation"
+
+type relayErrorResponsePreparation struct {
+	Err                *types.NewAPIError
+	LogMessage         string
+	OriginalStatusCode int
+	OriginalMessage    string
+	UserStatusCode     int
+	UserMessage        string
+	CustomErrorApplied bool
 }
 
 func addUsedChannel(c *gin.Context, channelId int) {
@@ -554,24 +561,24 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 	if hasManagedRouting(c) {
 		service.ClearChannelAffinityForRetryableFailure(c, channelError.ChannelId, err)
 	}
-	channelRouteFrozen := false
+	channelRouteAdvanced := false
 	if !nextChannelExcluded {
-		channelRouteFrozen = service.MarkChannelRouteFailure(c, err)
+		channelRouteAdvanced = service.MarkChannelRouteFailure(c, err)
 	} else {
 		logger.LogInfo(c, fmt.Sprintf("渠道路由分组已排除跨渠道切换：分组 %s", common.GetContextKeyString(c, constant.ContextKeyChannelRouteGroup)))
 	}
-	tokenGroupRouteFrozen := false
-	if !channelRouteFrozen && !nextChannelExcluded {
-		tokenGroupRouteFrozen = service.MarkTokenGroupRouteFailure(c, err)
+	tokenGroupRouteAdvanced := false
+	if !channelRouteAdvanced && !nextChannelExcluded {
+		tokenGroupRouteAdvanced = service.MarkTokenGroupRouteFailure(c, err)
 	}
 	// 不要使用context获取渠道信息，异步处理时可能会出现渠道信息不一致的情况
 	// do not use context to get channel info, there may be inconsistent channel info when processing asynchronously
-	if !channelRouteFrozen && service.ShouldDisableChannel(err) && channelError.AutoBan {
+	if !channelRouteAdvanced && service.ShouldDisableChannelForContext(c, err) && channelError.AutoBan {
 		gopool.Go(func() {
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
 	}
-	return channelRouteFrozen || tokenGroupRouteFrozen
+	return channelRouteAdvanced || tokenGroupRouteAdvanced
 }
 
 func recordChannelErrorLog(c *gin.Context, err *types.NewAPIError, relayInfo *relaycommon.RelayInfo, adminOnly bool) {
@@ -589,7 +596,8 @@ func recordChannelErrorLog(c *gin.Context, err *types.NewAPIError, relayInfo *re
 		}
 		other["error_type"] = err.GetErrorType()
 		other["error_code"] = err.GetErrorCode()
-		other["status_code"] = err.StatusCode
+		statusCode, logContent := relayErrorLogDetails(c, err)
+		other["status_code"] = statusCode
 		other["channel_id"] = channelId
 		other["channel_name"] = c.GetString("channel_name")
 		other["channel_type"] = c.GetInt("channel_type")
@@ -613,8 +621,54 @@ func recordChannelErrorLog(c *gin.Context, err *types.NewAPIError, relayInfo *re
 			startTime = time.Now()
 		}
 		useTimeSeconds := int(time.Since(startTime).Seconds())
-		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, formatRelayErrorLogContent(err), tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
+		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, logContent, tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
+}
+
+func prepareRelayErrorResponse(c *gin.Context, err *types.NewAPIError, requestId string) *relayErrorResponsePreparation {
+	if c != nil {
+		if value, exists := c.Get(relayErrorResponsePreparationKey); exists {
+			if preparation, ok := value.(*relayErrorResponsePreparation); ok && preparation != nil {
+				return preparation
+			}
+		}
+	}
+
+	logMessage := err.Error()
+	originalMessage := logMessage
+	if originalErr := err.InternalError(); originalErr != nil {
+		originalMessage = originalErr.Error()
+	}
+	originalStatusCode := err.StatusCode
+	customErrorApplied, messageReplaced := operation_setting.ApplyCustomErrorResponseWithResult(err)
+	if messageReplaced {
+		err.DisableResponseMasking()
+	} else {
+		err.ExposeOriginalErrorForResponse()
+	}
+	setRelayResponseRequestId(err, requestId)
+
+	preparation := &relayErrorResponsePreparation{
+		Err:                err,
+		LogMessage:         logMessage,
+		OriginalStatusCode: originalStatusCode,
+		OriginalMessage:    originalMessage,
+		UserStatusCode:     err.StatusCode,
+		UserMessage:        err.Error(),
+		CustomErrorApplied: customErrorApplied,
+	}
+	if c != nil {
+		c.Set(relayErrorResponsePreparationKey, preparation)
+		service.RecordChannelExecutionFinalOutcome(
+			c,
+			preparation.OriginalStatusCode,
+			preparation.OriginalMessage,
+			preparation.UserStatusCode,
+			preparation.UserMessage,
+			preparation.CustomErrorApplied,
+		)
+	}
+	return preparation
 }
 
 func setRelayResponseRequestId(err *types.NewAPIError, requestId string) {
@@ -638,14 +692,32 @@ func formatRelayErrorLogContent(err *types.NewAPIError) string {
 	if originalErr := err.InternalError(); originalErr != nil {
 		message = originalErr.Error()
 	}
+	return formatRelayErrorStatusMessage(err.StatusCode, message)
+}
+
+func relayErrorLogDetails(c *gin.Context, err *types.NewAPIError) (int, string) {
+	if c != nil {
+		if value, exists := c.Get(relayErrorResponsePreparationKey); exists {
+			if preparation, ok := value.(*relayErrorResponsePreparation); ok && preparation != nil && preparation.Err == err {
+				return preparation.UserStatusCode, formatRelayErrorStatusMessage(
+					preparation.UserStatusCode,
+					preparation.UserMessage,
+				)
+			}
+		}
+	}
+	return err.StatusCode, formatRelayErrorLogContent(err)
+}
+
+func formatRelayErrorStatusMessage(statusCode int, message string) string {
 	message = common.MessageWithoutRequestId(message)
-	if err.StatusCode == 0 {
+	if statusCode == 0 {
 		return message
 	}
 	if message == "" {
-		return fmt.Sprintf("status_code=%d", err.StatusCode)
+		return fmt.Sprintf("status_code=%d", statusCode)
 	}
-	return fmt.Sprintf("status_code=%d, %s", err.StatusCode, message)
+	return fmt.Sprintf("status_code=%d, %s", statusCode, message)
 }
 
 func RelayMidjourney(c *gin.Context) {

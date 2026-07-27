@@ -1,18 +1,33 @@
 package operation_setting
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/stretchr/testify/require"
 )
 
-func TestApplyCustomErrorResponse_StatusCodeOnly(t *testing.T) {
-	orig := errorResponseSetting
-	t.Cleanup(func() { errorResponseSetting = orig })
+func withErrorResponseSetting(t *testing.T, setting ErrorResponseSetting) {
+	t.Helper()
+	current := GetErrorResponseSetting()
+	original := *current
+	original.Rules = append([]CustomErrorResponseRule(nil), current.Rules...)
+	*current = setting
+	RefreshErrorResponseSnapshot()
+	t.Cleanup(func() {
+		*current = original
+		RefreshErrorResponseSnapshot()
+	})
+}
 
-	errorResponseSetting = ErrorResponseSetting{
+func TestApplyCustomErrorResponse_StatusCodeOnly(t *testing.T) {
+	withErrorResponseSetting(t, ErrorResponseSetting{
 		Enabled: true,
 		Rules: []CustomErrorResponseRule{
 			{
@@ -25,7 +40,7 @@ func TestApplyCustomErrorResponse_StatusCodeOnly(t *testing.T) {
 				PassThroughMessage:    false,
 			},
 		},
-	}
+	})
 
 	apiErr := types.NewOpenAIError(errors.New("upstream overloaded"), types.ErrorCodeBadResponse, 500)
 
@@ -36,10 +51,7 @@ func TestApplyCustomErrorResponse_StatusCodeOnly(t *testing.T) {
 }
 
 func TestApplyCustomErrorResponse_MessageOnly(t *testing.T) {
-	orig := errorResponseSetting
-	t.Cleanup(func() { errorResponseSetting = orig })
-
-	errorResponseSetting = ErrorResponseSetting{
+	withErrorResponseSetting(t, ErrorResponseSetting{
 		Enabled: true,
 		Rules: []CustomErrorResponseRule{
 			{
@@ -51,7 +63,7 @@ func TestApplyCustomErrorResponse_MessageOnly(t *testing.T) {
 				PassThroughMessage:    false,
 			},
 		},
-	}
+	})
 
 	apiErr := types.NewOpenAIError(errors.New("Quota Exceeded"), types.ErrorCodeBadResponse, 500)
 
@@ -61,11 +73,31 @@ func TestApplyCustomErrorResponse_MessageOnly(t *testing.T) {
 	require.Equal(t, "上游额度不足", apiErr.ToOpenAIError().Message)
 }
 
-func TestApplyCustomErrorResponse_ExactMessageMatch(t *testing.T) {
-	orig := errorResponseSetting
-	t.Cleanup(func() { errorResponseSetting = orig })
+func TestApplyCustomErrorResponse_MatchesHiddenInternalMessage(t *testing.T) {
+	withErrorResponseSetting(t, ErrorResponseSetting{
+		Enabled: true,
+		Rules: []CustomErrorResponseRule{
+			{
+				Enabled:            true,
+				MessageContains:    "raw upstream quota exhausted",
+				ResponseStatusCode: 503,
+				ResponseMessage:    "上游额度不足",
+			},
+		},
+	})
+	apiErr := types.NewError(
+		errors.New("raw upstream quota exhausted for account 7"),
+		types.ErrorCodeDoRequestFailed,
+		types.ErrOptionWithHideErrMsg("upstream error: do request failed"),
+	)
 
-	errorResponseSetting = ErrorResponseSetting{
+	require.True(t, ApplyCustomErrorResponse(apiErr))
+	require.Equal(t, 503, apiErr.StatusCode)
+	require.Equal(t, "上游额度不足", apiErr.ToOpenAIError().Message)
+}
+
+func TestApplyCustomErrorResponse_ExactMessageMatch(t *testing.T) {
+	withErrorResponseSetting(t, ErrorResponseSetting{
 		Enabled: true,
 		Rules: []CustomErrorResponseRule{
 			{
@@ -76,7 +108,7 @@ func TestApplyCustomErrorResponse_ExactMessageMatch(t *testing.T) {
 				ResponseMessage:    "精准命中",
 			},
 		},
-	}
+	})
 
 	partial := types.NewOpenAIError(errors.New("upstream quota exceeded"), types.ErrorCodeBadResponse, 500)
 	ApplyCustomErrorResponse(partial)
@@ -89,10 +121,7 @@ func TestApplyCustomErrorResponse_ExactMessageMatch(t *testing.T) {
 }
 
 func TestApplyCustomErrorResponse_LegacyEmptyMessageModeUsesContains(t *testing.T) {
-	orig := errorResponseSetting
-	t.Cleanup(func() { errorResponseSetting = orig })
-
-	errorResponseSetting = ErrorResponseSetting{
+	withErrorResponseSetting(t, ErrorResponseSetting{
 		Enabled: true,
 		Rules: []CustomErrorResponseRule{
 			{
@@ -102,7 +131,7 @@ func TestApplyCustomErrorResponse_LegacyEmptyMessageModeUsesContains(t *testing.
 				ResponseMessage:    "旧规则仍然命中",
 			},
 		},
-	}
+	})
 
 	apiErr := types.NewOpenAIError(errors.New("upstream quota exceeded temporarily"), types.ErrorCodeBadResponse, 500)
 	require.True(t, ApplyCustomErrorResponse(apiErr))
@@ -110,10 +139,7 @@ func TestApplyCustomErrorResponse_LegacyEmptyMessageModeUsesContains(t *testing.
 }
 
 func TestApplyCustomErrorResponse_UsesLowestPriorityFirst(t *testing.T) {
-	orig := errorResponseSetting
-	t.Cleanup(func() { errorResponseSetting = orig })
-
-	errorResponseSetting = ErrorResponseSetting{
+	withErrorResponseSetting(t, ErrorResponseSetting{
 		Enabled: true,
 		Rules: []CustomErrorResponseRule{
 			{
@@ -133,7 +159,7 @@ func TestApplyCustomErrorResponse_UsesLowestPriorityFirst(t *testing.T) {
 				ResponseMessage:    "高优先级规则",
 			},
 		},
-	}
+	})
 
 	apiErr := types.NewOpenAIError(errors.New("upstream error"), types.ErrorCodeBadResponse, 500)
 	require.True(t, ApplyCustomErrorResponse(apiErr))
@@ -142,10 +168,7 @@ func TestApplyCustomErrorResponse_UsesLowestPriorityFirst(t *testing.T) {
 }
 
 func TestApplyCustomErrorResponse_AllModeRequiresBothConditions(t *testing.T) {
-	orig := errorResponseSetting
-	t.Cleanup(func() { errorResponseSetting = orig })
-
-	errorResponseSetting = ErrorResponseSetting{
+	withErrorResponseSetting(t, ErrorResponseSetting{
 		Enabled: true,
 		Rules: []CustomErrorResponseRule{
 			{
@@ -159,7 +182,7 @@ func TestApplyCustomErrorResponse_AllModeRequiresBothConditions(t *testing.T) {
 				PassThroughMessage:    false,
 			},
 		},
-	}
+	})
 
 	notMatchedErr := types.NewOpenAIError(errors.New("rate limit"), types.ErrorCodeBadResponse, 500)
 	ApplyCustomErrorResponse(notMatchedErr)
@@ -173,10 +196,7 @@ func TestApplyCustomErrorResponse_AllModeRequiresBothConditions(t *testing.T) {
 }
 
 func TestApplyCustomErrorResponse_PassThroughStatusAndMessage(t *testing.T) {
-	orig := errorResponseSetting
-	t.Cleanup(func() { errorResponseSetting = orig })
-
-	errorResponseSetting = ErrorResponseSetting{
+	withErrorResponseSetting(t, ErrorResponseSetting{
 		Enabled: true,
 		Rules: []CustomErrorResponseRule{
 			{
@@ -188,7 +208,7 @@ func TestApplyCustomErrorResponse_PassThroughStatusAndMessage(t *testing.T) {
 				PassThroughMessage:    true,
 			},
 		},
-	}
+	})
 
 	apiErr := types.NewOpenAIError(errors.New("upstream raw message"), types.ErrorCodeBadResponse, 500)
 
@@ -199,10 +219,7 @@ func TestApplyCustomErrorResponse_PassThroughStatusAndMessage(t *testing.T) {
 }
 
 func TestApplyCustomErrorResponse_EmptyConditionRuleDoesNotMatch(t *testing.T) {
-	orig := errorResponseSetting
-	t.Cleanup(func() { errorResponseSetting = orig })
-
-	errorResponseSetting = ErrorResponseSetting{
+	withErrorResponseSetting(t, ErrorResponseSetting{
 		Enabled: true,
 		Rules: []CustomErrorResponseRule{
 			{
@@ -213,7 +230,7 @@ func TestApplyCustomErrorResponse_EmptyConditionRuleDoesNotMatch(t *testing.T) {
 				PassThroughMessage:    false,
 			},
 		},
-	}
+	})
 
 	apiErr := types.NewOpenAIError(errors.New("any error"), types.ErrorCodeBadResponse, 500)
 
@@ -221,6 +238,77 @@ func TestApplyCustomErrorResponse_EmptyConditionRuleDoesNotMatch(t *testing.T) {
 
 	require.Equal(t, 500, apiErr.StatusCode)
 	require.Equal(t, "any error", apiErr.ToOpenAIError().Message)
+}
+
+func TestErrorResponseRuntimeSnapshotConcurrentUpdateAndApply(t *testing.T) {
+	current := GetErrorResponseSetting()
+	original := *current
+	original.Rules = append([]CustomErrorResponseRule(nil), current.Rules...)
+	t.Cleanup(func() {
+		*current = original
+		RefreshErrorResponseSnapshot()
+	})
+
+	first := ErrorResponseSetting{
+		Enabled: true,
+		Rules: []CustomErrorResponseRule{
+			{Enabled: true, StatusCodes: "502", ResponseStatusCode: 429, ResponseMessage: "first"},
+		},
+	}
+	second := ErrorResponseSetting{
+		Enabled: true,
+		Rules: []CustomErrorResponseRule{
+			{Enabled: true, StatusCodes: "502", ResponseStatusCode: 503, ResponseMessage: "second"},
+		},
+	}
+	updateSetting := func(setting ErrorResponseSetting) {
+		rules, err := json.Marshal(setting.Rules)
+		require.NoError(t, err)
+		require.NoError(t, UpdateErrorResponseSetting(map[string]string{
+			"enabled": strconv.FormatBool(setting.Enabled),
+			"rules":   string(rules),
+		}))
+	}
+	updateSetting(first)
+
+	var invalid atomic.Bool
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for writer := 0; writer < 2; writer++ {
+		writer := writer
+		go func() {
+			defer wg.Done()
+			for index := 0; index < 2_500; index++ {
+				if (writer+index)%2 == 0 {
+					updateSetting(first)
+				} else {
+					updateSetting(second)
+				}
+			}
+		}()
+	}
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 5_000 {
+				apiErr := types.NewOpenAIError(errors.New("upstream failed"), types.ErrorCodeBadResponse, http.StatusBadGateway)
+				if !ApplyCustomErrorResponse(apiErr) {
+					invalid.Store(true)
+					return
+				}
+				message := apiErr.ToOpenAIError().Message
+				if (apiErr.StatusCode != 429 || message != "first") &&
+					(apiErr.StatusCode != 503 || message != "second") {
+					invalid.Store(true)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	require.False(t, invalid.Load(), "readers must observe one complete immutable setting")
 }
 
 func TestValidateCustomErrorResponseRulesJSON(t *testing.T) {

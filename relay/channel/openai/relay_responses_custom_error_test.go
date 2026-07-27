@@ -21,15 +21,17 @@ func withCustomErrorResponseSetting(t *testing.T, setting operation_setting.Erro
 	original := *current
 	original.Rules = append([]operation_setting.CustomErrorResponseRule(nil), current.Rules...)
 	*current = setting
+	operation_setting.RefreshErrorResponseSnapshot()
 	originalStreamingTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 1
 	t.Cleanup(func() {
 		*current = original
+		operation_setting.RefreshErrorResponseSnapshot()
 		constant.StreamingTimeout = originalStreamingTimeout
 	})
 }
 
-func TestOaiResponsesStreamHandlerInterceptsMatchingFailedEvent(t *testing.T) {
+func TestOaiResponsesStreamHandlerReturnsMatchingFailedEventWithoutApplyingCustomResponse(t *testing.T) {
 	withCustomErrorResponseSetting(t, operation_setting.ErrorResponseSetting{
 		Enabled: true,
 		Rules: []operation_setting.CustomErrorResponseRule{
@@ -38,7 +40,7 @@ func TestOaiResponsesStreamHandlerInterceptsMatchingFailedEvent(t *testing.T) {
 				Enabled:            true,
 				MessageContains:    "context limit",
 				MessageMatchMode:   operation_setting.CustomErrorMessageMatchContains,
-				ResponseStatusCode: http.StatusBadRequest,
+				ResponseStatusCode: http.StatusTooManyRequests,
 				ResponseMessage:    "上下文长度超限",
 			},
 		},
@@ -61,10 +63,11 @@ func TestOaiResponsesStreamHandlerInterceptsMatchingFailedEvent(t *testing.T) {
 
 	require.NotNil(t, apiErr)
 	require.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+	require.Equal(t, "context limit exceeded", apiErr.Error())
 	require.Empty(t, recorder.Body.String())
 }
 
-func TestOaiResponsesStreamHandlerKeepsUnmatchedFailedEvent(t *testing.T) {
+func TestOaiResponsesStreamHandlerReturnsUnmatchedFailedEvent(t *testing.T) {
 	withCustomErrorResponseSetting(t, operation_setting.ErrorResponseSetting{
 		Enabled: true,
 		Rules: []operation_setting.CustomErrorResponseRule{
@@ -92,6 +95,8 @@ func TestOaiResponsesStreamHandlerKeepsUnmatchedFailedEvent(t *testing.T) {
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-test"}}
 	_, apiErr := OaiResponsesStreamHandler(c, info, resp)
 
-	require.Nil(t, apiErr)
-	require.Contains(t, recorder.Body.String(), "response.failed")
+	require.NotNil(t, apiErr)
+	require.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
+	require.Equal(t, "context limit exceeded", apiErr.Error())
+	require.Empty(t, recorder.Body.String())
 }

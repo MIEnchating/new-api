@@ -9,6 +9,8 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+
+	"github.com/gin-gonic/gin"
 )
 
 func formatNotifyType(channelId int, status int) string {
@@ -43,6 +45,14 @@ func EnableChannel(channelId int, usingKey string, channelName string) {
 }
 
 func ShouldDisableChannel(err *types.NewAPIError) bool {
+	return shouldDisableChannel(nil, err)
+}
+
+func ShouldDisableChannelForContext(c *gin.Context, err *types.NewAPIError) bool {
+	return shouldDisableChannel(c, err)
+}
+
+func shouldDisableChannel(c *gin.Context, err *types.NewAPIError) bool {
 	if !common.AutomaticDisableChannelEnabled {
 		return false
 	}
@@ -51,6 +61,16 @@ func ShouldDisableChannel(err *types.NewAPIError) bool {
 	}
 	if types.IsChannelError(err) {
 		return true
+	}
+	var actions operation_setting.RequestErrorRoutingActions
+	var matched bool
+	if c == nil {
+		actions, matched = operation_setting.ResolveRequestErrorRouting(err)
+	} else {
+		actions, matched = ResolveRequestErrorRoutingForContext(c, err)
+	}
+	if matched && !actions.Cooldown {
+		return false
 	}
 	if types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err) {
 		return false

@@ -34,6 +34,10 @@ export type UpdateOptionRequest = {
   value: string | boolean | number
 }
 
+export type UpdateOptionsBulkRequest = {
+  options: UpdateOptionRequest[]
+}
+
 export type UpdateOptionResponse = {
   success: boolean
   message: string
@@ -245,6 +249,8 @@ export type ModelSettings = {
   'monitor_setting.channel_test_mode': 'scheduled_all' | 'passive_recovery'
   'error_response_setting.enabled': boolean
   'error_response_setting.rules': string
+  'request_error_routing_setting.enabled': boolean
+  'request_error_routing_setting.rules': string
   'channel_affinity_setting.enabled': boolean
   'channel_affinity_setting.switch_on_success': boolean
   'channel_affinity_setting.keep_on_channel_disabled': boolean

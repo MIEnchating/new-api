@@ -126,6 +126,11 @@ export type ChannelExecutionRouteGroupStatus = {
   cooldown_until?: number
 }
 
+export type ChannelExecutionFinalError = {
+  status_code?: number
+  message?: string
+}
+
 export type ChannelExecutionTrace = {
   request_id: string
   mode: 'route' | 'retry'
@@ -142,6 +147,9 @@ export type ChannelExecutionTrace = {
   channel_name?: string
   priority?: number
   affinity_hit?: boolean
+  original_final_error?: ChannelExecutionFinalError
+  user_visible_final_error?: ChannelExecutionFinalError
+  custom_error_applied?: boolean
   events?: ChannelExecutionEvent[]
 }
 

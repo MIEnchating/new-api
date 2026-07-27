@@ -217,7 +217,7 @@ export function ExecutionTraceDialog(props: ExecutionTraceDialogProps) {
   const standbyChannelIds = getStandbyChannelIds(timeline)
   const failedConclusion =
     trace?.status === 'failed'
-      ? getFailedChannelExecutionConclusion(events)
+      ? getFailedChannelExecutionConclusion(events, trace)
       : undefined
   const errorMessage = traceQuery.isError
     ? queryErrorMessage(traceQuery.error, t('Execution trace not found'))
@@ -421,12 +421,50 @@ export function ExecutionTraceDialog(props: ExecutionTraceDialogProps) {
                   'All channel attempts failed and the request did not receive a successful response.'
                 )}
               </p>
-              {failedConclusion.reason ? (
-                <div className='bg-background/70 rounded border px-2.5 py-2 text-xs break-all'>
+              {failedConclusion.originalError ? (
+                <div className='border-destructive/20 space-y-1.5 border-t pt-2'>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <span className='text-muted-foreground text-xs font-medium'>
+                      {t('Original final error')}
+                    </span>
+                    {failedConclusion.originalError.status_code ? (
+                      <StatusBadge variant='danger' size='sm' copyable={false}>
+                        HTTP {failedConclusion.originalError.status_code}
+                      </StatusBadge>
+                    ) : null}
+                  </div>
+                  <p className='text-xs leading-5 break-all'>
+                    {failedConclusion.originalError.message || '-'}
+                  </p>
+                </div>
+              ) : failedConclusion.reason ? (
+                <div className='border-destructive/20 border-t pt-2 text-xs break-all'>
                   <span className='text-muted-foreground'>
                     {t('Final error')}:{' '}
                   </span>
                   {failedConclusion.reason}
+                </div>
+              ) : null}
+              {failedConclusion.userVisibleError ? (
+                <div className='border-destructive/20 space-y-1.5 border-t pt-2'>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <span className='text-muted-foreground text-xs font-medium'>
+                      {t('Returned to user')}
+                    </span>
+                    {failedConclusion.userVisibleError.status_code ? (
+                      <StatusBadge variant='warning' size='sm' copyable={false}>
+                        HTTP {failedConclusion.userVisibleError.status_code}
+                      </StatusBadge>
+                    ) : null}
+                    {failedConclusion.customErrorApplied ? (
+                      <StatusBadge variant='info' size='sm' copyable={false}>
+                        {t('Custom error response applied')}
+                      </StatusBadge>
+                    ) : null}
+                  </div>
+                  <p className='text-xs leading-5 break-all'>
+                    {failedConclusion.userVisibleError.message || '-'}
+                  </p>
                 </div>
               ) : null}
               <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-[11px]'>

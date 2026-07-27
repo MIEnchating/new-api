@@ -687,7 +687,7 @@ func ClearCurrentChannelAffinityCache(c *gin.Context) bool {
 // selected the failed channel. Request errors that cannot advance routing keep
 // the affinity mapping intact.
 func ClearChannelAffinityForRetryableFailure(c *gin.Context, channelID int, err *types.NewAPIError) bool {
-	if c == nil || channelID <= 0 || !ShouldFreezeChannelRoute(err) {
+	if c == nil || channelID <= 0 || !ShouldSwitchChannelRouteForContext(c, err) {
 		return false
 	}
 	value, ok := c.Get(ginKeyChannelAffinityActiveHit)

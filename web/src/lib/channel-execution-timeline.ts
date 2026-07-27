@@ -48,6 +48,9 @@ export type ChannelExecutionTimelineItem =
 
 export type FailedChannelExecutionConclusion = {
   reason?: string
+  originalError?: ChannelExecutionTraceInfo['original_final_error']
+  userVisibleError?: ChannelExecutionTraceInfo['user_visible_final_error']
+  customErrorApplied: boolean
   channelId?: number
   channelName?: string
   attemptCount: number
@@ -334,7 +337,8 @@ export function getStandbyChannelIds(items: ChannelExecutionTimelineItem[]) {
 }
 
 export function getFailedChannelExecutionConclusion(
-  events: ChannelExecutionEvent[]
+  events: ChannelExecutionEvent[],
+  trace?: ChannelExecutionTraceInfo
 ): FailedChannelExecutionConclusion {
   const requestEvents = events.filter(
     (event) => event.state === 'active' && Boolean(event.channel_id)
@@ -365,6 +369,9 @@ export function getFailedChannelExecutionConclusion(
       terminalReason && terminalReason !== 'request_finished_without_success'
         ? terminalReason
         : lastFailureReason,
+    originalError: trace?.original_final_error,
+    userVisibleError: trace?.user_visible_final_error,
+    customErrorApplied: trace?.custom_error_applied === true,
     channelId: lastChannelEvent?.channel_id,
     channelName: lastChannelEvent?.channel_name,
     attemptCount: requestEvents.length,

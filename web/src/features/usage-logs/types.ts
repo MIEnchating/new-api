@@ -92,6 +92,11 @@ export interface ChannelAffinityInfo {
   using_group?: string
 }
 
+export interface ChannelExecutionFinalErrorInfo {
+  status_code?: number
+  message?: string
+}
+
 export interface ChannelExecutionTraceInfo {
   compact?: boolean
   request_id?: string
@@ -112,6 +117,9 @@ export interface ChannelExecutionTraceInfo {
   channel_name?: string
   priority?: number
   affinity_hit?: boolean
+  original_final_error?: ChannelExecutionFinalErrorInfo
+  user_visible_final_error?: ChannelExecutionFinalErrorInfo
+  custom_error_applied?: boolean
   events?: Array<{
     sequence?: number
     timestamp?: number

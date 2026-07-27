@@ -77,6 +77,7 @@ import {
   getOptionValue,
 } from '@/features/system-settings/hooks/use-system-options'
 import { useUpdateOption } from '@/features/system-settings/hooks/use-update-option'
+import { DEFAULT_REQUEST_ERROR_ROUTING_RULES_JSON } from '@/features/system-settings/models/request-error-routing-rules'
 import { normalizeJsonString } from '@/features/system-settings/models/utils'
 import type { ModelSettings } from '@/features/system-settings/types'
 import { safeJsonParse } from '@/features/system-settings/utils/json-parser'
@@ -344,6 +345,9 @@ export function ModelMutateDrawer({
       'monitor_setting.channel_test_mode': 'scheduled_all',
       'error_response_setting.enabled': false,
       'error_response_setting.rules': '[]',
+      'request_error_routing_setting.enabled': true,
+      'request_error_routing_setting.rules':
+        DEFAULT_REQUEST_ERROR_ROUTING_RULES_JSON,
       'channel_affinity_setting.enabled': false,
       'channel_affinity_setting.switch_on_success': true,
       'channel_affinity_setting.keep_on_channel_disabled': false,

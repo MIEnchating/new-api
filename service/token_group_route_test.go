@@ -1,9 +1,11 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -14,8 +16,10 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/types"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -29,6 +33,7 @@ func setupTokenGroupRouteTest(t *testing.T) *gorm.DB {
 
 	gin.SetMode(gin.TestMode)
 	oldRedisEnabled := common.RedisEnabled
+	oldRDB := common.RDB
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
 	common.RedisEnabled = false
 	common.MemoryCacheEnabled = true
@@ -46,6 +51,7 @@ func setupTokenGroupRouteTest(t *testing.T) *gorm.DB {
 
 	t.Cleanup(func() {
 		common.RedisEnabled = oldRedisEnabled
+		common.RDB = oldRDB
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
 		tokenGroupRouteCooldowns = syncMapForTokenRouteTest()
 		tokenGroupRouteCooldownWrites.Store(0)
@@ -60,8 +66,197 @@ func setupTokenGroupRouteTest(t *testing.T) *gorm.DB {
 	return db
 }
 
+type tokenGroupRouteRedisHook struct {
+	mu       sync.Mutex
+	commands []string
+	reject   bool
+}
+
+func (hook *tokenGroupRouteRedisHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error) {
+	hook.mu.Lock()
+	hook.commands = append(hook.commands, cmd.Name())
+	reject := hook.reject
+	hook.mu.Unlock()
+	if reject {
+		return ctx, errors.New("redis unavailable in test")
+	}
+	return ctx, nil
+}
+
+func (hook *tokenGroupRouteRedisHook) AfterProcess(context.Context, redis.Cmder) error {
+	return nil
+}
+
+func (hook *tokenGroupRouteRedisHook) BeforeProcessPipeline(ctx context.Context, commands []redis.Cmder) (context.Context, error) {
+	hook.mu.Lock()
+	for _, command := range commands {
+		hook.commands = append(hook.commands, command.Name())
+	}
+	reject := hook.reject
+	hook.mu.Unlock()
+	if reject {
+		return ctx, errors.New("redis unavailable in test")
+	}
+	return ctx, nil
+}
+
+func (hook *tokenGroupRouteRedisHook) AfterProcessPipeline(context.Context, []redis.Cmder) error {
+	return nil
+}
+
+func (hook *tokenGroupRouteRedisHook) commandCount(name string) int {
+	hook.mu.Lock()
+	defer hook.mu.Unlock()
+	count := 0
+	for _, command := range hook.commands {
+		if command == name {
+			count++
+		}
+	}
+	return count
+}
+
+func useTokenGroupRouteRedis(t *testing.T) (*miniredis.Miniredis, *redis.Client) {
+	t.Helper()
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	common.RDB = client
+	common.RedisEnabled = true
+	t.Cleanup(func() { _ = client.Close() })
+	return server, client
+}
+
 func syncMapForTokenRouteTest() sync.Map {
 	return sync.Map{}
+}
+
+func tokenGroupRouteTestRef(tokenID int, group string) tokenGroupRouteStateRef {
+	return tokenGroupRouteStateRef{
+		TokenID:     tokenID,
+		Kind:        tokenGroupRouteStateCooldown,
+		Group:       group,
+		ModelName:   tokenRouteTestModel,
+		RequestPath: tokenRouteTestPath,
+	}
+}
+
+func storeTokenGroupRouteMemoryCooldown(ref tokenGroupRouteStateRef, until int64) {
+	tokenGroupRouteCooldowns.Store(
+		tokenGroupRouteCooldownKey(ref.TokenID, ref.Group, ref.ModelName, ref.RequestPath),
+		tokenGroupRouteCooldownState{tokenGroupRouteStateRef: ref, Until: until},
+	)
+}
+
+func TestGetTokenGroupRouteCooldownsUntilBatchesRedisWithoutMutatingStateIndex(t *testing.T) {
+	setupTokenGroupRouteTest(t)
+	_, client := useTokenGroupRouteRedis(t)
+	now := common.GetTimestamp()
+	routes := []model.TokenGroupRoute{
+		{Group: "redis-active"},
+		{Group: "redis-missing"},
+		{Group: "redis-invalid"},
+		{Group: "redis-expired"},
+	}
+
+	refs := make([]tokenGroupRouteStateRef, 0, len(routes))
+	for _, route := range routes {
+		ref := tokenGroupRouteTestRef(11, route.Group)
+		refs = append(refs, ref)
+		require.NoError(t, client.SAdd(
+			context.Background(),
+			tokenGroupRouteStateIndexKey(11),
+			encodeTokenGroupRouteStateRef(ref),
+		).Err())
+	}
+	require.NoError(t, client.Set(context.Background(), tokenGroupRouteCooldownKey(11, "redis-active", tokenRouteTestModel, tokenRouteTestPath), strconv.FormatInt(now+120, 10), time.Minute).Err())
+	require.NoError(t, client.Set(context.Background(), tokenGroupRouteCooldownKey(11, "redis-invalid", tokenRouteTestModel, tokenRouteTestPath), "invalid", time.Minute).Err())
+	require.NoError(t, client.Set(context.Background(), tokenGroupRouteCooldownKey(11, "redis-expired", tokenRouteTestModel, tokenRouteTestPath), strconv.FormatInt(now-1, 10), time.Minute).Err())
+
+	storeTokenGroupRouteMemoryCooldown(refs[0], now+10)
+	storeTokenGroupRouteMemoryCooldown(refs[1], now+20)
+	storeTokenGroupRouteMemoryCooldown(refs[2], now+30)
+	storeTokenGroupRouteMemoryCooldown(refs[3], now+40)
+	hook := &tokenGroupRouteRedisHook{}
+	client.AddHook(hook)
+
+	cooldowns := getTokenGroupRouteCooldownsUntil(11, routes, tokenRouteTestModel, tokenRouteTestPath, now)
+
+	assert.Equal(t, now+120, cooldowns["redis-active"])
+	assert.Equal(t, now+20, cooldowns["redis-missing"])
+	assert.Equal(t, now+30, cooldowns["redis-invalid"])
+	assert.Equal(t, now+40, cooldowns["redis-expired"])
+	assert.Equal(t, 1, hook.commandCount("mget"))
+	assert.Zero(t, hook.commandCount("srem"))
+
+	members, err := client.SMembers(context.Background(), tokenGroupRouteStateIndexKey(11)).Result()
+	require.NoError(t, err)
+	for _, ref := range refs {
+		assert.Contains(t, members, encodeTokenGroupRouteStateRef(ref))
+	}
+}
+
+func TestGetTokenGroupRouteCooldownsUntilFallsBackWhenRedisFails(t *testing.T) {
+	setupTokenGroupRouteTest(t)
+	client := redis.NewClient(&redis.Options{Addr: "unused:0"})
+	hook := &tokenGroupRouteRedisHook{reject: true}
+	client.AddHook(hook)
+	common.RDB = client
+	common.RedisEnabled = true
+	t.Cleanup(func() { _ = client.Close() })
+	now := common.GetTimestamp()
+	routes := []model.TokenGroupRoute{{Group: "primary"}, {Group: "fallback"}}
+
+	primaryRef := tokenGroupRouteTestRef(11, "primary")
+	fallbackRef := tokenGroupRouteTestRef(11, "fallback")
+	storeTokenGroupRouteMemoryCooldown(primaryRef, now+60)
+	storeTokenGroupRouteMemoryCooldown(fallbackRef, now+90)
+
+	cooldowns := getTokenGroupRouteCooldownsUntil(11, routes, tokenRouteTestModel, tokenRouteTestPath, now)
+
+	assert.Equal(t, now+60, cooldowns["primary"])
+	assert.Equal(t, now+90, cooldowns["fallback"])
+	assert.Equal(t, 1, hook.commandCount("mget"))
+	assert.Zero(t, hook.commandCount("srem"))
+}
+
+func TestSelectTokenGroupRouteUsesSingleCooldownMGet(t *testing.T) {
+	db := setupTokenGroupRouteTest(t)
+	seedTokenRouteChannel(t, db, 1, "primary")
+	seedTokenRouteChannel(t, db, 2, "secondary")
+	seedTokenRouteChannel(t, db, 3, "fallback")
+	model.InitChannelCache()
+	_, client := useTokenGroupRouteRedis(t)
+	oldChannelRouteEnabled := common.ChannelRouteCooldownEnabled
+	common.ChannelRouteCooldownEnabled = false
+	t.Cleanup(func() { common.ChannelRouteCooldownEnabled = oldChannelRouteEnabled })
+	now := common.GetTimestamp()
+	routes := []model.TokenGroupRoute{
+		{Group: "primary", Priority: 3, CooldownSeconds: 60},
+		{Group: "secondary", Priority: 2, CooldownSeconds: 60},
+		{Group: "fallback", Priority: 1, CooldownSeconds: 60},
+	}
+	require.NoError(t, client.Set(context.Background(), tokenGroupRouteCooldownKey(11, "primary", tokenRouteTestModel, tokenRouteTestPath), strconv.FormatInt(now+60, 10), time.Minute).Err())
+	require.NoError(t, client.Set(context.Background(), tokenGroupRouteCooldownKey(11, "secondary", tokenRouteTestModel, tokenRouteTestPath), strconv.FormatInt(now+90, 10), time.Minute).Err())
+	hook := &tokenGroupRouteRedisHook{}
+	client.AddHook(hook)
+
+	ctx := newTokenRouteContext(routes)
+	channel, group, err := CacheGetRandomSatisfiedChannel(newTokenRouteRetryParam(ctx))
+
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, "fallback", group)
+	assert.Equal(t, 3, channel.Id)
+	assert.Equal(t, 1, hook.commandCount("mget"))
+	assert.Zero(t, hook.commandCount("get"))
+	state, exists := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, exists)
+	require.Len(t, state.trace.RouteGroupStatuses, 3)
+	assert.Equal(t, "skipped", state.trace.RouteGroupStatuses[0].Status)
+	assert.Equal(t, now+60, state.trace.RouteGroupStatuses[0].CooldownUntil)
+	assert.Equal(t, "skipped", state.trace.RouteGroupStatuses[1].Status)
+	assert.Equal(t, now+90, state.trace.RouteGroupStatuses[1].CooldownUntil)
+	assert.Equal(t, "active", state.trace.RouteGroupStatuses[2].Status)
 }
 
 func TestTokenGroupRouteAffinityMemoryStoreIsBounded(t *testing.T) {
@@ -215,6 +410,43 @@ func TestTokenGroupRouteScopesCooldownAndStickyByModel(t *testing.T) {
 	assert.Empty(t, GetTokenGroupRouteStickyGroup(11, modelA, tokenRouteTestPath))
 	assert.Empty(t, GetTokenGroupRouteStickyGroup(11, modelB, tokenRouteTestPath))
 	assert.Empty(t, ListTokenGroupRouteCooldowns(11, common.GetTimestamp()))
+}
+
+func TestContextLimitSwitchesTokenGroupWithoutCooldown(t *testing.T) {
+	db := setupTokenGroupRouteTest(t)
+	seedTokenRouteChannel(t, db, 1, "premium")
+	seedTokenRouteChannel(t, db, 2, "fallback")
+	model.InitChannelCache()
+
+	routes := []model.TokenGroupRoute{
+		{Group: "premium", Priority: 2, CooldownSeconds: 60},
+		{Group: "fallback", Priority: 1, CooldownSeconds: 60},
+	}
+	ctx := newTokenRouteContext(routes)
+	param := newTokenRouteRetryParam(ctx)
+	channel, group, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, "premium", group)
+
+	contextLimitErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "context length exceeded",
+		Code:    "context_length_exceeded",
+	}, http.StatusBadGateway)
+	require.True(t, MarkTokenGroupRouteFailure(ctx, contextLimitErr))
+	require.False(t, IsTokenGroupRouteFrozen(
+		11,
+		"premium",
+		tokenRouteTestModel,
+		tokenRouteTestPath,
+		common.GetTimestamp(),
+	))
+
+	channel, group, err = CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	require.Equal(t, "fallback", group)
+	require.Equal(t, 2, channel.Id)
 }
 
 func TestTokenGroupRouteRoutesDisjointModelsWithoutCoolingUnsupportedGroup(t *testing.T) {
