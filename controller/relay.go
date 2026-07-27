@@ -950,7 +950,7 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *taskdto.TaskEr
 	return true
 }
 
-func shouldAttemptNextTaskChannel(c *gin.Context, channelID int, taskErr *dto.TaskError, retryTimes int, routeAdvanced bool, channelRouteAllowed bool) bool {
+func shouldAttemptNextTaskChannel(c *gin.Context, channelID int, taskErr *taskdto.TaskError, retryTimes int, routeAdvanced bool, channelRouteAllowed bool) bool {
 	if hasManagedRouting(c) {
 		return channelRouteAllowed && routeAdvanced
 	}
