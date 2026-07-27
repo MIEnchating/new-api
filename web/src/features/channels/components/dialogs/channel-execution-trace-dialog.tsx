@@ -463,6 +463,7 @@ export function ChannelExecutionTracePanel(
               <ChannelExecutionTimelineList
                 items={timeline}
                 executionGroup={trace.group}
+                showGroupContext={(trace.route_groups?.length ?? 0) > 1}
               />
             </div>
           ) : (

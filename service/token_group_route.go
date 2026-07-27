@@ -333,7 +333,7 @@ func ShouldFreezeTokenGroupRoute(err *types.NewAPIError) bool {
 	if err == nil {
 		return false
 	}
-	if types.IsSkipRetryError(err) {
+	if types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err) {
 		return false
 	}
 	if types.IsChannelError(err) {

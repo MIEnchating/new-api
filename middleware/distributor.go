@@ -176,7 +176,10 @@ func Distribute() func(c *gin.Context) {
 }
 
 func shouldUseChannelAffinity(c *gin.Context) bool {
-	return !service.IsChannelRouteEnabled() && !service.HasTokenGroupRoutes(c)
+	usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+	return !service.IsChannelRouteEnabled() &&
+		!service.HasTokenGroupRoutes(c) &&
+		usingGroup != "auto"
 }
 
 // channelSupportsRequestPath reports whether a channel can serve the request path.

@@ -114,13 +114,21 @@ func ValidateCustomErrorResponseRules(rules []CustomErrorResponseRule) error {
 }
 
 func ApplyCustomErrorResponse(err *types.NewAPIError) bool {
+	matched, _ := ApplyCustomErrorResponseWithResult(err)
+	return matched
+}
+
+// ApplyCustomErrorResponseWithResult also reports whether the rule replaced
+// the message, allowing the relay layer to expose an original final error only
+// when the configured rule chose message passthrough.
+func ApplyCustomErrorResponseWithResult(err *types.NewAPIError) (matched bool, messageReplaced bool) {
 	if err == nil || !errorResponseSetting.Enabled {
-		return false
+		return false, false
 	}
 
 	rule, matched := matchingCustomErrorResponseRule(err)
 	if !matched {
-		return false
+		return false, false
 	}
 
 	if !rule.PassThroughStatusCode && isHTTPStatusCode(rule.ResponseStatusCode) {
@@ -130,9 +138,10 @@ func ApplyCustomErrorResponse(err *types.NewAPIError) bool {
 		message := strings.TrimSpace(rule.ResponseMessage)
 		if message != "" {
 			err.SetResponseMessage(message)
+			messageReplaced = true
 		}
 	}
-	return true
+	return true, messageReplaced
 }
 
 func HasMatchingCustomErrorResponse(err *types.NewAPIError) bool {

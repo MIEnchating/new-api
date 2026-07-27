@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { GitBranch, KeyRound, Sparkles, Workflow } from 'lucide-react'
+import { GitBranch, KeyRound, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -359,7 +359,6 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
 
           const other = parseLogOther(log.other)
           const affinity = other?.admin_info?.channel_affinity
-          const routeSticky = other?.admin_info?.channel_route_sticky
           const rawUseChannel = other?.admin_info?.use_channel ?? []
           const useChannel = Array.isArray(rawUseChannel)
             ? rawUseChannel.map(String).filter(Boolean)
@@ -501,46 +500,6 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
                                   affinity.selected_group ||
                                   '-'
                                 : '••••'}
-                            </p>
-                          </div>
-                        </div>
-                      </TooltipContent>
-                    </Tooltip>
-                  )}
-                  {routeSticky && (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={
-                          <span
-                            className='inline-flex size-5 shrink-0 items-center justify-center rounded-md border border-sky-500/20 bg-sky-500/10 text-sky-600 dark:text-sky-400'
-                            aria-label={t('Channel route affinity')}
-                          />
-                        }
-                      >
-                        <Workflow
-                          className='size-3.5 stroke-[2.25]'
-                          aria-hidden='true'
-                        />
-                      </TooltipTrigger>
-                      <TooltipContent side='top' align='center'>
-                        <div className='space-y-1'>
-                          <p>
-                            {sensitiveVisible
-                              ? channelDisplay
-                              : channelIdDisplay}
-                          </p>
-                          <div className='border-t pt-1 text-xs'>
-                            <p className='font-medium'>
-                              {t('Channel route affinity')}
-                            </p>
-                            <p>
-                              {t('Group')}:{' '}
-                              {sensitiveVisible
-                                ? routeSticky.group || '-'
-                                : '••••'}
-                            </p>
-                            <p>
-                              {t('Model')}: {routeSticky.model || '-'}
                             </p>
                           </div>
                         </div>

@@ -17,8 +17,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import {
+  ArrowDown,
+  ArrowRight,
+  ChevronDown,
+  ChevronRight,
+  Plus,
+  RefreshCcw,
+  Route,
+  Trash2,
+} from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useFieldArray, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -50,7 +60,9 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
+import { getChannelFilterGroups } from '@/features/channels/api'
 import { parseHttpStatusCodeRules } from '@/lib/http-status-code-rules'
 
 import {
@@ -63,6 +75,12 @@ import { SettingsSection } from '../components/settings-section'
 import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
+import { ChannelRouteExclusionEditor } from './channel-route-exclusion-editor'
+import { resolveRouteCooldownToggle } from './route-cooldown'
+import {
+  parseGroupExclusions,
+  serializeGroupExclusions,
+} from './route-exclusions'
 
 const numericString = z.string().refine((value) => {
   const trimmed = value.trim()
@@ -102,8 +120,9 @@ const routingReliabilitySchema = z
       .int()
       .min(0)
       .max(31536000, 'Cooldown cannot exceed 31536000 seconds'),
-    ChannelRouteStickyEnabled: z.boolean(),
     ChannelRouteSameChannelRetries: z.coerce.number().int().min(0).max(10),
+    ChannelRouteGroupExclusionsEnabled: z.boolean(),
+    ChannelRouteGroupExclusions: z.string(),
     ChannelDisableThreshold: numericString,
     AutomaticDisableChannelEnabled: z.boolean(),
     AutomaticEnableChannelEnabled: z.boolean(),
@@ -214,8 +233,9 @@ type RoutingReliabilitySectionProps = {
     RetryTimes: number
     ChannelRouteCooldownEnabled: boolean
     ChannelRouteCooldownSeconds: number
-    ChannelRouteStickyEnabled: boolean
     ChannelRouteSameChannelRetries: number
+    ChannelRouteGroupExclusionsEnabled: boolean
+    ChannelRouteGroupExclusions: string
     ChannelDisableThreshold: string
     AutomaticDisableChannelEnabled: boolean
     AutomaticEnableChannelEnabled: boolean
@@ -330,8 +350,9 @@ type NormalizedRoutingReliabilityValues = {
   RetryTimes: number
   ChannelRouteCooldownEnabled: boolean
   ChannelRouteCooldownSeconds: number
-  ChannelRouteStickyEnabled: boolean
   ChannelRouteSameChannelRetries: number
+  ChannelRouteGroupExclusionsEnabled: boolean
+  ChannelRouteGroupExclusions: string
   ChannelDisableThreshold: string
   AutomaticDisableChannelEnabled: boolean
   AutomaticEnableChannelEnabled: boolean
@@ -357,8 +378,12 @@ const buildFormDefaults = (
     : (defaults.RetryTimes ?? 0),
   ChannelRouteCooldownEnabled: defaults.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: defaults.ChannelRouteCooldownSeconds ?? 60,
-  ChannelRouteStickyEnabled: defaults.ChannelRouteStickyEnabled,
   ChannelRouteSameChannelRetries: defaults.ChannelRouteSameChannelRetries ?? 0,
+  ChannelRouteGroupExclusionsEnabled:
+    defaults.ChannelRouteGroupExclusionsEnabled,
+  ChannelRouteGroupExclusions: serializeGroupExclusions(
+    parseGroupExclusions(defaults.ChannelRouteGroupExclusions)
+  ),
   ChannelDisableThreshold: defaults.ChannelDisableThreshold ?? '',
   AutomaticDisableChannelEnabled: defaults.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: defaults.AutomaticEnableChannelEnabled,
@@ -390,8 +415,12 @@ const normalizeDefaults = (
   RetryTimes: defaults.RetryTimes ?? 0,
   ChannelRouteCooldownEnabled: defaults.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: defaults.ChannelRouteCooldownSeconds ?? 60,
-  ChannelRouteStickyEnabled: defaults.ChannelRouteStickyEnabled,
   ChannelRouteSameChannelRetries: defaults.ChannelRouteSameChannelRetries ?? 0,
+  ChannelRouteGroupExclusionsEnabled:
+    defaults.ChannelRouteGroupExclusionsEnabled,
+  ChannelRouteGroupExclusions: serializeGroupExclusions(
+    parseGroupExclusions(defaults.ChannelRouteGroupExclusions)
+  ),
   ChannelDisableThreshold: (defaults.ChannelDisableThreshold ?? '').trim(),
   AutomaticDisableChannelEnabled: defaults.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: defaults.AutomaticEnableChannelEnabled,
@@ -423,8 +452,11 @@ const normalizeFormValues = (
   RetryTimes: values.ChannelRouteCooldownEnabled ? 0 : values.RetryTimes,
   ChannelRouteCooldownEnabled: values.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: values.ChannelRouteCooldownSeconds,
-  ChannelRouteStickyEnabled: values.ChannelRouteStickyEnabled,
   ChannelRouteSameChannelRetries: values.ChannelRouteSameChannelRetries,
+  ChannelRouteGroupExclusionsEnabled: values.ChannelRouteGroupExclusionsEnabled,
+  ChannelRouteGroupExclusions: serializeGroupExclusions(
+    parseGroupExclusions(values.ChannelRouteGroupExclusions)
+  ),
   ChannelDisableThreshold: values.ChannelDisableThreshold.trim(),
   AutomaticDisableChannelEnabled: values.AutomaticDisableChannelEnabled,
   AutomaticEnableChannelEnabled: values.AutomaticEnableChannelEnabled,
@@ -462,6 +494,11 @@ export function RoutingReliabilitySection({
     () => buildFormDefaults(defaultValues),
     [defaultValues]
   )
+  const enabledCooldownSecondsRef = useRef(
+    defaultValues.ChannelRouteCooldownSeconds > 0
+      ? defaultValues.ChannelRouteCooldownSeconds
+      : 60
+  )
 
   const form = useForm<
     RoutingReliabilityFormInput,
@@ -478,9 +515,26 @@ export function RoutingReliabilitySection({
 
   useResetForm(form, formDefaults)
 
+  useEffect(() => {
+    if (defaultValues.ChannelRouteCooldownSeconds > 0) {
+      enabledCooldownSecondsRef.current =
+        defaultValues.ChannelRouteCooldownSeconds
+    }
+  }, [defaultValues.ChannelRouteCooldownSeconds])
+
+  const groupOptionsQuery = useQuery({
+    queryKey: ['channel-route-group-options'],
+    queryFn: () => getChannelFilterGroups(true),
+    enabled: view === 'routing',
+  })
+  const groupOptions = groupOptionsQuery.data?.data ?? []
+
   const autoDisableStatusCodes = form.watch('AutomaticDisableStatusCodes')
   const autoRetryStatusCodes = form.watch('AutomaticRetryStatusCodes')
   const channelRouteCooldownEnabled = form.watch('ChannelRouteCooldownEnabled')
+  const groupExclusionsEnabled = form.watch(
+    'ChannelRouteGroupExclusionsEnabled'
+  )
   const channelTestMode = form.watch('monitor_setting.channel_test_mode')
   const customErrorResponsesEnabled = form.watch(
     'error_response_setting.enabled'
@@ -564,77 +618,327 @@ export function RoutingReliabilitySection({
 
           {view === 'routing' ? (
             <>
-              <div className='flex min-w-0 flex-col gap-4'>
-                <div className='flex flex-col gap-1'>
-                  <h4 className='text-sm font-medium'>{t('Request retry')}</h4>
+              <div className='min-w-0 space-y-6'>
+                <div className='flex min-w-0 flex-col gap-4 lg:flex-row lg:items-end lg:justify-between'>
+                  <div className='min-w-0 space-y-0.5'>
+                    <h4 className='text-sm font-medium'>
+                      {t('Routing strategy')}
+                    </h4>
+                    <p className='text-muted-foreground text-xs'>
+                      {t('Choose one strategy for handling failed requests.')}
+                    </p>
+                  </div>
+                  <div className='w-full shrink-0 lg:w-auto'>
+                    <FormField
+                      control={form.control}
+                      name='ChannelRouteCooldownEnabled'
+                      render={({ field }) => (
+                        <FormItem>
+                          <Tabs
+                            value={field.value ? 'routing' : 'standard'}
+                            onValueChange={(value) => {
+                              const routeEnabled = value === 'routing'
+                              field.onChange(routeEnabled)
+                              if (routeEnabled) {
+                                form.setValue('RetryTimes', 0, {
+                                  shouldDirty: true,
+                                  shouldValidate: true,
+                                })
+                              }
+                            }}
+                          >
+                            <TabsList className='grid h-9 w-full grid-cols-2 lg:w-[30rem]'>
+                              <TabsTrigger value='standard'>
+                                <RefreshCcw />
+                                {t('Standard request retry')}
+                              </TabsTrigger>
+                              <TabsTrigger value='routing'>
+                                <Route />
+                                {t('Channel routing')}
+                              </TabsTrigger>
+                            </TabsList>
+                          </Tabs>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  </div>
                 </div>
-                <div className='grid min-w-0 gap-6 xl:grid-cols-[minmax(12rem,24rem)_minmax(0,1fr)]'>
-                  <FormField
-                    control={form.control}
-                    name='RetryTimes'
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>{t('Retry Times')}</FormLabel>
-                        <FormControl>
-                          <Input
-                            type='number'
-                            min='0'
-                            max='10'
-                            disabled={channelRouteCooldownEnabled}
-                            {...safeNumberFieldProps(field)}
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          {channelRouteCooldownEnabled
-                            ? t(
-                                'Request retry is disabled while channel routing is enabled'
-                              )
-                            : t(
-                                'Number of times to retry failed requests (0-10)'
-                              )}
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
 
-                  <FormField
-                    control={form.control}
-                    name='AutomaticRetryStatusCodes'
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>
-                          {channelRouteCooldownEnabled
-                            ? t('Route failover status codes')
-                            : t('Auto-retry status codes')}
-                        </FormLabel>
-                        <FormControl>
-                          <Input
-                            placeholder={t('e.g. 401, 403, 429, 500-599')}
-                            value={field.value}
-                            onChange={(event) =>
-                              field.onChange(event.target.value)
-                            }
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          {t(
-                            'Accepts comma-separated status codes and inclusive ranges.'
-                          )}{' '}
-                          {autoRetryParsed.ok &&
-                            autoRetryParsed.normalized &&
-                            autoRetryParsed.normalized !==
-                              field.value.trim() && (
-                              <span className='text-muted-foreground'>
-                                {t('Normalized:')} {autoRetryParsed.normalized}
-                              </span>
-                            )}
-                        </FormDescription>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-                </div>
+                <FormField
+                  control={form.control}
+                  name='AutomaticRetryStatusCodes'
+                  render={({ field }) => (
+                    <FormItem className='border-border/70 border-y py-4'>
+                      <FormLabel>
+                        {t('Failure handling status codes')}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder={t('e.g. 401, 403, 429, 500-599')}
+                          value={field.value}
+                          onChange={(event) =>
+                            field.onChange(event.target.value)
+                          }
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'A failed request enters the selected retry strategy only when its status code matches this shared list.'
+                        )}{' '}
+                        {t(
+                          'Accepts comma-separated status codes and inclusive ranges.'
+                        )}{' '}
+                        {autoRetryParsed.ok &&
+                          autoRetryParsed.normalized &&
+                          autoRetryParsed.normalized !== field.value.trim() && (
+                            <span className='text-muted-foreground'>
+                              {t('Normalized:')} {autoRetryParsed.normalized}
+                            </span>
+                          )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                {!channelRouteCooldownEnabled ? (
+                  <div className='min-w-0 space-y-4'>
+                    <div className='space-y-0.5'>
+                      <h4 className='text-sm font-medium'>
+                        {t('Standard request retry')}
+                      </h4>
+                      <p className='text-muted-foreground text-xs'>
+                        {t(
+                          'Failed requests follow the regular retry policy and distribution strategy.'
+                        )}
+                      </p>
+                    </div>
+                    <div className='max-w-2xl'>
+                      <FormField
+                        control={form.control}
+                        name='RetryTimes'
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t('Retry Times')}</FormLabel>
+                            <FormControl>
+                              <Input
+                                type='number'
+                                min='0'
+                                max='10'
+                                disabled={channelRouteCooldownEnabled}
+                                {...safeNumberFieldProps(field)}
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              {channelRouteCooldownEnabled
+                                ? t(
+                                    'Request retry is disabled while channel routing is enabled'
+                                  )
+                                : t(
+                                    'Number of times to retry failed requests (0-10)'
+                                  )}
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {channelRouteCooldownEnabled ? (
+                  <div className='min-w-0 space-y-5'>
+                    <div className='space-y-0.5'>
+                      <h4 className='text-sm font-medium'>
+                        {t('Channel routing')}
+                      </h4>
+                      <p className='text-muted-foreground text-xs'>
+                        {t(
+                          'Matching failures retry the current channel first, then switch to another candidate channel.'
+                        )}
+                      </p>
+                    </div>
+                    <div className='grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center md:gap-4'>
+                      <div className='border-primary/30 min-w-0 border-l-2 pl-4'>
+                        <div className='mb-3 flex items-center gap-2'>
+                          <span className='bg-primary text-primary-foreground flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold'>
+                            1
+                          </span>
+                          <span className='text-sm font-medium'>
+                            {t('Retry current channel')}
+                          </span>
+                        </div>
+                        <FormField
+                          control={form.control}
+                          name='ChannelRouteSameChannelRetries'
+                          render={({ field }) => {
+                            const parsedValue = Number(field.value)
+                            const sameChannelRetries = Number.isFinite(
+                              parsedValue
+                            )
+                              ? parsedValue
+                              : 0
+
+                            return (
+                              <FormItem>
+                                <FormLabel>
+                                  {t('Same-channel retries')}
+                                </FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={0}
+                                    max={10}
+                                    step={1}
+                                    {...safeNumberFieldProps(field)}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Additional retries on the current channel (0-10); 0 disables same-channel retries. With the initial request included, this setting allows up to {{total}} requests in total.',
+                                    { total: sameChannelRetries + 1 }
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )
+                          }}
+                        />
+                      </div>
+
+                      <div className='text-muted-foreground flex items-center justify-center'>
+                        <ArrowDown className='size-4 md:hidden' />
+                        <ArrowRight className='hidden size-4 md:block' />
+                      </div>
+
+                      <div className='border-primary/30 min-w-0 border-l-2 pl-4'>
+                        <div className='mb-3 flex items-center gap-2'>
+                          <span className='bg-primary text-primary-foreground flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold'>
+                            2
+                          </span>
+                          <span className='text-sm font-medium'>
+                            {t('Switch candidate channel')}
+                          </span>
+                        </div>
+                        <FormField
+                          control={form.control}
+                          name='ChannelRouteCooldownSeconds'
+                          render={({ field }) => {
+                            const parsedValue = Number(field.value)
+                            const cooldownSeconds = Number.isFinite(parsedValue)
+                              ? parsedValue
+                              : 0
+
+                            return (
+                              <FormItem>
+                                <div className='flex min-h-5 items-center justify-between gap-2'>
+                                  <FormLabel>
+                                    {t('Cooldown time (seconds)')}
+                                  </FormLabel>
+                                  <label className='text-muted-foreground flex cursor-pointer items-center gap-1.5 text-xs'>
+                                    <span>{t('Disable cooldown')}</span>
+                                    <Switch
+                                      size='sm'
+                                      checked={cooldownSeconds === 0}
+                                      disabled={!channelRouteCooldownEnabled}
+                                      onCheckedChange={(disabled) => {
+                                        const next = resolveRouteCooldownToggle(
+                                          cooldownSeconds,
+                                          disabled,
+                                          enabledCooldownSecondsRef.current
+                                        )
+                                        enabledCooldownSecondsRef.current =
+                                          next.lastEnabledSeconds
+                                        field.onChange(next.value)
+                                      }}
+                                    />
+                                  </label>
+                                </div>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={0}
+                                    max={31536000}
+                                    step={1}
+                                    disabled={
+                                      !channelRouteCooldownEnabled ||
+                                      cooldownSeconds === 0
+                                    }
+                                    {...safeNumberFieldProps(field)}
+                                    onChange={(event) => {
+                                      const value = event.target.valueAsNumber
+                                      if (!Number.isFinite(value)) return
+                                      field.onChange(value)
+                                      if (value > 0) {
+                                        enabledCooldownSecondsRef.current =
+                                          value
+                                      }
+                                    }}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'How long a failed channel is excluded from selection; 0 disables cooldown.'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className='border-border/70 space-y-3 border-t pt-4'>
+                      <FormField
+                        control={form.control}
+                        name='ChannelRouteGroupExclusionsEnabled'
+                        render={({ field }) => (
+                          <SettingsSwitchItem className='py-0'>
+                            <SettingsSwitchContent>
+                              <FormLabel>
+                                {t('Route exclusion groups')}
+                              </FormLabel>
+                              <FormDescription>
+                                {t(
+                                  'Override the two routing steps for selected groups: skip current-channel retries, candidate failover, or both.'
+                                )}
+                              </FormDescription>
+                            </SettingsSwitchContent>
+                            <FormControl>
+                              <Switch
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                              />
+                            </FormControl>
+                          </SettingsSwitchItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name='ChannelRouteGroupExclusions'
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormControl>
+                              <ChannelRouteExclusionEditor
+                                value={field.value}
+                                groupOptions={groupOptions}
+                                disabled={
+                                  !groupExclusionsEnabled ||
+                                  groupOptionsQuery.isLoading
+                                }
+                                onChange={field.onChange}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <Separator />

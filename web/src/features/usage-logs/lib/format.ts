@@ -433,7 +433,6 @@ const OPTION_KEY_LABELS: Record<string, string> = {
   AutomaticRetryStatusCodes: 'Auto-retry status codes',
   ChannelRouteCooldownEnabled: 'Channel routing',
   ChannelRouteCooldownSeconds: 'Cooldown time (seconds)',
-  ChannelRouteStickyEnabled: 'Channel route affinity',
   ChannelRouteSameChannelRetries: 'Same-channel retries',
   ChannelRouteGroupExclusionsEnabled: 'Route exclusion groups',
   ChannelRouteGroupExclusions: 'Route exclusion groups',
@@ -728,7 +727,6 @@ const AUDIT_TEMPLATES: Record<string, string> = {
   'channel.tag_enable': 'Enabled channels with tag {{tag}}',
   'channel.tag_edit': 'Edited channels with tag {{tag}}',
   'channel.tag_batch_set': 'Batch set tag for {{count}} channels',
-  'channel.route_affinity_clear': 'Route affinity cleared',
   'channel.copy':
     'Copied channel (source ID: {{sourceId}}) to {{name}} (new ID: {{id}})',
   'channel.multi_key_manage':

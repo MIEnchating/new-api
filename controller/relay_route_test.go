@@ -52,6 +52,31 @@ func TestShouldAttemptNextChannelKeepsRouteAndRetryMutuallyExclusive(t *testing.
 	assert.False(t, shouldAttemptNextChannel(c, err, 10, false))
 }
 
+func TestShouldRetryRejectsContextWindowErrorWithRetryableStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	err := types.WithOpenAIError(types.OpenAIError{
+		Message: "Your input exceeds the context window of this model. Please adjust your input and try again.",
+		Type:    "upstream_error",
+	}, http.StatusBadGateway)
+
+	assert.False(t, shouldRetry(c, err, 2))
+}
+
+func TestChannelExecutionErrorReasonIncludesHiddenTransportCause(t *testing.T) {
+	err := types.NewError(
+		errors.New(`Post "https://upstream.example/v1/responses?key=diagnostic-key": EOF`),
+		types.ErrorCodeDoRequestFailed,
+		types.ErrOptionWithHideErrMsg("upstream error: do request failed"),
+	)
+
+	reason := channelExecutionErrorReason(err)
+	assert.Contains(t, reason, "upstream error: do request failed")
+	assert.Contains(t, reason, "https://upstream.example/v1/responses?key=diagnostic-key")
+	assert.Contains(t, reason, "transport_error=")
+}
+
 func TestTokenGroupRoutingDoesNotDependOnLegacyRetryBudget(t *testing.T) {
 	oldRouteEnabled := common.ChannelRouteCooldownEnabled
 	t.Cleanup(func() { common.ChannelRouteCooldownEnabled = oldRouteEnabled })
@@ -153,13 +178,79 @@ func TestWriteRelayErrorResponseAppliesCustomRuleBeforeJSON(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	apiErr := types.NewOpenAIError(errors.New("upstream failed"), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	apiErr := types.NewError(
+		errors.New(`Post "https://internal.example/v1/responses?key=must-not-leak": EOF`),
+		types.ErrorCodeDoRequestFailed,
+		types.ErrOptionWithHideErrMsg("upstream error: do request failed"),
+	)
 
 	writeRelayErrorResponse(c, nil, types.RelayFormatOpenAIResponses, apiErr, "local-id")
 
 	assert.Equal(t, http.StatusTooManyRequests, recorder.Code)
 	assert.Contains(t, recorder.Body.String(), "服务繁忙")
 	assert.Contains(t, recorder.Body.String(), "local-id")
+	assert.NotContains(t, recorder.Body.String(), "must-not-leak")
+}
+
+func TestWriteRelayErrorResponseExposesOriginalWhenCustomRulePassesThroughMessage(t *testing.T) {
+	current := operation_setting.GetErrorResponseSetting()
+	originalSetting := *current
+	originalSetting.Rules = append([]operation_setting.CustomErrorResponseRule(nil), current.Rules...)
+	t.Cleanup(func() { *current = originalSetting })
+	*current = operation_setting.ErrorResponseSetting{
+		Enabled: true,
+		Rules: []operation_setting.CustomErrorResponseRule{
+			{
+				Enabled:               true,
+				StatusCodes:           "500",
+				PassThroughStatusCode: true,
+				PassThroughMessage:    true,
+			},
+		},
+	}
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	rawMessage := `Post "https://upstream.example/v1/responses?key=diagnostic-key": EOF`
+	apiErr := types.NewError(
+		errors.New(rawMessage),
+		types.ErrorCodeDoRequestFailed,
+		types.ErrOptionWithHideErrMsg("upstream error: do request failed"),
+	)
+
+	writeRelayErrorResponse(c, nil, types.RelayFormatOpenAIResponses, apiErr, "local-id")
+
+	assert.Contains(t, recorder.Body.String(), "https://upstream.example/v1/responses?key=diagnostic-key")
+	assert.NotContains(t, recorder.Body.String(), "***")
+}
+
+func TestWriteRelayErrorResponseExposesOnlyFinalOriginalTransportError(t *testing.T) {
+	current := operation_setting.GetErrorResponseSetting()
+	originalSetting := *current
+	originalSetting.Rules = append([]operation_setting.CustomErrorResponseRule(nil), current.Rules...)
+	t.Cleanup(func() { *current = originalSetting })
+	*current = operation_setting.ErrorResponseSetting{Enabled: false}
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	rawMessage := `Post "https://upstream.example/v1/responses?key=diagnostic-key": dial tcp 10.0.0.8:443: connection reset by peer`
+	apiErr := types.NewError(
+		errors.New(rawMessage),
+		types.ErrorCodeDoRequestFailed,
+		types.ErrOptionWithHideErrMsg("upstream error: do request failed"),
+	)
+
+	writeRelayErrorResponse(c, nil, types.RelayFormatOpenAIResponses, apiErr, "local-id")
+
+	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
+	assert.Contains(t, recorder.Body.String(), "https://upstream.example/v1/responses?key=diagnostic-key")
+	assert.Contains(t, recorder.Body.String(), "10.0.0.8:443")
+	assert.Contains(t, recorder.Body.String(), "connection reset by peer")
+	assert.NotContains(t, recorder.Body.String(), "***")
 }
 
 func TestWriteRelayErrorResponseUsesSSEAfterHeadersCommitted(t *testing.T) {
@@ -204,6 +295,19 @@ func TestFormatRelayErrorLogContentStripsUpstreamRequestId(t *testing.T) {
 	)
 
 	assert.Equal(t, "status_code=502, upstream failed", formatRelayErrorLogContent(err))
+}
+
+func TestFormatRelayErrorLogContentKeepsFinalOriginalTransportError(t *testing.T) {
+	rawMessage := `Post "https://upstream.example/v1/responses?key=diagnostic-key": EOF`
+	err := types.NewError(
+		errors.New(rawMessage),
+		types.ErrorCodeDoRequestFailed,
+		types.ErrOptionWithHideErrMsg("upstream error: do request failed"),
+	)
+
+	content := formatRelayErrorLogContent(err)
+	assert.Contains(t, content, rawMessage)
+	assert.NotContains(t, content, "***")
 }
 
 func TestShouldAttemptNextTaskChannelDoesNotRouteLockedChannel(t *testing.T) {

@@ -128,7 +128,6 @@ var optionAuditValueKeys = map[string]struct{}{
 	"AutomaticRetryStatusCodes":          {},
 	"ChannelRouteCooldownEnabled":        {},
 	"ChannelRouteCooldownSeconds":        {},
-	"ChannelRouteStickyEnabled":          {},
 	"ChannelRouteSameChannelRetries":     {},
 	"ChannelRouteGroupExclusionsEnabled": {},
 	"ChannelRouteGroupExclusions":        {},

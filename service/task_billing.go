@@ -55,7 +55,6 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 		"use_channel": c.GetStringSlice("use_channel"),
 	}
 	AppendChannelAffinityAdminInfo(c, adminInfo)
-	AppendChannelRouteStickyAdminInfo(c, adminInfo)
 	AppendChannelExecutionTraceAdminInfo(c, adminInfo)
 	other["admin_info"] = adminInfo
 	attachQuotaSaturation(c, info, other)

@@ -48,6 +48,7 @@ import { cn } from '@/lib/utils'
 type ChannelExecutionTimelineListProps = {
   items: ChannelExecutionTimelineItem[]
   executionGroup?: string
+  showGroupContext?: boolean
   className?: string
 }
 
@@ -94,11 +95,11 @@ function eventVariant(state?: string): StatusBadgeProps['variant'] {
   }
 }
 
-function eventLabel(state?: string, isGroupEvent = false) {
+function eventLabel(state?: string, isGroupEvent = false, reason?: string) {
   if (isGroupEvent) {
     switch (state) {
       case 'affinity_hit':
-        return 'Reused affinity group'
+        return 'Group affinity hit'
       case 'cooling':
         return 'Group entered cooldown'
       case 'skipped':
@@ -109,7 +110,8 @@ function eventLabel(state?: string, isGroupEvent = false) {
     case 'active':
       return 'Channel request started'
     case 'affinity_hit':
-      return 'Reused affinity channel'
+      if (reason === 'channel_affinity') return 'Channel affinity hit'
+      return 'Affinity hit'
     case 'same_channel_retry':
       return 'Same-channel retry'
     case 'success':
@@ -127,8 +129,15 @@ function eventLabel(state?: string, isGroupEvent = false) {
   }
 }
 
-function eventDescription(state?: string, isGroupEvent = false) {
+function eventDescription(
+  state?: string,
+  isGroupEvent = false,
+  reason?: string
+) {
   if (isGroupEvent) {
+    if (state === 'cooling' && reason === 'group_route_failure') {
+      return 'The current group failed and entered cooldown; routing continues with the next candidate group when available'
+    }
     return 'This is a group-routing decision, not an upstream channel request'
   }
   switch (state) {
@@ -147,8 +156,6 @@ function eventDescription(state?: string, isGroupEvent = false) {
 
 function eventReasonLabel(reason?: string) {
   switch (reason) {
-    case 'route_affinity':
-      return 'Route affinity'
     case 'channel_affinity':
       return 'Channel affinity'
     case 'affinity_cooling':
@@ -307,6 +314,16 @@ export function ChannelExecutionTimelineList(
                       {t('Same-channel retry')}
                     </StatusBadge>
                   ) : null}
+                  {item.group &&
+                  (props.showGroupContext ||
+                    item.group !== props.executionGroup) ? (
+                    <span className='text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs'>
+                      <span>{t('Group')}:</span>
+                      <span className='text-foreground font-mono break-all'>
+                        {item.group}
+                      </span>
+                    </span>
+                  ) : null}
                   <ChannelIdentity
                     channelId={item.channelId}
                     channelName={item.channelName}
@@ -341,7 +358,11 @@ export function ChannelExecutionTimelineList(
           const event = item.event
           const EventIcon = eventIcon(event.state)
           const isGroupEvent = Boolean(event.group && !event.channel_id)
-          const description = eventDescription(event.state, isGroupEvent)
+          const description = eventDescription(
+            event.state,
+            isGroupEvent,
+            event.reason
+          )
           return (
             <TimelineStep
               key={`${event.sequence ?? index}-${event.timestamp ?? 0}`}
@@ -362,7 +383,7 @@ export function ChannelExecutionTimelineList(
                         size='sm'
                         copyable={false}
                       >
-                        {t(eventLabel(event.state, isGroupEvent))}
+                        {t(eventLabel(event.state, isGroupEvent, event.reason))}
                       </StatusBadge>
                     </TooltipTrigger>
                     <TooltipContent
@@ -378,11 +399,13 @@ export function ChannelExecutionTimelineList(
                     size='sm'
                     copyable={false}
                   >
-                    {t(eventLabel(event.state, isGroupEvent))}
+                    {t(eventLabel(event.state, isGroupEvent, event.reason))}
                   </StatusBadge>
                 )}
                 {event.group &&
-                  (isGroupEvent || event.group !== props.executionGroup) && (
+                  (props.showGroupContext ||
+                    isGroupEvent ||
+                    event.group !== props.executionGroup) && (
                     <span className='text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs'>
                       <span>{t('Group')}:</span>
                       <span className='text-foreground font-mono break-all'>
@@ -398,7 +421,12 @@ export function ChannelExecutionTimelineList(
                   />
                 ) : null}
               </div>
-              {event.reason && event.state !== 'affinity_hit' ? (
+              {event.reason &&
+              event.state !== 'affinity_hit' &&
+              !(
+                event.state === 'cooling' &&
+                event.reason === 'group_route_failure'
+              ) ? (
                 <p className='text-muted-foreground mt-1.5 text-xs break-all'>
                   {t(eventReasonLabel(event.reason))}
                 </p>

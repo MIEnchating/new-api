@@ -13,7 +13,6 @@ import (
 )
 
 func TestChannelStatusRoutesUseOperatePermission(t *testing.T) {
-	assertChannelRoutePermission(t, http.MethodGet, "/route/affinity", authz.ChannelRead, controller.GetChannelRouteAffinityStats)
 	assertChannelRoutePermission(t, http.MethodGet, "/route/channels", authz.ChannelRead, controller.GetChannelExecutionOptions)
 	assertChannelRoutePermission(t, http.MethodGet, "/route/plan", authz.ChannelRead, controller.GetChannelExecutionPlan)
 	assertChannelRoutePermission(t, http.MethodGet, "/route/traces", authz.ChannelRead, controller.GetRecentChannelExecutionTraces)
@@ -21,8 +20,6 @@ func TestChannelStatusRoutesUseOperatePermission(t *testing.T) {
 	assertChannelRoutePermission(t, http.MethodPost, "/:id/status", authz.ChannelOperate, controller.UpdateChannelStatus)
 	assertChannelRoutePermission(t, http.MethodPost, "/status/batch", authz.ChannelOperate, controller.BatchUpdateChannelStatus)
 	assertChannelRoutePermission(t, http.MethodPost, "/:id/route/cooldown/clear", authz.ChannelOperate, controller.ClearChannelRouteCooldown)
-	assertChannelRoutePermission(t, http.MethodDelete, "/route/affinity", authz.ChannelOperate, controller.ClearAllChannelRouteAffinity)
-	assertChannelRoutePermission(t, http.MethodDelete, "/:id/route/affinity", authz.ChannelOperate, controller.ClearChannelRouteAffinity)
 	assertChannelRoutePermission(t, http.MethodPut, "/", authz.ChannelWrite, controller.UpdateChannel)
 }
 

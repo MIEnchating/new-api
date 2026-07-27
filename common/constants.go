@@ -131,7 +131,6 @@ var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false
 var ChannelRouteCooldownEnabled = false
 var ChannelRouteCooldownSeconds = 60
-var ChannelRouteStickyEnabled = false
 var ChannelRouteSameChannelRetries = 0
 var QuotaRemindThreshold = 1000
 var PreConsumedQuota = 500

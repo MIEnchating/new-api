@@ -90,6 +90,8 @@ const (
 type NewAPIError struct {
 	Err            error
 	RelayError     any
+	internalErr    error
+	responseRaw    bool
 	skipRetry      bool
 	recordErrorLog *bool
 	errorType      ErrorType
@@ -104,6 +106,39 @@ func (e *NewAPIError) Unwrap() error {
 		return nil
 	}
 	return e.Err
+}
+
+// InternalError returns the original error before a user-safe replacement was
+// applied. Callers decide whether the current audience may see it.
+func (e *NewAPIError) InternalError() error {
+	if e == nil {
+		return nil
+	}
+	if e.internalErr != nil {
+		return e.internalErr
+	}
+	return e.Err
+}
+
+// ExposeOriginalErrorForResponse restores a hidden original error and disables
+// response masking. It should only be called once the final relay attempt has
+// been selected, never for an intermediate retry failure.
+func (e *NewAPIError) ExposeOriginalErrorForResponse() {
+	if e == nil {
+		return
+	}
+	if e.internalErr != nil {
+		e.SetResponseMessage(e.internalErr.Error())
+	}
+	e.responseRaw = true
+}
+
+// DisableResponseMasking preserves a deliberately configured response message
+// exactly as written without restoring a hidden internal error.
+func (e *NewAPIError) DisableResponseMasking() {
+	if e != nil {
+		e.responseRaw = true
+	}
 }
 
 func (e *NewAPIError) GetErrorCode() ErrorCode {
@@ -224,7 +259,7 @@ func (e *NewAPIError) ToOpenAIError() OpenAIError {
 			Code:    e.errorCode,
 		}
 	}
-	if e.errorCode != ErrorCodeCountTokenFailed {
+	if e.errorCode != ErrorCodeCountTokenFailed && !e.responseRaw {
 		result.Message = common.MaskSensitiveInfo(result.Message)
 	}
 	if result.Message == "" {
@@ -253,7 +288,7 @@ func (e *NewAPIError) ToClaudeError() ClaudeError {
 			Type:    string(e.errorType),
 		}
 	}
-	if e.errorCode != ErrorCodeCountTokenFailed {
+	if e.errorCode != ErrorCodeCountTokenFailed && !e.responseRaw {
 		result.Message = common.MaskSensitiveInfo(result.Message)
 	}
 	if result.Message == "" {
@@ -423,6 +458,9 @@ func ErrOptionWithHideErrMsg(replaceStr string) NewAPIErrorOptions {
 	return func(e *NewAPIError) {
 		if common.DebugEnabled {
 			fmt.Printf("ErrOptionWithHideErrMsg: %s, origin error: %s", replaceStr, e.Err)
+		}
+		if e.internalErr == nil {
+			e.internalErr = e.Err
 		}
 		e.Err = errors.New(replaceStr)
 	}

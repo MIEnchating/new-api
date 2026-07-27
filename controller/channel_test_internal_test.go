@@ -246,20 +246,17 @@ func TestGetChannelOpsIncludesChannelRouteSettings(t *testing.T) {
 	oldRetryTimes := common.RetryTimes
 	oldRouteEnabled := common.ChannelRouteCooldownEnabled
 	oldCooldownSeconds := common.ChannelRouteCooldownSeconds
-	oldStickyEnabled := common.ChannelRouteStickyEnabled
 	oldSameChannelRetries := common.ChannelRouteSameChannelRetries
 	t.Cleanup(func() {
 		common.RetryTimes = oldRetryTimes
 		common.ChannelRouteCooldownEnabled = oldRouteEnabled
 		common.ChannelRouteCooldownSeconds = oldCooldownSeconds
-		common.ChannelRouteStickyEnabled = oldStickyEnabled
 		common.ChannelRouteSameChannelRetries = oldSameChannelRetries
 	})
 
 	common.RetryTimes = 0
 	common.ChannelRouteCooldownEnabled = true
 	common.ChannelRouteCooldownSeconds = 90
-	common.ChannelRouteStickyEnabled = true
 	common.ChannelRouteSameChannelRetries = 2
 
 	recorder := httptest.NewRecorder()
@@ -274,7 +271,6 @@ func TestGetChannelOpsIncludesChannelRouteSettings(t *testing.T) {
 			"retry_times": 0,
 			"channel_route_enabled": true,
 			"channel_route_cooldown_seconds": 90,
-			"channel_route_sticky_enabled": true,
 			"channel_route_same_channel_retries": 2
 		}
 	}`, recorder.Body.String())

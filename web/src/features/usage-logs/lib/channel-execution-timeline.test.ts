@@ -76,7 +76,7 @@ describe('channel execution timeline', () => {
         channel_id: 167,
         channel_name: 'SwiftAPI-1',
         state: 'affinity_hit',
-        reason: 'route_affinity',
+        reason: 'channel_affinity',
       },
       {
         sequence: 2,
@@ -121,7 +121,7 @@ describe('channel execution timeline', () => {
         channel_id: 92,
         channel_name: 'us-sub2-plus',
         state: 'affinity_hit',
-        reason: 'route_affinity',
+        reason: 'channel_affinity',
       },
       {
         sequence: 2,
@@ -161,7 +161,7 @@ describe('channel execution timeline', () => {
       ),
       [
         'group_affinity:affinity_hit',
-        'route_affinity:affinity_hit',
+        'channel_affinity:affinity_hit',
         'request:active',
         'request:success',
       ]

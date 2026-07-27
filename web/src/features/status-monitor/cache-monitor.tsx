@@ -245,7 +245,7 @@ function CacheTrend(props: {
         />
         <Line
           yAxisId='rate'
-          type='linear'
+          type='monotone'
           dataKey='cache_hit_rate'
           stroke='var(--color-cache_hit_rate)'
           strokeWidth={2}
@@ -256,7 +256,7 @@ function CacheTrend(props: {
         />
         <Line
           yAxisId='throughput'
-          type='linear'
+          type='monotone'
           dataKey='avg_tps'
           stroke='var(--color-avg_tps)'
           strokeWidth={2}
@@ -272,7 +272,6 @@ function CacheTrend(props: {
 
 function CacheGroupStats(props: {
   groups: CacheMetricGroup[]
-  activeGroup: string
   baseline: number
   onSelect: (group: string) => void
 }) {
@@ -312,11 +311,12 @@ function CacheGroupStats(props: {
   return (
     <ChartContainer
       config={config}
-      className='aspect-auto w-full'
+      className='aspect-auto w-full [&_.recharts-surface]:outline-none! [&_.recharts-wrapper]:outline-none!'
       style={{ height: chartHeight }}
+      onMouseDown={(event) => event.preventDefault()}
     >
       <BarChart
-        accessibilityLayer
+        accessibilityLayer={false}
         data={data}
         layout='vertical'
         margin={{ top: 8, right: 28, bottom: 0, left: 0 }}
@@ -400,8 +400,7 @@ function CacheGroupStats(props: {
               <Cell
                 key={group.group}
                 fill={fill}
-                opacity={group.group === props.activeGroup ? 1 : 0.68}
-                className='cursor-pointer transition-opacity hover:opacity-100'
+                className='cursor-pointer transition-[filter] hover:brightness-105'
                 onClick={() => props.onSelect(group.group)}
               />
             )
@@ -671,7 +670,6 @@ export function CacheMonitor(props: {
             </h3>
             <CacheGroupStats
               groups={groups}
-              activeGroup={activeGroup}
               baseline={baseline}
               onSelect={setActiveGroup}
             />

@@ -67,7 +67,6 @@ const defaultModelSettings: ModelSettings = {
   RetryTimes: 0,
   ChannelRouteCooldownEnabled: false,
   ChannelRouteCooldownSeconds: 60,
-  ChannelRouteStickyEnabled: false,
   ChannelRouteSameChannelRetries: 0,
   ChannelRouteGroupExclusionsEnabled: true,
   ChannelRouteGroupExclusions: '{}',

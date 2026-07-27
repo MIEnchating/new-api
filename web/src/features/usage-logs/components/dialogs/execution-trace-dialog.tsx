@@ -19,7 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
+  Check,
   CheckCircle2,
+  Copy,
   Info,
   ListTree,
   Loader2,
@@ -37,6 +39,7 @@ import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { getChannelExecutionTrace } from '@/features/channels/api'
+import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import {
   buildCompactChannelExecutionEvents,
   buildChannelExecutionTimeline,
@@ -94,6 +97,77 @@ function upstreamRequestIdSourceLabel(
     return t('Sub2API / other upstream (X-Request-Id)')
   }
   return t('Not recorded')
+}
+
+function UpstreamRequestIdChain(props: {
+  requestIds: string[]
+  sources?: Record<string, string>
+}) {
+  const { t } = useTranslation()
+  const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
+
+  if (props.requestIds.length === 0) return null
+
+  return (
+    <section className='bg-background overflow-hidden rounded-md border'>
+      <div className='bg-muted/30 flex min-w-0 items-center gap-2 border-b px-3 py-2'>
+        <ListTree
+          className='text-muted-foreground size-3.5 shrink-0'
+          aria-hidden='true'
+        />
+        <h3 className='min-w-0 flex-1 truncate text-xs font-medium'>
+          {t(
+            props.requestIds.length === 1
+              ? 'Upstream Request ID'
+              : 'Upstream Request ID Chain'
+          )}
+        </h3>
+        <span className='bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px] leading-none tabular-nums'>
+          {props.requestIds.length}
+        </span>
+      </div>
+
+      <ol className='divide-y'>
+        {props.requestIds.map((requestId, index) => {
+          const copied = copiedText === requestId
+
+          return (
+            <li
+              key={`${requestId}-${index}`}
+              className='grid min-w-0 grid-cols-[1.75rem_minmax(0,1fr)_1.75rem] items-start gap-2 px-3 py-2'
+            >
+              <span className='bg-muted text-muted-foreground mt-0.5 flex size-6 items-center justify-center rounded-full font-mono text-[10px] font-medium tabular-nums'>
+                {index + 1}
+              </span>
+              <div className='min-w-0'>
+                <div className='text-foreground font-mono text-xs leading-5 break-all'>
+                  {requestId}
+                </div>
+                <div className='text-muted-foreground mt-0.5 text-[11px] leading-4 break-words'>
+                  {upstreamRequestIdSourceLabel(t, props.sources?.[requestId])}
+                </div>
+              </div>
+              <Button
+                type='button'
+                variant='ghost'
+                size='icon-xs'
+                className='text-muted-foreground hover:text-foreground mt-0.5'
+                onClick={() => void copyToClipboard(requestId)}
+                aria-label={`${t('Copy to clipboard')}: ${requestId}`}
+                title={copied ? t('Copied') : t('Copy to clipboard')}
+              >
+                {copied ? (
+                  <Check className='text-success' aria-hidden='true' />
+                ) : (
+                  <Copy aria-hidden='true' />
+                )}
+              </Button>
+            </li>
+          )
+        })}
+      </ol>
+    </section>
+  )
 }
 
 function queryErrorMessage(error: unknown, fallback: string) {
@@ -279,31 +353,12 @@ export function ExecutionTraceDialog(props: ExecutionTraceDialogProps) {
                   </dd>
                 </div>
               ))}
-              {upstreamRequestIds.map((requestId, index) => (
-                <div key={requestId} className='min-w-0 sm:col-span-2'>
-                  <dt className='text-muted-foreground text-[11px]'>
-                    {t(
-                      upstreamRequestIds.length === 1
-                        ? 'Upstream Request ID'
-                        : 'Upstream Request ID Chain'
-                    )}
-                    {upstreamRequestIds.length > 1 ? ` ${index + 1}` : ''}
-                  </dt>
-                  <dd className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5'>
-                    <span className='font-mono text-xs break-all'>
-                      {requestId}
-                    </span>
-                    <span className='text-muted-foreground text-[11px]'>
-                      {t('Source')}:{' '}
-                      {upstreamRequestIdSourceLabel(
-                        t,
-                        props.upstreamRequestIdSources?.[requestId]
-                      )}
-                    </span>
-                  </dd>
-                </div>
-              ))}
             </dl>
+
+            <UpstreamRequestIdChain
+              requestIds={upstreamRequestIds}
+              sources={props.upstreamRequestIdSources}
+            />
 
             {routeGroupProgress.length > 1 ? (
               <div className='space-y-1.5'>
@@ -337,6 +392,7 @@ export function ExecutionTraceDialog(props: ExecutionTraceDialogProps) {
             <ChannelExecutionTimelineList
               items={timeline}
               executionGroup={trace.group}
+              showGroupContext={(trace.route_groups?.length ?? 0) > 1}
             />
           ) : (
             <p className='text-muted-foreground py-8 text-center text-sm'>

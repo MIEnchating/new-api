@@ -18,14 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import {
-  Link2,
-  RefreshCw,
-  Route,
-  Settings2,
-  TimerOff,
-  TimerReset,
-} from 'lucide-react'
+import { RefreshCw, Route, Settings2, TimerOff, TimerReset } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
@@ -57,8 +50,6 @@ export function Channels() {
   const channelOps = channelOpsQuery.data?.data
   const channelRouteEnabled = channelOps?.channel_route_enabled === true
   const channelRouteCooldownSeconds = channelOps?.channel_route_cooldown_seconds
-  const channelRouteStickyEnabled =
-    channelOps?.channel_route_sticky_enabled === true
   const channelRouteSameChannelRetries =
     channelOps?.channel_route_same_channel_retries
   const retryTimes = channelOpsQuery.data?.data?.retry_times
@@ -95,19 +86,6 @@ export function Channels() {
               </span>
             </span>
             <span className='border-border flex h-full shrink-0 items-center gap-1.5 border-l px-2'>
-              <Link2
-                className={
-                  channelRouteStickyEnabled
-                    ? 'text-info size-3.5'
-                    : 'text-muted-foreground size-3.5'
-                }
-              />
-              <span>
-                {t('Route affinity')}:{' '}
-                {t(channelRouteStickyEnabled ? 'Enabled' : 'Disabled')}
-              </span>
-            </span>
-            <span className='border-border flex h-full shrink-0 items-center gap-1.5 border-l px-2'>
               <RefreshCw className='text-muted-foreground size-3.5' />
               <span>
                 {t('Retry')}: {sameChannelRetries}
@@ -141,10 +119,6 @@ export function Channels() {
               : '-'}
         </p>
         <p>
-          {t('Channel route affinity')}:{' '}
-          {t(channelRouteStickyEnabled ? 'Enabled' : 'Disabled')}
-        </p>
-        <p>
           {t('Same-channel retries')}:{' '}
           {typeof channelRouteSameChannelRetries === 'number'
             ? channelRouteSameChannelRetries
@@ -163,11 +137,7 @@ export function Channels() {
               className='group focus-visible:ring-ring shrink-0 cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-offset-2'
               aria-label={summaryAriaLabel}
               to='/system-settings/models/$section'
-              params={{
-                section: channelRouteEnabled
-                  ? 'channel-routing'
-                  : 'routing-reliability',
-              }}
+              params={{ section: 'routing-reliability' }}
             />
           }
         >

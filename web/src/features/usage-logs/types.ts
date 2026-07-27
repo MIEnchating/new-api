@@ -92,13 +92,6 @@ export interface ChannelAffinityInfo {
   using_group?: string
 }
 
-export interface ChannelRouteStickyInfo {
-  group?: string
-  model?: string
-  request_path?: string
-  channel_id?: number
-}
-
 export interface ChannelExecutionTraceInfo {
   compact?: boolean
   request_id?: string
@@ -163,7 +156,6 @@ export interface LogOtherData {
     local_count_tokens?: boolean
     usage_billing_path?: UsageBillingPath | string
     channel_affinity?: ChannelAffinityInfo
-    channel_route_sticky?: ChannelRouteStickyInfo
     channel_execution_trace?: ChannelExecutionTraceInfo
     upstream_request_ids?: string[]
     upstream_request_id_sources?: Record<string, string>

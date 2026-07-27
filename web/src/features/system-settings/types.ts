@@ -231,7 +231,6 @@ export type ModelSettings = {
   RetryTimes: number
   ChannelRouteCooldownEnabled: boolean
   ChannelRouteCooldownSeconds: number
-  ChannelRouteStickyEnabled: boolean
   ChannelRouteSameChannelRetries: number
   ChannelRouteGroupExclusionsEnabled: boolean
   ChannelRouteGroupExclusions: string

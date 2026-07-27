@@ -37,4 +37,8 @@ func TestShouldUseChannelAffinity(t *testing.T) {
 	ctx := newContext()
 	common.SetContextKey(ctx, constant.ContextKeyTokenGroupRoutes, []model.TokenGroupRoute{{Group: "default"}})
 	assert.False(t, shouldUseChannelAffinity(ctx))
+
+	ctx = newContext()
+	common.SetContextKey(ctx, constant.ContextKeyUsingGroup, "auto")
+	assert.False(t, shouldUseChannelAffinity(ctx))
 }

@@ -291,6 +291,51 @@ function upstreamRequestIdSourceLabel(t: TFunction, source?: string) {
   }
 }
 
+type ChannelChainRun = {
+  channelId: string
+  count: number
+}
+
+function compactChannelChain(
+  channelIds: Array<number | string>
+): ChannelChainRun[] {
+  const runs: Array<{ channelId: string; count: number }> = []
+
+  for (const channelId of channelIds) {
+    const normalizedId = String(channelId)
+    const lastRun = runs.at(-1)
+    if (lastRun?.channelId === normalizedId) {
+      lastRun.count += 1
+      continue
+    }
+    runs.push({ channelId: normalizedId, count: 1 })
+  }
+
+  return runs
+}
+
+function CompactChannelChain(props: { runs: ChannelChainRun[] }) {
+  return (
+    <span className='inline-flex min-w-0 flex-wrap items-center gap-1'>
+      {props.runs.map((run, index) => (
+        <span key={`${run.channelId}-${index}`} className='contents'>
+          {index > 0 ? (
+            <ChevronRight className='text-muted-foreground size-3 shrink-0' />
+          ) : null}
+          <span className='border-border/70 bg-muted/50 inline-flex h-6 items-center gap-1 rounded-md border px-2 font-mono text-xs'>
+            <span className='font-medium'>{run.channelId}</span>
+            {run.count > 1 ? (
+              <span className='text-muted-foreground border-border/70 border-l pl-1 tabular-nums'>
+                ×{run.count}
+              </span>
+            ) : null}
+          </span>
+        </span>
+      ))}
+    </span>
+  )
+}
+
 function formatRatio(ratio: number | undefined): string {
   if (ratio == null) return '-'
   return ratio.toFixed(4)
@@ -838,9 +883,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
 
   const useChannel = other?.admin_info?.use_channel
   const channelChain =
-    useChannel && useChannel.length > 0 ? useChannel.join(' → ') : undefined
+    useChannel && useChannel.length > 0 ? compactChannelChain(useChannel) : []
   const showChannelChain =
-    channelChain &&
+    channelChain.length > 0 &&
     !(
       useChannel?.length === 1 &&
       String(useChannel[0]) === String(props.log.channel)
@@ -958,27 +1003,47 @@ export function DetailsDialog(props: DetailsDialogProps) {
             <DetailRow
               label={t('Upstream Request ID Chain')}
               value={
-                <span className='flex min-w-0 flex-col gap-1'>
-                  {upstreamRequestIds.map((requestId, index) => (
-                    <span key={requestId} className='flex min-w-0 gap-2'>
-                      <span className='text-muted-foreground shrink-0 tabular-nums'>
-                        {index + 1}.
-                      </span>
-                      <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
-                        <span className='min-w-0 break-all'>{requestId}</span>
-                        <span className='text-muted-foreground font-sans text-[11px]'>
-                          {t('Source')}:{' '}
-                          {upstreamRequestIdSourceLabel(
-                            t,
-                            upstreamRequestIdSources[requestId]
-                          )}
+                <details className='group min-w-0 font-sans'>
+                  <summary className='hover:bg-muted/60 flex cursor-pointer list-none items-center gap-2 rounded-md px-2 py-1.5 select-none [&::-webkit-details-marker]:hidden'>
+                    <ChevronRight className='text-muted-foreground size-3.5 shrink-0 transition-transform group-open:rotate-90' />
+                    <span className='bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-[11px] tabular-nums'>
+                      {t('{{count}} request IDs', {
+                        count: upstreamRequestIds.length,
+                      })}
+                    </span>
+                    <span className='min-w-0 truncate font-mono text-xs'>
+                      {upstreamRequestIds[0]}
+                    </span>
+                    <span className='text-muted-foreground shrink-0'>→</span>
+                    <span className='min-w-0 truncate font-mono text-xs'>
+                      {upstreamRequestIds.at(-1)}
+                    </span>
+                  </summary>
+                  <span className='border-border/70 mt-1 ml-1.5 flex min-w-0 flex-col gap-1 border-l pl-3'>
+                    {upstreamRequestIds.map((requestId, index) => (
+                      <span
+                        key={requestId}
+                        className='flex min-w-0 items-start gap-2 py-1'
+                      >
+                        <span className='text-muted-foreground w-4 shrink-0 text-right text-[11px] tabular-nums'>
+                          {index + 1}
+                        </span>
+                        <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
+                          <span className='min-w-0 font-mono text-xs break-all'>
+                            {requestId}
+                          </span>
+                          <span className='text-muted-foreground text-[11px]'>
+                            {upstreamRequestIdSourceLabel(
+                              t,
+                              upstreamRequestIdSources[requestId]
+                            )}
+                          </span>
                         </span>
                       </span>
-                    </span>
-                  ))}
-                </span>
+                    ))}
+                  </span>
+                </details>
               }
-              mono
             />
           )}
           {manageOperator && (
@@ -1020,8 +1085,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
               label={t(
                 isRetryIntermediate ? 'Retry Chain at This Log' : 'Retry Chain'
               )}
-              value={channelChain}
-              mono
+              value={<CompactChannelChain runs={channelChain} />}
             />
           )}
 

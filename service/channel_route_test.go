@@ -19,6 +19,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -239,7 +240,6 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
 	oldChannelRouteCooldownEnabled := common.ChannelRouteCooldownEnabled
 	oldChannelRouteCooldownSeconds := common.ChannelRouteCooldownSeconds
-	oldChannelRouteStickyEnabled := common.ChannelRouteStickyEnabled
 	oldChannelRouteSameChannelRetries := common.ChannelRouteSameChannelRetries
 	oldChannelRouteGroupExclusionsEnabled := setting.ChannelRouteGroupExclusionsEnabled
 	oldChannelRouteGroupExclusions := setting.ChannelRouteGroupExclusions2JSONString()
@@ -250,7 +250,6 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	common.MemoryCacheEnabled = true
 	common.ChannelRouteCooldownEnabled = true
 	common.ChannelRouteCooldownSeconds = 60
-	common.ChannelRouteStickyEnabled = false
 	common.ChannelRouteSameChannelRetries = 0
 	setting.ChannelRouteGroupExclusionsEnabled = true
 	require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString("{}"))
@@ -258,8 +257,6 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	channelRouteCooldowns = sync.Map{}
 	channelRouteCooldownWrites.Store(0)
-	channelRouteAffinityStoreOnce = sync.Once{}
-	channelRouteAffinityStore = nil
 	channelExecutionTraceCacheOnce = sync.Once{}
 	channelExecutionTraceCache = nil
 	channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
@@ -279,15 +276,12 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
 		common.ChannelRouteCooldownEnabled = oldChannelRouteCooldownEnabled
 		common.ChannelRouteCooldownSeconds = oldChannelRouteCooldownSeconds
-		common.ChannelRouteStickyEnabled = oldChannelRouteStickyEnabled
 		common.ChannelRouteSameChannelRetries = oldChannelRouteSameChannelRetries
 		setting.ChannelRouteGroupExclusionsEnabled = oldChannelRouteGroupExclusionsEnabled
 		require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString(oldChannelRouteGroupExclusions))
 		common.RetryTimes = oldRetryTimes
 		channelRouteCooldowns = sync.Map{}
 		channelRouteCooldownWrites.Store(0)
-		channelRouteAffinityStoreOnce = sync.Once{}
-		channelRouteAffinityStore = nil
 		channelExecutionTraceCacheOnce = sync.Once{}
 		channelExecutionTraceCache = nil
 		channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
@@ -332,6 +326,14 @@ func TestShouldRetrySameChannelRouteHonorsLimitAndDisable(t *testing.T) {
 		http.StatusBadRequest,
 	)
 	assert.False(t, ShouldRetrySameChannelRoute(nonRouteErr, 0))
+
+	contextWindowErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "Your input exceeds the context window of this model. Please adjust your input and try again.",
+		Type:    "upstream_error",
+	}, http.StatusBadGateway)
+	assert.False(t, ShouldRetrySameChannelRoute(contextWindowErr, 0))
+	assert.False(t, ShouldFreezeChannelRoute(contextWindowErr))
+	assert.False(t, ShouldFreezeTokenGroupRoute(contextWindowErr))
 }
 
 func TestShouldRetrySameChannelRouteHonorsGroupExclusions(t *testing.T) {
@@ -490,7 +492,7 @@ func TestGroupAffinityPrecedesSelectionAndResolvedAttemptIsDeduplicated(t *testi
 	priority := int64(1000)
 	channel := &model.Channel{Id: 92, Name: "us-sub2-plus", Priority: &priority}
 
-	TrackChannelExecutionAffinityHit(ctx, "codex", channelRouteTestModel, "/v1/responses", channel.Id, "route_affinity")
+	TrackChannelExecutionAffinityHit(ctx, "codex", channelRouteTestModel, "/v1/responses", channel.Id, "channel_affinity")
 	TrackChannelExecutionSelection(ctx, "codex", channelRouteTestModel, "/v1/responses", channel, 0)
 	TrackChannelExecutionGroupAffinityHit(ctx, "codex", channelRouteTestModel, "/v1/responses", channel.Id)
 	TrackResolvedChannelExecutionAttempt(ctx, "codex", channelRouteTestModel, "/v1/responses", channel, 0)
@@ -504,7 +506,7 @@ func TestGroupAffinityPrecedesSelectionAndResolvedAttemptIsDeduplicated(t *testi
 	require.Len(t, events, 3)
 	assert.Equal(t, "group_affinity", events[0].Reason)
 	assert.Zero(t, events[0].ChannelID)
-	assert.Equal(t, "route_affinity", events[1].Reason)
+	assert.Equal(t, "channel_affinity", events[1].Reason)
 	assert.Equal(t, "active", events[2].State)
 	assert.Equal(t, channel.Id, events[2].ChannelID)
 }
@@ -974,6 +976,56 @@ func newChannelRouteRetryParam(ctx *gin.Context, group string) *RetryParam {
 	}
 }
 
+func setupChannelRouteAffinityRule(t *testing.T) operation_setting.ChannelAffinityRule {
+	t.Helper()
+	setting := operation_setting.GetChannelAffinitySetting()
+	original := *setting
+	original.Rules = append([]operation_setting.ChannelAffinityRule(nil), setting.Rules...)
+	rule := operation_setting.ChannelAffinityRule{
+		Name:       "managed-route-test-" + strings.ReplaceAll(t.Name(), "/", "-"),
+		ModelRegex: []string{"^" + channelRouteTestModel + "$"},
+		PathRegex:  []string{"^/v1/chat/completions$"},
+		KeySources: []operation_setting.ChannelAffinityKeySource{
+			{Type: "request_header", Key: "X-Route-Affinity"},
+		},
+		TTLSeconds:         60,
+		SkipRetryOnFailure: true,
+		IncludeUsingGroup:  true,
+		IncludeModelName:   true,
+		IncludeRuleName:    true,
+	}
+	setting.Enabled = true
+	setting.SwitchOnSuccess = true
+	setting.KeepOnChannelDisabled = false
+	setting.Rules = []operation_setting.ChannelAffinityRule{rule}
+	t.Cleanup(func() {
+		*setting = original
+	})
+	return rule
+}
+
+func setChannelRouteAffinityTestRequest(ctx *gin.Context, value string) {
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Request.Header.Set("X-Route-Affinity", value)
+}
+
+func seedChannelRouteAffinityForTest(
+	t *testing.T,
+	rule operation_setting.ChannelAffinityRule,
+	group string,
+	value string,
+	channelID int,
+) string {
+	t.Helper()
+	key := buildChannelAffinityCacheKeySuffix(rule, channelRouteTestModel, group, value)
+	cache := getChannelAffinityCache()
+	require.NoError(t, cache.SetWithTTL(key, channelID, time.Minute))
+	t.Cleanup(func() {
+		_, _ = cache.DeleteMany([]string{key})
+	})
+	return key
+}
+
 func newChannelRouteFailure() *types.NewAPIError {
 	return types.NewErrorWithStatusCode(
 		errors.New("upstream unavailable"),
@@ -1089,15 +1141,17 @@ func TestChannelRouteCooldownZeroExhaustsPrimaryGroupBeforeCoolingAndFallback(t 
 
 func TestChannelRouteSameChannelRetriesThenFailsOverAtSamePriority(t *testing.T) {
 	db := setupChannelRouteTest(t)
+	rule := setupChannelRouteAffinityRule(t)
 	seedChannelRouteChannel(t, db, 1, "default", 1)
 	seedChannelRouteChannel(t, db, 2, "default", 1)
 	model.InitChannelCache()
 	common.ChannelRouteCooldownSeconds = 0
-	common.ChannelRouteStickyEnabled = true
 	common.ChannelRouteSameChannelRetries = 2
-	SetChannelRouteStickyChannel("default", channelRouteTestModel, "/v1/chat/completions", 1)
 
+	value := fmt.Sprintf("same-channel-retries-%d", time.Now().UnixNano())
+	key := seedChannelRouteAffinityForTest(t, rule, "default", value, 1)
 	ctx := newChannelRouteContext()
+	setChannelRouteAffinityTestRequest(ctx, value)
 	param := newChannelRouteRetryParam(ctx, "default")
 	first, _, err := CacheGetRandomSatisfiedChannel(param)
 	require.NoError(t, err)
@@ -1112,8 +1166,11 @@ func TestChannelRouteSameChannelRetriesThenFailsOverAtSamePriority(t *testing.T)
 	}
 	ctx.Set("use_channel", usedChannels)
 	assert.False(t, ShouldRetrySameChannelRoute(routeErr, common.ChannelRouteSameChannelRetries))
+	assert.True(t, ClearChannelAffinityForRetryableFailure(ctx, first.Id, routeErr))
+	_, found, err := getChannelAffinityCache().Get(key)
+	require.NoError(t, err)
+	assert.False(t, found)
 	assert.True(t, MarkChannelRouteFailure(ctx, routeErr))
-	assert.Zero(t, GetChannelRouteStickyChannel("default", channelRouteTestModel, "/v1/chat/completions"))
 
 	param.SetRetry(1)
 	fallback, _, err := CacheGetRandomSatisfiedChannel(param)
@@ -1197,114 +1254,177 @@ func TestChannelRouteTriesDistinctChannelsAtSamePriority(t *testing.T) {
 	assert.NotEqual(t, first.Id, second.Id)
 }
 
-func TestChannelRouteStickyKeepsLastSuccessfulFallback(t *testing.T) {
+func TestChannelRouteUsesRequestAffinityAfterConcreteGroup(t *testing.T) {
 	db := setupChannelRouteTest(t)
-	common.ChannelRouteStickyEnabled = true
+	rule := setupChannelRouteAffinityRule(t)
 	seedChannelRouteChannel(t, db, 1, "default", 2)
 	seedChannelRouteChannel(t, db, 2, "default", 1)
 	model.InitChannelCache()
 
-	firstCtx := newChannelRouteContext()
-	first, _, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(firstCtx, "default"))
+	value := fmt.Sprintf("route-hit-%d", time.Now().UnixNano())
+	seedChannelRouteAffinityForTest(t, rule, "default", value, 2)
+	ctx := newChannelRouteContext()
+	setChannelRouteAffinityTestRequest(ctx, value)
+
+	channel, group, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(ctx, "default"))
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, "default", group)
+	assert.Equal(t, 2, channel.Id)
+
+	state, ok := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, ok)
+	require.Len(t, state.trace.Events, 2)
+	assert.Equal(t, "channel_affinity", state.trace.Events[0].Reason)
+	assert.Equal(t, "default", state.trace.Events[0].Group)
+	assert.Equal(t, 2, state.trace.Events[0].ChannelID)
+	assert.Equal(t, "active", state.trace.Events[1].State)
+}
+
+func TestTokenGroupRouteUsesRequestAffinityInFirstConcreteGroup(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	common.ChannelRouteCooldownEnabled = false
+	rule := setupChannelRouteAffinityRule(t)
+	seedChannelRouteChannel(t, db, 1, "primary", 2)
+	seedChannelRouteChannel(t, db, 2, "primary", 1)
+	model.InitChannelCache()
+
+	value := fmt.Sprintf("group-hit-%d", time.Now().UnixNano())
+	seedChannelRouteAffinityForTest(t, rule, "primary", value, 2)
+	ctx := newTokenRouteContext([]model.TokenGroupRoute{{Group: "primary", Priority: 1, CooldownSeconds: 60}})
+	setChannelRouteAffinityTestRequest(ctx, value)
+	param := newChannelRouteRetryParam(ctx, "default")
+
+	channel, group, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, channel)
+	assert.Equal(t, "primary", group)
+	assert.Equal(t, 2, channel.Id)
+
+	state, ok := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, ok)
+	require.NotEmpty(t, state.trace.Events)
+	assert.Equal(t, "channel_affinity", state.trace.Events[0].Reason)
+	assert.Equal(t, "primary", state.trace.Events[0].Group)
+}
+
+func TestChannelAffinityOnlySelectsFirstChannelAcrossGroupFallback(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	rule := setupChannelRouteAffinityRule(t)
+	seedChannelRouteChannel(t, db, 171, "codex-limited", 1)
+	seedChannelRouteChannel(t, db, 116, "codex-special", 1)
+	seedChannelRouteChannel(t, db, 117, "codex-special", 2)
+	model.InitChannelCache()
+
+	value := fmt.Sprintf("group-fallback-%d", time.Now().UnixNano())
+	specialKey := seedChannelRouteAffinityForTest(t, rule, "codex-special", value, 116)
+	routes := []model.TokenGroupRoute{
+		{Group: "codex-limited", Priority: 2, CooldownSeconds: 60},
+		{Group: "codex-special", Priority: 1, CooldownSeconds: 60},
+	}
+	ctx := newTokenRouteContext(routes)
+	setChannelRouteAffinityTestRequest(ctx, value)
+	param := newChannelRouteRetryParam(ctx, "default")
+
+	first, group, err := CacheGetRandomSatisfiedChannel(param)
 	require.NoError(t, err)
 	require.NotNil(t, first)
-	assert.Equal(t, 1, first.Id)
-	assert.True(t, MarkChannelRouteFailure(firstCtx, newChannelRouteFailure()))
+	assert.Equal(t, "codex-limited", group)
+	assert.Equal(t, 171, first.Id)
+	ctx.Set("use_channel", []string{strconv.Itoa(first.Id)})
+	assert.False(t, MarkChannelRouteFailure(ctx, newChannelRouteFailure()))
+	assert.True(t, MarkTokenGroupRouteFailure(ctx, newChannelRouteFailure()))
 
-	fallbackCtx := newChannelRouteContext()
-	fallback, _, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(fallbackCtx, "default"))
+	param.SetRetry(1)
+	fallback, group, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, fallback)
+	assert.Equal(t, "codex-special", group)
+	assert.Equal(t, 117, fallback.Id)
+
+	state, ok := channelExecutionTraceStateFromContext(ctx)
+	require.True(t, ok)
+	for _, event := range state.trace.Events {
+		assert.NotEqual(t, "channel_affinity", event.Reason)
+	}
+
+	operation_setting.GetChannelAffinitySetting().SwitchOnSuccess = false
+	common.SetContextKey(ctx, constant.ContextKeyChannelId, fallback.Id)
+	RecordChannelAffinity(ctx, first.Id)
+	stored, found, err := getChannelAffinityCache().Get(specialKey)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, fallback.Id, stored)
+}
+
+func TestRetryableAffinityFailureClearsAndSuccessfulCandidateRebinds(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	rule := setupChannelRouteAffinityRule(t)
+	seedChannelRouteChannel(t, db, 1, "default", 1)
+	seedChannelRouteChannel(t, db, 2, "default", 2)
+	model.InitChannelCache()
+
+	value := fmt.Sprintf("retryable-failure-%d", time.Now().UnixNano())
+	key := seedChannelRouteAffinityForTest(t, rule, "default", value, 1)
+	ctx := newChannelRouteContext()
+	setChannelRouteAffinityTestRequest(ctx, value)
+	param := newChannelRouteRetryParam(ctx, "default")
+
+	first, _, err := CacheGetRandomSatisfiedChannel(param)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Equal(t, 1, first.Id)
+	assert.True(t, ShouldSkipRetryAfterChannelAffinityFailure(ctx))
+
+	routeErr := newChannelRouteFailure()
+	assert.True(t, ClearChannelAffinityForRetryableFailure(ctx, first.Id, routeErr))
+	assert.False(t, ShouldSkipRetryAfterChannelAffinityFailure(ctx))
+	_, found, err := getChannelAffinityCache().Get(key)
+	require.NoError(t, err)
+	assert.False(t, found)
+
+	ctx.Set("use_channel", []string{strconv.Itoa(first.Id)})
+	assert.True(t, MarkChannelRouteFailure(ctx, routeErr))
+	param.SetRetry(1)
+	fallback, _, err := CacheGetRandomSatisfiedChannel(param)
 	require.NoError(t, err)
 	require.NotNil(t, fallback)
 	assert.Equal(t, 2, fallback.Id)
-	fallbackAdminInfo := map[string]interface{}{}
-	AppendChannelRouteStickyAdminInfo(fallbackCtx, fallbackAdminInfo)
-	assert.NotContains(t, fallbackAdminInfo, "channel_route_sticky")
-	MarkChannelRouteSuccess(fallbackCtx)
-	assert.Equal(t, 2, GetChannelRouteStickyChannel("default", channelRouteTestModel, "/v1/chat/completions"))
 
-	ClearChannelRouteCooldown("default", 1)
-	stickyCtx := newChannelRouteContext()
-	sticky, _, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(stickyCtx, "default"))
+	operation_setting.GetChannelAffinitySetting().SwitchOnSuccess = false
+	common.SetContextKey(ctx, constant.ContextKeyChannelId, fallback.Id)
+	RecordChannelAffinity(ctx, first.Id)
+	stored, found, err := getChannelAffinityCache().Get(key)
 	require.NoError(t, err)
-	require.NotNil(t, sticky)
-	assert.Equal(t, 2, sticky.Id)
-	stickyAdminInfo := map[string]interface{}{}
-	AppendChannelRouteStickyAdminInfo(stickyCtx, stickyAdminInfo)
-	require.Contains(t, stickyAdminInfo, "channel_route_sticky")
-	stickyLogInfo := stickyAdminInfo["channel_route_sticky"].(map[string]interface{})
-	assert.Equal(t, "default", stickyLogInfo["group"])
-	assert.Equal(t, channelRouteTestModel, stickyLogInfo["model"])
-	assert.Equal(t, "/v1/chat/completions", stickyLogInfo["request_path"])
-	assert.Equal(t, 2, stickyLogInfo["channel_id"])
-	assert.True(t, MarkChannelRouteFailure(stickyCtx, newChannelRouteFailure()))
-	assert.Zero(t, GetChannelRouteStickyChannel("default", channelRouteTestModel, "/v1/chat/completions"))
-
-	recoveredCtx := newChannelRouteContext()
-	recovered, _, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(recoveredCtx, "default"))
-	require.NoError(t, err)
-	require.NotNil(t, recovered)
-	assert.Equal(t, 1, recovered.Id)
+	require.True(t, found)
+	assert.Equal(t, fallback.Id, stored)
 }
 
-func TestClearChannelRouteAffinityByChannelOnlyClearsMatchingChannel(t *testing.T) {
-	setupChannelRouteTest(t)
+func TestNonRetryableAffinityFailureKeepsMapping(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	rule := setupChannelRouteAffinityRule(t)
+	seedChannelRouteChannel(t, db, 1, "default", 1)
+	model.InitChannelCache()
 
-	SetChannelRouteStickyChannel("default", "model-a", "/v1/responses", 1)
-	SetChannelRouteStickyChannel("default", "model-b", "/v1/responses", 1)
-	SetChannelRouteStickyChannel("default", "model-c", "/v1/responses", 2)
-
-	deleted, err := ClearChannelRouteAffinityByChannel(1)
+	value := fmt.Sprintf("request-error-%d", time.Now().UnixNano())
+	key := seedChannelRouteAffinityForTest(t, rule, "default", value, 1)
+	ctx := newChannelRouteContext()
+	setChannelRouteAffinityTestRequest(ctx, value)
+	channel, _, err := CacheGetRandomSatisfiedChannel(newChannelRouteRetryParam(ctx, "default"))
 	require.NoError(t, err)
-	assert.Equal(t, 2, deleted)
-	assert.Zero(t, GetChannelRouteStickyChannel("default", "model-a", "/v1/responses"))
-	assert.Zero(t, GetChannelRouteStickyChannel("default", "model-b", "/v1/responses"))
-	assert.Equal(t, 2, GetChannelRouteStickyChannel("default", "model-c", "/v1/responses"))
-}
+	require.NotNil(t, channel)
 
-func TestClearAllChannelRouteAffinityClearsEveryChannel(t *testing.T) {
-	setupChannelRouteTest(t)
-
-	SetChannelRouteStickyChannel("default", "model-a", "/v1/responses", 1)
-	SetChannelRouteStickyChannel("default", "model-b", "/v1/responses", 2)
-
-	deleted, err := ClearAllChannelRouteAffinity()
-	require.NoError(t, err)
-	assert.Equal(t, 2, deleted)
-	assert.Zero(t, GetChannelRouteStickyChannel("default", "model-a", "/v1/responses"))
-	assert.Zero(t, GetChannelRouteStickyChannel("default", "model-b", "/v1/responses"))
-}
-
-func TestChannelRouteAffinityStatsUseSharedStore(t *testing.T) {
-	setupChannelRouteTest(t)
-	common.ChannelRouteStickyEnabled = true
-
-	SetChannelRouteStickyChannel("default", "model-a", "/v1/responses", 1)
-	SetChannelRouteStickyChannel("default", "model-b", "/v1/responses", 2)
-
-	stats := GetChannelRouteAffinityStats()
-	assert.True(t, stats.Enabled)
-	assert.Equal(t, 2, stats.Total)
-	assert.Equal(t, 100_000, stats.CacheCapacity)
-	assert.Equal(t, "lru", stats.CacheAlgo)
-}
-
-func TestChannelRouteAffinityKeepsExistingRedisKeyFormat(t *testing.T) {
-	setupChannelRouteTest(t)
-
-	group := "default"
-	modelName := "gpt-5"
-	requestPath := "/v1/responses"
-	expected := "channel_route_sticky:" + common.GenerateHMAC(
-		channelRouteStickyScope(group, modelName, requestPath),
+	requestErr := types.NewErrorWithStatusCode(
+		errors.New("invalid request"),
+		types.ErrorCodeInvalidRequest,
+		http.StatusBadRequest,
+		types.ErrOptionWithSkipRetry(),
 	)
-
-	assert.Equal(
-		t,
-		expected,
-		getChannelRouteAffinityStore().FullKey(
-			channelRouteStickyKey(group, modelName, requestPath),
-		),
-	)
+	assert.False(t, ClearChannelAffinityForRetryableFailure(ctx, channel.Id, requestErr))
+	stored, found, err := getChannelAffinityCache().Get(key)
+	require.NoError(t, err)
+	require.True(t, found)
+	assert.Equal(t, channel.Id, stored)
 }
 
 func TestChannelRouteCooldownKeepsTokenGroupBeforeFallingBackGroup(t *testing.T) {
@@ -1397,7 +1517,7 @@ func TestChannelExecutionPlanAndTraceFollowActualRoute(t *testing.T) {
 
 	affinityCtx := newChannelRouteContext()
 	affinityCtx.Set(common.RequestIdKey, "request-trace-affinity")
-	TrackChannelExecutionAffinityHit(affinityCtx, "default", channelRouteTestModel, "/v1/chat/completions", first.Id, "route_affinity")
+	TrackChannelExecutionAffinityHit(affinityCtx, "default", channelRouteTestModel, "/v1/chat/completions", first.Id, "channel_affinity")
 	TrackChannelExecutionSelection(affinityCtx, "default", channelRouteTestModel, "/v1/chat/completions", first, 0)
 	MarkChannelExecutionSuccess(affinityCtx)
 	affinityAdminInfo := map[string]interface{}{}

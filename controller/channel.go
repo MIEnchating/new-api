@@ -135,7 +135,6 @@ func GetChannelOps(c *gin.Context) {
 		"retry_times":                        common.RetryTimes,
 		"channel_route_enabled":              service.IsChannelRouteEnabled(),
 		"channel_route_cooldown_seconds":     common.ChannelRouteCooldownSeconds,
-		"channel_route_sticky_enabled":       service.IsChannelRouteStickyEnabled(),
 		"channel_route_same_channel_retries": common.ChannelRouteSameChannelRetries,
 	})
 }

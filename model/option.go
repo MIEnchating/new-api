@@ -49,7 +49,6 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["ChannelRouteCooldownEnabled"] = strconv.FormatBool(common.ChannelRouteCooldownEnabled)
 	common.OptionMap["ChannelRouteCooldownSeconds"] = strconv.Itoa(common.ChannelRouteCooldownSeconds)
-	common.OptionMap["ChannelRouteStickyEnabled"] = strconv.FormatBool(common.ChannelRouteStickyEnabled)
 	common.OptionMap["ChannelRouteSameChannelRetries"] = strconv.Itoa(common.ChannelRouteSameChannelRetries)
 	common.OptionMap["ChannelRouteGroupExclusionsEnabled"] = strconv.FormatBool(setting.ChannelRouteGroupExclusionsEnabled)
 	common.OptionMap["ChannelRouteGroupExclusions"] = setting.ChannelRouteGroupExclusions2JSONString()
@@ -279,7 +278,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
-	if key == retiredThemeOptionKey {
+	if key == retiredThemeOptionKey || key == "ChannelRouteStickyEnabled" {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)
 		common.OptionMapRWMutex.Unlock()
@@ -339,8 +338,6 @@ func updateOptionMap(key string, value string) (err error) {
 			common.AutomaticEnableChannelEnabled = boolValue
 		case "ChannelRouteCooldownEnabled":
 			common.ChannelRouteCooldownEnabled = boolValue
-		case "ChannelRouteStickyEnabled":
-			common.ChannelRouteStickyEnabled = boolValue
 		case "ChannelRouteGroupExclusionsEnabled":
 			setting.ChannelRouteGroupExclusionsEnabled = boolValue
 		case "LogConsumeEnabled":

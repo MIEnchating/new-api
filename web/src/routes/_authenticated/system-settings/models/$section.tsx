@@ -28,6 +28,13 @@ export const Route = createFileRoute(
   '/_authenticated/system-settings/models/$section'
 )({
   beforeLoad: ({ params }) => {
+    if (params.section === 'channel-routing') {
+      throw redirect({
+        to: '/system-settings/models/$section',
+        params: { section: 'routing-reliability' },
+      })
+    }
+
     const validSections = MODELS_SECTION_IDS as unknown as string[]
     if (!validSections.includes(params.section)) {
       throw redirect({

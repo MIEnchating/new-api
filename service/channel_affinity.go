@@ -25,6 +25,10 @@ const (
 	ginKeyChannelAffinityMeta       = "channel_affinity_meta"
 	ginKeyChannelAffinityLogInfo    = "channel_affinity_log_info"
 	ginKeyChannelAffinitySkipRetry  = "channel_affinity_skip_retry_on_failure"
+	ginKeyChannelAffinityFirstPick  = "channel_affinity_first_pick_complete"
+	ginKeyChannelAffinityActiveHit  = "channel_affinity_active_hit"
+	ginKeyChannelAffinityFailover   = "channel_affinity_failover"
+	ginKeyChannelAffinityManaged    = "channel_affinity_managed_selection"
 
 	channelAffinityCacheNamespace           = "new-api:channel_affinity:v1"
 	channelAffinityUsageCacheStatsNamespace = "new-api:channel_affinity_usage_cache_stats:v1"
@@ -54,6 +58,11 @@ type channelAffinityMeta struct {
 	UsingGroup     string
 	ModelName      string
 	RequestPath    string
+}
+
+type channelAffinityActiveHit struct {
+	CacheKey  string
+	ChannelID int
 }
 
 type ChannelAffinityStatsContext struct {
@@ -341,6 +350,25 @@ func setChannelAffinityContext(c *gin.Context, meta channelAffinityMeta) {
 	c.Set(ginKeyChannelAffinityMeta, meta)
 }
 
+func resetChannelAffinityMatchContext(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	c.Set(ginKeyChannelAffinityCacheKey, "")
+	c.Set(ginKeyChannelAffinityTTLSeconds, 0)
+	c.Set(ginKeyChannelAffinityMeta, channelAffinityMeta{})
+}
+
+func shouldSelectFirstChannelByAffinity(c *gin.Context) bool {
+	return c != nil && !c.GetBool(ginKeyChannelAffinityFirstPick)
+}
+
+func markChannelAffinityFirstPickComplete(c *gin.Context) {
+	if c != nil {
+		c.Set(ginKeyChannelAffinityFirstPick, true)
+	}
+}
+
 func getChannelAffinityContext(c *gin.Context) (string, int, bool) {
 	keyAny, ok := c.Get(ginKeyChannelAffinityCacheKey)
 	if !ok {
@@ -534,6 +562,7 @@ func ApplyChannelAffinityOverrideTemplate(c *gin.Context, paramOverride map[stri
 }
 
 func GetPreferredChannelByAffinity(c *gin.Context, modelName string, usingGroup string) (int, bool) {
+	resetChannelAffinityMatchContext(c)
 	setting := operation_setting.GetChannelAffinitySetting()
 	if setting == nil || !setting.Enabled {
 		return 0, false
@@ -620,11 +649,24 @@ func ShouldSkipRetryAfterChannelAffinityFailure(c *gin.Context) bool {
 			return b
 		}
 	}
-	meta, ok := getChannelAffinityMeta(c)
-	if !ok {
+	return false
+}
+
+func deleteChannelAffinityCacheKey(cacheKey string) bool {
+	if cacheKey == "" {
 		return false
 	}
-	return meta.SkipRetry
+	deleted, err := getChannelAffinityCache().DeleteMany([]string{cacheKey})
+	if err != nil {
+		common.SysError(fmt.Sprintf("channel affinity cache delete current failed: err=%v", err))
+		return false
+	}
+	for _, ok := range deleted {
+		if ok {
+			return true
+		}
+	}
+	return false
 }
 
 func ClearCurrentChannelAffinityCache(c *gin.Context) bool {
@@ -636,19 +678,32 @@ func ClearCurrentChannelAffinityCache(c *gin.Context) bool {
 		return false
 	}
 
-	cache := getChannelAffinityCache()
-	deleted, err := cache.DeleteMany([]string{cacheKey})
-	if err != nil {
-		common.SysError(fmt.Sprintf("channel affinity cache delete current failed: err=%v", err))
+	c.Set(ginKeyChannelAffinitySkipRetry, false)
+	c.Set(ginKeyChannelAffinityActiveHit, channelAffinityActiveHit{})
+	return deleteChannelAffinityCacheKey(cacheKey)
+}
+
+// ClearChannelAffinityForRetryableFailure removes only the mapping that
+// selected the failed channel. Request errors that cannot advance routing keep
+// the affinity mapping intact.
+func ClearChannelAffinityForRetryableFailure(c *gin.Context, channelID int, err *types.NewAPIError) bool {
+	if c == nil || channelID <= 0 || !ShouldFreezeChannelRoute(err) {
 		return false
 	}
-	c.Set(ginKeyChannelAffinitySkipRetry, false)
-	for _, ok := range deleted {
-		if ok {
-			return true
-		}
+	value, ok := c.Get(ginKeyChannelAffinityActiveHit)
+	if !ok {
+		return false
 	}
-	return false
+	hit, ok := value.(channelAffinityActiveHit)
+	if !ok || hit.CacheKey == "" || hit.ChannelID != channelID {
+		return false
+	}
+
+	deleted := deleteChannelAffinityCacheKey(hit.CacheKey)
+	c.Set(ginKeyChannelAffinityActiveHit, channelAffinityActiveHit{})
+	c.Set(ginKeyChannelAffinitySkipRetry, false)
+	c.Set(ginKeyChannelAffinityFailover, true)
+	return deleted
 }
 
 func ShouldKeepChannelAffinityOnChannelDisabled() bool {
@@ -667,7 +722,12 @@ func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int
 	if !ok {
 		return
 	}
+	markChannelAffinityFirstPickComplete(c)
 	c.Set(ginKeyChannelAffinitySkipRetry, meta.SkipRetry)
+	c.Set(ginKeyChannelAffinityActiveHit, channelAffinityActiveHit{
+		CacheKey:  meta.CacheKey,
+		ChannelID: channelID,
+	})
 	info := map[string]interface{}{
 		"reason":         meta.RuleName,
 		"rule_name":      meta.RuleName,
@@ -697,14 +757,16 @@ func AppendChannelAffinityAdminInfo(c *gin.Context, adminInfo map[string]interfa
 }
 
 func RecordChannelAffinity(c *gin.Context, channelID int) {
-	if channelID <= 0 {
+	if c == nil || channelID <= 0 {
 		return
 	}
 	setting := operation_setting.GetChannelAffinitySetting()
 	if setting == nil || !setting.Enabled {
 		return
 	}
-	if setting.SwitchOnSuccess && c != nil {
+	if setting.SwitchOnSuccess ||
+		c.GetBool(ginKeyChannelAffinityFailover) ||
+		c.GetBool(ginKeyChannelAffinityManaged) {
 		if successChannelID := c.GetInt("channel_id"); successChannelID > 0 {
 			channelID = successChannelID
 		}

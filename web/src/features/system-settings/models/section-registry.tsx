@@ -24,7 +24,6 @@ import { ClaudeSettingsCard } from './claude-settings-card'
 import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
 import { GrokSettingsCard } from './grok-settings-card'
-import { ChannelRoutingSection } from './route-affinity-section'
 import { RoutingReliabilitySection } from './routing-reliability-section'
 
 function formatJsonForEditor(value: string, fallback: string) {
@@ -76,9 +75,11 @@ const MODELS_SECTIONS = [
           RetryTimes: settings.RetryTimes,
           ChannelRouteCooldownEnabled: settings.ChannelRouteCooldownEnabled,
           ChannelRouteCooldownSeconds: settings.ChannelRouteCooldownSeconds,
-          ChannelRouteStickyEnabled: settings.ChannelRouteStickyEnabled,
           ChannelRouteSameChannelRetries:
             settings.ChannelRouteSameChannelRetries,
+          ChannelRouteGroupExclusionsEnabled:
+            settings.ChannelRouteGroupExclusionsEnabled,
+          ChannelRouteGroupExclusions: settings.ChannelRouteGroupExclusions,
           ChannelDisableThreshold: settings.ChannelDisableThreshold,
           AutomaticDisableChannelEnabled:
             settings.AutomaticDisableChannelEnabled,
@@ -101,25 +102,6 @@ const MODELS_SECTIONS = [
     ),
   },
   {
-    id: 'channel-routing',
-    titleKey: 'Channel routing',
-    build: (settings: ModelSettings) => (
-      <ChannelRoutingSection
-        defaultValues={{
-          RetryTimes: settings.RetryTimes,
-          ChannelRouteCooldownEnabled: settings.ChannelRouteCooldownEnabled,
-          ChannelRouteCooldownSeconds: settings.ChannelRouteCooldownSeconds,
-          ChannelRouteStickyEnabled: settings.ChannelRouteStickyEnabled,
-          ChannelRouteSameChannelRetries:
-            settings.ChannelRouteSameChannelRetries,
-          ChannelRouteGroupExclusionsEnabled:
-            settings.ChannelRouteGroupExclusionsEnabled,
-          ChannelRouteGroupExclusions: settings.ChannelRouteGroupExclusions,
-        }}
-      />
-    ),
-  },
-  {
     id: 'custom-error-responses',
     titleKey: 'Custom error responses',
     build: (settings: ModelSettings) => (
@@ -129,9 +111,11 @@ const MODELS_SECTIONS = [
           RetryTimes: settings.RetryTimes,
           ChannelRouteCooldownEnabled: settings.ChannelRouteCooldownEnabled,
           ChannelRouteCooldownSeconds: settings.ChannelRouteCooldownSeconds,
-          ChannelRouteStickyEnabled: settings.ChannelRouteStickyEnabled,
           ChannelRouteSameChannelRetries:
             settings.ChannelRouteSameChannelRetries,
+          ChannelRouteGroupExclusionsEnabled:
+            settings.ChannelRouteGroupExclusionsEnabled,
+          ChannelRouteGroupExclusions: settings.ChannelRouteGroupExclusions,
           ChannelDisableThreshold: settings.ChannelDisableThreshold,
           AutomaticDisableChannelEnabled:
             settings.AutomaticDisableChannelEnabled,

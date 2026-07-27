@@ -1,8 +1,11 @@
 package operation_setting
 
 import (
+	"errors"
+	"net/http"
 	"testing"
 
+	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/require"
 )
 
@@ -84,4 +87,26 @@ func TestIsAlwaysSkipRetryStatusCode(t *testing.T) {
 	require.True(t, IsAlwaysSkipRetryStatusCode(504))
 	require.True(t, IsAlwaysSkipRetryStatusCode(524))
 	require.False(t, IsAlwaysSkipRetryStatusCode(500))
+}
+
+func TestIsAlwaysSkipRetryError_DeterministicRequestFailure(t *testing.T) {
+	contextWindowErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "Your input exceeds the context window of this model. Please adjust your input and try again.",
+		Type:    "upstream_error",
+	}, http.StatusBadGateway)
+	require.True(t, IsAlwaysSkipRetryError(contextWindowErr))
+
+	contextCodeErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "request rejected",
+		Type:    "invalid_request_error",
+		Code:    "context_length_exceeded",
+	}, http.StatusBadGateway)
+	require.True(t, IsAlwaysSkipRetryError(contextCodeErr))
+
+	genericGatewayErr := types.NewOpenAIError(
+		errors.New("temporary upstream failure"),
+		types.ErrorCodeBadResponseStatusCode,
+		http.StatusBadGateway,
+	)
+	require.False(t, IsAlwaysSkipRetryError(genericGatewayErr))
 }

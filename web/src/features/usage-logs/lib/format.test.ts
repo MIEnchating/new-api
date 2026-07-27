@@ -114,32 +114,6 @@ describe('usage log audit formatting', () => {
       'Channel routing'
     )
     assert.equal(getOptionKeyLabel('theme.frontend', t), 'Frontend Theme')
-    assert.equal(
-      renderAuditContent(
-        operation('option.update', { key: 'ChannelRouteStickyEnabled' }),
-        t
-      ),
-      'Updated system setting Channel route affinity'
-    )
-    assert.deepEqual(
-      getAuditParamEntries(
-        operation('option.update', {
-          key: 'ChannelRouteStickyEnabled',
-          from: 'false',
-          to: 'true',
-        }),
-        t
-      ),
-      [
-        {
-          key: 'key',
-          label: 'Setting',
-          value: 'Channel route affinity (ChannelRouteStickyEnabled)',
-        },
-        { key: 'from', label: 'Previous value', value: 'Disabled' },
-        { key: 'to', label: 'New value', value: 'Enabled' },
-      ]
-    )
   })
 
   test('keeps unknown actions readable and exposes their structured params', () => {
@@ -162,16 +136,6 @@ describe('usage log audit formatting', () => {
       { key: 'groups', label: 'Groups', value: 'alpha, beta' },
       { key: 'changed', label: 'Changed', value: 'No' },
     ])
-  })
-
-  test('renders route affinity clearing as a localized channel operation', () => {
-    assert.equal(
-      renderAuditContent(
-        operation('channel.route_affinity_clear', { id: 12, deleted: 3 }),
-        t
-      ),
-      'Route affinity cleared'
-    )
   })
 })
 

@@ -81,7 +81,6 @@ func TestBuildOptionAuditParamsOnlyIncludesAllowlistedValues(t *testing.T) {
 		"AutomaticRetryStatusCodes",
 		"ChannelRouteCooldownEnabled",
 		"ChannelRouteCooldownSeconds",
-		"ChannelRouteStickyEnabled",
 		"ChannelRouteSameChannelRetries",
 		"ChannelRouteGroupExclusionsEnabled",
 		"ChannelRouteGroupExclusions",

@@ -37,6 +37,28 @@ var alwaysSkipRetryCodes = map[types.ErrorCode]struct{}{
 	types.ErrorCodeBadResponseBody: {},
 }
 
+var nonRetryableRequestErrorCodes = map[string]struct{}{
+	"context_length_exceeded": {},
+	"input_too_long":          {},
+	"prompt_too_long":         {},
+}
+
+var nonRetryableRequestErrorPhrases = []string{
+	"exceeds the context window",
+	"exceed the context window",
+	"maximum context length",
+	"context length exceeded",
+	"context window exceeded",
+	"input is too long",
+	"input too long",
+	"prompt is too long",
+	"prompt too long",
+	"上下文长度超出",
+	"超出上下文窗口",
+	"输入内容过长",
+	"提示词过长",
+}
+
 func AutomaticDisableStatusCodesToString() string {
 	return statusCodeRangesToString(AutomaticDisableStatusCodeRanges)
 }
@@ -75,6 +97,48 @@ func IsAlwaysSkipRetryStatusCode(code int) bool {
 func IsAlwaysSkipRetryCode(errorCode types.ErrorCode) bool {
 	_, exists := alwaysSkipRetryCodes[errorCode]
 	return exists
+}
+
+// IsAlwaysSkipRetryError identifies deterministic request failures that cannot
+// recover when the unchanged payload is sent again. Some compatible upstreams
+// incorrectly return these errors with a retryable 5xx status, so status-only
+// routing would hide the actionable error behind later transport failures.
+func IsAlwaysSkipRetryError(err *types.NewAPIError) bool {
+	if err == nil {
+		return false
+	}
+	if IsAlwaysSkipRetryCode(err.GetErrorCode()) {
+		return true
+	}
+
+	values := []string{err.Error(), string(err.GetErrorCode())}
+	switch relayErr := err.RelayError.(type) {
+	case types.OpenAIError:
+		values = append(values, relayErr.Message, relayErr.Type, fmt.Sprint(relayErr.Code))
+	case *types.OpenAIError:
+		if relayErr != nil {
+			values = append(values, relayErr.Message, relayErr.Type, fmt.Sprint(relayErr.Code))
+		}
+	case types.ClaudeError:
+		values = append(values, relayErr.Message, relayErr.Type)
+	case *types.ClaudeError:
+		if relayErr != nil {
+			values = append(values, relayErr.Message, relayErr.Type)
+		}
+	}
+
+	for _, value := range values {
+		normalized := strings.ToLower(strings.TrimSpace(value))
+		if _, exists := nonRetryableRequestErrorCodes[normalized]; exists {
+			return true
+		}
+		for _, phrase := range nonRetryableRequestErrorPhrases {
+			if strings.Contains(normalized, phrase) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func ShouldRetryByStatusCode(code int) bool {
