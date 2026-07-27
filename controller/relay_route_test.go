@@ -9,14 +9,15 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
+	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
-	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -94,7 +95,7 @@ func TestTokenGroupRoutingDoesNotDependOnLegacyRetryBudget(t *testing.T) {
 		types.ErrorCodeChannelInvalidKey,
 		http.StatusInternalServerError,
 	)
-	taskErr := &dto.TaskError{StatusCode: http.StatusInternalServerError}
+	taskErr := &taskdto.TaskError{StatusCode: http.StatusInternalServerError}
 
 	assert.True(t, hasManagedRouting(c))
 	assert.True(t, shouldAttemptNextChannel(c, routeErr, 0, true))
@@ -322,7 +323,7 @@ func TestShouldAttemptNextTaskChannelDoesNotRouteLockedChannel(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	taskErr := &dto.TaskError{StatusCode: http.StatusInternalServerError}
+	taskErr := &taskdto.TaskError{StatusCode: http.StatusInternalServerError}
 
 	assert.True(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 0, true, true))
 	assert.False(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 10, true, false))
@@ -479,7 +480,7 @@ func TestChannelAndTokenGroupRoutesAdvanceTogether(t *testing.T) {
 	assert.True(t, shouldAttemptNextTaskChannel(
 		c,
 		channel.Id,
-		&dto.TaskError{StatusCode: http.StatusInternalServerError},
+		&taskdto.TaskError{StatusCode: http.StatusInternalServerError},
 		0,
 		routeAdvanced,
 		true,

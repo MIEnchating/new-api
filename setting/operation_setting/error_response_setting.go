@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/config"
-	"github.com/QuantumNous/new-api/types"
 )
 
 const (
