@@ -394,6 +394,9 @@ func ShouldFreezeTokenGroupRoute(err *types.NewAPIError) bool {
 	if types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err) {
 		return false
 	}
+	if types.IsStreamEventError(err) {
+		return true
+	}
 	if types.IsChannelError(err) {
 		return true
 	}
@@ -405,42 +408,30 @@ func ShouldFreezeTokenGroupRoute(err *types.NewAPIError) bool {
 }
 
 func ShouldSwitchTokenGroupRoute(err *types.NewAPIError) bool {
-	if actions, matched := operation_setting.ResolveRequestErrorRouting(err); matched {
-		return actions.SwitchGroup
-	}
 	return ShouldFreezeTokenGroupRoute(err)
 }
 
 func ShouldSwitchTokenGroupRouteForContext(c *gin.Context, err *types.NewAPIError) bool {
-	if actions, matched := ResolveRequestErrorRoutingForContext(c, err); matched {
-		return actions.SwitchGroup
-	}
 	return ShouldFreezeTokenGroupRoute(err)
 }
 
 func ShouldCooldownTokenGroupRoute(err *types.NewAPIError) bool {
-	if actions, matched := operation_setting.ResolveRequestErrorRouting(err); matched {
-		return actions.Cooldown
+	if types.IsStreamEventError(err) {
+		return false
 	}
 	return ShouldFreezeTokenGroupRoute(err)
 }
 
 func ShouldCooldownTokenGroupRouteForContext(c *gin.Context, err *types.NewAPIError) bool {
-	if actions, matched := ResolveRequestErrorRoutingForContext(c, err); matched {
-		return actions.Cooldown
+	if types.IsStreamEventError(err) {
+		return false
 	}
 	return ShouldFreezeTokenGroupRoute(err)
 }
 
 func MarkTokenGroupRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
-	actions, matched := ResolveRequestErrorRoutingForContext(c, err)
-	switchGroup := actions.SwitchGroup
-	cooldown := actions.Cooldown
-	if !matched {
-		fallback := ShouldFreezeTokenGroupRoute(err)
-		switchGroup = fallback
-		cooldown = fallback
-	}
+	switchGroup := ShouldSwitchTokenGroupRouteForContext(c, err)
+	cooldown := ShouldCooldownTokenGroupRouteForContext(c, err)
 	if !switchGroup && !cooldown {
 		return false
 	}

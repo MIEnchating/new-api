@@ -190,6 +190,35 @@ func TestSameChannelRetryAllowsClaudePingButStopsAfterBusinessOutput(t *testing.
 	assert.False(t, shouldRetrySameChannel(c, err, 0))
 }
 
+func TestSameChannelRetrySkipsResponsesStreamEventError(t *testing.T) {
+	oldRouteEnabled := common.ChannelRouteCooldownEnabled
+	oldSameChannelRetries := common.ChannelRouteSameChannelRetries
+	t.Cleanup(func() {
+		common.ChannelRouteCooldownEnabled = oldRouteEnabled
+		common.ChannelRouteSameChannelRetries = oldSameChannelRetries
+	})
+	common.ChannelRouteCooldownEnabled = true
+	common.ChannelRouteSameChannelRetries = 2
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	streamErr := types.NewOpenAIError(
+		errors.New("upstream response stream failed"),
+		types.ErrorCodeBadResponse,
+		http.StatusBadGateway,
+		types.ErrOptionWithStreamEvent(),
+	)
+	httpErr := types.NewOpenAIError(
+		errors.New("upstream returned HTTP 502"),
+		types.ErrorCodeBadResponseStatusCode,
+		http.StatusBadGateway,
+	)
+
+	assert.False(t, shouldRetrySameChannel(c, streamErr, 0))
+	assert.True(t, shouldRetrySameChannel(c, httpErr, 0))
+}
+
 func TestSetRelayResponseRequestIdReplacesUpstreamRequestId(t *testing.T) {
 	err := types.NewOpenAIError(
 		errors.New("upstream failed (request id: upstream-request-id)"),

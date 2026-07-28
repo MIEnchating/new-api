@@ -25,6 +25,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { IconBadge } from '@/components/ui/icon-badge'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
+import { toIntlLocale } from '@/i18n/languages'
 import { formatQuota } from '@/lib/format'
 
 import type { UserWalletData } from '../types'
@@ -34,6 +35,8 @@ interface AffiliateRewardsCardProps {
   affiliateLink: string
   onTransfer: () => void
   complianceConfirmed?: boolean
+  firstTopupRebateEnabled?: boolean
+  firstTopupRebateRatio?: number
   loading?: boolean
 }
 
@@ -42,9 +45,11 @@ export function AffiliateRewardsCard({
   affiliateLink,
   onTransfer,
   complianceConfirmed = true,
+  firstTopupRebateEnabled = false,
+  firstTopupRebateRatio = 0,
   loading,
 }: AffiliateRewardsCardProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   if (loading) {
     return (
       <Card data-card-hover='false' className='bg-muted/20 py-0'>
@@ -61,6 +66,27 @@ export function AffiliateRewardsCard({
   }
 
   const hasRewards = (user?.aff_quota ?? 0) > 0
+  const rebateRatio =
+    Number.isFinite(firstTopupRebateRatio) && firstTopupRebateRatio > 0
+      ? firstTopupRebateRatio
+      : 0
+  const rebateEnabled = firstTopupRebateEnabled && rebateRatio > 0
+  const rebateDescription = rebateEnabled
+    ? t(
+        'When an invited user completes their first successful paid top-up, you receive {{ratio}} of their credited quota as a rebate. Rewards can be transferred to your balance at any time.',
+        {
+          ratio: new Intl.NumberFormat(
+            toIntlLocale(i18n.resolvedLanguage || i18n.language),
+            {
+              style: 'percent',
+              maximumFractionDigits: 2,
+            }
+          ).format(rebateRatio),
+        }
+      )
+    : t(
+        'First top-up rebates are currently disabled. Users can still register through your referral link.'
+      )
 
   return (
     <Card data-card-hover='false' className='bg-muted/20 py-0'>
@@ -73,10 +99,8 @@ export function AffiliateRewardsCard({
             <h3 className='truncate text-sm font-semibold'>
               {t('Referral Program')}
             </h3>
-            <p className='text-muted-foreground line-clamp-1 text-xs'>
-              {t(
-                'Earn rewards when users join through your referral link. Transfer accumulated rewards to your balance anytime.'
-              )}
+            <p className='text-muted-foreground line-clamp-2 text-xs leading-4'>
+              {rebateDescription}
             </p>
           </div>
         </div>

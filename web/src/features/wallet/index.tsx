@@ -346,7 +346,11 @@ export function Wallet(props: WalletProps) {
               complianceConfirmed={
                 topupInfo?.payment_compliance_confirmed !== false
               }
-              loading={affiliateLoading}
+              firstTopupRebateEnabled={
+                topupInfo?.invite_recharge_rebate_enabled === true
+              }
+              firstTopupRebateRatio={topupInfo?.invite_recharge_rebate_ratio}
+              loading={affiliateLoading || topupLoading}
             />
           </div>
         </SectionPageLayout.Content>

@@ -83,11 +83,9 @@ import { useResetForm } from '../hooks/use-reset-form'
 import { useUpdateOptionsBulk } from '../hooks/use-update-option'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import { ChannelRouteExclusionEditor } from './channel-route-exclusion-editor'
-import { RequestErrorRoutingEditor } from './request-error-routing-editor'
 import {
   parseRequestErrorRoutingRules,
   serializeRequestErrorRoutingRules,
-  validateRequestErrorRoutingRulesWithTranslator,
 } from './request-error-routing-rules'
 import {
   resolveRouteCooldownToggle,
@@ -217,20 +215,6 @@ export function createRoutingReliabilitySchema(
         })
       }
 
-      const requestErrorRoutingValidation = values.request_error_routing_setting
-        .enabled
-        ? validateRequestErrorRoutingRulesWithTranslator(
-            values.request_error_routing_setting.rules,
-            t
-          )
-        : null
-      if (requestErrorRoutingValidation) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['request_error_routing_setting', 'rules'],
-          message: requestErrorRoutingValidation,
-        })
-      }
       return
     }
 
@@ -492,6 +476,9 @@ export function optionShouldBeSaved(
     'request_error_routing_setting.enabled': boolean
   }
 ) {
+  if (key.startsWith('request_error_routing_setting.')) {
+    return false
+  }
   if (
     !optionBelongsToView(key as keyof NormalizedRoutingReliabilityValues, view)
   ) {
@@ -500,12 +487,6 @@ export function optionShouldBeSaved(
   if (
     key === 'error_response_setting.rules' &&
     !values['error_response_setting.enabled']
-  ) {
-    return false
-  }
-  if (
-    key === 'request_error_routing_setting.rules' &&
-    !values['request_error_routing_setting.enabled']
   ) {
     return false
   }
@@ -721,9 +702,6 @@ export function RoutingReliabilitySection({
   const channelTestMode = form.watch('monitor_setting.channel_test_mode')
   const customErrorResponsesEnabled = form.watch(
     'error_response_setting.enabled'
-  )
-  const requestErrorRoutingEnabled = form.watch(
-    'request_error_routing_setting.enabled'
   )
   const [activeRoutingView, setActiveRoutingView] =
     useState<RoutingReliabilityView>('strategy')
@@ -1006,77 +984,19 @@ export function RoutingReliabilitySection({
                 ) : null}
 
                 {activeRoutingView === 'errors' ? (
-                  <div className='min-w-0 space-y-7'>
+                  <div className='min-w-0'>
                     <section className='min-w-0 space-y-3'>
-                      <FormField
-                        control={form.control}
-                        name='request_error_routing_setting.enabled'
-                        render={({ field }) => (
-                          <FormItem className='border-border/70 flex min-w-0 items-start justify-between gap-4 border-b pb-4'>
-                            <div className='flex min-w-0 items-start gap-3'>
-                              <span className='bg-primary text-primary-foreground mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold'>
-                                1
-                              </span>
-                              <div className='min-w-0 space-y-0.5'>
-                                <FormLabel>
-                                  {t('Request error routing rules')}
-                                </FormLabel>
-                                <FormDescription>
-                                  {t(
-                                    'Matched rules take precedence over failure handling status codes.'
-                                  )}
-                                </FormDescription>
-                              </div>
-                            </div>
-                            <div className='flex shrink-0 items-center gap-1.5'>
-                              <span className='text-muted-foreground text-xs'>
-                                {field.value ? t('Enabled') : t('Disabled')}
-                              </span>
-                              <FormControl>
-                                <Switch
-                                  checked={field.value}
-                                  onCheckedChange={field.onChange}
-                                />
-                              </FormControl>
-                            </div>
-                          </FormItem>
-                        )}
-                      />
-                      <FormField
-                        control={form.control}
-                        name='request_error_routing_setting.rules'
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormControl>
-                              <RequestErrorRoutingEditor
-                                value={field.value}
-                                onChange={field.onChange}
-                                disabled={!requestErrorRoutingEnabled}
-                              />
-                            </FormControl>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </section>
-
-                    <section className='border-border/70 min-w-0 space-y-3 border-t pt-5'>
                       <div className='flex min-w-0 items-start gap-3'>
-                        <span className='bg-muted text-muted-foreground mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold'>
-                          2
+                        <span className='bg-primary text-primary-foreground mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold'>
+                          1
                         </span>
                         <div className='min-w-0 space-y-0.5'>
-                          <div className='flex min-w-0 flex-wrap items-center gap-2'>
-                            <h4 className='text-sm font-medium'>
-                              {t('Failure handling status codes')}
-                            </h4>
-                            <span className='bg-muted text-muted-foreground rounded-sm px-1.5 py-0.5 text-[11px]'>
-                              {t('Fallback')}
-                            </span>
-                          </div>
+                          <h4 className='text-sm font-medium'>
+                            {t('Failure handling status codes')}
+                          </h4>
                           <p className='text-muted-foreground text-xs'>
                             {t(
-                              'A failed request enters the selected retry strategy only when its status code matches this shared list.'
+                              'Only ordinary HTTP errors use this status-code list. Streaming terminal errors follow built-in safety rules.'
                             )}{' '}
                             {t(
                               'Accepts comma-separated status codes and inclusive ranges.'

@@ -87,6 +87,20 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var streamError *types.NewAPIError
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
+	type pendingStreamEvent struct {
+		response dto.ResponsesStreamResponse
+		data     string
+	}
+	pendingPreamble := make([]pendingStreamEvent, 0, 2)
+	flushPreamble := func() error {
+		for _, event := range pendingPreamble {
+			if err := sendResponsesStreamData(c, event.response, event.data); err != nil {
+				return err
+			}
+		}
+		pendingPreamble = pendingPreamble[:0]
+		return nil
+	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -102,7 +116,20 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Stop(streamErr)
 			return
 		}
-		sendResponsesStreamData(c, streamResponse, data)
+		if streamResponse.Type == "response.created" || streamResponse.Type == "response.in_progress" {
+			pendingPreamble = append(pendingPreamble, pendingStreamEvent{response: streamResponse, data: data})
+			return
+		}
+		if err := flushPreamble(); err != nil {
+			streamError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
+			sr.Stop(streamError)
+			return
+		}
+		if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
+			streamError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
+			sr.Stop(streamError)
+			return
+		}
 		switch streamResponse.Type {
 		case "response.completed", "response.done":
 			if streamResponse.Response != nil {
@@ -168,6 +195,14 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if streamError != nil {
 		return usage, streamError
 	}
+	if len(pendingPreamble) > 0 {
+		return usage, types.NewOpenAIError(
+			errors.New("upstream response stream ended before a terminal event"),
+			types.ErrorCodeBadResponse,
+			http.StatusBadGateway,
+			types.ErrOptionWithStreamEvent(),
+		)
+	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量
@@ -201,9 +236,48 @@ func newResponsesStreamError(response dto.ResponsesStreamResponse) *types.NewAPI
 		openAIError = dto.GetOpenAIError(response.Error)
 	}
 	if openAIError == nil || strings.TrimSpace(openAIError.Message) == "" {
-		return types.NewOpenAIError(errors.New("upstream response stream failed"), types.ErrorCodeBadResponse, http.StatusBadGateway)
+		return types.NewOpenAIError(
+			errors.New("upstream response stream failed"),
+			types.ErrorCodeBadResponse,
+			http.StatusBadGateway,
+			types.ErrOptionWithStreamEvent(),
+		)
 	}
-	return types.WithOpenAIError(*openAIError, responsesStreamErrorStatus(openAIError.Code))
+	options := []types.NewAPIErrorOptions{types.ErrOptionWithStreamEvent()}
+	if isDeterministicResponsesStreamError(*openAIError) {
+		options = append(options, types.ErrOptionWithSkipRetry())
+	}
+	return types.WithOpenAIError(
+		*openAIError,
+		responsesStreamErrorStatus(openAIError.Code),
+		options...,
+	)
+}
+
+func isDeterministicResponsesStreamError(openAIError types.OpenAIError) bool {
+	combined := strings.ToLower(strings.TrimSpace(strings.Join([]string{
+		openAIError.Message,
+		openAIError.Type,
+		fmt.Sprint(openAIError.Code),
+	}, " ")))
+	for _, marker := range []string{
+		"invalid_request",
+		"context_length_exceeded",
+		"exceeds the context window",
+		"exceed the context window",
+		"maximum context length",
+		"context window exceeded",
+		"content_policy",
+		"high-risk cyber",
+		"not allowed",
+		"safety",
+		"violat",
+	} {
+		if strings.Contains(combined, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func responsesStreamErrorStatus(code any) int {

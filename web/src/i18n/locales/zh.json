@@ -755,7 +755,6 @@
     "Channel route cooldown": "渠道路由冷却",
     "Same-channel retries": "同渠道重试",
     "Additional retries on the current channel (0-10); 0 disables same-channel retries. With the initial request included, this setting allows up to {{total}} requests in total.": "当前渠道的追加重试次数（0-10），0 表示不重试；包含首次请求后，实际最多请求 {{total}} 次。",
-    "A failed request enters the selected retry strategy only when its status code matches this shared list.": "请求失败且状态码命中此公共列表时，才会进入当前选择的重试策略。",
     "Matching failures retry the current channel first, then switch to another candidate channel.": "命中规则后先重试当前渠道，次数用尽后再切换其他候选渠道。",
     "How long a failed channel is excluded from selection; 0 disables cooldown.": "失败渠道暂停参与选择的时间；0 表示不冷却。",
     "Override the two routing steps for selected groups: skip current-channel retries, candidate failover, or both.": "为指定分组跳过当前渠道重试、候选渠道切换，或同时跳过两步。",
@@ -2102,7 +2101,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "相关项目",
     "footer.defaultCopyright": "版权所有。",
-    "footer.new\u0061pi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
+    "footer.newapi.projectAttributionSuffix": "版权所有，由项目贡献者设计与开发。",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "对于 2025 年 5 月 10 日之后添加的渠道，在部署时无需从模型名称中移除 \".\"",
     "For private deployments, format: https://fastgpt.run/api/openapi": "对于私有部署，格式为：https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "强制返回语法合法的 JSON",
@@ -5729,6 +5728,10 @@
     "Attempts": "尝试次数",
     "Current selection": "当前选择",
     "Backup candidate": "备用候选",
-    "Channel execution": "渠道执行"
+    "Channel execution": "渠道执行",
+    "First top-up rebates are currently disabled. Users can still register through your referral link.": "首充返利当前未开启。用户仍可通过您的推荐链接注册。",
+    "Inviters receive this share of an invited user's first successful paid top-up credited quota. 0 disables the rebate; 0.2 means 20%.": "邀请人可获得受邀用户首次成功付费充值到账额度的相应比例返利。设为 0 表示关闭返利，0.2 表示 20%。",
+    "Only ordinary HTTP errors use this status-code list. Streaming terminal errors follow built-in safety rules.": "仅普通 HTTP 错误使用此状态码列表；流式终态错误按照系统内置的安全规则处理。",
+    "When an invited user completes their first successful paid top-up, you receive {{ratio}} of their credited quota as a rebate. Rewards can be transferred to your balance at any time.": "受邀用户完成首次成功付费充值后，您可获得其到账额度的 {{ratio}} 作为返利。奖励可随时转入余额。"
   }
 }

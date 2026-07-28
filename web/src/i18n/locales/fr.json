@@ -755,7 +755,6 @@
     "Channel route cooldown": "Channel route cooldown",
     "Same-channel retries": "Nouvelles tentatives sur le même canal",
     "Additional retries on the current channel (0-10); 0 disables same-channel retries. With the initial request included, this setting allows up to {{total}} requests in total.": "Nouvelles tentatives supplémentaires sur le canal actuel (0-10) ; 0 les désactive. Avec la requête initiale, jusqu'à {{total}} requêtes sont effectuées.",
-    "A failed request enters the selected retry strategy only when its status code matches this shared list.": "Une requête échouée entre dans la stratégie choisie uniquement si son code d'état correspond à cette liste commune.",
     "Matching failures retry the current channel first, then switch to another candidate channel.": "Les échecs correspondants réessaient d'abord le canal actuel, puis passent à un autre canal candidat.",
     "How long a failed channel is excluded from selection; 0 disables cooldown.": "Durée d'exclusion d'un canal en échec ; 0 désactive le délai de récupération.",
     "Override the two routing steps for selected groups: skip current-channel retries, candidate failover, or both.": "Remplacer les deux étapes pour certains groupes : ignorer les tentatives actuelles, le basculement candidat, ou les deux.",
@@ -2102,7 +2101,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "Projets liés",
     "footer.defaultCopyright": "Tous droits réservés.",
-    "footer.new\u0061pi.projectAttributionSuffix": "Tous droits réservés. Conçu et développé par les contributeurs du projet.",
+    "footer.newapi.projectAttributionSuffix": "Tous droits réservés. Conçu et développé par les contributeurs du projet.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "Pour les canaux ajoutés après le 10 mai 2025, pas besoin de supprimer \".\" des noms de modèles lors du déploiement",
     "For private deployments, format: https://fastgpt.run/api/openapi": "Pour les déploiements privés, format : https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "Imposer une réponse JSON syntaxiquement valide",
@@ -5729,6 +5728,10 @@
     "Attempts": "Tentatives",
     "Current selection": "Sélection actuelle",
     "Backup candidate": "Candidat de secours",
-    "Channel execution": "Exécution du canal"
+    "Channel execution": "Exécution du canal",
+    "First top-up rebates are currently disabled. Users can still register through your referral link.": "Les commissions sur le premier rechargement sont actuellement désactivées. Les utilisateurs peuvent toujours s'inscrire via votre lien de parrainage.",
+    "Inviters receive this share of an invited user's first successful paid top-up credited quota. 0 disables the rebate; 0.2 means 20%.": "Les parrains reçoivent cette part du quota crédité lors du premier rechargement payant réussi d'un utilisateur invité. 0 désactive la commission ; 0,2 correspond à 20 %.",
+    "Only ordinary HTTP errors use this status-code list. Streaming terminal errors follow built-in safety rules.": "Seules les erreurs HTTP ordinaires utilisent cette liste de codes ; les erreurs terminales de flux suivent les règles de sécurité intégrées.",
+    "When an invited user completes their first successful paid top-up, you receive {{ratio}} of their credited quota as a rebate. Rewards can be transferred to your balance at any time.": "Lorsqu'un utilisateur invité effectue son premier rechargement payant réussi, vous recevez {{ratio}} du quota crédité sous forme de commission. Les récompenses peuvent être transférées vers votre solde à tout moment."
   }
 }

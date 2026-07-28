@@ -755,7 +755,6 @@
     "Channel route cooldown": "Channel route cooldown",
     "Same-channel retries": "Повторы на том же канале",
     "Additional retries on the current channel (0-10); 0 disables same-channel retries. With the initial request included, this setting allows up to {{total}} requests in total.": "Дополнительные повторы на текущем канале (0-10); 0 отключает повторы. С учётом первого запроса всего до {{total}} запросов.",
-    "A failed request enters the selected retry strategy only when its status code matches this shared list.": "Неудачный запрос попадает в выбранную стратегию только при совпадении кода состояния с этим общим списком.",
     "Matching failures retry the current channel first, then switch to another candidate channel.": "Подходящие ошибки сначала повторяются на текущем канале, затем выполняется переход к другому кандидату.",
     "How long a failed channel is excluded from selection; 0 disables cooldown.": "Время исключения неудачного канала из выбора; 0 отключает охлаждение.",
     "Override the two routing steps for selected groups: skip current-channel retries, candidate failover, or both.": "Для выбранных групп пропустить повторы текущего канала, переход к кандидату или оба шага.",
@@ -2102,7 +2101,7 @@
     "footer.columns.related.links.oneApi": "Один API",
     "footer.columns.related.title": "Связанные проекты",
     "footer.defaultCopyright": "Все права защищены.",
-    "footer.new\u0061pi.projectAttributionSuffix": "Все права защищены. Разработано участниками проекта.",
+    "footer.newapi.projectAttributionSuffix": "Все права защищены. Разработано участниками проекта.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "Для каналов, добавленных после 10 мая 2025 г., не нужно удалять \".\" из имён моделей при развёртывании",
     "For private deployments, format: https://fastgpt.run/api/openapi": "Для частных развертываний, формат: https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "Принудительно возвращать синтаксически корректный JSON",
@@ -5729,6 +5728,10 @@
     "Attempts": "Попытки",
     "Current selection": "Текущий выбор",
     "Backup candidate": "Резервный кандидат",
-    "Channel execution": "Выполнение канала"
+    "Channel execution": "Выполнение канала",
+    "First top-up rebates are currently disabled. Users can still register through your referral link.": "Вознаграждение за первое пополнение сейчас отключено. Пользователи по-прежнему могут регистрироваться по вашей реферальной ссылке.",
+    "Inviters receive this share of an invited user's first successful paid top-up credited quota. 0 disables the rebate; 0.2 means 20%.": "Пригласивший получает указанную долю от квоты, зачисленной при первом успешном платном пополнении приглашённого пользователя. 0 отключает вознаграждение, 0,2 означает 20%.",
+    "Only ordinary HTTP errors use this status-code list. Streaming terminal errors follow built-in safety rules.": "Этот список кодов используется только для обычных HTTP-ошибок; терминальные ошибки потока обрабатываются встроенными правилами безопасности.",
+    "When an invited user completes their first successful paid top-up, you receive {{ratio}} of their credited quota as a rebate. Rewards can be transferred to your balance at any time.": "Когда приглашённый пользователь успешно совершит первое платное пополнение, вы получите {{ratio}} от зачисленной квоты в качестве вознаграждения. Вознаграждение можно в любое время перевести на баланс."
   }
 }

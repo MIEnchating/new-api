@@ -156,6 +156,10 @@ export interface TopupInfo {
   payment_compliance_confirmed?: boolean
   /** Current compliance terms version */
   payment_compliance_terms_version?: string
+  /** Whether inviter first-top-up rebates are currently effective */
+  invite_recharge_rebate_enabled?: boolean
+  /** Share of the invitee's first credited paid top-up awarded to the inviter */
+  invite_recharge_rebate_ratio?: number
 }
 
 /**

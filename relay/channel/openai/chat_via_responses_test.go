@@ -141,6 +141,30 @@ func TestOaiResponsesToChatStreamHandlerConvertsClaudeSSETerminalsAndUsage(t *te
 	)
 }
 
+func TestOaiResponsesToChatStreamHandlerReturnsBareErrorEvent(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	body := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_error","model":"gpt-test"}}`,
+		`data: {"type":"error","error":{"type":"upstream_error","message":"stream failed"}}`,
+		``,
+	}, "\n")
+	c, recorder, resp, info := newResponsesChatTestContext(t, body, true)
+
+	usage, apiErr := OaiResponsesToChatStreamHandler(c, info, resp)
+	require.Nil(t, usage)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
+	assert.Equal(t, "stream failed", apiErr.Error())
+	assert.True(t, types.IsStreamEventError(apiErr))
+	assert.Empty(t, recorder.Body.String())
+}
+
 func TestOaiResponsesToChatBufferedStreamHandlerReturnsJSONFromSSE(t *testing.T) {
 	oldMode := gin.Mode()
 	gin.SetMode(gin.TestMode)

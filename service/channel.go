@@ -62,14 +62,7 @@ func shouldDisableChannel(c *gin.Context, err *types.NewAPIError) bool {
 	if types.IsChannelError(err) {
 		return true
 	}
-	var actions operation_setting.RequestErrorRoutingActions
-	var matched bool
-	if c == nil {
-		actions, matched = operation_setting.ResolveRequestErrorRouting(err)
-	} else {
-		actions, matched = ResolveRequestErrorRoutingForContext(c, err)
-	}
-	if matched && !actions.Cooldown {
+	if types.IsStreamEventError(err) {
 		return false
 	}
 	if types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err) {

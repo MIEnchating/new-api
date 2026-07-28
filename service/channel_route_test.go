@@ -343,8 +343,8 @@ func TestShouldRetrySameChannelRouteHonorsLimitAndDisable(t *testing.T) {
 		Type:    "upstream_error",
 	}, http.StatusBadGateway)
 	assert.False(t, ShouldRetrySameChannelRoute(contextWindowErr, 0))
-	assert.True(t, ShouldSwitchChannelRoute(contextWindowErr))
-	assert.True(t, ShouldSwitchTokenGroupRoute(contextWindowErr))
+	assert.False(t, ShouldSwitchChannelRoute(contextWindowErr))
+	assert.False(t, ShouldSwitchTokenGroupRoute(contextWindowErr))
 	assert.False(t, ShouldCooldownChannelRoute(contextWindowErr))
 	assert.False(t, ShouldCooldownTokenGroupRoute(contextWindowErr))
 }
@@ -368,6 +368,22 @@ func TestShouldRetrySameChannelRouteHonorsGroupExclusions(t *testing.T) {
 
 	setting.ChannelRouteGroupExclusionsEnabled = false
 	assert.True(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "no-retry"))
+}
+
+func TestStreamEventUsesBuiltInFailoverWithoutSameChannelRetryOrCooldown(t *testing.T) {
+	setupChannelRouteTest(t)
+	streamErr := types.NewOpenAIError(
+		errors.New("upstream response stream failed"),
+		types.ErrorCodeBadResponse,
+		http.StatusBadGateway,
+		types.ErrOptionWithStreamEvent(),
+	)
+
+	assert.False(t, ShouldRetrySameChannelRoute(streamErr, 0))
+	assert.True(t, ShouldSwitchChannelRoute(streamErr))
+	assert.False(t, ShouldCooldownChannelRoute(streamErr))
+	assert.True(t, ShouldSwitchTokenGroupRoute(streamErr))
+	assert.False(t, ShouldCooldownTokenGroupRoute(streamErr))
 }
 
 func TestNextChannelRouteExclusionHonorsGlobalAndRuleSwitches(t *testing.T) {
@@ -1146,7 +1162,7 @@ func TestChannelRouteCanDisableCooldownWhileStillFailingOver(t *testing.T) {
 	assert.Equal(t, 1, next.Id)
 }
 
-func TestContextLimitSwitchesChannelWithoutCooldown(t *testing.T) {
+func TestContextLimitDoesNotRetrySwitchOrCooldownChannel(t *testing.T) {
 	db := setupChannelRouteTest(t)
 	seedChannelRouteChannel(t, db, 1, "default", 2)
 	seedChannelRouteChannel(t, db, 2, "default", 1)
@@ -1166,17 +1182,11 @@ func TestContextLimitSwitchesChannelWithoutCooldown(t *testing.T) {
 		Code:    "context_length_exceeded",
 	}, http.StatusBadGateway)
 	require.False(t, ShouldRetrySameChannelRoute(contextLimitErr, 0))
-	require.True(t, MarkChannelRouteFailure(ctx, contextLimitErr))
+	require.False(t, MarkChannelRouteFailure(ctx, contextLimitErr))
 	require.False(t, IsChannelRouteFrozen("default", 1, common.GetTimestamp()))
-
-	param.SetRetry(1)
-	second, _, err := CacheGetRandomSatisfiedChannel(param)
-	require.NoError(t, err)
-	require.NotNil(t, second)
-	require.Equal(t, 2, second.Id)
 }
 
-func TestContextLimitStopsChannelFailoverAfterUnusedCandidatesAreExhausted(t *testing.T) {
+func TestContextLimitDoesNotStartChannelFailover(t *testing.T) {
 	db := setupChannelRouteTest(t)
 	seedChannelRouteChannel(t, db, 1, "default", 2)
 	seedChannelRouteChannel(t, db, 2, "default", 1)
@@ -1194,15 +1204,6 @@ func TestContextLimitStopsChannelFailoverAfterUnusedCandidatesAreExhausted(t *te
 		Message: "context length exceeded",
 		Code:    "context_length_exceeded",
 	}, http.StatusBadGateway)
-	require.True(t, MarkChannelRouteFailure(ctx, contextLimitErr))
-
-	param.SetRetry(1)
-	second, _, err := CacheGetRandomSatisfiedChannel(param)
-	require.NoError(t, err)
-	require.NotNil(t, second)
-	require.Equal(t, 2, second.Id)
-	ctx.Set("use_channel", []string{"1", "2"})
-
 	require.False(t, MarkChannelRouteFailure(ctx, contextLimitErr))
 }
 

@@ -532,6 +532,9 @@ func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) b
 	if operation_setting.IsAlwaysSkipRetryError(openaiErr) {
 		return false
 	}
+	if types.IsStreamEventError(openaiErr) {
+		return true
+	}
 	if code < 100 || code > 599 {
 		return true
 	}
@@ -553,6 +556,9 @@ func hasManagedRouting(c *gin.Context) bool {
 }
 
 func shouldRetrySameChannel(c *gin.Context, err *types.NewAPIError, retriesUsed int) bool {
+	if types.IsStreamEventError(err) {
+		return false
+	}
 	return !helper.StreamOutputStarted(c) && service.ShouldRetrySameChannelRouteForContext(c, err, retriesUsed)
 }
 
@@ -574,6 +580,10 @@ func channelExecutionErrorReason(err *types.NewAPIError) string {
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) bool {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
+	if types.IsStreamEventError(err) &&
+		(types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err)) {
+		return false
+	}
 	nextChannelExcluded := service.IsNextChannelRouteExcluded(c)
 	if hasManagedRouting(c) {
 		service.ClearChannelAffinityForRetryableFailure(c, channelError.ChannelId, err)

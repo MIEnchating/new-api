@@ -412,7 +412,7 @@ func TestTokenGroupRouteScopesCooldownAndStickyByModel(t *testing.T) {
 	assert.Empty(t, ListTokenGroupRouteCooldowns(11, common.GetTimestamp()))
 }
 
-func TestContextLimitSwitchesTokenGroupWithoutCooldown(t *testing.T) {
+func TestContextLimitDoesNotSwitchOrCooldownTokenGroup(t *testing.T) {
 	db := setupTokenGroupRouteTest(t)
 	seedTokenRouteChannel(t, db, 1, "premium")
 	seedTokenRouteChannel(t, db, 2, "fallback")
@@ -433,7 +433,7 @@ func TestContextLimitSwitchesTokenGroupWithoutCooldown(t *testing.T) {
 		Message: "context length exceeded",
 		Code:    "context_length_exceeded",
 	}, http.StatusBadGateway)
-	require.True(t, MarkTokenGroupRouteFailure(ctx, contextLimitErr))
+	require.False(t, MarkTokenGroupRouteFailure(ctx, contextLimitErr))
 	require.False(t, IsTokenGroupRouteFrozen(
 		11,
 		"premium",
@@ -442,11 +442,6 @@ func TestContextLimitSwitchesTokenGroupWithoutCooldown(t *testing.T) {
 		common.GetTimestamp(),
 	))
 
-	channel, group, err = CacheGetRandomSatisfiedChannel(param)
-	require.NoError(t, err)
-	require.NotNil(t, channel)
-	require.Equal(t, "fallback", group)
-	require.Equal(t, 2, channel.Id)
 }
 
 func TestTokenGroupRouteRoutesDisjointModelsWithoutCoolingUnsupportedGroup(t *testing.T) {

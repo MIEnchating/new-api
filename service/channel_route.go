@@ -233,6 +233,9 @@ func ShouldFreezeChannelRoute(err *types.NewAPIError) bool {
 	if types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err) {
 		return false
 	}
+	if types.IsStreamEventError(err) {
+		return true
+	}
 	if types.IsChannelError(err) {
 		return true
 	}
@@ -244,29 +247,23 @@ func ShouldFreezeChannelRoute(err *types.NewAPIError) bool {
 }
 
 func ShouldSwitchChannelRoute(err *types.NewAPIError) bool {
-	if actions, matched := operation_setting.ResolveRequestErrorRouting(err); matched {
-		return actions.SwitchChannel
-	}
 	return ShouldFreezeChannelRoute(err)
 }
 
 func ShouldSwitchChannelRouteForContext(c *gin.Context, err *types.NewAPIError) bool {
-	if actions, matched := ResolveRequestErrorRoutingForContext(c, err); matched {
-		return actions.SwitchChannel
-	}
 	return ShouldFreezeChannelRoute(err)
 }
 
 func ShouldCooldownChannelRoute(err *types.NewAPIError) bool {
-	if actions, matched := operation_setting.ResolveRequestErrorRouting(err); matched {
-		return actions.Cooldown
+	if types.IsStreamEventError(err) {
+		return false
 	}
 	return ShouldFreezeChannelRoute(err)
 }
 
 func ShouldCooldownChannelRouteForContext(c *gin.Context, err *types.NewAPIError) bool {
-	if actions, matched := ResolveRequestErrorRoutingForContext(c, err); matched {
-		return actions.Cooldown
+	if types.IsStreamEventError(err) {
+		return false
 	}
 	return ShouldFreezeChannelRoute(err)
 }
@@ -277,12 +274,10 @@ func ShouldRetrySameChannelRoute(err *types.NewAPIError, retriesUsed int) bool {
 
 func ShouldRetrySameChannelRouteForGroup(err *types.NewAPIError, retriesUsed int, group string) bool {
 	if !IsChannelRouteEnabled() ||
+		types.IsStreamEventError(err) ||
 		setting.IsChannelRouteSameChannelRetryExcluded(group) ||
 		common.ChannelRouteSameChannelRetries <= retriesUsed {
 		return false
-	}
-	if actions, matched := operation_setting.ResolveRequestErrorRouting(err); matched {
-		return actions.RetrySameChannel
 	}
 	return ShouldFreezeChannelRoute(err)
 }
@@ -290,12 +285,10 @@ func ShouldRetrySameChannelRouteForGroup(err *types.NewAPIError, retriesUsed int
 func ShouldRetrySameChannelRouteForContext(c *gin.Context, err *types.NewAPIError, retriesUsed int) bool {
 	group := common.GetContextKeyString(c, constant.ContextKeyChannelRouteGroup)
 	if !IsChannelRouteEnabled() ||
+		types.IsStreamEventError(err) ||
 		setting.IsChannelRouteSameChannelRetryExcluded(group) ||
 		common.ChannelRouteSameChannelRetries <= retriesUsed {
 		return false
-	}
-	if actions, matched := ResolveRequestErrorRoutingForContext(c, err); matched {
-		return actions.RetrySameChannel
 	}
 	return ShouldFreezeChannelRoute(err)
 }
@@ -540,14 +533,8 @@ func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 	if !IsChannelRouteEnabled() {
 		return false
 	}
-	actions, matched := ResolveRequestErrorRoutingForContext(c, err)
-	switchChannel := actions.SwitchChannel
-	cooldown := actions.Cooldown
-	if !matched {
-		fallback := ShouldFreezeChannelRoute(err)
-		switchChannel = fallback
-		cooldown = fallback
-	}
+	switchChannel := ShouldSwitchChannelRouteForContext(c, err)
+	cooldown := ShouldCooldownChannelRouteForContext(c, err)
 	if !switchChannel && !cooldown {
 		return false
 	}

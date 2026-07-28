@@ -255,7 +255,7 @@ export function QuotaSettingsSection({
                   </FormControl>
                   <FormDescription>
                     {t(
-                      'Rebate ratio applied to the invitee first successful top-up. 0 disables it, 0.2 means 20%.'
+                      "Inviters receive this share of an invited user's first successful paid top-up credited quota. 0 disables the rebate; 0.2 means 20%."
                     )}
                   </FormDescription>
                   <FormMessage />

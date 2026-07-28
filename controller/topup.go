@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -25,6 +26,10 @@ import (
 
 func GetTopUpInfo(c *gin.Context) {
 	complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
+	inviteRechargeRebateRatio := common.InviteRechargeRebateRatio
+	if math.IsNaN(inviteRechargeRebateRatio) || math.IsInf(inviteRechargeRebateRatio, 0) || inviteRechargeRebateRatio <= 0 {
+		inviteRechargeRebateRatio = 0
+	}
 
 	// 获取支付方式
 	payMethods := operation_setting.PayMethods
@@ -106,6 +111,8 @@ func GetTopUpInfo(c *gin.Context) {
 		"enable_redemption":                complianceConfirmed,
 		"payment_compliance_confirmed":     complianceConfirmed,
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,
+		"invite_recharge_rebate_enabled":   complianceConfirmed && inviteRechargeRebateRatio > 0,
+		"invite_recharge_rebate_ratio":     inviteRechargeRebateRatio,
 		"waffo_pay_methods": func() interface{} {
 			if enableWaffo {
 				return setting.GetWaffoPayMethods()

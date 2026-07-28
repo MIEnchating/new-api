@@ -755,7 +755,6 @@
     "Channel route cooldown": "Channel route cooldown",
     "Same-channel retries": "Thử lại cùng kênh",
     "Additional retries on the current channel (0-10); 0 disables same-channel retries. With the initial request included, this setting allows up to {{total}} requests in total.": "Số lần thử lại bổ sung trên kênh hiện tại (0-10); 0 là không thử lại. Tính cả yêu cầu đầu tiên, tối đa {{total}} yêu cầu.",
-    "A failed request enters the selected retry strategy only when its status code matches this shared list.": "Yêu cầu lỗi chỉ đi vào chiến lược đã chọn khi mã trạng thái khớp danh sách dùng chung này.",
     "Matching failures retry the current channel first, then switch to another candidate channel.": "Lỗi phù hợp sẽ thử lại kênh hiện tại trước, sau đó chuyển sang kênh ứng viên khác.",
     "How long a failed channel is excluded from selection; 0 disables cooldown.": "Thời gian loại kênh lỗi khỏi lựa chọn; 0 là không làm nguội.",
     "Override the two routing steps for selected groups: skip current-channel retries, candidate failover, or both.": "Ghi đè hai bước cho nhóm đã chọn: bỏ thử lại kênh hiện tại, chuyển kênh ứng viên hoặc cả hai.",
@@ -2102,7 +2101,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "Các Dự Án Liên Quan",
     "footer.defaultCopyright": "Bản quyền được bảo lưu.",
-    "footer.new\u0061pi.projectAttributionSuffix": "Bản quyền được bảo lưu. Được thiết kế và phát triển bởi các cộng tác viên dự án.",
+    "footer.newapi.projectAttributionSuffix": "Bản quyền được bảo lưu. Được thiết kế và phát triển bởi các cộng tác viên dự án.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "Đối với các kênh được thêm sau ngày 10 tháng 5 năm 2025, không cần loại bỏ \".\" khỏi tên mô hình trong quá trình triển khai",
     "For private deployments, format: https://fastgpt.run/api/openapi": "Đối với các triển khai riêng tư, định dạng: https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "Buộc phản hồi JSON hợp lệ về cú pháp",
@@ -5729,6 +5728,10 @@
     "Attempts": "Số lần thử",
     "Current selection": "Lựa chọn hiện tại",
     "Backup candidate": "Ứng viên dự phòng",
-    "Channel execution": "Thực thi kênh"
+    "Channel execution": "Thực thi kênh",
+    "First top-up rebates are currently disabled. Users can still register through your referral link.": "Thưởng cho lần nạp đầu hiện đang tắt. Người dùng vẫn có thể đăng ký qua liên kết giới thiệu của bạn.",
+    "Inviters receive this share of an invited user's first successful paid top-up credited quota. 0 disables the rebate; 0.2 means 20%.": "Người giới thiệu nhận tỷ lệ này trên hạn mức được ghi có từ lần nạp tiền trả phí thành công đầu tiên của người được mời. 0 sẽ tắt thưởng; 0,2 nghĩa là 20%.",
+    "Only ordinary HTTP errors use this status-code list. Streaming terminal errors follow built-in safety rules.": "Chỉ lỗi HTTP thông thường dùng danh sách mã trạng thái này; lỗi kết thúc luồng tuân theo quy tắc an toàn tích hợp.",
+    "When an invited user completes their first successful paid top-up, you receive {{ratio}} of their credited quota as a rebate. Rewards can be transferred to your balance at any time.": "Khi người được mời hoàn tất lần nạp tiền trả phí đầu tiên, bạn nhận được {{ratio}} hạn mức đã ghi có dưới dạng tiền thưởng. Có thể chuyển phần thưởng vào số dư bất cứ lúc nào."
   }
 }

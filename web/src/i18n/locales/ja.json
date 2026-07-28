@@ -755,7 +755,6 @@
     "Channel route cooldown": "Channel route cooldown",
     "Same-channel retries": "同一チャネル再試行",
     "Additional retries on the current channel (0-10); 0 disables same-channel retries. With the initial request included, this setting allows up to {{total}} requests in total.": "現在のチャネルでの追加再試行回数（0-10）。0 は再試行なしです。初回を含め最大 {{total}} 回リクエストします。",
-    "A failed request enters the selected retry strategy only when its status code matches this shared list.": "失敗したリクエストは、ステータスコードがこの共通リストに一致した場合のみ選択中の再試行戦略に入ります。",
     "Matching failures retry the current channel first, then switch to another candidate channel.": "一致した失敗は現在のチャネルを先に再試行し、その後別の候補チャネルへ切り替えます。",
     "How long a failed channel is excluded from selection; 0 disables cooldown.": "失敗したチャネルを選択対象から外す時間。0 はクールダウンなしです。",
     "Override the two routing steps for selected groups: skip current-channel retries, candidate failover, or both.": "指定したグループで現在のチャネル再試行、候補切り替え、または両方をスキップします。",
@@ -2102,7 +2101,7 @@
     "footer.columns.related.links.oneApi": "1つのAPI",
     "footer.columns.related.title": "関連プロジェクト",
     "footer.defaultCopyright": "すべての権利を留保します。",
-    "footer.new\u0061pi.projectAttributionSuffix": "すべての権利を留保します。プロジェクトコントリビューターにより設計・開発されています。",
+    "footer.newapi.projectAttributionSuffix": "すべての権利を留保します。プロジェクトコントリビューターにより設計・開発されています。",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "2025 年 5 月 10 日以降に追加されたチャネルの場合、デプロイ時にモデル名から「.」を削除する必要はありません",
     "For private deployments, format: https://fastgpt.run/api/openapi": "プライベートデプロイメントの場合、形式: https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "構文的に有効な JSON 応答を強制",
@@ -5729,6 +5728,10 @@
     "Attempts": "試行回数",
     "Current selection": "現在の選択",
     "Backup candidate": "予備候補",
-    "Channel execution": "チャネル実行"
+    "Channel execution": "チャネル実行",
+    "First top-up rebates are currently disabled. Users can still register through your referral link.": "初回チャージ還元は現在無効です。ユーザーは引き続き紹介リンクから登録できます。",
+    "Inviters receive this share of an invited user's first successful paid top-up credited quota. 0 disables the rebate; 0.2 means 20%.": "招待者は、招待されたユーザーの初回有料チャージで入金されたクォータの指定割合を還元として受け取ります。0 で無効、0.2 で 20% です。",
+    "Only ordinary HTTP errors use this status-code list. Streaming terminal errors follow built-in safety rules.": "通常の HTTP エラーだけがこのステータスコード一覧を使用し、ストリーム終端エラーは組み込みの安全ルールに従います。",
+    "When an invited user completes their first successful paid top-up, you receive {{ratio}} of their credited quota as a rebate. Rewards can be transferred to your balance at any time.": "招待されたユーザーが初回の有料チャージを正常に完了すると、入金されたクォータの {{ratio}} を還元として受け取れます。報酬はいつでも残高へ振り替えられます。"
   }
 }

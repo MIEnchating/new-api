@@ -755,7 +755,6 @@
     "Channel route cooldown": "Channel route cooldown",
     "Same-channel retries": "Same-channel retries",
     "Additional retries on the current channel (0-10); 0 disables same-channel retries. With the initial request included, this setting allows up to {{total}} requests in total.": "Additional retries on the current channel (0-10); 0 disables same-channel retries. With the initial request included, this setting allows up to {{total}} requests in total.",
-    "A failed request enters the selected retry strategy only when its status code matches this shared list.": "A failed request enters the selected retry strategy only when its status code matches this shared list.",
     "Matching failures retry the current channel first, then switch to another candidate channel.": "Matching failures retry the current channel first, then switch to another candidate channel.",
     "How long a failed channel is excluded from selection; 0 disables cooldown.": "How long a failed channel is excluded from selection; 0 disables cooldown.",
     "Override the two routing steps for selected groups: skip current-channel retries, candidate failover, or both.": "Override the two routing steps for selected groups: skip current-channel retries, candidate failover, or both.",
@@ -2102,7 +2101,7 @@
     "footer.columns.related.links.oneApi": "One API",
     "footer.columns.related.title": "Related Projects",
     "footer.defaultCopyright": "All rights reserved.",
-    "footer.new\u0061pi.projectAttributionSuffix": "All rights reserved. Designed and developed by the project contributors.",
+    "footer.newapi.projectAttributionSuffix": "All rights reserved. Designed and developed by the project contributors.",
     "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment": "For channels added after May 10, 2025, no need to remove \".\" from model names during deployment",
     "For private deployments, format: https://fastgpt.run/api/openapi": "For private deployments, format: https://fastgpt.run/api/openapi",
     "Force a syntactically valid JSON response": "Force a syntactically valid JSON response",
@@ -5729,6 +5728,10 @@
     "Attempts": "Attempts",
     "Current selection": "Current selection",
     "Backup candidate": "Backup candidate",
-    "Channel execution": "Channel execution"
+    "Channel execution": "Channel execution",
+    "First top-up rebates are currently disabled. Users can still register through your referral link.": "First top-up rebates are currently disabled. Users can still register through your referral link.",
+    "Inviters receive this share of an invited user's first successful paid top-up credited quota. 0 disables the rebate; 0.2 means 20%.": "Inviters receive this share of an invited user's first successful paid top-up credited quota. 0 disables the rebate; 0.2 means 20%.",
+    "Only ordinary HTTP errors use this status-code list. Streaming terminal errors follow built-in safety rules.": "Only ordinary HTTP errors use this status-code list. Streaming terminal errors follow built-in safety rules.",
+    "When an invited user completes their first successful paid top-up, you receive {{ratio}} of their credited quota as a rebate. Rewards can be transferred to your balance at any time.": "When an invited user completes their first successful paid top-up, you receive {{ratio}} of their credited quota as a rebate. Rewards can be transferred to your balance at any time."
   }
 }

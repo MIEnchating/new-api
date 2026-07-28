@@ -121,14 +121,8 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 					finalResponse.Status = []byte(`"incomplete"`)
 				}
 			}
-		case "response.failed", "response.error":
-			if streamResp.Response != nil {
-				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
-					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
-					break
-				}
-			}
-			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		case "response.failed", "response.error", "error":
+			streamErr = newResponsesStreamError(streamResp)
 		}
 		if streamErr != nil || finalResponse != nil {
 			break
@@ -203,6 +197,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 	streamErr := (*types.NewAPIError)(nil)
+	pendingPreamble := make([]dto.ResponsesStreamResponse, 0, 2)
 
 	if info.RelayFormat == types.RelayFormatClaude && info.ClaudeConvertInfo == nil {
 		info.ClaudeConvertInfo = &relaycommon.ClaudeConvertInfo{LastMessagesType: relaycommon.LastMessageTypeNone}
@@ -280,18 +275,30 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			return
 		}
 
-		if streamResp.Type == "response.error" || streamResp.Type == "response.failed" {
-			if streamResp.Response != nil {
-				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
-					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
+		if streamResp.Type == "response.error" || streamResp.Type == "response.failed" || streamResp.Type == "error" {
+			streamErr = newResponsesStreamError(streamResp)
+			sr.Stop(streamErr)
+			return
+		}
+		if streamResp.Type == "response.created" || streamResp.Type == "response.in_progress" {
+			pendingPreamble = append(pendingPreamble, streamResp)
+			return
+		}
+		for i := range pendingPreamble {
+			results, err := relayconvert.ConvertStreamResponseChunk(c, info, state, &pendingPreamble[i])
+			if err != nil {
+				streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+				sr.Stop(streamErr)
+				return
+			}
+			for _, result := range results {
+				if !sendStreamResult(result) {
 					sr.Stop(streamErr)
 					return
 				}
 			}
-			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
-			sr.Stop(streamErr)
-			return
 		}
+		pendingPreamble = pendingPreamble[:0]
 
 		results, err := relayconvert.ConvertStreamResponseChunk(c, info, state, &streamResp)
 		if err != nil {
@@ -309,6 +316,14 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 	if streamErr != nil {
 		return nil, streamErr
+	}
+	if len(pendingPreamble) > 0 {
+		return nil, types.NewOpenAIError(
+			fmt.Errorf("upstream response stream ended before a terminal event"),
+			types.ErrorCodeBadResponse,
+			http.StatusBadGateway,
+			types.ErrOptionWithStreamEvent(),
+		)
 	}
 
 	usage := state.Usage()
