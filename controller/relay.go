@@ -186,9 +186,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		var channel *model.Channel
 		var channelErr *types.NewAPIError
 		if retrySameChannel != nil {
-			channel = retrySameChannel
+			channel, channelErr = reloadChannelForRetry(retrySameChannel)
 			retrySameChannel = nil
-			channelErr = middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName)
+			if channelErr == nil {
+				channelErr = middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName)
+			}
 		} else {
 			channel, channelErr = getChannel(c, relayInfo, retryParam)
 		}
@@ -486,6 +488,21 @@ func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service
 	return channel, nil
 }
 
+// reloadChannelForRetry restores the full channel record before rebuilding the
+// request context. The first distributor selection is represented by a small
+// channel stub in getChannel; reusing that stub would clear the base URL, key,
+// and channel settings on a same-channel retry.
+func reloadChannelForRetry(channel *model.Channel) (*model.Channel, *types.NewAPIError) {
+	if channel == nil || channel.Id <= 0 {
+		return nil, types.NewError(errors.New("retry channel is nil"), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	reloaded, err := model.CacheGetChannel(channel.Id)
+	if err != nil {
+		return nil, types.NewError(fmt.Errorf("reload channel #%d for retry failed: %w", channel.Id, err), types.ErrorCodeGetChannelFailed, types.ErrOptionWithSkipRetry())
+	}
+	return reloaded, nil
+}
+
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
 	if openaiErr == nil {
 		return false
@@ -644,9 +661,15 @@ func prepareRelayErrorResponse(c *gin.Context, err *types.NewAPIError, requestId
 	if messageReplaced {
 		err.DisableResponseMasking()
 	} else {
-		err.ExposeOriginalErrorForResponse()
+		if originalErr := err.InternalError(); originalErr != nil {
+			err.SetResponseMessage(originalErr.Error())
+		}
 	}
 	setRelayResponseRequestId(err, requestId)
+	userMessage := err.Error()
+	if !messageReplaced {
+		userMessage = common.MaskSensitiveInfo(userMessage)
+	}
 
 	preparation := &relayErrorResponsePreparation{
 		Err:                err,
@@ -654,7 +677,7 @@ func prepareRelayErrorResponse(c *gin.Context, err *types.NewAPIError, requestId
 		OriginalStatusCode: originalStatusCode,
 		OriginalMessage:    originalMessage,
 		UserStatusCode:     err.StatusCode,
-		UserMessage:        err.Error(),
+		UserMessage:        userMessage,
 		CustomErrorApplied: customErrorApplied,
 	}
 	if c != nil {
@@ -845,8 +868,13 @@ func RelayTask(c *gin.Context) {
 		var channel *model.Channel
 
 		if retrySameChannel != nil {
-			channel = retrySameChannel
+			var channelErr *types.NewAPIError
+			channel, channelErr = reloadChannelForRetry(retrySameChannel)
 			retrySameChannel = nil
+			if channelErr != nil {
+				taskErr = service.TaskErrorWrapperLocal(channelErr.Err, "reload_same_channel_retry_failed", http.StatusInternalServerError)
+				break
+			}
 			if setupErr := middleware.SetupContextForSelectedChannel(c, channel, relayInfo.OriginModelName); setupErr != nil {
 				taskErr = service.TaskErrorWrapperLocal(setupErr.Err, "setup_same_channel_retry_failed", http.StatusInternalServerError)
 				break

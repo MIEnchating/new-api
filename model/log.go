@@ -163,6 +163,9 @@ func sanitizeErrorLogContents(logs []*Log) {
 func formatUserLogs(logs []*Log, startIdx int) {
 	sanitizeErrorLogContents(logs)
 	for i := range logs {
+		if logs[i].Type == LogTypeError {
+			logs[i].Content = common.MaskSensitiveInfo(logs[i].Content)
+		}
 		logs[i].ChannelId = 0
 		logs[i].ChannelName = ""
 		logs[i].UpstreamRequestId = ""

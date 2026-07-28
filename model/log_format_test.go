@@ -174,6 +174,22 @@ func TestSanitizeErrorLogContentsPreservesAdminUpstreamField(t *testing.T) {
 	require.Equal(t, "updated label (request id: preserved-as-content)", logs[1].Content)
 }
 
+func TestFormatUserLogsMasksTransportDetailsButAdminFormattingKeepsThem(t *testing.T) {
+	rawContent := `status_code=500, Post "https://api.x5m5x.com/v1/images/generations?key=secret": dial tcp 194.147.98.184:443: connect: connection refused`
+	userLogs := []*Log{{Type: LogTypeError, Content: rawContent}}
+	adminLogs := []*Log{{Type: LogTypeError, Content: rawContent}}
+
+	formatUserLogs(userLogs, 0)
+	sanitizeErrorLogContents(adminLogs)
+
+	require.Contains(t, userLogs[0].Content, "connect: connection refused")
+	require.Contains(t, userLogs[0].Content, "***")
+	require.NotContains(t, userLogs[0].Content, "api.x5m5x.com")
+	require.NotContains(t, userLogs[0].Content, "194.147.98.184")
+	require.NotContains(t, userLogs[0].Content, "secret")
+	require.Equal(t, rawContent, adminLogs[0].Content)
+}
+
 func TestAuditLogsPreserveHTTPRequestID(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)

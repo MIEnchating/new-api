@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	taskdto "github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -76,6 +77,50 @@ func TestChannelExecutionErrorReasonIncludesHiddenTransportCause(t *testing.T) {
 	assert.Contains(t, reason, "upstream error: do request failed")
 	assert.Contains(t, reason, "https://upstream.example/v1/responses?key=diagnostic-key")
 	assert.Contains(t, reason, "transport_error=")
+}
+
+func TestReloadChannelForRetryRestoresCompleteChannel(t *testing.T) {
+	oldDB := model.DB
+	oldMemoryCacheEnabled := common.MemoryCacheEnabled
+	t.Cleanup(func() {
+		model.DB = oldDB
+		common.MemoryCacheEnabled = oldMemoryCacheEnabled
+	})
+
+	db, err := gorm.Open(sqlite.Open("file:relay_retry_channel?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.Channel{}))
+	model.DB = db
+	common.MemoryCacheEnabled = false
+
+	baseURL := "https://upstream.example"
+	stored := &model.Channel{
+		Type:    constant.ChannelTypeSub2API,
+		Name:    "complete-channel",
+		Key:     "secret-key",
+		BaseURL: &baseURL,
+		Status:  common.ChannelStatusEnabled,
+	}
+	require.NoError(t, db.Create(stored).Error)
+
+	reloaded, apiErr := reloadChannelForRetry(&model.Channel{
+		Id:   stored.Id,
+		Type: stored.Type,
+		Name: stored.Name,
+	})
+	require.Nil(t, apiErr)
+	require.NotNil(t, reloaded)
+	assert.Equal(t, baseURL, reloaded.GetBaseURL())
+	assert.Equal(t, "secret-key", reloaded.Key)
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	require.Nil(t, middleware.SetupContextForSelectedChannel(c, reloaded, "gpt-test"))
+	retryInfo := &relaycommon.RelayInfo{RequestURLPath: "/v1/responses"}
+	retryInfo.InitChannelMeta(c)
+	assert.Equal(t, baseURL, retryInfo.ChannelBaseUrl)
+	assert.Equal(t, "secret-key", retryInfo.ApiKey)
+	assert.Equal(t, "https://upstream.example/v1/responses", relaycommon.GetFullRequestURL(retryInfo.ChannelBaseUrl, retryInfo.RequestURLPath, retryInfo.ChannelType))
 }
 
 func TestTokenGroupRoutingDoesNotDependOnLegacyRetryBudget(t *testing.T) {
@@ -228,7 +273,7 @@ func TestWriteRelayErrorResponseAppliesCustomRuleBeforeJSON(t *testing.T) {
 	assert.Equal(t, "status_code=503, original intermediate failure", trace.Events[0].Reason)
 }
 
-func TestWriteRelayErrorResponseExposesOriginalWhenCustomRulePassesThroughMessage(t *testing.T) {
+func TestWriteRelayErrorResponseMasksOriginalWhenCustomRulePassesThroughMessage(t *testing.T) {
 	current := operation_setting.GetErrorResponseSetting()
 	originalSetting := *current
 	originalSetting.Rules = append([]operation_setting.CustomErrorResponseRule(nil), current.Rules...)
@@ -262,11 +307,12 @@ func TestWriteRelayErrorResponseExposesOriginalWhenCustomRulePassesThroughMessag
 
 	writeRelayErrorResponse(c, nil, types.RelayFormatOpenAIResponses, apiErr, "local-id")
 
-	assert.Contains(t, recorder.Body.String(), "https://upstream.example/v1/responses?key=diagnostic-key")
-	assert.NotContains(t, recorder.Body.String(), "***")
+	assert.NotContains(t, recorder.Body.String(), "upstream.example")
+	assert.NotContains(t, recorder.Body.String(), "diagnostic-key")
+	assert.Contains(t, recorder.Body.String(), "***")
 }
 
-func TestWriteRelayErrorResponseExposesOnlyFinalOriginalTransportError(t *testing.T) {
+func TestWriteRelayErrorResponseMasksFinalOriginalTransportErrorForUser(t *testing.T) {
 	current := operation_setting.GetErrorResponseSetting()
 	originalSetting := *current
 	originalSetting.Rules = append([]operation_setting.CustomErrorResponseRule(nil), current.Rules...)
@@ -281,6 +327,16 @@ func TestWriteRelayErrorResponseExposesOnlyFinalOriginalTransportError(t *testin
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set(common.RequestIdKey, "masked-final-transport-trace")
+	service.TrackChannelExecutionGroupEvent(
+		c,
+		"default",
+		"gpt-test",
+		"/v1/responses",
+		"failed",
+		"status_code=503, original intermediate failure",
+		0,
+	)
 	rawMessage := `Post "https://upstream.example/v1/responses?key=diagnostic-key": dial tcp 10.0.0.8:443: connection reset by peer`
 	apiErr := types.NewError(
 		errors.New(rawMessage),
@@ -291,10 +347,22 @@ func TestWriteRelayErrorResponseExposesOnlyFinalOriginalTransportError(t *testin
 	writeRelayErrorResponse(c, nil, types.RelayFormatOpenAIResponses, apiErr, "local-id")
 
 	assert.Equal(t, http.StatusInternalServerError, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "https://upstream.example/v1/responses?key=diagnostic-key")
-	assert.Contains(t, recorder.Body.String(), "10.0.0.8:443")
 	assert.Contains(t, recorder.Body.String(), "connection reset by peer")
-	assert.NotContains(t, recorder.Body.String(), "***")
+	assert.NotContains(t, recorder.Body.String(), "upstream.example")
+	assert.NotContains(t, recorder.Body.String(), "diagnostic-key")
+	assert.NotContains(t, recorder.Body.String(), "10.0.0.8")
+	assert.Contains(t, recorder.Body.String(), "***")
+
+	trace, found, traceErr := service.GetChannelExecutionTrace("masked-final-transport-trace")
+	require.NoError(t, traceErr)
+	require.True(t, found)
+	require.NotNil(t, trace.OriginalFinalError)
+	assert.Contains(t, trace.OriginalFinalError.Message, "upstream.example")
+	assert.Contains(t, trace.OriginalFinalError.Message, "10.0.0.8")
+	require.NotNil(t, trace.UserVisibleError)
+	assert.NotContains(t, trace.UserVisibleError.Message, "upstream.example")
+	assert.NotContains(t, trace.UserVisibleError.Message, "10.0.0.8")
+	assert.Contains(t, trace.UserVisibleError.Message, "***")
 }
 
 func TestWriteRelayErrorResponseUsesSSEAfterHeadersCommitted(t *testing.T) {

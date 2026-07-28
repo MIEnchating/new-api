@@ -21,6 +21,8 @@ import {
   Activity,
   Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Copy,
   Info,
   ListTree,
@@ -30,6 +32,7 @@ import {
   SkipForward,
   XCircle,
 } from 'lucide-react'
+import { useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ChannelExecutionTimelineList } from '@/components/channel-execution-timeline-list'
@@ -99,14 +102,72 @@ function upstreamRequestIdSourceLabel(
   return t('Not recorded')
 }
 
-function UpstreamRequestIdChain(props: {
+const COLLAPSED_REQUEST_ID_CHAIN_LENGTH = 3
+
+export function UpstreamRequestIdChain(props: {
   requestIds: string[]
   sources?: Record<string, string>
 }) {
   const { t } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
+  const [expanded, setExpanded] = useState(false)
+  const contentId = useId()
+  const requestIdsKey = props.requestIds.join('\u001f')
+
+  useEffect(() => {
+    setExpanded(false)
+  }, [requestIdsKey])
 
   if (props.requestIds.length === 0) return null
+
+  const entries = props.requestIds.map((requestId, index) => ({
+    requestId,
+    index,
+  }))
+  const canCollapse = entries.length > COLLAPSED_REQUEST_ID_CHAIN_LENGTH
+  const finalEntry = entries.at(-1)
+  const visibleEntries =
+    canCollapse && !expanded && finalEntry ? [entries[0], finalEntry] : entries
+  const hiddenCount = entries.length - visibleEntries.length
+  const toggleLabel = t(expanded ? 'Collapse' : 'Expand')
+
+  const renderRequestId = (entry: (typeof entries)[number]) => {
+    const copied = copiedText === entry.requestId
+
+    return (
+      <li
+        key={`${entry.requestId}-${entry.index}`}
+        className='grid min-w-0 grid-cols-[1.75rem_minmax(0,1fr)_1.75rem] items-start gap-2 px-3 py-2'
+      >
+        <span className='bg-muted text-muted-foreground mt-0.5 flex size-6 items-center justify-center rounded-full font-mono text-[10px] font-medium tabular-nums'>
+          {entry.index + 1}
+        </span>
+        <div className='min-w-0'>
+          <div className='text-foreground font-mono text-xs leading-5 break-all'>
+            {entry.requestId}
+          </div>
+          <div className='text-muted-foreground mt-0.5 text-[11px] leading-4 break-words'>
+            {upstreamRequestIdSourceLabel(t, props.sources?.[entry.requestId])}
+          </div>
+        </div>
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-xs'
+          className='text-muted-foreground hover:text-foreground mt-0.5'
+          onClick={() => void copyToClipboard(entry.requestId)}
+          aria-label={`${t('Copy to clipboard')}: ${entry.requestId}`}
+          title={copied ? t('Copied') : t('Copy to clipboard')}
+        >
+          {copied ? (
+            <Check className='text-success' aria-hidden='true' />
+          ) : (
+            <Copy aria-hidden='true' />
+          )}
+        </Button>
+      </li>
+    )
+  }
 
   return (
     <section className='bg-background overflow-hidden rounded-md border'>
@@ -125,46 +186,53 @@ function UpstreamRequestIdChain(props: {
         <span className='bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px] leading-none tabular-nums'>
           {props.requestIds.length}
         </span>
+        {canCollapse ? (
+          <Button
+            type='button'
+            variant='ghost'
+            size='icon-xs'
+            className='text-muted-foreground hover:text-foreground -mr-1'
+            data-press-animation='none'
+            onClick={() => setExpanded((current) => !current)}
+            aria-expanded={expanded}
+            aria-controls={contentId}
+            aria-label={toggleLabel}
+            title={toggleLabel}
+          >
+            {expanded ? (
+              <ChevronUp aria-hidden='true' />
+            ) : (
+              <ChevronDown aria-hidden='true' />
+            )}
+          </Button>
+        ) : null}
       </div>
 
-      <ol className='divide-y'>
-        {props.requestIds.map((requestId, index) => {
-          const copied = copiedText === requestId
-
-          return (
-            <li
-              key={`${requestId}-${index}`}
-              className='grid min-w-0 grid-cols-[1.75rem_minmax(0,1fr)_1.75rem] items-start gap-2 px-3 py-2'
-            >
-              <span className='bg-muted text-muted-foreground mt-0.5 flex size-6 items-center justify-center rounded-full font-mono text-[10px] font-medium tabular-nums'>
-                {index + 1}
-              </span>
-              <div className='min-w-0'>
-                <div className='text-foreground font-mono text-xs leading-5 break-all'>
-                  {requestId}
-                </div>
-                <div className='text-muted-foreground mt-0.5 text-[11px] leading-4 break-words'>
-                  {upstreamRequestIdSourceLabel(t, props.sources?.[requestId])}
-                </div>
-              </div>
+      <ol id={contentId} className='divide-y'>
+        {canCollapse && !expanded ? (
+          <>
+            {renderRequestId(visibleEntries[0])}
+            <li className='flex items-center justify-center px-3 py-1.5'>
               <Button
                 type='button'
                 variant='ghost'
-                size='icon-xs'
-                className='text-muted-foreground hover:text-foreground mt-0.5'
-                onClick={() => void copyToClipboard(requestId)}
-                aria-label={`${t('Copy to clipboard')}: ${requestId}`}
-                title={copied ? t('Copied') : t('Copy to clipboard')}
+                size='sm'
+                className='text-muted-foreground hover:text-foreground h-7 w-full text-xs'
+                data-press-animation='none'
+                onClick={() => setExpanded(true)}
+                aria-expanded='false'
+                aria-controls={contentId}
+                aria-label={t('Expand')}
               >
-                {copied ? (
-                  <Check className='text-success' aria-hidden='true' />
-                ) : (
-                  <Copy aria-hidden='true' />
-                )}
+                <ChevronDown aria-hidden='true' />
+                {t('+{{count}} more', { count: hiddenCount })}
               </Button>
             </li>
-          )
-        })}
+            {renderRequestId(visibleEntries[1])}
+          </>
+        ) : (
+          visibleEntries.map((entry) => renderRequestId(entry))
+        )}
       </ol>
     </section>
   )
@@ -371,20 +439,27 @@ export function ExecutionTraceDialog(props: ExecutionTraceDialogProps) {
           </div>
 
           {standbyChannelIds.length > 0 ? (
-            <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
-              <span className='text-muted-foreground text-xs'>
-                {t('Standby channels')}
-              </span>
-              {standbyChannelIds.map((channelId) => (
-                <StatusBadge
-                  key={channelId}
-                  variant='neutral'
-                  size='sm'
-                  copyable={false}
-                >
-                  <span className='font-mono'>#{channelId}</span>
-                </StatusBadge>
-              ))}
+            <div className='min-w-0 space-y-1.5'>
+              <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+                <span className='text-muted-foreground text-xs'>
+                  {t('Candidate channel')}
+                </span>
+                {standbyChannelIds.map((channelId) => (
+                  <StatusBadge
+                    key={channelId}
+                    variant='neutral'
+                    size='sm'
+                    copyable={false}
+                  >
+                    <span className='font-mono'>#{channelId}</span>
+                  </StatusBadge>
+                ))}
+              </div>
+              <p className='text-muted-foreground text-[11px]'>
+                {t(
+                  'If this channel fails, routing selects again from these available channels; the displayed order is not the execution order'
+                )}
+              </p>
             </div>
           ) : null}
 

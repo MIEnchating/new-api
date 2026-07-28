@@ -443,21 +443,28 @@ export function ChannelExecutionTracePanel(
                 ) : null}
               </dl>
               {standbyChannelIds.length > 0 ? (
-                <div className='flex flex-wrap items-center gap-1.5'>
-                  <span className='text-muted-foreground text-xs'>
-                    {t('Standby channels')}
-                  </span>
-                  {standbyChannelIds.map((id) => (
-                    <StatusBadge
-                      key={id}
-                      variant='neutral'
-                      size='sm'
-                      copyable={false}
-                    >
-                      <span className='font-mono'>#{id}</span>
-                      {channelNames.get(id) || t('Unknown channel')}
-                    </StatusBadge>
-                  ))}
+                <div className='space-y-1.5'>
+                  <div className='flex flex-wrap items-center gap-1.5'>
+                    <span className='text-muted-foreground text-xs'>
+                      {t('Candidate channel')}
+                    </span>
+                    {standbyChannelIds.map((id) => (
+                      <StatusBadge
+                        key={id}
+                        variant='neutral'
+                        size='sm'
+                        copyable={false}
+                      >
+                        <span className='font-mono'>#{id}</span>
+                        {channelNames.get(id) || t('Unknown channel')}
+                      </StatusBadge>
+                    ))}
+                  </div>
+                  <p className='text-muted-foreground text-[11px]'>
+                    {t(
+                      'If this channel fails, routing selects again from these available channels; the displayed order is not the execution order'
+                    )}
+                  </p>
                 </div>
               ) : null}
               <ChannelExecutionTimelineList
