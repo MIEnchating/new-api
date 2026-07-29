@@ -85,24 +85,90 @@ function normalizeServerAddress(serverAddress: string): string {
   return serverAddress.trim().replace(/\/+$/, '')
 }
 
-export function resolveCCSwitchServerAddress(
-  rawStatus: string | null,
-  currentOrigin: string
-): string {
-  if (rawStatus) {
+function parseCCSwitchStatus(
+  rawStatus: unknown
+): Record<string, unknown> | null {
+  if (typeof rawStatus === 'string') {
     try {
-      const status = JSON.parse(rawStatus) as { server_address?: unknown }
-      if (
-        typeof status.server_address === 'string' &&
-        status.server_address.trim()
-      ) {
-        return normalizeServerAddress(status.server_address)
-      }
+      const parsed = JSON.parse(rawStatus) as unknown
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : null
     } catch {
-      // Fall back to the current origin when the cached status is stale.
+      return null
     }
   }
+  return rawStatus && typeof rawStatus === 'object' && !Array.isArray(rawStatus)
+    ? (rawStatus as Record<string, unknown>)
+    : null
+}
+
+export function resolveCCSwitchServerAddress(
+  rawStatus: unknown,
+  currentOrigin: string
+): string {
+  const status = parseCCSwitchStatus(rawStatus)
+  if (
+    typeof status?.server_address === 'string' &&
+    status.server_address.trim()
+  ) {
+    return normalizeServerAddress(status.server_address)
+  }
   return normalizeServerAddress(currentOrigin)
+}
+
+export interface CCSwitchEndpointInfo {
+  url: string
+  route: string
+  description: string
+  color: string
+}
+
+export function resolveCCSwitchEndpointInfo(
+  rawStatus: unknown,
+  currentOrigin: string
+): CCSwitchEndpointInfo[] {
+  const status = parseCCSwitchStatus(rawStatus)
+  const apiInfo =
+    status?.api_info_enabled !== false && Array.isArray(status?.api_info)
+      ? status.api_info
+      : []
+  const endpoints = apiInfo.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
+    const record = item as Record<string, unknown>
+    if (
+      typeof record.url !== 'string' ||
+      !isValidCCSwitchEndpoint(record.url)
+    ) {
+      return []
+    }
+    return [
+      {
+        url: normalizeServerAddress(record.url),
+        route: typeof record.route === 'string' ? record.route.trim() : '',
+        description:
+          typeof record.description === 'string'
+            ? record.description.trim()
+            : '',
+        color: typeof record.color === 'string' ? record.color.trim() : '',
+      },
+    ]
+  })
+
+  const uniqueEndpoints = endpoints.filter(
+    (endpoint, index) =>
+      endpoints.findIndex((item) => item.url === endpoint.url) === index
+  )
+  return uniqueEndpoints.length > 0
+    ? uniqueEndpoints
+    : [
+        {
+          url: resolveCCSwitchServerAddress(status, currentOrigin),
+          route: '',
+          description: '',
+          color: '',
+        },
+      ]
 }
 
 interface BuildCCSwitchURLParams {
@@ -111,7 +177,34 @@ interface BuildCCSwitchURLParams {
   models: Record<string, string>
   apiKey: string
   serverAddress: string
+  endpoint: string
   language?: string
+}
+
+export function getDefaultCCSwitchEndpoint(
+  app: CCSwitchAppType,
+  serverAddress: string
+): string {
+  const normalizedAddress = normalizeServerAddress(serverAddress)
+  return app === 'codex' && !/\/v1$/i.test(normalizedAddress)
+    ? `${normalizedAddress}/v1`
+    : normalizedAddress
+}
+
+export function getCCSwitchUsageBaseUrl(endpoint: string): string {
+  return normalizeServerAddress(endpoint).replace(/\/v1$/i, '')
+}
+
+export function isValidCCSwitchEndpoint(endpoint: string): boolean {
+  try {
+    const parsed = new URL(endpoint.trim())
+    return (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      Boolean(parsed.host)
+    )
+  } catch {
+    return false
+  }
 }
 
 export function normalizeCCSwitchLanguage(language?: string): string {
@@ -129,10 +222,12 @@ export function buildCCSwitchURL({
   models,
   apiKey,
   serverAddress: rawServerAddress,
+  endpoint: rawEndpoint,
   language,
 }: BuildCCSwitchURLParams): string {
   const serverAddress = normalizeServerAddress(rawServerAddress)
-  const endpoint = app === 'codex' ? `${serverAddress}/v1` : serverAddress
+  const endpoint = normalizeServerAddress(rawEndpoint)
+  const usageBaseUrl = getCCSwitchUsageBaseUrl(endpoint)
   const params = new URLSearchParams()
   params.set('resource', 'provider')
   params.set('app', app)
@@ -150,7 +245,7 @@ export function buildCCSwitchURL({
     normalizeCCSwitchLanguage(language)
   )
   params.set('usageScript', encodeBase64Utf8(usageScript))
-  params.set('usageBaseUrl', serverAddress)
+  params.set('usageBaseUrl', usageBaseUrl)
   params.set('usageAutoInterval', CC_SWITCH_USAGE_AUTO_INTERVAL.toString())
   return `ccswitch://v1/import?${params.toString()}`
 }

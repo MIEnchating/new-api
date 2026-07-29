@@ -26,10 +26,15 @@ import { Button } from '@/components/ui/button'
 import { ComboboxInput } from '@/components/ui/combobox-input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { useStatus } from '@/hooks/use-status'
+import { getBgColorClass } from '@/lib/colors'
+import { cn } from '@/lib/utils'
 
 import { getApiKeyModels } from '../../api'
 import {
   buildCCSwitchURL,
+  getDefaultCCSwitchEndpoint,
+  resolveCCSwitchEndpointInfo,
   resolveCCSwitchServerAddress,
   type CCSwitchAppType,
 } from '../../lib/cc-switch'
@@ -59,16 +64,6 @@ const APP_CONFIGS = {
 
 type AppType = keyof typeof APP_CONFIGS & CCSwitchAppType
 
-function getServerAddress(): string {
-  let rawStatus: string | null = null
-  try {
-    rawStatus = localStorage.getItem('status')
-  } catch {
-    // Storage can be unavailable in restricted browser contexts.
-  }
-  return resolveCCSwitchServerAddress(rawStatus, window.location.origin)
-}
-
 interface Props {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -78,9 +73,21 @@ interface Props {
 
 export function CCSwitchDialog(props: Props) {
   const { t, i18n } = useTranslation()
+  const { status } = useStatus()
+  const serverAddress = resolveCCSwitchServerAddress(
+    status,
+    window.location.origin
+  )
+  const endpointInfo = useMemo(
+    () => resolveCCSwitchEndpointInfo(status, window.location.origin),
+    [status]
+  )
   const [app, setApp] = useState<AppType>('claude')
   const [name, setName] = useState<string>(APP_CONFIGS.claude.defaultName)
   const [models, setModels] = useState<Record<string, string>>({})
+  const [endpointAddress, setEndpointAddress] = useState<string>(
+    endpointInfo[0].url
+  )
 
   const { data: modelsData, isFetching: modelsFetching } = useQuery({
     queryKey: ['api-key-models-ccswitch', props.tokenId],
@@ -102,10 +109,22 @@ export function CCSwitchDialog(props: Props) {
       setApp('claude')
 
       setName(APP_CONFIGS.claude.defaultName)
+
+      setEndpointAddress(endpointInfo[0].url)
     }
-  }, [props.open])
+  }, [endpointInfo, props.open])
 
   const currentConfig = APP_CONFIGS[app]
+  const endpointOptions = endpointInfo.map((item) => ({
+    value: item.url,
+    label: item.route || item.url,
+    description: [item.url, item.description].filter(Boolean).join(' · '),
+    icon: item.color ? (
+      <span
+        className={cn('block size-2 rounded-full', getBgColorClass(item.color))}
+      />
+    ) : undefined,
+  }))
 
   const handleAppChange = (val: string) => {
     const appVal = val as AppType
@@ -127,7 +146,8 @@ export function CCSwitchDialog(props: Props) {
       name,
       models,
       apiKey: key,
-      serverAddress: getServerAddress(),
+      serverAddress,
+      endpoint: getDefaultCCSwitchEndpoint(app, endpointAddress),
       language: i18n.resolvedLanguage || i18n.language,
     })
     window.open(url, '_blank')
@@ -188,6 +208,18 @@ export function CCSwitchDialog(props: Props) {
             allowCustomValue
           />
         </div>
+
+        {endpointOptions.length > 1 && (
+          <div className='space-y-2'>
+            <Label>{t('API Endpoint')}</Label>
+            <ComboboxInput
+              options={endpointOptions}
+              value={endpointAddress}
+              onValueChange={setEndpointAddress}
+              emptyText=''
+            />
+          </div>
+        )}
 
         {currentConfig.modelFields.map((field) => (
           <div key={field.key} className='space-y-2'>

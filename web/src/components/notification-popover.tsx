@@ -39,7 +39,6 @@ import {
 } from '@/components/ui/popover'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator } from '@/components/ui/separator'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getAnnouncementColorClass } from '@/lib/colors'
 import { formatDateTimeObject } from '@/lib/time'
 import { cn } from '@/lib/utils'
@@ -163,7 +162,7 @@ function EmptyState({
   description?: string
 }) {
   return (
-    <Empty className='min-h-48 border-0 p-4'>
+    <Empty className='h-full min-h-0 border-0 p-4'>
       <EmptyHeader>
         <EmptyMedia variant='icon'>{icon}</EmptyMedia>
         <EmptyTitle>{title}</EmptyTitle>
@@ -204,7 +203,7 @@ function NoticeContent({
   }
 
   return (
-    <ScrollArea className='h-[min(52vh,28rem)] pr-3'>
+    <ScrollArea className='h-full pr-3'>
       <RichContent breaks content={notice} />
     </ScrollArea>
   )
@@ -239,7 +238,7 @@ function AnnouncementsContent({
   }
 
   return (
-    <ScrollArea className='h-[min(52vh,28rem)] pr-3'>
+    <ScrollArea className='h-full pr-3'>
       <div className='flex flex-col'>
         {announcements.map((item, idx) => {
           const announcementKey = getAnnouncementRenderKey(item)
@@ -337,33 +336,75 @@ export function NotificationPopover({
           </p>
         </PopoverHeader>
 
-        <Tabs
-          value={activeTab}
-          onValueChange={onTabChange as (value: string) => void}
-        >
-          <TabsList className='grid w-full grid-cols-2'>
-            <TabsTrigger value='notice' className='gap-1.5'>
+        <div>
+          <div
+            role='tablist'
+            aria-label={t('System Announcements')}
+            className='bg-muted grid h-8 w-full grid-cols-2 rounded-lg p-[3px]'
+          >
+            <button
+              id='notification-tab-notice'
+              type='button'
+              role='tab'
+              aria-selected={activeTab === 'notice'}
+              aria-controls='notification-panel-notice'
+              tabIndex={activeTab === 'notice' ? 0 : -1}
+              onClick={() => onTabChange('notice')}
+              className={cn(
+                'focus-visible:ring-ring/50 inline-flex min-w-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 text-sm font-medium transition-colors outline-none focus-visible:ring-3',
+                activeTab === 'notice'
+                  ? 'bg-background text-foreground shadow-sm dark:border-input dark:bg-input/30'
+                  : 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'
+              )}
+            >
               <Bell className='size-3.5' />
               {t('Notice')}
-            </TabsTrigger>
-            <TabsTrigger value='announcements' className='gap-1.5'>
+            </button>
+            <button
+              id='notification-tab-announcements'
+              type='button'
+              role='tab'
+              aria-selected={activeTab === 'announcements'}
+              aria-controls='notification-panel-announcements'
+              tabIndex={activeTab === 'announcements' ? 0 : -1}
+              onClick={() => onTabChange('announcements')}
+              className={cn(
+                'focus-visible:ring-ring/50 inline-flex min-w-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-1.5 text-sm font-medium transition-colors outline-none focus-visible:ring-3',
+                activeTab === 'announcements'
+                  ? 'bg-background text-foreground shadow-sm dark:border-input dark:bg-input/30'
+                  : 'text-foreground/60 hover:text-foreground dark:text-muted-foreground dark:hover:text-foreground'
+              )}
+            >
               <Megaphone className='size-3.5' />
               {t('Timeline')}
-            </TabsTrigger>
-          </TabsList>
+            </button>
+          </div>
 
-          <TabsContent value='notice' className='mt-2'>
-            <NoticeContent notice={notice} loading={loading} t={t} />
-          </TabsContent>
-
-          <TabsContent value='announcements' className='mt-2'>
-            <AnnouncementsContent
-              announcements={announcements}
-              loading={loading}
-              t={t}
-            />
-          </TabsContent>
-        </Tabs>
+          <div className='relative mt-2 h-[min(52vh,28rem)] flex-none overflow-hidden'>
+            <div
+              id='notification-panel-notice'
+              role='tabpanel'
+              aria-labelledby='notification-tab-notice'
+              hidden={activeTab !== 'notice'}
+              className='h-full'
+            >
+              <NoticeContent notice={notice} loading={loading} t={t} />
+            </div>
+            <div
+              id='notification-panel-announcements'
+              role='tabpanel'
+              aria-labelledby='notification-tab-announcements'
+              hidden={activeTab !== 'announcements'}
+              className='h-full'
+            >
+              <AnnouncementsContent
+                announcements={announcements}
+                loading={loading}
+                t={t}
+              />
+            </div>
+          </div>
+        </div>
 
         <div className='flex justify-end'>
           <Button size='sm' onClick={() => onOpenChange(false)}>

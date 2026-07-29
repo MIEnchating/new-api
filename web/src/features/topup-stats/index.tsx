@@ -106,9 +106,11 @@ function TypeQuotaBadge(props: {
   loading: boolean
 }) {
   return (
-    <span className='border-border/60 bg-muted/25 inline-flex h-9 min-w-0 items-center gap-2 rounded-md border px-2.5 text-xs shadow-xs'>
+    <span className='border-border/60 bg-muted/25 inline-flex h-9 min-w-0 items-center gap-2 rounded-md border px-2.5 text-xs shadow-xs max-sm:w-full'>
       <span className={`h-4 w-0.5 shrink-0 rounded-full ${props.accent}`} />
-      <span className='text-muted-foreground truncate'>{props.label}</span>
+      <span className='text-muted-foreground min-w-0 flex-1 truncate'>
+        {props.label}
+      </span>
       {props.loading ? (
         <Skeleton className='h-3.5 w-7' />
       ) : (
@@ -129,20 +131,20 @@ function SummaryMetricBadge(props: {
 }) {
   const Icon = props.icon
   return (
-    <div className='border-border/60 bg-card inline-flex h-9 min-w-0 items-center gap-2 rounded-md border px-2.5 shadow-xs'>
+    <div className='border-border/60 bg-card grid h-12 min-w-0 grid-cols-[1.5rem_minmax(0,1fr)] grid-rows-2 items-center gap-x-2 rounded-md border px-2 shadow-xs sm:inline-flex sm:h-9 sm:px-2.5'>
       <span
-        className={`flex size-6 shrink-0 items-center justify-center rounded ${props.iconClassName}`}
+        className={`row-span-2 flex size-6 shrink-0 items-center justify-center rounded sm:row-auto ${props.iconClassName}`}
       >
         <Icon className='size-3.5' aria-hidden='true' />
       </span>
-      <span className='text-muted-foreground text-xs whitespace-nowrap'>
+      <span className='text-muted-foreground min-w-0 self-end truncate text-[11px] leading-4 sm:text-xs sm:whitespace-nowrap'>
         {props.label}
       </span>
       {props.loading ? (
         <Skeleton className='h-4 w-10' />
       ) : (
         <span
-          className='max-w-28 truncate font-mono text-sm font-semibold tabular-nums'
+          className='min-w-0 self-start truncate font-mono text-xs leading-4 font-semibold tabular-nums sm:max-w-28 sm:text-sm'
           title={props.value}
         >
           {props.value}
@@ -538,7 +540,7 @@ export function TopUpStats() {
               }
               toolbarProps={{
                 customSearch: (
-                  <>
+                  <div className='grid min-w-0 grid-cols-1 gap-2 sm:contents'>
                     <CompactDateTimeRangePicker
                       start={range.start}
                       end={range.end}
@@ -551,13 +553,14 @@ export function TopUpStats() {
                       placeholder={t('Search users by ID or name...')}
                       className='w-full sm:min-w-[200px] sm:flex-[0.85]'
                     />
-                  </>
+                  </div>
                 ),
                 filters: [
                   {
                     columnId: 'type',
                     title: t('Type'),
-                    className: 'min-w-[190px] flex-1 justify-start',
+                    className:
+                      'min-w-0 w-full flex-1 justify-start sm:min-w-[190px]',
                     options: [
                       {
                         label: t('Online Top-up'),
@@ -576,7 +579,8 @@ export function TopUpStats() {
                   {
                     columnId: 'invoice_status',
                     title: t('Invoice status'),
-                    className: 'min-w-[180px] flex-1 justify-start',
+                    className:
+                      'min-w-0 w-full flex-1 justify-start sm:min-w-[180px]',
                     options: [
                       { label: t('Not invoiced'), value: '0' },
                       { label: t('Invoiced'), value: '1' },
@@ -585,7 +589,7 @@ export function TopUpStats() {
                   },
                 ],
                 expandable: (
-                  <>
+                  <div className='grid min-w-0 grid-cols-1 gap-2 sm:contents'>
                     <Input
                       value={globalFilter}
                       onChange={(event) => setGlobalFilter(event.target.value)}
@@ -595,7 +599,7 @@ export function TopUpStats() {
                     <DataTableFacetedFilter
                       column={table.getColumn('status')}
                       title={t('Order status')}
-                      className='min-w-[180px] flex-1 justify-start'
+                      className='w-full min-w-0 flex-1 justify-start sm:min-w-[180px]'
                       options={[
                         { label: t('Success'), value: 'success' },
                         { label: t('Pending'), value: 'pending' },
@@ -606,7 +610,7 @@ export function TopUpStats() {
                     <DataTableFacetedFilter
                       column={table.getColumn('payment_method')}
                       title={t('Top-up method')}
-                      className='min-w-[180px] flex-1 justify-start'
+                      className='w-full min-w-0 flex-1 justify-start sm:min-w-[180px]'
                       options={[
                         { label: t('Alipay'), value: 'alipay' },
                         { label: t('WeChat Pay'), value: 'wxpay' },
@@ -616,7 +620,7 @@ export function TopUpStats() {
                         { label: t('Balance'), value: 'balance' },
                       ]}
                     />
-                  </>
+                  </div>
                 ),
                 hasExpandedActiveFilters:
                   globalFilter.trim() !== '' ||
@@ -628,8 +632,8 @@ export function TopUpStats() {
                   readStringFilter('payment_method').length > 0,
                 ].filter(Boolean).length,
                 leftActions: (
-                  <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
-                    <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                  <div className='grid min-w-0 grid-cols-1 gap-2 sm:flex sm:flex-1 sm:flex-wrap sm:items-center'>
+                    <div className='grid min-w-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center'>
                       <TypeQuotaBadge
                         label={t('Online payment')}
                         value={typeQuotas.online_topup}
@@ -656,7 +660,7 @@ export function TopUpStats() {
                       />
                     </div>
                     <div className='bg-border mx-0.5 hidden h-5 w-px shrink-0 xl:block' />
-                    <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                    <div className='grid min-w-0 grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center'>
                       {metrics.map((metric) => (
                         <SummaryMetricBadge
                           key={metric.label}

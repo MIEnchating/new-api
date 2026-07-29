@@ -26,6 +26,7 @@ import { cn } from '@/lib/utils'
 export type ComboboxInputOption = {
   value: string
   label: string
+  description?: string
   icon?: React.ReactNode
 }
 
@@ -72,7 +73,8 @@ export function ComboboxInput({
     return options.filter(
       (option) =>
         option.label.toLowerCase().includes(search) ||
-        option.value.toLowerCase().includes(search)
+        option.value.toLowerCase().includes(search) ||
+        option.description?.toLowerCase().includes(search)
     )
   }, [options, searchValue])
 
@@ -229,8 +231,17 @@ export function ComboboxInput({
                       value === option.value ? 'opacity-100' : 'opacity-0'
                     )}
                   />
-                  {option.icon && <span>{option.icon}</span>}
-                  <span className='truncate'>{option.label}</span>
+                  {option.icon && (
+                    <span className='self-start pt-1.5'>{option.icon}</span>
+                  )}
+                  <span className='flex min-w-0 flex-1 flex-col'>
+                    <span className='truncate'>{option.label}</span>
+                    {option.description && (
+                      <span className='text-muted-foreground truncate text-xs font-normal'>
+                        {option.description}
+                      </span>
+                    )}
+                  </span>
                 </li>
               ))}
             </ul>

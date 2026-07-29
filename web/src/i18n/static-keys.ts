@@ -412,6 +412,11 @@ export const STATIC_I18N_KEYS = [
   // CC Switch dialog
   'Import to CC Switch',
   'Open CC Switch',
+  'API Endpoint',
+  'Select an API key to continue with one-click import.',
+  'No enabled API keys',
+  'Create an enabled API key before importing it to CC Switch.',
+  'Failed to load API key',
   'Primary Model',
   'Haiku Model',
   'Sonnet Model',

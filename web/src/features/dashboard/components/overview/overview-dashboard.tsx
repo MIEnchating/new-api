@@ -62,6 +62,7 @@ import {
 } from '../../hooks/use-status-data'
 import { AnnouncementsPanel } from './announcements-panel'
 import { ApiInfoPanel } from './api-info-panel'
+import { CCSwitchImport } from './cc-switch-import'
 import { FAQPanel } from './faq-panel'
 import { PerformanceHealthPanel } from './performance-health-panel'
 import { SummaryCards } from './summary-cards'
@@ -691,6 +692,7 @@ export function OverviewDashboard() {
                 {visibleQuickActions.map((action) => (
                   <QuickActionItem key={action.title} action={action} />
                 ))}
+                <CCSwitchImport />
               </div>
             </div>
           </CardStaggerItem>
@@ -733,6 +735,7 @@ export function OverviewDashboard() {
                   {visibleQuickActions.map((action) => (
                     <CompactQuickAction key={action.title} action={action} />
                   ))}
+                  <CCSwitchImport compact />
                   <Button
                     variant='outline'
                     size='sm'

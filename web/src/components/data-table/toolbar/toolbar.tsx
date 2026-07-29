@@ -409,22 +409,76 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
   if (
     isMobile &&
     props.mobileCollapsibleFilters &&
-    !hasLeftActions &&
     (filters.length > 0 || props.additionalSearch != null)
   ) {
+    if (!hasLeftActions) {
+      return (
+        <div className={cn('flex flex-col gap-2', props.className)}>
+          <div className='flex min-w-0 items-center gap-2'>
+            {props.customSearch !== undefined
+              ? props.customSearch
+              : mobileSearchInput}
+            <Button
+              type='button'
+              variant={mobileFiltersOpen ? 'secondary' : 'outline'}
+              size='sm'
+              onClick={() => setMobileFiltersOpen((open) => !open)}
+              aria-expanded={mobileFiltersOpen}
+              className='h-9 shrink-0 gap-1.5 px-2.5'
+            >
+              <SlidersHorizontal className='size-4' />
+              {t('Filter')}
+              {activeMobileFilterCount > 0 && (
+                <span className='bg-primary text-primary-foreground flex min-w-4 items-center justify-center rounded-sm px-1 font-mono text-[10px] leading-4'>
+                  {activeMobileFilterCount}
+                </span>
+              )}
+            </Button>
+          </div>
+
+          {mobileFiltersOpen && (
+            <div className='border-border/70 bg-muted/15 flex flex-col gap-2 rounded-lg border p-2'>
+              {props.additionalSearch && (
+                <div className='[&>*]:w-full'>{props.additionalSearch}</div>
+              )}
+              <div className='flex flex-wrap items-center gap-2'>
+                {filterChips}
+              </div>
+              {isFiltered && (
+                <div className='flex justify-end'>{resetButton}</div>
+              )}
+            </div>
+          )}
+
+          <div className='flex min-w-0 items-center gap-1.5'>
+            {props.preActions}
+            <div className='ms-auto flex shrink-0 items-center gap-1.5'>
+              {searchButton}
+              {viewToggleNode}
+              {viewOptionsNode}
+              {expandToggle}
+            </div>
+          </div>
+        </div>
+      )
+    }
+
     return (
       <div className={cn('flex flex-col gap-2', props.className)}>
-        <div className='flex min-w-0 items-center gap-2'>
+        <div className='min-w-0'>
           {props.customSearch !== undefined
             ? props.customSearch
             : mobileSearchInput}
+        </div>
+
+        <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
           <Button
             type='button'
             variant={mobileFiltersOpen ? 'secondary' : 'outline'}
             size='sm'
             onClick={() => setMobileFiltersOpen((open) => !open)}
             aria-expanded={mobileFiltersOpen}
-            className='h-9 shrink-0 gap-1.5 px-2.5'
+            className='h-9 min-w-0 flex-1 gap-1.5 px-2.5'
           >
             <SlidersHorizontal className='size-4' />
             {t('Filter')}
@@ -434,31 +488,32 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
               </span>
             )}
           </Button>
+          {props.preActions}
+          {resetButton}
+          {searchButton}
+          {viewToggleNode}
+          {viewOptionsNode}
         </div>
 
         {mobileFiltersOpen && (
-          <div className='border-border/70 bg-muted/15 flex flex-col gap-2 rounded-lg border p-2'>
+          <div className='border-border/70 bg-muted/15 flex min-w-0 flex-col gap-2 rounded-lg border p-2'>
             {props.additionalSearch && (
-              <div className='[&>*]:w-full'>{props.additionalSearch}</div>
+              <div className='min-w-0 [&>*]:w-full'>
+                {props.additionalSearch}
+              </div>
             )}
-            <div className='flex flex-wrap items-center gap-2'>
+            <div className='grid min-w-0 grid-cols-2 gap-2 [&>*]:w-full'>
               {filterChips}
             </div>
-            {isFiltered && (
-              <div className='flex justify-end'>{resetButton}</div>
+            {hasExpandable && (
+              <div className='grid min-w-0 grid-cols-1 gap-2 [&>*]:w-full'>
+                {props.expandable}
+              </div>
             )}
           </div>
         )}
 
-        <div className='flex min-w-0 items-center gap-1.5'>
-          {props.preActions}
-          <div className='ms-auto flex shrink-0 items-center gap-1.5'>
-            {searchButton}
-            {viewToggleNode}
-            {viewOptionsNode}
-            {expandToggle}
-          </div>
-        </div>
+        {hasLeftActions && <div className='min-w-0'>{props.leftActions}</div>}
       </div>
     )
   }
