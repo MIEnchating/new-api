@@ -96,6 +96,7 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
 
   const [records, setRecords] = useState<BillingRecord[]>([])
   const [total, setTotal] = useState(0)
+  const [totalQuota, setTotalQuota] = useState(0)
   const [page, setPage] = useState(initialPage)
   const [pageSize, setPageSize] = useState(initialPageSize)
   const [filters, setFilters] =
@@ -140,12 +141,14 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
       if (isApiSuccess(response) && response.data) {
         setRecords(response.data.items || [])
         setTotal(response.data.total || 0)
+        setTotalQuota(response.data.total_quota || 0)
       } else {
         toast.error(
           response.message || i18next.t('Failed to load billing history')
         )
         setRecords([])
         setTotal(0)
+        setTotalQuota(0)
       }
     } catch (error) {
       if (
@@ -158,6 +161,7 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
       toast.error(i18next.t('Failed to load billing history'))
       setRecords([])
       setTotal(0)
+      setTotalQuota(0)
     } finally {
       if (isLatestBillingRequest(requestSequence, requestSequenceRef.current)) {
         setLoading(false)
@@ -255,6 +259,7 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
   return {
     records,
     total,
+    totalQuota,
     page,
     pageSize,
     keyword: filters.keyword,

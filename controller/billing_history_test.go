@@ -41,3 +41,14 @@ func TestRedactUserBillingHistoryRemovesOperatorUserID(t *testing.T) {
 	require.NotContains(t, string(data), "topup_id")
 	require.NotContains(t, string(data), "redemption_id")
 }
+
+func TestBillingHistoryTotalQuotaIncludesSignedAdjustments(t *testing.T) {
+	typeQuotas := model.BillingHistoryTypeQuotas{
+		model.BillingTypeOnlineTopup:     500,
+		model.BillingTypeRedemption:      200,
+		model.BillingTypeAffiliate:       100,
+		model.BillingTypeAdminAdjustment: -50,
+	}
+
+	require.Equal(t, int64(750), billingHistoryTotalQuota(typeQuotas))
+}

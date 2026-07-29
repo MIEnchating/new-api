@@ -27,6 +27,7 @@ import {
   TicketPercent,
   UserRoundCheck,
   ShieldCheck,
+  CircleDollarSign,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -84,6 +85,7 @@ export function BillingHistoryDialog({
   const {
     records,
     total,
+    totalQuota,
     page,
     pageSize,
     keyword,
@@ -248,6 +250,22 @@ export function BillingHistoryDialog({
                 {t('Search')}
               </Button>
             </div>
+          </div>
+
+          <div className='bg-muted/20 flex min-h-11 items-center justify-between gap-3 rounded-md border px-3 py-2'>
+            <div className='text-muted-foreground flex min-w-0 items-center gap-2 text-sm'>
+              <CircleDollarSign className='text-primary size-4 shrink-0' />
+              <span>{t('Total Amount')}</span>
+            </div>
+            {loading ? (
+              <Skeleton className='h-5 w-24' />
+            ) : (
+              <span
+                className={`text-base font-semibold tabular-nums ${totalQuota < 0 ? 'text-destructive' : 'text-foreground'}`}
+              >
+                {formatQuota(totalQuota)}
+              </span>
+            )}
           </div>
 
           {/* Records List */}

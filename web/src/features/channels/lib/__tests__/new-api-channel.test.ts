@@ -20,11 +20,17 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import {
+  CHANNEL_TYPE_ANTHROPIC,
   CHANNEL_TYPE_NEW_API,
+  CHANNEL_TYPE_SUB2_API,
   CHANNEL_TYPE_OPTIONS,
   MODEL_FETCHABLE_TYPES,
 } from '../../constants'
-import { CHANNEL_FORM_DEFAULT_VALUES, channelFormSchema } from '../channel-form'
+import {
+  CHANNEL_FORM_DEFAULT_VALUES,
+  channelFormSchema,
+  transformFormDataToCreatePayload,
+} from '../channel-form'
 import { getChannelTypeConfig } from '../channel-type-config'
 import { getChannelTypeIcon, getKeyPromptForType } from '../channel-utils'
 
@@ -93,5 +99,32 @@ describe('New API channel', () => {
     })
 
     assert.equal(result.success, true)
+  })
+
+  test('persists Claude Code client emulation only for supported channel types', () => {
+    for (const type of [
+      CHANNEL_TYPE_ANTHROPIC,
+      CHANNEL_TYPE_SUB2_API,
+      CHANNEL_TYPE_NEW_API,
+    ]) {
+      const payload = transformFormDataToCreatePayload({
+        ...newAPIForm('https://upstream.example'),
+        type,
+        claude_code_client_spoofing: true,
+      })
+      const settings = JSON.parse(payload.channel.settings || '{}')
+      assert.equal(settings.claude_code_client_spoofing, true)
+    }
+
+    const unsupportedPayload = transformFormDataToCreatePayload({
+      ...newAPIForm('https://upstream.example'),
+      type: 1,
+      settings: '{"claude_code_client_spoofing":true}',
+      claude_code_client_spoofing: true,
+    })
+    const unsupportedSettings = JSON.parse(
+      unsupportedPayload.channel.settings || '{}'
+    )
+    assert.equal('claude_code_client_spoofing' in unsupportedSettings, false)
   })
 })

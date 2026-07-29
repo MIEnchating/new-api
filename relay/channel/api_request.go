@@ -1,6 +1,9 @@
 package channel
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -10,6 +13,7 @@ import (
 	"sync"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	channelconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
@@ -17,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -49,6 +54,147 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 			req.Set("Accept", "text/event-stream")
 		}
 	}
+}
+
+const (
+	claudeCodeVersion      = "2.1.220"
+	claudeCodeUserAgent    = "claude-cli/" + claudeCodeVersion + " (external, cli)"
+	claudeCodeSystemPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
+	claudeCodeBetaHeader   = "claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,prompt-caching-scope-2026-01-05,effort-2025-11-24,context-management-2025-06-27,extended-cache-ttl-2025-04-11"
+)
+
+var claudeCodeDefaultHeaders = map[string]string{
+	"User-Agent":                                claudeCodeUserAgent,
+	"X-Stainless-Lang":                          "js",
+	"X-Stainless-Package-Version":               "0.94.0",
+	"X-Stainless-OS":                            "Linux",
+	"X-Stainless-Arch":                          "arm64",
+	"X-Stainless-Runtime":                       "node",
+	"X-Stainless-Runtime-Version":               "v24.3.0",
+	"X-Stainless-Retry-Count":                   "0",
+	"X-Stainless-Timeout":                       "600",
+	"X-App":                                     "cli",
+	"Anthropic-Dangerous-Direct-Browser-Access": "true",
+	"Anthropic-Beta":                            claudeCodeBetaHeader,
+	"Anthropic-Version":                         "2023-06-01",
+}
+
+func shouldSpoofClaudeCodeClient(info *common.RelayInfo) bool {
+	if info == nil || !info.ChannelOtherSettings.ClaudeCodeClientSpoofing {
+		return false
+	}
+
+	switch info.ChannelType {
+	case channelconstant.ChannelTypeAnthropic:
+		// Anthropic channels always emit an Anthropic Messages request, including
+		// requests converted from OpenAI-compatible input.
+		return true
+	case channelconstant.ChannelTypeSub2API, channelconstant.ChannelTypeNewAPI:
+		return info.RelayFormat == types.RelayFormatClaude ||
+			strings.EqualFold(strings.TrimRight(info.RequestURLPath, "/"), "/v1/messages")
+	default:
+		return false
+	}
+}
+
+func applyClaudeCodeClientHeaders(req *http.Request, info *common.RelayInfo) {
+	if req == nil || !shouldSpoofClaudeCodeClient(info) {
+		return
+	}
+
+	for name, value := range claudeCodeDefaultHeaders {
+		req.Header.Set(name, value)
+	}
+}
+
+func claudeCodeMetadataUserID(info *common.RelayInfo) string {
+	identitySeed := "0:0:0"
+	if info != nil {
+		identitySeed = fmt.Sprintf("%d:%d:%d", info.UserId, info.TokenId, info.ChannelId)
+	}
+	deviceID := sha256.Sum256([]byte("new-api:claude-code:device:" + identitySeed))
+	accountID := uuid.NewSHA1(
+		uuid.NameSpaceURL,
+		[]byte("new-api:claude-code:account:"+identitySeed),
+	).String()
+	sessionID := uuid.NewSHA1(
+		uuid.NameSpaceOID,
+		[]byte("new-api:claude-code:session:"+identitySeed),
+	).String()
+	metadata, _ := json.Marshal(map[string]string{
+		"device_id":    fmt.Sprintf("%x", deviceID),
+		"account_uuid": accountID,
+		"session_id":   sessionID,
+	})
+	return string(metadata)
+}
+
+func containsClaudeCodeSystemPrompt(system []any) bool {
+	for _, entry := range system {
+		block, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		text, _ := block["text"].(string)
+		if strings.Contains(text, "You are Claude Code") ||
+			strings.HasPrefix(text, "x-anthropic-billing-header") {
+			return true
+		}
+	}
+	return false
+}
+
+func applyClaudeCodeClientBody(requestBody io.Reader, info *common.RelayInfo) (io.Reader, int64, error) {
+	if requestBody == nil || !shouldSpoofClaudeCodeClient(info) {
+		return requestBody, 0, nil
+	}
+
+	bodyBytes, err := io.ReadAll(requestBody)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read Claude Code emulation request body: %w", err)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(bodyBytes))
+	decoder.UseNumber()
+	body := make(map[string]any)
+	if err = decoder.Decode(&body); err != nil {
+		return nil, 0, fmt.Errorf("decode Claude Code emulation request body: %w", err)
+	}
+
+	system := make([]any, 0, 2)
+	switch original := body["system"].(type) {
+	case []any:
+		system = append(system, original...)
+	case string:
+		if strings.TrimSpace(original) != "" {
+			system = append(system, map[string]any{
+				"type": "text",
+				"text": original,
+			})
+		}
+	}
+	if !containsClaudeCodeSystemPrompt(system) {
+		system = append([]any{map[string]any{
+			"type": "text",
+			"text": claudeCodeSystemPrompt,
+			"cache_control": map[string]any{
+				"type": "ephemeral",
+			},
+		}}, system...)
+	}
+	body["system"] = system
+
+	metadata, ok := body["metadata"].(map[string]any)
+	if !ok {
+		metadata = make(map[string]any)
+	}
+	metadata["user_id"] = claudeCodeMetadataUserID(info)
+	body["metadata"] = metadata
+
+	bodyBytes, err = json.Marshal(body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("encode Claude Code emulation request body: %w", err)
+	}
+	return bytes.NewReader(bodyBytes), int64(len(bodyBytes)), nil
 }
 
 const clientHeaderPlaceholderPrefix = "{client_header:"
@@ -305,6 +451,13 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", common.SanitizeURLForLog(fullRequestURL))
+	requestBody, spoofedBodySize, err := applyClaudeCodeClientBody(requestBody, info)
+	if err != nil {
+		return nil, err
+	}
+	if spoofedBodySize > 0 {
+		info.UpstreamRequestBodySize = spoofedBodySize
+	}
 	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
@@ -315,6 +468,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("setup request header failed: %w", err)
 	}
+	applyClaudeCodeClientHeaders(req, info)
 	// 在 SetupRequestHeader 之后应用 Header Override，确保用户设置优先级最高
 	// 这样可以覆盖默认的 Authorization header 设置
 	headerOverride, err := processHeaderOverride(info, c)

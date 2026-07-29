@@ -39,6 +39,14 @@ func parseBillingHistoryTimestamp(c *gin.Context, key string, fallback int64) (i
 	return value, true
 }
 
+func billingHistoryTotalQuota(typeQuotas model.BillingHistoryTypeQuotas) int64 {
+	var total int64
+	for _, quota := range typeQuotas {
+		total += quota
+	}
+	return total
+}
+
 func getBillingHistory(c *gin.Context, admin bool) {
 	now := time.Now().Unix()
 	startTime, ok := parseBillingHistoryTimestamp(c, "start_timestamp", now-defaultBillingHistoryDays*24*60*60)
@@ -68,17 +76,22 @@ func getBillingHistory(c *gin.Context, admin bool) {
 		filter.UserId = c.GetInt("id")
 	}
 
-	items, total, err := model.GetBillingHistory(filter)
+	items, total, _, typeQuotas, err := model.GetBillingHistoryWithTypeStats(filter)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	totalQuota := billingHistoryTotalQuota(typeQuotas)
 	if !admin {
 		redactUserBillingHistory(items)
 	}
-	pageInfo.SetTotal(int(total))
-	pageInfo.SetItems(items)
-	common.ApiSuccess(c, pageInfo)
+	common.ApiSuccess(c, gin.H{
+		"items":       items,
+		"total":       total,
+		"total_quota": totalQuota,
+		"page":        pageInfo.GetPage(),
+		"page_size":   pageInfo.GetPageSize(),
+	})
 }
 
 func redactUserBillingHistory(items []model.BillingHistoryItem) {

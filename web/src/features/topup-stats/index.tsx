@@ -545,13 +545,13 @@ export function TopUpStats() {
                       start={range.start}
                       end={range.end}
                       onChange={handleRangeChange}
-                      className='w-full sm:min-w-[300px] sm:flex-[1.25]'
+                      className='max-sm:w-full sm:min-w-[300px] sm:flex-[1.25]'
                     />
                     <Input
                       value={userKeyword}
                       onChange={(event) => setUserKeyword(event.target.value)}
                       placeholder={t('Search users by ID or name...')}
-                      className='w-full sm:min-w-[200px] sm:flex-[0.85]'
+                      className='max-sm:w-full sm:min-w-[200px] sm:flex-[0.85]'
                     />
                   </div>
                 ),
@@ -560,7 +560,7 @@ export function TopUpStats() {
                     columnId: 'type',
                     title: t('Type'),
                     className:
-                      'min-w-0 w-full flex-1 justify-start sm:min-w-[190px]',
+                      'min-w-0 flex-1 justify-start max-sm:w-full sm:min-w-[190px]',
                     options: [
                       {
                         label: t('Online Top-up'),
@@ -580,7 +580,7 @@ export function TopUpStats() {
                     columnId: 'invoice_status',
                     title: t('Invoice status'),
                     className:
-                      'min-w-0 w-full flex-1 justify-start sm:min-w-[180px]',
+                      'min-w-0 flex-1 justify-start max-sm:w-full sm:min-w-[180px]',
                     options: [
                       { label: t('Not invoiced'), value: '0' },
                       { label: t('Invoiced'), value: '1' },
@@ -594,12 +594,12 @@ export function TopUpStats() {
                       value={globalFilter}
                       onChange={(event) => setGlobalFilter(event.target.value)}
                       placeholder={t('Search by order number...')}
-                      className='w-full sm:min-w-[240px] sm:flex-1'
+                      className='max-sm:w-full sm:min-w-[240px] sm:flex-1'
                     />
                     <DataTableFacetedFilter
                       column={table.getColumn('status')}
                       title={t('Order status')}
-                      className='w-full min-w-0 flex-1 justify-start sm:min-w-[180px]'
+                      className='min-w-0 flex-1 justify-start max-sm:w-full sm:min-w-[180px]'
                       options={[
                         { label: t('Success'), value: 'success' },
                         { label: t('Pending'), value: 'pending' },
@@ -610,7 +610,7 @@ export function TopUpStats() {
                     <DataTableFacetedFilter
                       column={table.getColumn('payment_method')}
                       title={t('Top-up method')}
-                      className='w-full min-w-0 flex-1 justify-start sm:min-w-[180px]'
+                      className='min-w-0 flex-1 justify-start max-sm:w-full sm:min-w-[180px]'
                       options={[
                         { label: t('Alipay'), value: 'alipay' },
                         { label: t('WeChat Pay'), value: 'wxpay' },

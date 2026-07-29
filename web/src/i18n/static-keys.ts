@@ -417,6 +417,8 @@ export const STATIC_I18N_KEYS = [
   'No enabled API keys',
   'Create an enabled API key before importing it to CC Switch.',
   'Failed to load API key',
+  'Emulate Claude Code client',
+  'Inject Claude Code client identity into headers and the Anthropic request body',
   'Primary Model',
   'Haiku Model',
   'Sonnet Model',
@@ -430,6 +432,7 @@ export const STATIC_I18N_KEYS = [
   'Search users by ID or name...',
   'All transaction types',
   'Quota Change',
+  'Total Amount',
   'View balance changes from top-ups, redemptions, affiliate transfers, and administrator adjustments',
 
   // User binding dialog

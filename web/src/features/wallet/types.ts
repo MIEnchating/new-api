@@ -293,6 +293,8 @@ export interface BillingRecord {
 export interface BillingHistoryResponse {
   items: BillingRecord[]
   total: number
+  /** Signed quota total across all records matching the applied filters */
+  total_quota: number
 }
 
 export interface BillingHistoryParams {

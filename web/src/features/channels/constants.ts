@@ -21,6 +21,8 @@ For commercial licensing, please contact support@quantumnous.com
 // All label/name values are i18n keys; use t(value) when displaying.
 // ============================================================================
 
+export const CHANNEL_TYPE_ANTHROPIC = 14
+export const CHANNEL_TYPE_SUB2_API = 59
 export const CHANNEL_TYPE_NEW_API = 60
 
 export const CHANNEL_TYPES = {
