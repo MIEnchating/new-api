@@ -75,6 +75,26 @@ type AppliedFilters = {
   invoiceStatuses: string[]
 }
 
+function areStringArraysEqual(left: string[], right: string[]) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  )
+}
+
+function areAppliedFiltersEqual(left: AppliedFilters, right: AppliedFilters) {
+  return (
+    left.range.start.getTime() === right.range.start.getTime() &&
+    left.range.end.getTime() === right.range.end.getTime() &&
+    left.keyword === right.keyword &&
+    left.userKeyword === right.userKeyword &&
+    areStringArraysEqual(left.types, right.types) &&
+    areStringArraysEqual(left.statuses, right.statuses) &&
+    areStringArraysEqual(left.paymentMethods, right.paymentMethods) &&
+    areStringArraysEqual(left.invoiceStatuses, right.invoiceStatuses)
+  )
+}
+
 const DEFAULT_ORDER_TYPES = ['online_topup', 'redemption'] as const
 const ORDER_MANAGEMENT_TYPES = [
   ...DEFAULT_ORDER_TYPES,
@@ -137,14 +157,14 @@ function SummaryMetricBadge(props: {
       >
         <Icon className='size-3.5' aria-hidden='true' />
       </span>
-      <span className='text-muted-foreground min-w-0 self-end truncate text-[11px] leading-4 sm:text-xs sm:whitespace-nowrap'>
+      <span className='text-muted-foreground min-w-0 self-end truncate text-[11px] leading-4 sm:self-auto sm:text-xs sm:whitespace-nowrap'>
         {props.label}
       </span>
       {props.loading ? (
         <Skeleton className='h-4 w-10' />
       ) : (
         <span
-          className='min-w-0 self-start truncate font-mono text-xs leading-4 font-semibold tabular-nums sm:max-w-28 sm:text-sm'
+          className='min-w-0 self-start truncate font-mono text-xs leading-4 font-semibold tabular-nums sm:max-w-28 sm:self-auto sm:text-sm'
           title={props.value}
         >
           {props.value}
@@ -301,6 +321,7 @@ export function TopUpStats() {
     },
     placeholderData: (previousData) => previousData,
   })
+  const { refetch } = query
 
   const handleRangeChange = useCallback(
     (nextRange: { start?: Date; end?: Date }) => {
@@ -372,7 +393,7 @@ export function TopUpStats() {
   )
   const handleSearch = useCallback(() => {
     const selectedTypes = readStringFilter('type')
-    setAppliedFilters({
+    const nextFilters: AppliedFilters = {
       range,
       keyword: globalFilter.trim(),
       userKeyword: userKeyword.trim(),
@@ -381,10 +402,34 @@ export function TopUpStats() {
       statuses: readStringFilter('status'),
       paymentMethods: readStringFilter('payment_method'),
       invoiceStatuses: readStringFilter('invoice_status'),
-    })
+    }
+    const filtersChanged = !areAppliedFiltersEqual(
+      appliedFilters,
+      nextFilters
+    )
+    const pageChanged = pagination.pageIndex !== 0
+
+    if (filtersChanged) {
+      setAppliedFilters(nextFilters)
+    }
     setRowSelection({})
     setPagination((current) => ({ ...current, pageIndex: 0 }))
-  }, [globalFilter, range, readStringFilter, userKeyword])
+
+    // React Query only runs again when its key changes. Re-submit an
+    // unchanged first-page search explicitly so the Search button always
+    // represents a real server query.
+    if (!filtersChanged && !pageChanged) {
+      void refetch()
+    }
+  }, [
+    appliedFilters,
+    globalFilter,
+    pagination.pageIndex,
+    range,
+    readStringFilter,
+    refetch,
+    userKeyword,
+  ])
 
   const selectedItems = table
     .getSelectedRowModel()

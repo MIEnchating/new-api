@@ -556,9 +556,6 @@ func hasManagedRouting(c *gin.Context) bool {
 }
 
 func shouldRetrySameChannel(c *gin.Context, err *types.NewAPIError, retriesUsed int) bool {
-	if types.IsStreamEventError(err) {
-		return false
-	}
 	return !helper.StreamOutputStarted(c) && service.ShouldRetrySameChannelRouteForContext(c, err, retriesUsed)
 }
 

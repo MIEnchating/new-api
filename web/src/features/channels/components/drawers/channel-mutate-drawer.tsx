@@ -140,10 +140,7 @@ import {
 import {
   ADD_MODE_OPTIONS,
   CHANNEL_STATUS_LABELS,
-  CHANNEL_TYPE_ANTHROPIC,
-  CHANNEL_TYPE_NEW_API,
   CHANNEL_TYPE_OPTIONS,
-  CHANNEL_TYPE_SUB2_API,
   CHANNEL_TYPE_WARNINGS,
   ERROR_MESSAGES,
   FIELD_DESCRIPTIONS,
@@ -300,7 +297,6 @@ const SENSITIVE_FORM_FIELDS = [
   'allow_inference_geo',
   'allow_speed',
   'claude_beta_query',
-  'claude_code_client_spoofing',
   'disable_task_polling_sleep',
   'upstream_model_update_check_enabled',
   'upstream_model_update_auto_sync_enabled',
@@ -350,7 +346,6 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     (values.http2_connection_shards != null &&
       values.http2_connection_shards > 1) ||
     values.claude_beta_query ||
-    values.claude_code_client_spoofing ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
     values.upstream_model_update_ignored_models?.trim()
@@ -767,9 +762,6 @@ export function ChannelMutateDrawer({
   const currentAllowInferenceGeo = form.watch('allow_inference_geo')
   const currentAllowSpeed = form.watch('allow_speed')
   const currentClaudeBetaQuery = form.watch('claude_beta_query')
-  const currentClaudeCodeClientSpoofing = form.watch(
-    'claude_code_client_spoofing'
-  )
   const currentUpstreamModelUpdateAutoSyncEnabled = form.watch(
     'upstream_model_update_auto_sync_enabled'
   )
@@ -1031,7 +1023,6 @@ export function ChannelMutateDrawer({
     currentProxy?.trim() ||
     currentSystemPrompt?.trim() ||
     currentSystemPromptOverride ||
-    currentClaudeCodeClientSpoofing ||
     (currentHttpProtocol && currentHttpProtocol !== 'auto') ||
     (currentHttp2ConnectionShards != null && currentHttp2ConnectionShards > 1)
   )
@@ -4191,36 +4182,6 @@ export function ChannelMutateDrawer({
                                 )}
                               />
 
-                              {[
-                                CHANNEL_TYPE_ANTHROPIC,
-                                CHANNEL_TYPE_SUB2_API,
-                                CHANNEL_TYPE_NEW_API,
-                              ].includes(currentType) && (
-                                <FormField
-                                  control={form.control}
-                                  name='claude_code_client_spoofing'
-                                  render={({ field }) => (
-                                    <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
-                                      <div className='space-y-0.5'>
-                                        <FormLabel>
-                                          {t('Emulate Claude Code client')}
-                                        </FormLabel>
-                                        <FormDescription>
-                                          {t(
-                                            'Inject Claude Code client identity into headers and the Anthropic request body'
-                                          )}
-                                        </FormDescription>
-                                      </div>
-                                      <FormControl>
-                                        <Switch
-                                          checked={field.value}
-                                          onCheckedChange={field.onChange}
-                                        />
-                                      </FormControl>
-                                    </FormItem>
-                                  )}
-                                />
-                              )}
                             </div>
 
                             <FormField

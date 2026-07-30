@@ -274,7 +274,6 @@ func ShouldRetrySameChannelRoute(err *types.NewAPIError, retriesUsed int) bool {
 
 func ShouldRetrySameChannelRouteForGroup(err *types.NewAPIError, retriesUsed int, group string) bool {
 	if !IsChannelRouteEnabled() ||
-		types.IsStreamEventError(err) ||
 		setting.IsChannelRouteSameChannelRetryExcluded(group) ||
 		common.ChannelRouteSameChannelRetries <= retriesUsed {
 		return false
@@ -285,7 +284,6 @@ func ShouldRetrySameChannelRouteForGroup(err *types.NewAPIError, retriesUsed int
 func ShouldRetrySameChannelRouteForContext(c *gin.Context, err *types.NewAPIError, retriesUsed int) bool {
 	group := common.GetContextKeyString(c, constant.ContextKeyChannelRouteGroup)
 	if !IsChannelRouteEnabled() ||
-		types.IsStreamEventError(err) ||
 		setting.IsChannelRouteSameChannelRetryExcluded(group) ||
 		common.ChannelRouteSameChannelRetries <= retriesUsed {
 		return false

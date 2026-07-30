@@ -190,7 +190,7 @@ func TestSameChannelRetryAllowsClaudePingButStopsAfterBusinessOutput(t *testing.
 	assert.False(t, shouldRetrySameChannel(c, err, 0))
 }
 
-func TestSameChannelRetrySkipsResponsesStreamEventError(t *testing.T) {
+func TestSameChannelRetryAllowsResponsesStreamEventBeforeBusinessOutput(t *testing.T) {
 	oldRouteEnabled := common.ChannelRouteCooldownEnabled
 	oldSameChannelRetries := common.ChannelRouteSameChannelRetries
 	t.Cleanup(func() {
@@ -215,8 +215,10 @@ func TestSameChannelRetrySkipsResponsesStreamEventError(t *testing.T) {
 		http.StatusBadGateway,
 	)
 
-	assert.False(t, shouldRetrySameChannel(c, streamErr, 0))
+	assert.True(t, shouldRetrySameChannel(c, streamErr, 0))
 	assert.True(t, shouldRetrySameChannel(c, httpErr, 0))
+	require.NoError(t, helper.StringData(c, `{"type":"response.output_text.delta"}`))
+	assert.False(t, shouldRetrySameChannel(c, streamErr, 0))
 }
 
 func TestSetRelayResponseRequestIdReplacesUpstreamRequestId(t *testing.T) {

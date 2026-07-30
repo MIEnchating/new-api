@@ -370,8 +370,9 @@ func TestShouldRetrySameChannelRouteHonorsGroupExclusions(t *testing.T) {
 	assert.True(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "no-retry"))
 }
 
-func TestStreamEventUsesBuiltInFailoverWithoutSameChannelRetryOrCooldown(t *testing.T) {
+func TestTransientStreamEventUsesSameChannelRetryAndFailoverWithoutCooldown(t *testing.T) {
 	setupChannelRouteTest(t)
+	common.ChannelRouteSameChannelRetries = 1
 	streamErr := types.NewOpenAIError(
 		errors.New("upstream response stream failed"),
 		types.ErrorCodeBadResponse,
@@ -379,11 +380,21 @@ func TestStreamEventUsesBuiltInFailoverWithoutSameChannelRetryOrCooldown(t *test
 		types.ErrOptionWithStreamEvent(),
 	)
 
-	assert.False(t, ShouldRetrySameChannelRoute(streamErr, 0))
+	assert.True(t, ShouldRetrySameChannelRoute(streamErr, 0))
+	assert.False(t, ShouldRetrySameChannelRoute(streamErr, 1))
 	assert.True(t, ShouldSwitchChannelRoute(streamErr))
 	assert.False(t, ShouldCooldownChannelRoute(streamErr))
 	assert.True(t, ShouldSwitchTokenGroupRoute(streamErr))
 	assert.False(t, ShouldCooldownTokenGroupRoute(streamErr))
+
+	deterministicStreamErr := types.NewOpenAIError(
+		errors.New("context length exceeded"),
+		types.ErrorCodeBadResponse,
+		http.StatusBadRequest,
+		types.ErrOptionWithStreamEvent(),
+		types.ErrOptionWithSkipRetry(),
+	)
+	assert.False(t, ShouldRetrySameChannelRoute(deterministicStreamErr, 0))
 }
 
 func TestNextChannelRouteExclusionHonorsGlobalAndRuleSwitches(t *testing.T) {
