@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -283,4 +284,28 @@ func TestUptimeStatusLoaderReturnsDefensiveCopies(t *testing.T) {
 	assert.Equal(t, 0.98, *second.Results[0].Monitors[0].Uptime1h)
 	assert.Equal(t, 0.99, *second.Results[0].Monitors[0].Uptime7)
 	assert.Equal(t, 42, *second.Results[0].Monitors[0].Heartbeats[0].Ping)
+}
+
+func TestRequestStatsLoaderCachesForUptimeTTL(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	loader := &requestStatsLoader{now: func() time.Time { return now }}
+	var calls atomic.Int32
+	fetch := func() (perfmetrics.RecentRequestStats, error) {
+		calls.Add(1)
+		return perfmetrics.RecentRequestStats{
+			FiveMinutes: perfmetrics.RequestWindowStats{SuccessRate: 99, HasData: true},
+		}, nil
+	}
+
+	first, err := loader.load(context.Background(), fetch)
+	require.NoError(t, err)
+	second, err := loader.load(context.Background(), fetch)
+	require.NoError(t, err)
+	assert.Equal(t, first, second)
+	assert.Equal(t, int32(1), calls.Load())
+
+	now = now.Add(uptimeStatusCacheTTL)
+	_, err = loader.load(context.Background(), fetch)
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), calls.Load())
 }

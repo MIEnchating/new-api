@@ -273,6 +273,7 @@ function CacheTrend(props: {
 function CacheGroupStats(props: {
   groups: CacheMetricGroup[]
   baseline: number
+  countsVisible: boolean
   onSelect: (group: string) => void
 }) {
   const { t } = useTranslation()
@@ -280,7 +281,7 @@ function CacheGroupStats(props: {
     () =>
       props.groups.map((group) => ({
         ...group,
-        cache_hit_rate: group.request_count > 0 ? group.cache_hit_rate : 0,
+        cache_hit_rate: group.has_data ? group.cache_hit_rate : 0,
       })),
     [props.groups]
   )
@@ -353,7 +354,7 @@ function CacheGroupStats(props: {
               }
               formatter={(_, __, item) => {
                 const group = item.payload as CacheMetricGroup
-                const hasData = group.request_count > 0
+                const hasData = group.has_data
                 return (
                   <div className='grid min-w-44 gap-1.5'>
                     <div className='flex items-center justify-between gap-4'>
@@ -364,15 +365,17 @@ function CacheGroupStats(props: {
                         {hasData ? formatPercent(group.cache_hit_rate) : '--'}
                       </span>
                     </div>
-                    <div className='flex items-center justify-between gap-4'>
-                      <span className='text-muted-foreground'>
-                        {t('Hits / Requests')}
-                      </span>
-                      <span className='font-mono font-medium tabular-nums'>
-                        {formatCount(group.hit_count)} /{' '}
-                        {formatCount(group.request_count)}
-                      </span>
-                    </div>
+                    {props.countsVisible ? (
+                      <div className='flex items-center justify-between gap-4'>
+                        <span className='text-muted-foreground'>
+                          {t('Hits / Requests')}
+                        </span>
+                        <span className='font-mono font-medium tabular-nums'>
+                          {formatCount(group.hit_count ?? 0)} /{' '}
+                          {formatCount(group.request_count ?? 0)}
+                        </span>
+                      </div>
+                    ) : null}
                     <div className='flex items-center justify-between gap-4'>
                       <span className='text-muted-foreground'>
                         {t('Cached tokens')}
@@ -390,7 +393,7 @@ function CacheGroupStats(props: {
         <Bar dataKey='cache_hit_rate' maxBarSize={24} radius={[0, 4, 4, 0]}>
           {data.map((group) => {
             let fill = 'var(--muted-foreground)'
-            if (group.request_count > 0) {
+            if (group.has_data) {
               fill =
                 group.cache_hit_rate >= props.baseline
                   ? 'var(--success)'
@@ -480,6 +483,7 @@ export function CacheMonitor(props: {
 }) {
   const { t } = useTranslation()
   const isAdmin = useIsAdmin()
+  const countsVisible = props.response?.data.counts_visible ?? isAdmin
   const [activeGroup, setActiveGroup] = useState('')
   const [baseline, setBaseline] = useState(DEFAULT_BASELINE)
   const [baselineDraft, setBaselineDraft] = useState(DEFAULT_BASELINE)
@@ -510,6 +514,7 @@ export function CacheMonitor(props: {
           cached_tokens: 0,
           cache_hit_rate: 0,
           avg_tps: 0,
+          has_data: false,
           series: [],
         }
     )
@@ -599,8 +604,16 @@ export function CacheMonitor(props: {
   if (props.loading) {
     content = (
       <div className='mt-4 space-y-4'>
-        <div className='grid grid-cols-2 gap-x-4 sm:grid-cols-4'>
-          {['rate', 'hits', 'tokens', 'requests'].map((key) => (
+        <div
+          className={cn(
+            'grid grid-cols-2 gap-x-4',
+            countsVisible && 'sm:grid-cols-4'
+          )}
+        >
+          {(countsVisible
+            ? ['rate', 'hits', 'tokens', 'requests']
+            : ['rate', 'tokens']
+          ).map((key) => (
             <Skeleton key={key} className='h-14 w-full' />
           ))}
         </div>
@@ -617,27 +630,36 @@ export function CacheMonitor(props: {
   } else if (selectedGroup) {
     content = (
       <div className='mt-4'>
-        <div className='grid grid-cols-2 gap-x-4 sm:grid-cols-4'>
+        <div
+          className={cn(
+            'grid grid-cols-2 gap-x-4',
+            countsVisible && 'sm:grid-cols-4'
+          )}
+        >
           <CacheMetric
             icon={Gauge}
             label={t('Hit Rate')}
             value={formatPercent(selectedGroup.cache_hit_rate)}
           />
-          <CacheMetric
-            icon={Target}
-            label={t('Cache hits')}
-            value={formatCount(selectedGroup.hit_count)}
-          />
+          {countsVisible ? (
+            <CacheMetric
+              icon={Target}
+              label={t('Cache hits')}
+              value={formatCount(selectedGroup.hit_count ?? 0)}
+            />
+          ) : null}
           <CacheMetric
             icon={Zap}
             label={t('Cached tokens')}
             value={formatCount(selectedGroup.cached_tokens)}
           />
-          <CacheMetric
-            icon={Database}
-            label={t('Cache requests')}
-            value={formatCount(selectedGroup.request_count)}
-          />
+          {countsVisible ? (
+            <CacheMetric
+              icon={Database}
+              label={t('Cache requests')}
+              value={formatCount(selectedGroup.request_count ?? 0)}
+            />
+          ) : null}
         </div>
         <div className='mt-5 grid min-w-0 gap-7'>
           <div className='min-w-0'>
@@ -671,6 +693,7 @@ export function CacheMonitor(props: {
             <CacheGroupStats
               groups={groups}
               baseline={baseline}
+              countsVisible={countsVisible}
               onSelect={setActiveGroup}
             />
           </div>
@@ -697,7 +720,7 @@ export function CacheMonitor(props: {
               <h2 className='truncate text-sm font-semibold'>
                 {t('Cache hit rate')}
               </h2>
-              {selectedGroup && selectedGroup.request_count > 0 ? (
+              {selectedGroup && selectedGroup.has_data ? (
                 <StatusBadge
                   variant={
                     selectedGroup.cache_hit_rate >= baseline

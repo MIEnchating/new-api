@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,4 +74,30 @@ func TestBuildCacheMonitorGroupsAuditParams(t *testing.T) {
 	require.Equal(t, len(available), all["group_count"])
 	require.Equal(t, false, all["previous_all_groups"])
 	require.Equal(t, []string{"vip", "default"}, all["previous_display_groups"])
+}
+
+func TestHideCacheMetricCountsPreservesRatesAndDataState(t *testing.T) {
+	result := perfmetrics.CacheQueryResult{Groups: []perfmetrics.CacheGroupResult{{
+		Group:        "default",
+		RequestCount: 20,
+		HitCount:     15,
+		CacheHitRate: 75,
+		HasData:      true,
+		Series: []perfmetrics.CacheBucketPoint{{
+			RequestCount: 10,
+			HitCount:     8,
+			CacheHitRate: 80,
+			HasData:      true,
+		}},
+	}}}
+
+	hideCacheMetricCounts(&result)
+
+	assert.Zero(t, result.Groups[0].RequestCount)
+	assert.Zero(t, result.Groups[0].HitCount)
+	assert.Equal(t, float64(75), result.Groups[0].CacheHitRate)
+	assert.True(t, result.Groups[0].HasData)
+	assert.Zero(t, result.Groups[0].Series[0].RequestCount)
+	assert.Zero(t, result.Groups[0].Series[0].HitCount)
+	assert.True(t, result.Groups[0].Series[0].HasData)
 }

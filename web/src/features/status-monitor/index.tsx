@@ -45,6 +45,7 @@ import {
 } from '@/components/ui/tooltip'
 import { getUptimeStatus } from '@/features/dashboard/api'
 import type {
+  RecentRequestStats,
   UptimeHeartbeat,
   UptimeGroupResult,
   UptimeMonitor,
@@ -556,6 +557,9 @@ export function StatusMonitor() {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<StatusMonitorTab>('site-status')
   const [groups, setGroups] = useState<UptimeGroupResult[]>([])
+  const [requestStats, setRequestStats] = useState<RecentRequestStats | null>(
+    null
+  )
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [failed, setFailed] = useState(false)
@@ -592,9 +596,11 @@ export function StatusMonitor() {
     try {
       const uptimeResult = await getUptimeStatus()
       setGroups(uptimeResult?.data ?? [])
+      setRequestStats(uptimeResult?.request_stats ?? null)
       setLastUpdated(new Date())
     } catch {
       setGroups([])
+      setRequestStats(null)
       setFailed(true)
     } finally {
       setLoading(false)
@@ -962,6 +968,7 @@ export function StatusMonitor() {
       <MonitorDetailsDrawer
         open={monitorDetailsOpen}
         monitor={selectedMonitor}
+        requestStats={requestStats}
         onOpenChange={setMonitorDetailsOpen}
       />
     </>

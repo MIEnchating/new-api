@@ -64,20 +64,22 @@ type SummaryAllResult struct {
 
 type CacheBucketPoint struct {
 	Ts           int64   `json:"ts"`
-	RequestCount int64   `json:"request_count"`
-	HitCount     int64   `json:"hit_count"`
+	RequestCount int64   `json:"request_count,omitempty"`
+	HitCount     int64   `json:"hit_count,omitempty"`
 	CachedTokens int64   `json:"cached_tokens"`
 	CacheHitRate float64 `json:"cache_hit_rate"`
 	AvgTps       float64 `json:"avg_tps"`
+	HasData      bool    `json:"has_data"`
 }
 
 type CacheGroupResult struct {
 	Group        string             `json:"group"`
-	RequestCount int64              `json:"request_count"`
-	HitCount     int64              `json:"hit_count"`
+	RequestCount int64              `json:"request_count,omitempty"`
+	HitCount     int64              `json:"hit_count,omitempty"`
 	CachedTokens int64              `json:"cached_tokens"`
 	CacheHitRate float64            `json:"cache_hit_rate"`
 	AvgTps       float64            `json:"avg_tps"`
+	HasData      bool               `json:"has_data"`
 	Series       []CacheBucketPoint `json:"series"`
 }
 
@@ -85,6 +87,19 @@ type CacheQueryResult struct {
 	StartTs int64              `json:"start_ts"`
 	EndTs   int64              `json:"end_ts"`
 	Groups  []CacheGroupResult `json:"groups"`
+}
+
+type RequestWindowStats struct {
+	RequestCount int64   `json:"-"`
+	SuccessCount int64   `json:"-"`
+	SuccessRate  float64 `json:"success_rate"`
+	HasData      bool    `json:"has_data"`
+}
+
+type RecentRequestStats struct {
+	FiveMinutes   RequestWindowStats `json:"5m"`
+	ThirtyMinutes RequestWindowStats `json:"30m"`
+	OneHour       RequestWindowStats `json:"1h"`
 }
 
 type bucketKey struct {

@@ -80,6 +80,50 @@ type Log struct {
 	Other             string `json:"other"`
 }
 
+type RecentRelayRequestCounts struct {
+	Requests5m   int64 `gorm:"column:requests_5m"`
+	Successes5m  int64 `gorm:"column:successes_5m"`
+	Requests30m  int64 `gorm:"column:requests_30m"`
+	Successes30m int64 `gorm:"column:successes_30m"`
+	Requests1h   int64 `gorm:"column:requests_1h"`
+	Successes1h  int64 `gorm:"column:successes_1h"`
+}
+
+const recentRelayRequestSampleLimit = 5000
+
+func GetRecentRelayRequestCounts(now int64) (RecentRelayRequestCounts, error) {
+	if now <= 0 {
+		now = common.GetTimestamp()
+	}
+	cutoff5m := now - 5*60
+	cutoff30m := now - 30*60
+	cutoff1h := now - 60*60
+
+	order := "created_at DESC, id DESC"
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		order = clickHouseLogOrder("")
+	}
+	rows := applyUserVisibleLogFilter(
+		LOG_DB.Model(&Log{}).
+			Select("created_at", "type", "request_id").
+			Where("created_at >= ? AND type IN ? AND request_id <> ''", cutoff1h, []int{LogTypeConsume, LogTypeError}),
+		"other",
+	).Order(order).Limit(recentRelayRequestSampleLimit)
+
+	var counts RecentRelayRequestCounts
+	err := LOG_DB.Table("(?) AS recent_relay_requests", rows).
+		Select(`
+			COUNT(DISTINCT CASE WHEN created_at >= ? THEN request_id END) AS requests_5m,
+			COUNT(DISTINCT CASE WHEN created_at >= ? AND type = ? THEN request_id END) AS successes_5m,
+			COUNT(DISTINCT CASE WHEN created_at >= ? THEN request_id END) AS requests_30m,
+			COUNT(DISTINCT CASE WHEN created_at >= ? AND type = ? THEN request_id END) AS successes_30m,
+			COUNT(DISTINCT request_id) AS requests_1h,
+			COUNT(DISTINCT CASE WHEN type = ? THEN request_id END) AS successes_1h
+		`, cutoff5m, cutoff5m, LogTypeConsume, cutoff30m, cutoff30m, LogTypeConsume, LogTypeConsume).
+		Scan(&counts).Error
+	return counts, err
+}
+
 // don't use iota, avoid change log type value
 const (
 	LogTypeUnknown = 0

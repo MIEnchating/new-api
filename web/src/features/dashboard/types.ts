@@ -194,9 +194,21 @@ export interface UptimeGroupResult {
   monitors: UptimeMonitor[]
 }
 
+export interface RequestWindowStats {
+  success_rate: number
+  has_data: boolean
+}
+
+export interface RecentRequestStats {
+  '5m': RequestWindowStats
+  '30m': RequestWindowStats
+  '1h': RequestWindowStats
+}
+
 export interface UptimeStatusResponse {
   success: boolean
   data: UptimeGroupResult[]
+  request_stats?: RecentRequestStats
 }
 
 // ============================================================================

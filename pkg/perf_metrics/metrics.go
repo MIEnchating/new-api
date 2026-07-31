@@ -418,6 +418,7 @@ func buildCacheGroupResult(group string, buckets map[int64]counters) CacheGroupR
 			CachedTokens: value.cachedTokens,
 			CacheHitRate: cacheHitRate(value),
 			AvgTps:       math.Round(avgTps(value)*100) / 100,
+			HasData:      value.cacheRequests > 0,
 		})
 	}
 
@@ -428,6 +429,7 @@ func buildCacheGroupResult(group string, buckets map[int64]counters) CacheGroupR
 		CachedTokens: total.cachedTokens,
 		CacheHitRate: cacheHitRate(total),
 		AvgTps:       math.Round(avgTps(total)*100) / 100,
+		HasData:      total.cacheRequests > 0,
 		Series:       series,
 	}
 }
@@ -514,6 +516,30 @@ func successRate(value counters) float64 {
 		return 0
 	}
 	return float64(value.successCount) / float64(value.requestCount) * 100
+}
+
+func QueryRecentRequestStats() (RecentRequestStats, error) {
+	counts, err := model.GetRecentRelayRequestCounts(time.Now().Unix())
+	if err != nil {
+		return RecentRequestStats{}, err
+	}
+	return RecentRequestStats{
+		FiveMinutes:   buildRequestWindowStats(counts.Requests5m, counts.Successes5m),
+		ThirtyMinutes: buildRequestWindowStats(counts.Requests30m, counts.Successes30m),
+		OneHour:       buildRequestWindowStats(counts.Requests1h, counts.Successes1h),
+	}, nil
+}
+
+func buildRequestWindowStats(requests int64, successes int64) RequestWindowStats {
+	result := RequestWindowStats{
+		RequestCount: requests,
+		SuccessCount: successes,
+		HasData:      requests > 0,
+	}
+	if requests > 0 {
+		result.SuccessRate = math.Round(float64(successes)/float64(requests)*10_000) / 100
+	}
+	return result
 }
 
 func cacheHitRate(value counters) float64 {

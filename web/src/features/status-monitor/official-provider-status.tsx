@@ -305,20 +305,6 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
     ? (INDICATOR_META[effectiveIndicator] ?? UNKNOWN_META)
     : UNAVAILABLE_META
   const StatusIcon = meta.icon
-  const componentGroups = provider.components.filter(
-    (component) => component.group
-  )
-  const componentGroupIds = new Set(
-    componentGroups.map((component) => component.id).filter(Boolean)
-  )
-  const serviceComponents = provider.components.filter(
-    (component) => !component.group
-  )
-  const standaloneComponents = provider.components.filter(
-    (component) =>
-      !component.group &&
-      (!component.group_id || !componentGroupIds.has(component.group_id))
-  )
   let errorLabel = t('Official status fetch failed')
   switch (provider.error_code) {
     case 'timeout':
@@ -511,7 +497,7 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
         </div>
       )}
 
-      {provider.available && provider.components.length > 0 ? (
+      {provider.available && affectedComponents.length > 0 ? (
         <Collapsible
           open={componentsOpen}
           onOpenChange={setComponentsOpen}
@@ -523,19 +509,17 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
           >
             <div className='min-w-0'>
               <h4 className='text-sm font-semibold'>
-                {t('Service components')}
+                {t('Affected components')}
               </h4>
               <p className='text-muted-foreground mt-0.5 text-xs'>
-                {affectedComponents.length > 0
-                  ? t('{{count}} affected components', {
-                      count: affectedComponents.length,
-                    })
-                  : t('All components operational')}
+                {t('{{count}} affected components', {
+                  count: affectedComponents.length,
+                })}
               </p>
             </div>
             <div className='flex shrink-0 items-center gap-2'>
               <span className='text-muted-foreground text-xs tabular-nums'>
-                {serviceComponents.length} {t('components')}
+                {affectedComponents.length} {t('components')}
               </span>
               <ChevronDown
                 className={cn(
@@ -547,29 +531,7 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
           </CollapsibleTrigger>
           <CollapsibleContent className='border-t'>
             <div className='divide-y'>
-              {componentGroups.map((group) => {
-                const children = provider.components.filter(
-                  (component) =>
-                    !component.group && component.group_id === group.id
-                )
-                return (
-                  <div key={group.id || group.name}>
-                    <ProviderComponentRow component={group} locale={locale} />
-                    {children.length > 0 ? (
-                      <div className='bg-muted/10 divide-y border-t pl-5'>
-                        {children.map((component) => (
-                          <ProviderComponentRow
-                            key={component.id || component.name}
-                            component={component}
-                            locale={locale}
-                          />
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                )
-              })}
-              {standaloneComponents.map((component) => (
+              {affectedComponents.map((component) => (
                 <ProviderComponentRow
                   key={component.id || component.name}
                   component={component}

@@ -18,20 +18,22 @@ For commercial licensing, please contact support@quantumnous.com
 */
 export type CacheMetricPoint = {
   ts: number
-  request_count: number
-  hit_count: number
+  request_count?: number
+  hit_count?: number
   cached_tokens: number
   cache_hit_rate: number
   avg_tps: number
+  has_data: boolean
 }
 
 export type CacheMetricGroup = {
   group: string
-  request_count: number
-  hit_count: number
+  request_count?: number
+  hit_count?: number
   cached_tokens: number
   cache_hit_rate: number
   avg_tps: number
+  has_data: boolean
   series: CacheMetricPoint[]
 }
 
@@ -47,6 +49,7 @@ export type CacheMetricsResponse = {
     available_groups: string[]
     display_groups: string[]
     all_groups: boolean
+    counts_visible: boolean
   }
 }
 

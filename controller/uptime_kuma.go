@@ -15,6 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 
 	"github.com/gin-gonic/gin"
@@ -57,6 +59,20 @@ type uptimeStatusLoader struct {
 }
 
 var defaultUptimeStatusLoader uptimeStatusLoader
+
+type requestStatsCacheEntry struct {
+	expiresAt time.Time
+	stats     perfmetrics.RecentRequestStats
+}
+
+type requestStatsLoader struct {
+	mu       sync.RWMutex
+	entry    requestStatsCacheEntry
+	requests singleflight.Group
+	now      func() time.Time
+}
+
+var defaultRequestStatsLoader requestStatsLoader
 
 type Monitor struct {
 	Name        string      `json:"name"`
@@ -494,10 +510,78 @@ func (loader *uptimeStatusLoader) load(
 	}
 }
 
+func (loader *requestStatsLoader) currentTime() time.Time {
+	if loader.now != nil {
+		return loader.now()
+	}
+	return time.Now()
+}
+
+func (loader *requestStatsLoader) cached(now time.Time) (perfmetrics.RecentRequestStats, bool) {
+	loader.mu.RLock()
+	defer loader.mu.RUnlock()
+	if loader.entry.expiresAt.IsZero() || !now.Before(loader.entry.expiresAt) {
+		return perfmetrics.RecentRequestStats{}, false
+	}
+	return loader.entry.stats, true
+}
+
+func (loader *requestStatsLoader) load(
+	ctx context.Context,
+	fetch func() (perfmetrics.RecentRequestStats, error),
+) (perfmetrics.RecentRequestStats, error) {
+	if stats, ok := loader.cached(loader.currentTime()); ok {
+		return stats, nil
+	}
+
+	result := loader.requests.DoChan("recent-request-stats", func() (interface{}, error) {
+		if stats, ok := loader.cached(loader.currentTime()); ok {
+			return stats, nil
+		}
+		stats, err := fetch()
+		if err != nil {
+			return perfmetrics.RecentRequestStats{}, err
+		}
+		loader.mu.Lock()
+		loader.entry = requestStatsCacheEntry{
+			expiresAt: loader.currentTime().Add(uptimeStatusCacheTTL),
+			stats:     stats,
+		}
+		loader.mu.Unlock()
+		return stats, nil
+	})
+
+	select {
+	case <-ctx.Done():
+		return perfmetrics.RecentRequestStats{}, ctx.Err()
+	case loaded := <-result:
+		if loaded.Err != nil {
+			return perfmetrics.RecentRequestStats{}, loaded.Err
+		}
+		stats, ok := loaded.Val.(perfmetrics.RecentRequestStats)
+		if !ok {
+			return perfmetrics.RecentRequestStats{}, errors.New("invalid request statistics cache result")
+		}
+		return stats, nil
+	}
+}
+
 func GetUptimeKumaStatus(c *gin.Context) {
+	requestStats, statsErr := defaultRequestStatsLoader.load(
+		c.Request.Context(),
+		perfmetrics.QueryRecentRequestStats,
+	)
+	if statsErr != nil {
+		common.SysError("failed to load recent relay request statistics: " + statsErr.Error())
+	}
 	groups := console_setting.GetUptimeKumaGroups()
 	if len(groups) == 0 {
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": []UptimeGroupResult{}})
+		c.JSON(http.StatusOK, gin.H{
+			"success":       true,
+			"message":       "",
+			"data":          []UptimeGroupResult{},
+			"request_stats": requestStats,
+		})
 		return
 	}
 
@@ -505,5 +589,10 @@ func GetUptimeKumaStatus(c *gin.Context) {
 	if err != nil {
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": snapshot.Results})
+	c.JSON(http.StatusOK, gin.H{
+		"success":       true,
+		"message":       "",
+		"data":          snapshot.Results,
+		"request_stats": requestStats,
+	})
 }

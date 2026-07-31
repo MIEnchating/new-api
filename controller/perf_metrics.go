@@ -61,6 +61,10 @@ func GetCacheMetrics(c *gin.Context) {
 		})
 		return
 	}
+	countsVisible := c.GetInt("role") >= common.RoleAdminUser
+	if !countsVisible {
+		hideCacheMetricCounts(&result)
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
@@ -73,8 +77,23 @@ func GetCacheMetrics(c *gin.Context) {
 			"available_groups": availableGroups,
 			"display_groups":   displayGroups,
 			"all_groups":       len(configuredGroups) == 0,
+			"counts_visible":   countsVisible,
 		},
 	})
+}
+
+func hideCacheMetricCounts(result *perfmetrics.CacheQueryResult) {
+	if result == nil {
+		return
+	}
+	for groupIndex := range result.Groups {
+		result.Groups[groupIndex].RequestCount = 0
+		result.Groups[groupIndex].HitCount = 0
+		for pointIndex := range result.Groups[groupIndex].Series {
+			result.Groups[groupIndex].Series[pointIndex].RequestCount = 0
+			result.Groups[groupIndex].Series[pointIndex].HitCount = 0
+		}
+	}
 }
 
 func getAvailableCacheGroups() []string {
