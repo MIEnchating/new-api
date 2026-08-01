@@ -141,6 +141,7 @@ import {
   ADD_MODE_OPTIONS,
   CHANNEL_STATUS_LABELS,
   CHANNEL_TYPE_OPTIONS,
+  CHANNEL_TYPE_SUB2_API,
   CHANNEL_TYPE_WARNINGS,
   ERROR_MESSAGES,
   FIELD_DESCRIPTIONS,
@@ -294,6 +295,7 @@ const SENSITIVE_FORM_FIELDS = [
   'disable_store',
   'allow_safety_identifier',
   'allow_include_obfuscation',
+  'normalize_responses_reasoning_ids',
   'allow_inference_geo',
   'allow_speed',
   'claude_beta_query',
@@ -759,6 +761,9 @@ export function ChannelMutateDrawer({
   const currentDisableStore = form.watch('disable_store')
   const currentAllowSafetyIdentifier = form.watch('allow_safety_identifier')
   const currentAllowIncludeObfuscation = form.watch('allow_include_obfuscation')
+  const currentNormalizeResponsesReasoningIDs = form.watch(
+    'normalize_responses_reasoning_ids'
+  )
   const currentAllowInferenceGeo = form.watch('allow_inference_geo')
   const currentAllowSpeed = form.watch('allow_speed')
   const currentClaudeBetaQuery = form.watch('claude_beta_query')
@@ -1019,6 +1024,7 @@ export function ChannelMutateDrawer({
     currentForceFormat ||
     currentThinkingToContent ||
     currentPassThroughBodyEnabled ||
+    currentNormalizeResponsesReasoningIDs ||
     currentDisableTaskPollingSleep ||
     currentProxy?.trim() ||
     currentSystemPrompt?.trim() ||
@@ -4156,6 +4162,35 @@ export function ChannelMutateDrawer({
                                   </FormItem>
                                 )}
                               />
+
+                              {currentType === CHANNEL_TYPE_SUB2_API && (
+                                <FormField
+                                  control={form.control}
+                                  name='normalize_responses_reasoning_ids'
+                                  render={({ field }) => (
+                                    <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                                      <div className='space-y-0.5'>
+                                        <FormLabel>
+                                          {t(
+                                            'Repair invalid Responses reasoning IDs'
+                                          )}
+                                        </FormLabel>
+                                        <FormDescription>
+                                          {t(
+                                            'Remove incompatible non-rs_ IDs from reasoning items in non-compact Responses requests'
+                                          )}
+                                        </FormDescription>
+                                      </div>
+                                      <FormControl>
+                                        <Switch
+                                          checked={field.value}
+                                          onCheckedChange={field.onChange}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+                              )}
 
                               <FormField
                                 control={form.control}

@@ -21,6 +21,7 @@ import { describe, test } from 'node:test'
 
 import {
   CHANNEL_TYPE_NEW_API,
+  CHANNEL_TYPE_SUB2_API,
   CHANNEL_TYPE_OPTIONS,
   MODEL_FETCHABLE_TYPES,
 } from '../../constants'
@@ -107,5 +108,21 @@ describe('New API channel', () => {
     const settings = JSON.parse(payload.channel.settings || '{}')
 
     assert.equal('claude_code_client_spoofing' in settings, false)
+  })
+  test('stores invalid Responses reasoning ID repair only for Sub2API', () => {
+    const sub2apiPayload = transformFormDataToCreatePayload({
+      ...newAPIForm('https://sub2api.example'),
+      type: CHANNEL_TYPE_SUB2_API,
+      normalize_responses_reasoning_ids: true,
+    })
+    const sub2apiSettings = JSON.parse(sub2apiPayload.channel.settings || '{}')
+    assert.equal(sub2apiSettings.normalize_responses_reasoning_ids, true)
+
+    const newAPIPayload = transformFormDataToCreatePayload({
+      ...newAPIForm('https://new-api.example'),
+      normalize_responses_reasoning_ids: true,
+    })
+    const newAPISettings = JSON.parse(newAPIPayload.channel.settings || '{}')
+    assert.equal('normalize_responses_reasoning_ids' in newAPISettings, false)
   })
 })
