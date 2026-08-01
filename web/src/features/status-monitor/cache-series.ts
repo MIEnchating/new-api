@@ -38,6 +38,7 @@ function missingCachePoint(timestamp: number): CacheChartPoint {
     cached_tokens: null,
     cache_hit_rate: null,
     avg_tps: null,
+    has_data: false,
     missing: true,
   }
 }
@@ -68,7 +69,14 @@ export function buildCacheChartSeries(
   for (let timestamp = start; timestamp <= end; timestamp += interval) {
     const point = points.get(timestamp)
     result.push(
-      point ? { ...point, missing: false } : missingCachePoint(timestamp)
+      point
+        ? {
+            ...point,
+            request_count: point.request_count ?? null,
+            hit_count: point.hit_count ?? null,
+            missing: false,
+          }
+        : missingCachePoint(timestamp)
     )
   }
 
