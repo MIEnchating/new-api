@@ -108,5 +108,4 @@ describe('New API channel', () => {
 
     assert.equal('claude_code_client_spoofing' in settings, false)
   })
-
 })

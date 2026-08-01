@@ -403,10 +403,7 @@ export function TopUpStats() {
       paymentMethods: readStringFilter('payment_method'),
       invoiceStatuses: readStringFilter('invoice_status'),
     }
-    const filtersChanged = !areAppliedFiltersEqual(
-      appliedFilters,
-      nextFilters
-    )
+    const filtersChanged = !areAppliedFiltersEqual(appliedFilters, nextFilters)
     const pageChanged = pagination.pageIndex !== 0
 
     if (filtersChanged) {

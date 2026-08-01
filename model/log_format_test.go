@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -188,6 +189,48 @@ func TestFormatUserLogsMasksTransportDetailsButAdminFormattingKeepsThem(t *testi
 	require.NotContains(t, userLogs[0].Content, "194.147.98.184")
 	require.NotContains(t, userLogs[0].Content, "secret")
 	require.Equal(t, rawContent, adminLogs[0].Content)
+}
+
+func TestFormatUserLogsKeepsMaskedStreamStatus(t *testing.T) {
+	logs := []*Log{{
+		Type: LogTypeError,
+		Other: common.MapToJsonStr(map[string]interface{}{
+			"stream_status": map[string]interface{}{
+				"status":      "error",
+				"end_reason":  "scanner_error",
+				"end_error":   `Authorization: Bearer sk-terminal-secret from https://api.example.com/v1/responses (request id: upstream-terminal-id)`,
+				"error_count": 2,
+				"errors": []string{
+					`authorization: bearer sk-soft-secret (request id: upstream-soft-id)`,
+					`dial tcp 192.0.2.10:443: connection refused`,
+				},
+			},
+		}),
+	}}
+
+	formatUserLogs(logs, 0)
+
+	parsed, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	streamStatus, ok := parsed["stream_status"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "error", streamStatus["status"])
+	assert.Equal(t, "scanner_error", streamStatus["end_reason"])
+	assert.EqualValues(t, 2, streamStatus["error_count"])
+
+	endError, ok := streamStatus["end_error"].(string)
+	require.True(t, ok)
+	assert.Contains(t, endError, "***")
+	assert.NotContains(t, endError, "sk-terminal-secret")
+	assert.NotContains(t, endError, "api.example.com")
+	assert.NotContains(t, endError, "upstream-terminal-id")
+
+	streamErrors, ok := streamStatus["errors"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, streamErrors, 2)
+	assert.NotContains(t, streamErrors[0], "sk-soft-secret")
+	assert.NotContains(t, streamErrors[0], "upstream-soft-id")
+	assert.NotContains(t, streamErrors[1], "192.0.2.10")
 }
 
 func TestAuditLogsPreserveHTTPRequestID(t *testing.T) {
