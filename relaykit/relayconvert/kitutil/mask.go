@@ -12,6 +12,8 @@ var (
 	maskIPPattern     = regexp.MustCompile(`\b(?:\d{1,3}\.){3}\d{1,3}\b`)
 	// maskApiKeyPattern matches patterns like 'api_key:xxx' or "api_key:xxx" to mask the API key value
 	maskApiKeyPattern = regexp.MustCompile(`(['"]?)api_key:([^\s'"]+)(['"]?)`)
+	// maskAuthorizationPattern masks credentials copied from HTTP Authorization headers.
+	maskAuthorizationPattern = regexp.MustCompile(`(?i)(\bauthorization\b["']?\s*[:=]\s*["']?(?:bearer|basic)\s+)[^\s,"'}]+`)
 )
 
 // maskHostTail returns the tail parts of a domain/host that should be preserved.
@@ -129,6 +131,9 @@ func MaskSensitiveInfo(str string) string {
 
 	// Mask API keys (e.g., "api_key:AIzaSyAAAaUooTUni8AdaOkSRMda30n_Q4vrV70" -> "api_key:***")
 	str = maskApiKeyPattern.ReplaceAllString(str, "${1}api_key:***${3}")
+
+	// Mask credentials from plain-text or JSON-like Authorization headers.
+	str = maskAuthorizationPattern.ReplaceAllString(str, "${1}***")
 
 	return str
 }
