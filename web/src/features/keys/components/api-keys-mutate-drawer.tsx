@@ -81,11 +81,17 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useStatus } from '@/hooks/use-status'
 import { getUserModels, getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
 import { cn } from '@/lib/utils'
 
-import { createApiKey, updateApiKey, getApiKey } from '../api'
+import {
+  createApiKey,
+  updateApiKey,
+  getApiKey,
+  getTokenAutoGroups,
+} from '../api'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
   canConfigureGroupRouteCooldown,
@@ -102,6 +108,7 @@ import {
   type ApiKeyGroupOption,
 } from './api-key-group-combobox'
 import { useApiKeys } from './api-keys-provider'
+import { AutoGroupOrderEditor } from './auto-group-order-editor'
 
 type ApiKeyMutateDrawerProps = {
   open: boolean
@@ -124,12 +131,18 @@ export function ApiKeysMutateDrawer({
 }: ApiKeyMutateDrawerProps) {
   const { t } = useTranslation()
   const isUpdate = !!currentRow
+  const currentRowId = currentRow?.id
   const { triggerRefresh } = useApiKeys()
+  const { status, loading: statusLoading } = useStatus()
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [autoSortGroupRoutes, setAutoSortGroupRoutes] = useState(false)
   const manualRoutePrioritiesRef = useRef(new Map<string, number>())
   const enabledRouteCooldownsRef = useRef(new Map<string, number>())
+  const [initializedTarget, setInitializedTarget] = useState<string | null>(
+    null
+  )
+  const defaultUseAutoGroup = status?.default_use_auto_group === true
 
   // Fetch models
   const { data: modelsData } = useQuery({
@@ -140,9 +153,35 @@ export function ApiKeysMutateDrawer({
   })
 
   // Fetch groups
-  const { data: groupsData } = useQuery({
+  const {
+    data: groupsData,
+    isFetched: groupsFetched,
+    isFetching: groupsFetching,
+  } = useQuery({
     queryKey: ['user-groups'],
     queryFn: getUserGroups,
+    enabled: open,
+    staleTime: 0,
+  })
+
+  const {
+    data: apiKeyData,
+    isFetched: apiKeyFetched,
+    isFetching: apiKeyFetching,
+  } = useQuery({
+    queryKey: ['api-key', currentRowId],
+    queryFn: () => getApiKey(currentRowId ?? 0),
+    enabled: open && isUpdate && currentRowId !== undefined,
+    staleTime: 0,
+  })
+
+  const {
+    data: autoGroupsData,
+    isFetched: autoGroupsFetched,
+    isFetching: autoGroupsFetching,
+  } = useQuery({
+    queryKey: ['token-auto-groups'],
+    queryFn: getTokenAutoGroups,
     enabled: open,
     staleTime: 0,
   })
@@ -171,7 +210,33 @@ export function ApiKeysMutateDrawer({
     () => groups.filter((group) => group.value !== 'auto'),
     [groups]
   )
-  const schema = getApiKeyFormSchema(t)
+  const backendHasAuto = groups.some((g) => g.value === 'auto')
+  const availableAutoGroupNames = useMemo(
+    () => groups.filter((group) => group.value !== 'auto').map((g) => g.value),
+    [groups]
+  )
+  const globalAutoGroups = useMemo(() => {
+    const available = new Set(availableAutoGroupNames)
+    return (autoGroupsData?.data?.groups || []).filter((group) =>
+      available.has(group)
+    )
+  }, [autoGroupsData, availableAutoGroupNames])
+  const globalAutoGroupOptions = useMemo(() => {
+    const groupsByValue = new Map(groups.map((group) => [group.value, group]))
+    return globalAutoGroups.flatMap((group) => {
+      const option = groupsByValue.get(group)
+      return option ? [option] : []
+    })
+  }, [globalAutoGroups, groups])
+  const maxAutoGroups =
+    Number.isInteger(autoGroupsData?.data?.max_count) &&
+    Number(autoGroupsData?.data?.max_count) > 0
+      ? Number(autoGroupsData?.data?.max_count)
+      : 5
+  const schema = useMemo(
+    () => getApiKeyFormSchema(t, maxAutoGroups),
+    [t, maxAutoGroups]
+  )
 
   const form = useForm<ApiKeyFormValues>({
     resolver: zodResolver(schema),
@@ -184,35 +249,80 @@ export function ApiKeysMutateDrawer({
 
   // Load existing data when updating
   useEffect(() => {
-    if (open) {
-      setAutoSortGroupRoutes(false)
-      manualRoutePrioritiesRef.current.clear()
-      enabledRouteCooldownsRef.current.clear()
+    if (!open) {
+      setInitializedTarget(null)
+      return
     }
-    if (open && isUpdate && currentRow) {
-      void getApiKey(currentRow.id)
-        .then((result) => {
-          if (result.success && result.data) {
-            form.reset(transformApiKeyToFormDefaults(result.data))
-          }
-        })
-        .catch(() => undefined)
-    } else if (open && !isUpdate) {
-      form.reset(getApiKeyFormDefaultValues())
+    if (
+      !groupsFetched ||
+      groupsFetching ||
+      !autoGroupsFetched ||
+      autoGroupsFetching
+    ) {
+      return
     }
-  }, [open, isUpdate, currentRow, form])
+    if (isUpdate && (!apiKeyFetched || apiKeyFetching)) return
+    if (!isUpdate && statusLoading) return
+
+    const target = isUpdate && currentRow ? `update:${currentRow.id}` : 'create'
+    if (initializedTarget === target) return
+    setAutoSortGroupRoutes(false)
+    manualRoutePrioritiesRef.current.clear()
+    enabledRouteCooldownsRef.current.clear()
+    if (isUpdate && currentRow) {
+      if (apiKeyData?.success && apiKeyData.data) {
+        form.reset(
+          transformApiKeyToFormDefaults(
+            apiKeyData.data,
+            availableAutoGroupNames,
+            maxAutoGroups
+          )
+        )
+        setInitializedTarget(target)
+      }
+    } else {
+      form.reset(
+        getApiKeyFormDefaultValues(defaultUseAutoGroup && backendHasAuto)
+      )
+      setInitializedTarget(target)
+    }
+  }, [
+    open,
+    isUpdate,
+    currentRow,
+    form,
+    defaultUseAutoGroup,
+    statusLoading,
+    backendHasAuto,
+    groupsFetched,
+    groupsFetching,
+    autoGroupsFetched,
+    autoGroupsFetching,
+    apiKeyData,
+    apiKeyFetched,
+    apiKeyFetching,
+    availableAutoGroupNames,
+    maxAutoGroups,
+    initializedTarget,
+  ])
+
+  const formTarget =
+    isUpdate && currentRow ? `update:${currentRow.id}` : 'create'
+  const isFormInitialized = initializedTarget === formTarget
+  const selectedGroup = form.watch('group')
 
   // Clear stale selections after group permissions change; never pick for the user.
   useEffect(() => {
     if (!open || groups.length === 0) return
-    const currentGroup = form.getValues('group')
+    const currentGroup = selectedGroup
     if (currentGroup && !groups.some((g) => g.value === currentGroup)) {
       form.setValue('group', '')
       if (currentGroup === 'auto') {
+        form.setValue('auto_groups', [])
+        form.setValue('auto_groups_mode', 'inherit')
         form.setValue('cross_group_retry', false)
       }
     }
-
     const currentRoutes = form.getValues('group_routes') || []
     currentRoutes.forEach((route, index) => {
       if (
@@ -222,7 +332,7 @@ export function ApiKeysMutateDrawer({
         form.setValue(`group_routes.${index}.group`, '')
       }
     })
-  }, [open, groups, routableGroups, form])
+  }, [open, groups, routableGroups, form, selectedGroup])
 
   const onSubmit = async (data: ApiKeyFormValues) => {
     setIsSubmitting(true)
@@ -304,7 +414,7 @@ export function ApiKeysMutateDrawer({
   const quotaPlaceholder = tokensOnly
     ? t('Enter quota in tokens')
     : t('Enter quota in {{currency}}', { currency: currencyLabel })
-  const selectedGroup = form.watch('group')
+  const autoGroupsMode = form.watch('auto_groups_mode')
   const unlimitedQuota = form.watch('unlimited_quota')
   const groupRouteEnabled = form.watch('group_route_enabled')
   const groupRoutes = form.watch('group_routes') || []
@@ -427,6 +537,8 @@ export function ApiKeysMutateDrawer({
           <form
             id='api-key-form'
             onSubmit={form.handleSubmit(onSubmit, onInvalid)}
+            aria-busy={!isFormInitialized}
+            inert={!isFormInitialized || isSubmitting ? true : undefined}
             className={sideDrawerFormClassName('gap-5')}
           >
             <SideDrawerSection>
@@ -757,7 +869,14 @@ export function ApiKeysMutateDrawer({
                           <ApiKeyGroupCombobox
                             options={groups}
                             value={field.value}
-                            onValueChange={field.onChange}
+                            onValueChange={(group) => {
+                              field.onChange(group)
+                              form.setValue(
+                                'cross_group_retry',
+                                group === 'auto',
+                                { shouldDirty: true }
+                              )
+                            }}
                             placeholder={t('Select a group')}
                           />
                         </FormControl>
@@ -765,6 +884,47 @@ export function ApiKeysMutateDrawer({
                       </FormItem>
                     )}
                   />
+
+                  {selectedGroup === 'auto' && (
+                    <FormField
+                      control={form.control}
+                      name='auto_groups'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('Auto group order')}</FormLabel>
+                          <FormDescription>
+                            {t(
+                              'Choose and order the groups this API key will try.'
+                            )}
+                          </FormDescription>
+                          <FormControl>
+                            <AutoGroupOrderEditor
+                              value={field.value}
+                              mode={autoGroupsMode}
+                              options={groups}
+                              globalOptions={globalAutoGroupOptions}
+                              maxCount={maxAutoGroups}
+                              onChange={(value) => {
+                                form.setValue('auto_groups_mode', value.mode, {
+                                  shouldDirty: true,
+                                  shouldValidate: false,
+                                })
+                                form.setValue(
+                                  'auto_groups',
+                                  value.groups.slice(0, maxAutoGroups),
+                                  {
+                                    shouldDirty: true,
+                                    shouldValidate: true,
+                                  }
+                                )
+                              }}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  )}
 
                   {selectedGroup === 'auto' && (
                     <FormField
@@ -1044,7 +1204,7 @@ export function ApiKeysMutateDrawer({
           <Button
             type='button'
             onClick={form.handleSubmit(onSubmit, onInvalid)}
-            disabled={isSubmitting}
+            disabled={!isFormInitialized || isSubmitting}
             className='w-full sm:w-auto'
           >
             {isSubmitting ? t('Saving...') : t('Save changes')}

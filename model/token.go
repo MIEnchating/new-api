@@ -31,6 +31,7 @@ type Token struct {
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	GroupRouteConfig   string         `json:"group_route_config" gorm:"type:text"`
 	GroupRouteSticky   bool           `json:"group_route_sticky" gorm:"default:false"`
+	AutoGroups         string         `json:"-" gorm:"type:text"`
 	CacheSchema        int            `json:"-" gorm:"-"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
 }
@@ -121,6 +122,30 @@ func (token *Token) GetGroupRoutes() []TokenGroupRoute {
 		return nil
 	}
 	return EnabledTokenGroupRoutes(routes)
+}
+
+func (token *Token) GetAutoGroups() ([]string, error) {
+	if token.AutoGroups == "" {
+		return nil, nil
+	}
+	var groups []string
+	if err := common.UnmarshalJsonStr(token.AutoGroups, &groups); err != nil {
+		return nil, err
+	}
+	return groups, nil
+}
+
+func (token *Token) SetAutoGroups(groups []string) error {
+	if len(groups) == 0 {
+		token.AutoGroups = ""
+		return nil
+	}
+	data, err := common.Marshal(groups)
+	if err != nil {
+		return err
+	}
+	token.AutoGroups = string(data)
+	return nil
 }
 
 func (token *Token) Clean() {
@@ -386,10 +411,19 @@ func (token *Token) Insert() error {
 // Update Make sure your token's fields is completed, because this will update non-zero values
 func (token *Token) Update() (err error) {
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "group_route_config", "group_route_sticky").Updates(token).Error
+		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "group_route_config", "group_route_sticky", "auto_groups").Updates(token).Error
 	if err == nil && common.RedisEnabled {
 		if cacheErr := cacheDeleteToken(token.Key); cacheErr != nil {
 			common.SysLog("failed to invalidate token cache after update: " + cacheErr.Error())
+		} else if generation, generationErr := cacheGetTokenGeneration(token.Key); generationErr != nil {
+			common.SysLog("failed to read token cache generation after update: " + generationErr.Error())
+		} else {
+			var refreshedToken Token
+			if refreshErr := DB.Where(commonKeyCol+" = ?", token.Key).First(&refreshedToken).Error; refreshErr != nil {
+				common.SysLog("failed to reload token cache data after update: " + refreshErr.Error())
+			} else if cacheErr := cacheSetTokenAtGeneration(refreshedToken, generation); cacheErr != nil {
+				common.SysLog("failed to refresh token cache after update: " + cacheErr.Error())
+			}
 		}
 	}
 	return err

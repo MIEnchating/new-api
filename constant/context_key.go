@@ -25,6 +25,7 @@ const (
 	ContextKeyTokenGroupRouteCooldown  ContextKey = "token_group_route_cooldown"
 	ContextKeyTokenGroupRouteSticky    ContextKey = "token_group_route_sticky"
 	ContextKeyTokenGroupRouteStickyHit ContextKey = "token_group_route_sticky_hit"
+	ContextKeyTokenAutoGroups          ContextKey = "token_auto_groups"
 
 	/* channel related keys */
 	ContextKeyChannelId                ContextKey = "channel_id"

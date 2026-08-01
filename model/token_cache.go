@@ -11,7 +11,7 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-const tokenCacheSchemaVersion = 2
+const tokenCacheSchemaVersion = 3
 
 func tokenCacheKey(key string) string {
 	return fmt.Sprintf("token:%s", common.GenerateHMAC(key))
@@ -67,8 +67,8 @@ redis.call('HSET', KEYS[1],
   'ModelLimits', ARGV[12], 'AllowIps', ARGV[13], 'UsedQuota', ARGV[14],
   'Group', ARGV[15], 'CrossGroupRetry', ARGV[16],
   'GroupRouteConfig', ARGV[17], 'GroupRouteSticky', ARGV[18],
-  'CacheSchema', ARGV[19])
-redis.call('EXPIRE', KEYS[1], ARGV[20])
+  'AutoGroups', ARGV[19], 'CacheSchema', ARGV[20])
+redis.call('EXPIRE', KEYS[1], ARGV[21])
 return 1`
 	return common.RDB.Eval(
 		context.Background(),
@@ -92,6 +92,7 @@ return 1`
 		strconv.FormatBool(token.CrossGroupRetry),
 		token.GroupRouteConfig,
 		strconv.FormatBool(token.GroupRouteSticky),
+		token.AutoGroups,
 		tokenCacheSchemaVersion,
 		tokenCacheTTLSeconds(),
 	).Err()

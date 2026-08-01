@@ -250,6 +250,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			tokenRoute.GET("/", controller.GetAllTokens)
 			tokenRoute.GET("/search", middleware.SearchRateLimit(), controller.SearchTokens)
+			tokenRoute.GET("/auto-groups", controller.GetTokenAutoGroups)
 			tokenRoute.GET("/:id/models", controller.GetTokenModels)
 			tokenRoute.GET("/:id/route/status", controller.GetTokenRouteStatus)
 			tokenRoute.POST("/:id/route/cooldown/clear", controller.ClearTokenRouteCooldown)

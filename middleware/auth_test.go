@@ -71,7 +71,7 @@ func TestTokenAuthReadOnlyWritesUserQuotaContext(t *testing.T) {
 	require.NoError(t, model.DB.Create(token).Error)
 	cachedToken := *token
 	cachedToken.Key = ""
-	cachedToken.CacheSchema = 2
+	cachedToken.CacheSchema = 3
 	tokenCacheKey := fmt.Sprintf("token:%s", common.GenerateHMAC(token.Key))
 	require.NoError(t, common.RedisHSetObj(tokenCacheKey, &cachedToken, time.Minute))
 
@@ -149,7 +149,7 @@ func TestTokenAuthRestoresConfiguredGroupRoutesWhenOwnGroupIsHidden(t *testing.T
 		t.Helper()
 		cached := *token
 		cached.Key = ""
-		cached.CacheSchema = 2
+		cached.CacheSchema = 3
 		key := fmt.Sprintf("token:%s", common.GenerateHMAC(token.Key))
 		require.NoError(t, common.RedisHSetObj(key, &cached, time.Minute))
 	}

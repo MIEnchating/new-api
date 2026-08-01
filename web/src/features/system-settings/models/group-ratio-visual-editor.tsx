@@ -116,6 +116,7 @@ type GroupRatioVisualEditorProps = {
   groupGroupRatio: string
   autoGroups: string
   groupOrder: string
+  maxTokenAutoGroupsField: ReactNode
   groupSpecialUsableGroup: string
   autoGroupDefaultControl: ReactNode
   onChange: (field: string, value: string) => void
@@ -321,6 +322,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupGroupRatio,
   autoGroups,
   groupOrder,
+  maxTokenAutoGroupsField,
   groupSpecialUsableGroup,
   autoGroupDefaultControl,
   onChange,
@@ -426,6 +428,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         </CardHeader>
         <CardContent>
           <div className='space-y-4'>
+            {maxTokenAutoGroupsField}
             <GroupNameSelect
               options={autoGroupCandidates}
               value={null}

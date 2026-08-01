@@ -26,6 +26,7 @@ import type {
   SearchApiKeysParams,
   ApiKeyFormData,
   RouteStatus,
+  TokenAutoGroupsConfig,
 } from './types'
 
 // ============================================================================
@@ -84,6 +85,14 @@ export function clearApiKeyRouteCooldown(
 
 export function getApiKeyModels(id: number): Promise<ApiResponse<string[]>> {
   return api.get(`/api/token/${id}/models`).then((res) => res.data)
+}
+
+// Get the current user's global Auto order and the per-token selection limit.
+export async function getTokenAutoGroups(): Promise<
+  ApiResponse<TokenAutoGroupsConfig>
+> {
+  const res = await api.get('/api/token/auto-groups')
+  return res.data
 }
 
 // Create a new API key

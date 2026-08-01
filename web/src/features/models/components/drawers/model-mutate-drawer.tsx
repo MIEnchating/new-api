@@ -322,6 +322,7 @@ export function ModelMutateDrawer({
       GroupGroupRatio: '',
       AutoGroups: '',
       GroupOrder: '[]',
+      MaxTokenAutoGroups: 5,
       DefaultUseAutoGroup: false,
       CreateCacheRatio: '',
       'group_ratio_setting.group_special_usable_group': '{}',
