@@ -221,18 +221,6 @@ func formatUserLogs(logs []*Log, startIdx int) {
 			// Remove operation-audit details (operator/route info), admin-only.
 			delete(otherMap, "audit_info")
 			// delete(otherMap, "reject_reason")
-			if streamStatus, ok := otherMap["stream_status"].(map[string]interface{}); ok {
-				if endError, ok := streamStatus["end_error"].(string); ok {
-					streamStatus["end_error"] = common.MaskSensitiveInfo(common.MessageWithoutRequestId(endError))
-				}
-				if errors, ok := streamStatus["errors"].([]interface{}); ok {
-					for j, streamError := range errors {
-						if message, ok := streamError.(string); ok {
-							errors[j] = common.MaskSensitiveInfo(common.MessageWithoutRequestId(message))
-						}
-					}
-				}
-			}
 			delete(otherMap, "channel_id")
 			delete(otherMap, "channel_name")
 			delete(otherMap, "channel_type")

@@ -191,19 +191,24 @@ func TestFormatUserLogsMasksTransportDetailsButAdminFormattingKeepsThem(t *testi
 	require.Equal(t, rawContent, adminLogs[0].Content)
 }
 
-func TestFormatUserLogsKeepsMaskedStreamStatus(t *testing.T) {
+func TestFormatUserLogsKeepsOriginalStreamStatus(t *testing.T) {
+	endError := `Authorization: Bearer sk-terminal-secret from https://api.example.com/v1/responses (request id: upstream-terminal-id)`
+	softErrors := []string{
+		`authorization: bearer sk-soft-secret (request id: upstream-soft-id)`,
+		`dial tcp 192.0.2.10:443: connection refused`,
+	}
 	logs := []*Log{{
 		Type: LogTypeError,
 		Other: common.MapToJsonStr(map[string]interface{}{
+			"admin_info":   map[string]interface{}{"channel_id": 99},
+			"channel_id":   99,
+			"channel_name": "admin-only-channel",
 			"stream_status": map[string]interface{}{
 				"status":      "error",
 				"end_reason":  "scanner_error",
-				"end_error":   `Authorization: Bearer sk-terminal-secret from https://api.example.com/v1/responses (request id: upstream-terminal-id)`,
+				"end_error":   endError,
 				"error_count": 2,
-				"errors": []string{
-					`authorization: bearer sk-soft-secret (request id: upstream-soft-id)`,
-					`dial tcp 192.0.2.10:443: connection refused`,
-				},
+				"errors":      softErrors,
 			},
 		}),
 	}}
@@ -217,20 +222,14 @@ func TestFormatUserLogsKeepsMaskedStreamStatus(t *testing.T) {
 	assert.Equal(t, "error", streamStatus["status"])
 	assert.Equal(t, "scanner_error", streamStatus["end_reason"])
 	assert.EqualValues(t, 2, streamStatus["error_count"])
-
-	endError, ok := streamStatus["end_error"].(string)
-	require.True(t, ok)
-	assert.Contains(t, endError, "***")
-	assert.NotContains(t, endError, "sk-terminal-secret")
-	assert.NotContains(t, endError, "api.example.com")
-	assert.NotContains(t, endError, "upstream-terminal-id")
+	assert.Equal(t, endError, streamStatus["end_error"])
 
 	streamErrors, ok := streamStatus["errors"].([]interface{})
 	require.True(t, ok)
-	assert.Len(t, streamErrors, 2)
-	assert.NotContains(t, streamErrors[0], "sk-soft-secret")
-	assert.NotContains(t, streamErrors[0], "upstream-soft-id")
-	assert.NotContains(t, streamErrors[1], "192.0.2.10")
+	assert.Equal(t, []interface{}{softErrors[0], softErrors[1]}, streamErrors)
+	assert.NotContains(t, parsed, "admin_info")
+	assert.NotContains(t, parsed, "channel_id")
+	assert.NotContains(t, parsed, "channel_name")
 }
 
 func TestAuditLogsPreserveHTTPRequestID(t *testing.T) {

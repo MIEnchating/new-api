@@ -75,8 +75,6 @@ import {
   getLoginMethodLabel,
   getSecondFactorMethodLabel,
   getUpstreamRequestIds,
-  isDuplicateLogDiagnosticMessage,
-  uniqueLogDiagnosticMessages,
 } from '../../lib/format'
 import {
   getLogTypeConfig,
@@ -775,14 +773,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const contentText =
     (isManage || isLogin) && operationText ? operationText : details
   const operationIdentifier = other?.op?.action ?? ''
-  const streamEndErrorIsDuplicate = isDuplicateLogDiagnosticMessage(
-    other?.stream_status?.end_error,
-    details
-  )
-  const uniqueStreamErrors = uniqueLogDiagnosticMessages(
-    other?.stream_status?.errors,
-    details
-  )
   const auditParamEntries =
     isManage || isLogin ? getAuditParamEntries(other, t) : []
   const auditRoute = isManage ? other?.audit_info : undefined
@@ -1557,17 +1547,18 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 value={String(other.stream_status.error_count)}
               />
             )}
-            {other.stream_status.end_error && !streamEndErrorIsDuplicate && (
+            {other.stream_status.end_error && (
               <DetailRow
                 label={t('End Error')}
                 value={other.stream_status.end_error}
               />
             )}
-            {uniqueStreamErrors.length > 0 && (
-              <pre className='bg-background/60 mt-1 max-h-32 overflow-y-auto rounded border p-2 font-mono text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap'>
-                {uniqueStreamErrors.join('\n')}
-              </pre>
-            )}
+            {Array.isArray(other.stream_status.errors) &&
+              other.stream_status.errors.length > 0 && (
+                <pre className='bg-background/60 mt-1 max-h-32 overflow-y-auto rounded border p-2 font-mono text-[11px] leading-relaxed wrap-break-word whitespace-pre-wrap'>
+                  {other.stream_status.errors.join('\n')}
+                </pre>
+              )}
           </DetailSection>
         )}
 
