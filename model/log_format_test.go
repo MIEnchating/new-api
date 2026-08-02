@@ -39,13 +39,15 @@ func TestFormatUserLogsStripsQuotaSaturation(t *testing.T) {
 }
 
 func TestFormatUserLogsStripsUpstreamRequestID(t *testing.T) {
+	actualResponseModel := "gpt-5.6-terra"
 	logs := []*Log{{
-		Type:              LogTypeError,
-		ChannelId:         17,
-		ChannelName:       "private-channel",
-		RequestId:         "local-request-id",
-		UpstreamRequestId: "upstream-request-id",
-		Content:           "status_code=500, upstream failed (request id: upstream-request-id)",
+		Type:                LogTypeError,
+		ChannelId:           17,
+		ChannelName:         "private-channel",
+		RequestId:           "local-request-id",
+		UpstreamRequestId:   "upstream-request-id",
+		ActualResponseModel: &actualResponseModel,
+		Content:             "status_code=500, upstream failed (request id: upstream-request-id)",
 		Other: common.MapToJsonStr(map[string]interface{}{
 			"channel_id":   17,
 			"channel_name": "private-channel",
@@ -63,6 +65,7 @@ func TestFormatUserLogsStripsUpstreamRequestID(t *testing.T) {
 	require.Zero(t, logs[0].ChannelId)
 	require.Empty(t, logs[0].ChannelName)
 	require.Empty(t, logs[0].UpstreamRequestId)
+	require.Nil(t, logs[0].ActualResponseModel)
 	require.Equal(t, "status_code=500, upstream failed", logs[0].Content)
 	parsed, err := common.StrToMap(logs[0].Other)
 	require.NoError(t, err)
@@ -71,6 +74,37 @@ func TestFormatUserLogsStripsUpstreamRequestID(t *testing.T) {
 	require.NotContains(t, parsed, "channel_type")
 	require.NotContains(t, parsed, "admin_info")
 	require.Equal(t, "/v1/responses", parsed["request_path"])
+}
+
+func TestRecordConsumeLogPersistsNullableActualResponseModel(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+	require.True(t, db.Migrator().HasColumn(&Log{}, "actual_response_model"))
+
+	previousLogDB := LOG_DB
+	previousLogConsumeEnabled := common.LogConsumeEnabled
+	LOG_DB = db
+	common.LogConsumeEnabled = true
+	t.Cleanup(func() {
+		LOG_DB = previousLogDB
+		common.LogConsumeEnabled = previousLogConsumeEnabled
+	})
+
+	c, _ := gin.CreateTestContext(nil)
+	c.Set("username", "audit-user")
+	RecordConsumeLog(c, 1, RecordConsumeLogParams{
+		ModelName:           "gpt-5.6-sol",
+		ActualResponseModel: "gpt-5.6-terra",
+	})
+	RecordConsumeLog(c, 1, RecordConsumeLogParams{ModelName: "gpt-5.6-sol"})
+
+	var logs []Log
+	require.NoError(t, db.Order("id ASC").Find(&logs).Error)
+	require.Len(t, logs, 2)
+	require.NotNil(t, logs[0].ActualResponseModel)
+	assert.Equal(t, "gpt-5.6-terra", *logs[0].ActualResponseModel)
+	assert.Nil(t, logs[1].ActualResponseModel)
 }
 
 func TestAppendUpstreamRequestIdsAdminInfo(t *testing.T) {

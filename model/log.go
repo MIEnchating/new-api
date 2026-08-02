@@ -57,27 +57,28 @@ func sanitizeClickHouseLikePattern(input string) (string, error) {
 }
 
 type Log struct {
-	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
-	UserId            int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
-	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type"`
-	Type              int    `json:"type" gorm:"index:idx_created_at_type"`
-	Content           string `json:"content"`
-	Username          string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
-	TokenName         string `json:"token_name" gorm:"index;default:''"`
-	ModelName         string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
-	Quota             int    `json:"quota" gorm:"default:0"`
-	PromptTokens      int    `json:"prompt_tokens" gorm:"default:0"`
-	CompletionTokens  int    `json:"completion_tokens" gorm:"default:0"`
-	UseTime           int    `json:"use_time" gorm:"default:0"`
-	IsStream          bool   `json:"is_stream"`
-	ChannelId         int    `json:"channel" gorm:"index"`
-	ChannelName       string `json:"channel_name" gorm:"->"`
-	TokenId           int    `json:"token_id" gorm:"default:0;index"`
-	Group             string `json:"group" gorm:"index"`
-	Ip                string `json:"ip" gorm:"index;default:''"`
-	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
-	UpstreamRequestId string `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
-	Other             string `json:"other"`
+	Id                  int     `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
+	UserId              int     `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
+	CreatedAt           int64   `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type"`
+	Type                int     `json:"type" gorm:"index:idx_created_at_type"`
+	Content             string  `json:"content"`
+	Username            string  `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
+	TokenName           string  `json:"token_name" gorm:"index;default:''"`
+	ModelName           string  `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
+	ActualResponseModel *string `json:"actual_response_model" gorm:"type:varchar(100)"`
+	Quota               int     `json:"quota" gorm:"default:0"`
+	PromptTokens        int     `json:"prompt_tokens" gorm:"default:0"`
+	CompletionTokens    int     `json:"completion_tokens" gorm:"default:0"`
+	UseTime             int     `json:"use_time" gorm:"default:0"`
+	IsStream            bool    `json:"is_stream"`
+	ChannelId           int     `json:"channel" gorm:"index"`
+	ChannelName         string  `json:"channel_name" gorm:"->"`
+	TokenId             int     `json:"token_id" gorm:"default:0;index"`
+	Group               string  `json:"group" gorm:"index"`
+	Ip                  string  `json:"ip" gorm:"index;default:''"`
+	RequestId           string  `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
+	UpstreamRequestId   string  `json:"upstream_request_id,omitempty" gorm:"type:varchar(128);index:idx_logs_upstream_request_id;default:''"`
+	Other               string  `json:"other"`
 }
 
 type RecentRelayRequestCounts struct {
@@ -213,6 +214,7 @@ func formatUserLogs(logs []*Log, startIdx int) {
 		logs[i].ChannelId = 0
 		logs[i].ChannelName = ""
 		logs[i].UpstreamRequestId = ""
+		logs[i].ActualResponseModel = nil
 		var otherMap map[string]interface{}
 		otherMap, _ = common.StrToMap(logs[i].Other)
 		if otherMap != nil {
@@ -384,7 +386,7 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 	}
 }
 
-func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
+func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, actualResponseModel string, tokenName string, content string, tokenId int, useTimeSeconds int,
 	isStream bool, group string, other map[string]interface{}) {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
 	username := c.GetString("username")
@@ -403,21 +405,22 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 		}
 	}
 	log := &Log{
-		UserId:           userId,
-		Username:         username,
-		CreatedAt:        common.GetTimestamp(),
-		Type:             LogTypeError,
-		Content:          content,
-		PromptTokens:     0,
-		CompletionTokens: 0,
-		TokenName:        tokenName,
-		ModelName:        modelName,
-		Quota:            0,
-		ChannelId:        channelId,
-		TokenId:          tokenId,
-		UseTime:          useTimeSeconds,
-		IsStream:         isStream,
-		Group:            group,
+		UserId:              userId,
+		Username:            username,
+		CreatedAt:           common.GetTimestamp(),
+		Type:                LogTypeError,
+		Content:             content,
+		PromptTokens:        0,
+		CompletionTokens:    0,
+		TokenName:           tokenName,
+		ModelName:           modelName,
+		ActualResponseModel: nullableActualResponseModel(actualResponseModel),
+		Quota:               0,
+		ChannelId:           channelId,
+		TokenId:             tokenId,
+		UseTime:             useTimeSeconds,
+		IsStream:            isStream,
+		Group:               group,
 		Ip: func() string {
 			if needRecordIp {
 				return c.ClientIP()
@@ -435,18 +438,19 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 }
 
 type RecordConsumeLogParams struct {
-	ChannelId        int                    `json:"channel_id"`
-	PromptTokens     int                    `json:"prompt_tokens"`
-	CompletionTokens int                    `json:"completion_tokens"`
-	ModelName        string                 `json:"model_name"`
-	TokenName        string                 `json:"token_name"`
-	Quota            int                    `json:"quota"`
-	Content          string                 `json:"content"`
-	TokenId          int                    `json:"token_id"`
-	UseTimeSeconds   int                    `json:"use_time_seconds"`
-	IsStream         bool                   `json:"is_stream"`
-	Group            string                 `json:"group"`
-	Other            map[string]interface{} `json:"other"`
+	ChannelId           int                    `json:"channel_id"`
+	PromptTokens        int                    `json:"prompt_tokens"`
+	CompletionTokens    int                    `json:"completion_tokens"`
+	ModelName           string                 `json:"model_name"`
+	ActualResponseModel string                 `json:"actual_response_model"`
+	TokenName           string                 `json:"token_name"`
+	Quota               int                    `json:"quota"`
+	Content             string                 `json:"content"`
+	TokenId             int                    `json:"token_id"`
+	UseTimeSeconds      int                    `json:"use_time_seconds"`
+	IsStream            bool                   `json:"is_stream"`
+	Group               string                 `json:"group"`
+	Other               map[string]interface{} `json:"other"`
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
@@ -471,21 +475,22 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		}
 	}
 	log := &Log{
-		UserId:           userId,
-		Username:         username,
-		CreatedAt:        createdAt,
-		Type:             LogTypeConsume,
-		Content:          params.Content,
-		PromptTokens:     params.PromptTokens,
-		CompletionTokens: params.CompletionTokens,
-		TokenName:        params.TokenName,
-		ModelName:        params.ModelName,
-		Quota:            params.Quota,
-		ChannelId:        params.ChannelId,
-		TokenId:          params.TokenId,
-		UseTime:          params.UseTimeSeconds,
-		IsStream:         params.IsStream,
-		Group:            params.Group,
+		UserId:              userId,
+		Username:            username,
+		CreatedAt:           createdAt,
+		Type:                LogTypeConsume,
+		Content:             params.Content,
+		PromptTokens:        params.PromptTokens,
+		CompletionTokens:    params.CompletionTokens,
+		TokenName:           params.TokenName,
+		ModelName:           params.ModelName,
+		ActualResponseModel: nullableActualResponseModel(params.ActualResponseModel),
+		Quota:               params.Quota,
+		ChannelId:           params.ChannelId,
+		TokenId:             params.TokenId,
+		UseTime:             params.UseTimeSeconds,
+		IsStream:            params.IsStream,
+		Group:               params.Group,
 		Ip: func() string {
 			if needRecordIp {
 				return c.ClientIP()
@@ -514,6 +519,14 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 			NodeName:  common.NodeName,
 		})
 	}
+}
+
+func nullableActualResponseModel(model string) *string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil
+	}
+	return &model
 }
 
 type RecordTaskBillingLogParams struct {

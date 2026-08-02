@@ -1456,19 +1456,29 @@ export function DetailsDialog(props: DetailsDialogProps) {
           />
         )}
 
-        {/* Model mapping */}
-        {other?.is_model_mapped && other?.upstream_model_name && (
-          <DetailSection label={t('Model Mapping')}>
+        {/* Model mapping and upstream response audit */}
+        {((other?.is_model_mapped && other?.upstream_model_name) ||
+          (props.isAdmin && props.log.actual_response_model)) && (
+          <DetailSection label={t('Model Audit')}>
             <DetailRow
               label={t('Request Model')}
               value={props.log.model_name}
               mono
             />
-            <DetailRow
-              label={t('Actual Model')}
-              value={other.upstream_model_name}
-              mono
-            />
+            {other?.is_model_mapped && other?.upstream_model_name && (
+              <DetailRow
+                label={t('Upstream Request Model')}
+                value={other.upstream_model_name}
+                mono
+              />
+            )}
+            {props.isAdmin && props.log.actual_response_model && (
+              <DetailRow
+                label={t('Response Model')}
+                value={props.log.actual_response_model}
+                mono
+              />
+            )}
           </DetailSection>
         )}
 

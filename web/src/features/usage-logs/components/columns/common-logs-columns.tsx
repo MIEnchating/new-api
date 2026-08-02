@@ -621,11 +621,34 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         const modelInfo = formatModelName(log)
 
         return (
-          <div className='flex w-fit flex-col gap-0.5'>
+          <div className='flex max-w-[220px] flex-col gap-0.5'>
             <ModelBadge
               modelName={modelInfo.name}
               actualModel={modelInfo.actualModel}
             />
+            {isAdmin && log.actual_response_model && (
+              <TooltipProvider delay={200}>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <span
+                        className={cn(
+                          'block truncate font-mono text-[11px]',
+                          log.actual_response_model === log.model_name
+                            ? 'text-muted-foreground'
+                            : 'text-amber-600 dark:text-amber-400'
+                        )}
+                      />
+                    }
+                  >
+                    {t('Response Model')}: {log.actual_response_model}
+                  </TooltipTrigger>
+                  <TooltipContent side='top' className='max-w-sm break-all'>
+                    {log.actual_response_model}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
           </div>
         )
       },

@@ -32,6 +32,10 @@ export const usageLogSchema = z.object({
   username: z.string().default(''),
   token_name: z.string().default(''),
   model_name: z.string().default(''),
+  actual_response_model: z
+    .string()
+    .nullish()
+    .transform((value) => value ?? ''),
   quota: z.number().default(0),
   prompt_tokens: z.number().default(0),
   completion_tokens: z.number().default(0),

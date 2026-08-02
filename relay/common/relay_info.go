@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -98,6 +99,8 @@ type RelayInfo struct {
 	UsePrice               bool
 	RelayMode              int
 	OriginModelName        string
+	actualResponseModelMu  sync.RWMutex
+	actualResponseModel    string
 	RequestURLPath         string
 	RequestHeaders         map[string]string
 	ShouldIncludeUsage     bool
@@ -686,6 +689,37 @@ func (info *RelayInfo) SetEstimatePromptTokens(promptTokens int) {
 		return
 	}
 	info.estimatePromptTokens = promptTokens
+}
+
+// ObserveActualResponseModel records only the model identifier found in an
+// upstream JSON payload. The payload itself is never retained.
+func (info *RelayInfo) ObserveActualResponseModel(data []byte) {
+	if info == nil {
+		return
+	}
+	model := ExtractActualResponseModel(data)
+	if model != "" {
+		info.actualResponseModelMu.Lock()
+		info.actualResponseModel = model
+		info.actualResponseModelMu.Unlock()
+	}
+}
+
+func (info *RelayInfo) ActualResponseModel() string {
+	if info == nil {
+		return ""
+	}
+	info.actualResponseModelMu.RLock()
+	defer info.actualResponseModelMu.RUnlock()
+	return info.actualResponseModel
+}
+
+func (info *RelayInfo) ResetActualResponseModel() {
+	if info != nil {
+		info.actualResponseModelMu.Lock()
+		info.actualResponseModel = ""
+		info.actualResponseModelMu.Unlock()
+	}
 }
 
 func (info *RelayInfo) GetEstimatePromptTokens() int {

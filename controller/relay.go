@@ -183,6 +183,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	for {
 		relayInfo.RetryIndex = retryParam.GetRetry()
+		relayInfo.ResetActualResponseModel()
 		var channel *model.Channel
 		var channelErr *types.NewAPIError
 		if retrySameChannel != nil {
@@ -648,7 +649,7 @@ func recordChannelErrorLog(c *gin.Context, err *types.NewAPIError, relayInfo *re
 			startTime = time.Now()
 		}
 		useTimeSeconds := int(time.Since(startTime).Seconds())
-		model.RecordErrorLog(c, userId, channelId, modelName, tokenName, logContent, tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
+		model.RecordErrorLog(c, userId, channelId, modelName, relayInfo.ActualResponseModel(), tokenName, logContent, tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 }
 
