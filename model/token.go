@@ -412,21 +412,36 @@ func (token *Token) Insert() error {
 func (token *Token) Update() (err error) {
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
 		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "group_route_config", "group_route_sticky", "auto_groups").Updates(token).Error
-	if err == nil && common.RedisEnabled {
-		if cacheErr := cacheDeleteToken(token.Key); cacheErr != nil {
-			common.SysLog("failed to invalidate token cache after update: " + cacheErr.Error())
-		} else if generation, generationErr := cacheGetTokenGeneration(token.Key); generationErr != nil {
-			common.SysLog("failed to read token cache generation after update: " + generationErr.Error())
-		} else {
-			var refreshedToken Token
-			if refreshErr := DB.Where(commonKeyCol+" = ?", token.Key).First(&refreshedToken).Error; refreshErr != nil {
-				common.SysLog("failed to reload token cache data after update: " + refreshErr.Error())
-			} else if cacheErr := cacheSetTokenAtGeneration(refreshedToken, generation); cacheErr != nil {
-				common.SysLog("failed to refresh token cache after update: " + cacheErr.Error())
-			}
-		}
+	if err == nil {
+		refreshTokenCacheAfterUpdate(token.Key)
 	}
 	return err
+}
+
+func (token *Token) UpdateGroupRouteConfig() (err error) {
+	err = DB.Model(token).Select("group_route_config").Updates(token).Error
+	if err == nil && common.RedisEnabled {
+		refreshTokenCacheAfterUpdate(token.Key)
+	}
+	return err
+}
+
+func refreshTokenCacheAfterUpdate(key string) {
+	if !common.RedisEnabled {
+		return
+	}
+	if cacheErr := cacheDeleteToken(key); cacheErr != nil {
+		common.SysLog("failed to invalidate token cache after update: " + cacheErr.Error())
+	} else if generation, generationErr := cacheGetTokenGeneration(key); generationErr != nil {
+		common.SysLog("failed to read token cache generation after update: " + generationErr.Error())
+	} else {
+		var refreshedToken Token
+		if refreshErr := DB.Where(commonKeyCol+" = ?", key).First(&refreshedToken).Error; refreshErr != nil {
+			common.SysLog("failed to reload token cache data after update: " + refreshErr.Error())
+		} else if cacheErr := cacheSetTokenAtGeneration(refreshedToken, generation); cacheErr != nil {
+			common.SysLog("failed to refresh token cache after update: " + cacheErr.Error())
+		}
+	}
 }
 
 func (token *Token) SelectUpdate() (err error) {

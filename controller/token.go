@@ -427,6 +427,47 @@ func ClearTokenRouteCooldown(c *gin.Context) {
 	})
 }
 
+type updateTokenGroupRoutesRequest struct {
+	GroupRouteConfig string `json:"group_route_config"`
+}
+
+func UpdateTokenGroupRoutes(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	request := updateTokenGroupRoutesRequest{}
+	if err = c.ShouldBindJSON(&request); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	userID := c.GetInt("id")
+	token, err := model.GetTokenByIds(id, userID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	normalized, err := normalizeTokenGroupRouteConfigForUser(userID, request.GroupRouteConfig)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if normalized == "" {
+		common.ApiErrorMsg(c, "请至少添加一条分组路由规则")
+		return
+	}
+
+	token.GroupRouteConfig = normalized
+	if err = token.UpdateGroupRouteConfig(); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	service.ClearTokenGroupRouteState(token.Id)
+	common.ApiSuccess(c, buildMaskedTokenResponse(token))
+}
+
 func GetTokenAutoGroups(c *gin.Context) {
 	userGroup, err := getTokenRequestUserGroup(c)
 	if err != nil {

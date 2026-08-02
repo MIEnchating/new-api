@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 // Form Utilities
 // ============================================================================
 export {
+  canDisableGroupRoute,
   canConfigureGroupRouteCooldown,
   getApiKeyFormSchema,
   type ApiKeyFormValues,

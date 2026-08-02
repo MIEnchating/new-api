@@ -233,3 +233,60 @@ func TestGetTokenAutoGroupsReturnsFullFilteredGlobalOrderAndLimit(t *testing.T) 
 	assert.Equal(t, []string{"vip", "default"}, data.Groups)
 	assert.Equal(t, 1, data.MaxCount)
 }
+
+func TestUpdateTokenGroupRoutesOnlyChangesRouteConfig(t *testing.T) {
+	configureTokenAutoGroupsTest(t, "5", `["default","vip"]`)
+	user := setupTokenAutoGroupsControllerTest(t)
+	token := seedToken(t, model.DB, user.Id, "route-editor", "route-editor-key")
+	token.Group = ""
+	token.RemainQuota = 123456
+	token.UnlimitedQuota = false
+	token.ModelLimitsEnabled = true
+	token.ModelLimits = "gpt-5.6-sol"
+	token.GroupRouteSticky = true
+	token.GroupRouteConfig = `[{"group":"default","priority":2,"cooldown_seconds":60,"enabled":true},{"group":"vip","priority":1,"cooldown_seconds":120,"enabled":true}]`
+	require.NoError(t, model.DB.Save(token).Error)
+
+	body := map[string]any{
+		"group_route_config": `[{"group":"vip","priority":9,"cooldown_seconds":120,"enabled":true},{"group":"default","priority":1,"cooldown_seconds":60,"enabled":false}]`,
+	}
+	ctx, recorder := newTokenAutoGroupsAuthenticatedContext(
+		t, http.MethodPut, "/api/token/"+stringInt(token.Id)+"/route", body, user.Id,
+	)
+	ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: stringInt(token.Id)})
+	UpdateTokenGroupRoutes(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	var updated model.Token
+	require.NoError(t, model.DB.First(&updated, token.Id).Error)
+	assert.JSONEq(t, `[{"group":"vip","priority":9,"cooldown_seconds":120,"enabled":true},{"group":"default","priority":1,"cooldown_seconds":60,"enabled":false}]`, updated.GroupRouteConfig)
+	assert.Equal(t, 123456, updated.RemainQuota)
+	assert.False(t, updated.UnlimitedQuota)
+	assert.True(t, updated.ModelLimitsEnabled)
+	assert.Equal(t, "gpt-5.6-sol", updated.ModelLimits)
+	assert.True(t, updated.GroupRouteSticky)
+}
+
+func TestUpdateTokenGroupRoutesRejectsDisablingEveryRoute(t *testing.T) {
+	configureTokenAutoGroupsTest(t, "5", `["default","vip"]`)
+	user := setupTokenAutoGroupsControllerTest(t)
+	token := seedToken(t, model.DB, user.Id, "route-editor-disabled", "route-editor-disabled-key")
+	token.GroupRouteConfig = `[{"group":"default","priority":2,"cooldown_seconds":60,"enabled":true},{"group":"vip","priority":1,"cooldown_seconds":60,"enabled":true}]`
+	require.NoError(t, model.DB.Save(token).Error)
+
+	body := map[string]any{
+		"group_route_config": `[{"group":"default","priority":2,"cooldown_seconds":60,"enabled":false},{"group":"vip","priority":1,"cooldown_seconds":60,"enabled":false}]`,
+	}
+	ctx, recorder := newTokenAutoGroupsAuthenticatedContext(
+		t, http.MethodPut, "/api/token/"+stringInt(token.Id)+"/route", body, user.Id,
+	)
+	ctx.Params = append(ctx.Params, gin.Param{Key: "id", Value: stringInt(token.Id)})
+	UpdateTokenGroupRoutes(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	assert.False(t, response.Success)
+	var unchanged model.Token
+	require.NoError(t, model.DB.First(&unchanged, token.Id).Error)
+	assert.JSONEq(t, token.GroupRouteConfig, unchanged.GroupRouteConfig)
+}

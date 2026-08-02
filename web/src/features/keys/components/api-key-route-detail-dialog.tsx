@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
-import { Clock, Edit, Loader2, Network, RotateCcw } from 'lucide-react'
+import { Clock, Loader2, Network, RotateCcw, Save } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -34,6 +34,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import {
   Tooltip,
   TooltipContent,
@@ -41,9 +43,13 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
-import { clearApiKeyRouteCooldown, getApiKeyRouteStatus } from '../api'
-import { parseApiKeyGroupRouteConfig } from '../lib'
-import type { RouteStatus } from '../types'
+import {
+  clearApiKeyRouteCooldown,
+  getApiKeyRouteStatus,
+  updateApiKeyGroupRoutes,
+} from '../api'
+import { canDisableGroupRoute, parseApiKeyGroupRouteConfig } from '../lib'
+import type { ApiKeyGroupRoute, RouteStatus } from '../types'
 import { useApiKeys } from './api-keys-provider'
 
 function formatCooldown(seconds: number, t: TFunction) {
@@ -77,11 +83,19 @@ function getRouteCooldownRemaining(
 
 export function ApiKeyRouteDetailDialog() {
   const { t } = useTranslation()
-  const { open, setOpen, currentRow } = useApiKeys()
+  const { open, setOpen, currentRow, setCurrentRow, triggerRefresh } =
+    useApiKeys()
   const [isResettingAllCooldowns, setIsResettingAllCooldowns] = useState(false)
   const [resettingGroup, setResettingGroup] = useState<string | null>(null)
+  const [isSaving, setIsSaving] = useState(false)
+  const [draftRoutes, setDraftRoutes] = useState<ApiKeyGroupRoute[]>([])
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
-  const routes = parseApiKeyGroupRouteConfig(currentRow?.group_route_config)
+  const storedRoutes = useMemo(
+    () => parseApiKeyGroupRouteConfig(currentRow?.group_route_config),
+    [currentRow?.group_route_config]
+  )
+  const routes = draftRoutes
+  const isDirty = JSON.stringify(draftRoutes) !== JSON.stringify(storedRoutes)
   const { data: routeStatusData, refetch: refetchRouteStatus } = useQuery({
     queryKey: ['api-key-route-status', currentRow?.id],
     queryFn: () => getApiKeyRouteStatus(currentRow?.id ?? 0),
@@ -105,12 +119,64 @@ export function ApiKeyRouteDetailDialog() {
     if (open !== 'route-detail') {
       return
     }
+    setDraftRoutes(storedRoutes)
     setNow(Math.floor(Date.now() / 1000))
     const timer = window.setInterval(() => {
       setNow(Math.floor(Date.now() / 1000))
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [open])
+  }, [open, currentRow?.id, storedRoutes])
+
+  const updateDraftRoute = (
+    index: number,
+    patch: Partial<ApiKeyGroupRoute>
+  ) => {
+    setDraftRoutes((current) =>
+      current.map((route, routeIndex) =>
+        routeIndex === index ? { ...route, ...patch } : route
+      )
+    )
+  }
+
+  const handleRouteEnabledChange = (index: number, enabled: boolean) => {
+    if (!enabled && !canDisableGroupRoute(draftRoutes, index)) {
+      toast.error(t('Please enable at least one route group'))
+      return
+    }
+    updateDraftRoute(index, { enabled })
+  }
+
+  const handleSaveRoutes = async () => {
+    if (!currentRow?.id || !isDirty || isSaving) return
+    if (
+      draftRoutes.some(
+        (route) => !Number.isInteger(route.priority) || route.priority < 0
+      )
+    ) {
+      toast.error(t('Priority must be zero or greater'))
+      return
+    }
+
+    setIsSaving(true)
+    try {
+      const result = await updateApiKeyGroupRoutes(currentRow.id, draftRoutes)
+      if (!result.success || !result.data) {
+        toast.error(result.message || t('Save failed, please retry'))
+        return
+      }
+      setCurrentRow(result.data)
+      setDraftRoutes(
+        parseApiKeyGroupRouteConfig(result.data.group_route_config)
+      )
+      triggerRefresh()
+      await refetchRouteStatus()
+      toast.success(t('Saved successfully'))
+    } catch {
+      toast.error(t('Save failed, please retry'))
+    } finally {
+      setIsSaving(false)
+    }
+  }
 
   const handleResetCooldown = async (group?: string) => {
     if (!currentRow?.id || isResettingAllCooldowns || resettingGroup) return
@@ -138,7 +204,7 @@ export function ApiKeyRouteDetailDialog() {
 
   return (
     <Dialog open={open === 'route-detail'} onOpenChange={() => setOpen(null)}>
-      <DialogContent className='sm:max-w-lg'>
+      <DialogContent className='sm:max-w-xl'>
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>
             <Network className='size-4' />
@@ -176,7 +242,7 @@ export function ApiKeyRouteDetailDialog() {
               return (
                 <div
                   key={route.group}
-                  className='border-border/70 bg-muted/20 grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg border px-3 py-2.5'
+                  className='border-border/70 bg-muted/20 grid grid-cols-[2rem_minmax(0,1fr)_auto_auto_auto] items-center gap-x-2 gap-y-2 rounded-lg border px-3 py-2.5 max-[520px]:grid-cols-[2rem_minmax(0,1fr)_auto]'
                 >
                   <span className='bg-background text-muted-foreground flex size-7 items-center justify-center rounded-md border text-xs font-medium tabular-nums'>
                     {index + 1}
@@ -186,11 +252,6 @@ export function ApiKeyRouteDetailDialog() {
                     <div className='flex min-w-0 flex-wrap items-center gap-2'>
                       <GroupBadge group={route.group} />
                       <StatusBadge
-                        label={`${t('Priority')} ${route.priority}`}
-                        variant='neutral'
-                        copyable={false}
-                      />
-                      <StatusBadge
                         label={statusLabel}
                         variant={statusVariant}
                         copyable={false}
@@ -198,9 +259,28 @@ export function ApiKeyRouteDetailDialog() {
                     </div>
                   </div>
 
-                  <div className='flex items-center justify-end gap-1.5 text-right'>
+                  <div className='flex items-center gap-1.5 max-[520px]:col-start-2 max-[520px]:row-start-2 max-[520px]:border-t max-[520px]:pt-2'>
+                    <span className='text-muted-foreground text-xs'>
+                      {t('Priority')}
+                    </span>
+                    <Input
+                      type='number'
+                      min={0}
+                      step={1}
+                      value={route.priority}
+                      onChange={(event) =>
+                        updateDraftRoute(index, {
+                          priority: Number(event.target.value),
+                        })
+                      }
+                      aria-label={`${route.group} ${t('Priority')}`}
+                      className='h-7 w-14 text-center tabular-nums'
+                    />
+                  </div>
+
+                  <div className='flex items-center justify-end gap-1 text-right max-[520px]:col-start-3 max-[520px]:row-start-2 max-[520px]:border-t max-[520px]:pt-2'>
                     <div>
-                      <div className='flex items-center justify-end gap-1.5 text-sm font-medium tabular-nums'>
+                      <div className='flex items-center justify-end gap-1 text-sm font-medium tabular-nums'>
                         <Clock className='text-muted-foreground size-3.5' />
                         {cooling
                           ? coolingStatuses.length
@@ -245,8 +325,29 @@ export function ApiKeyRouteDetailDialog() {
                     </TooltipProvider>
                   </div>
 
+                  <TooltipProvider delay={100}>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <span className='inline-flex max-[520px]:col-start-3 max-[520px]:row-start-1' />
+                        }
+                      >
+                        <Switch
+                          checked={enabled}
+                          onCheckedChange={(checked) =>
+                            handleRouteEnabledChange(index, checked)
+                          }
+                          aria-label={`${route.group} ${t('Enabled')}`}
+                        />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {enabled ? t('Enabled') : t('Disabled')}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+
                   {cooling && (
-                    <div className='col-span-2 col-start-2 space-y-1.5 border-t pt-2'>
+                    <div className='col-span-4 col-start-2 space-y-1.5 border-t pt-2 max-[520px]:col-span-2'>
                       {coolingStatuses.map(({ status, remaining }) => (
                         <div
                           key={`${status.model}:${status.request_path}`}
@@ -281,10 +382,11 @@ export function ApiKeyRouteDetailDialog() {
           </div>
         )}
 
-        <DialogFooter>
+        <DialogFooter className='sm:flex-wrap sm:items-center'>
           <Button
             type='button'
             variant='outline'
+            className='sm:mr-auto'
             onClick={() => void handleResetCooldown()}
             disabled={
               !hasActiveCooldown || isResettingAllCooldowns || !!resettingGroup
@@ -300,9 +402,17 @@ export function ApiKeyRouteDetailDialog() {
           <Button type='button' variant='outline' onClick={() => setOpen(null)}>
             {t('Close')}
           </Button>
-          <Button type='button' onClick={() => setOpen('update')}>
-            <Edit className='size-4' />
-            {t('Edit')}
+          <Button
+            type='button'
+            onClick={() => void handleSaveRoutes()}
+            disabled={!isDirty || isSaving}
+          >
+            {isSaving ? (
+              <Loader2 className='size-4 animate-spin' />
+            ) : (
+              <Save className='size-4' />
+            )}
+            {t('Save')}
           </Button>
         </DialogFooter>
       </DialogContent>

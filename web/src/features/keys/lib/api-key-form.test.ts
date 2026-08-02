@@ -23,6 +23,7 @@ import { t } from 'i18next'
 
 import {
   API_KEY_FORM_DEFAULT_VALUES,
+  canDisableGroupRoute,
   canConfigureGroupRouteCooldown,
   getApiKeyFormDefaultValues,
   getAutomaticGroupRoutePriorities,
@@ -141,6 +142,21 @@ describe('API key form schema', () => {
       ]),
       true
     )
+  })
+
+  test('keeps at least one route enabled in the quick route editor', () => {
+    const routes = [
+      { group: 'primary', priority: 2, cooldown_seconds: 60, enabled: true },
+      { group: 'fallback', priority: 1, cooldown_seconds: 60, enabled: true },
+    ]
+
+    assert.equal(canDisableGroupRoute(routes, 0), true)
+    const oneEnabledRoute = routes.map((route, index) => ({
+      ...route,
+      enabled: index === 0 ? false : route.enabled,
+    }))
+    assert.equal(canDisableGroupRoute(oneEnabledRoute, 1), false)
+    assert.equal(canDisableGroupRoute(oneEnabledRoute, 0), true)
   })
 
   test('requires one enabled route group when group routing is enabled', () => {

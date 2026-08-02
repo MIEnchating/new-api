@@ -253,6 +253,7 @@ func SetApiRouter(router *gin.Engine) {
 			tokenRoute.GET("/auto-groups", controller.GetTokenAutoGroups)
 			tokenRoute.GET("/:id/models", controller.GetTokenModels)
 			tokenRoute.GET("/:id/route/status", controller.GetTokenRouteStatus)
+			tokenRoute.PUT("/:id/route", controller.UpdateTokenGroupRoutes)
 			tokenRoute.POST("/:id/route/cooldown/clear", controller.ClearTokenRouteCooldown)
 			tokenRoute.GET("/:id", controller.GetToken)
 			tokenRoute.POST("/:id/key", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.GetTokenKey)

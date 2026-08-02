@@ -33,6 +33,14 @@ export function canConfigureGroupRouteCooldown(routes: ApiKeyGroupRoute[]) {
   return routes.filter((route) => route.enabled !== false).length >= 2
 }
 
+export function canDisableGroupRoute(
+  routes: ApiKeyGroupRoute[],
+  routeIndex: number
+) {
+  if (routes[routeIndex]?.enabled === false) return true
+  return routes.filter((route) => route.enabled !== false).length > 1
+}
+
 // ============================================================================
 // Form Schema
 // ============================================================================

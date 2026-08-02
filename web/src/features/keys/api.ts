@@ -25,6 +25,7 @@ import type {
   GetApiKeysResponse,
   SearchApiKeysParams,
   ApiKeyFormData,
+  ApiKeyGroupRoute,
   RouteStatus,
   TokenAutoGroupsConfig,
 } from './types'
@@ -108,6 +109,16 @@ export async function updateApiKey(
   data: ApiKeyFormData & { id: number }
 ): Promise<ApiResponse<ApiKey>> {
   const res = await api.put('/api/token/', data)
+  return res.data
+}
+
+export async function updateApiKeyGroupRoutes(
+  id: number,
+  routes: ApiKeyGroupRoute[]
+): Promise<ApiResponse<ApiKey>> {
+  const res = await api.put(`/api/token/${id}/route`, {
+    group_route_config: JSON.stringify(routes),
+  })
   return res.data
 }
 
