@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { KeyRound, Sparkles } from 'lucide-react'
+import { ArrowRight, CircleCheck, KeyRound, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -619,32 +619,48 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
         if (!isDisplayableLogType(log.type)) return null
 
         const modelInfo = formatModelName(log)
+        const responseModel = log.actual_response_model?.trim()
+        const responseMatchesRequest = responseModel === log.model_name.trim()
 
         return (
-          <div className='flex max-w-[220px] flex-col gap-0.5'>
-            <ModelBadge
-              modelName={modelInfo.name}
-              actualModel={modelInfo.actualModel}
-            />
-            {isAdmin && log.actual_response_model && (
+          <div className='flex max-w-[240px] flex-col gap-1'>
+            <div className='flex min-w-0 items-center gap-1.5'>
+              <ModelBadge
+                modelName={modelInfo.name}
+                actualModel={modelInfo.actualModel}
+              />
+              {isAdmin && responseModel && responseMatchesRequest && (
+                <TooltipProvider delay={150}>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <span className='inline-flex shrink-0 text-emerald-600 dark:text-emerald-400' />
+                      }
+                    >
+                      <CircleCheck className='size-3.5' />
+                    </TooltipTrigger>
+                    <TooltipContent side='top'>
+                      {t('Response Model')}: {responseModel}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
+            {isAdmin && responseModel && !responseMatchesRequest && (
               <TooltipProvider delay={200}>
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <span
-                        className={cn(
-                          'block truncate font-mono text-[11px]',
-                          log.actual_response_model === log.model_name
-                            ? 'text-muted-foreground'
-                            : 'text-amber-600 dark:text-amber-400'
-                        )}
-                      />
+                      <span className='flex min-w-0 items-center gap-1 text-amber-600 dark:text-amber-400' />
                     }
                   >
-                    {t('Response Model')}: {log.actual_response_model}
+                    <ArrowRight className='size-3 shrink-0' />
+                    <span className='truncate font-mono text-[11px] font-medium'>
+                      {responseModel}
+                    </span>
                   </TooltipTrigger>
                   <TooltipContent side='top' className='max-w-sm break-all'>
-                    {log.actual_response_model}
+                    {t('Response Model')}: {responseModel}
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
