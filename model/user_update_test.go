@@ -31,14 +31,17 @@ func TestUserUpdateDoesNotOverwriteAccountingFields(t *testing.T) {
 	setupUserUpdateTestState(t)
 
 	user := User{
-		Id:           1,
-		Username:     "quota-race-user",
-		Password:     "password",
-		DisplayName:  "before",
-		Status:       common.UserStatusEnabled,
-		Quota:        1000,
-		UsedQuota:    20,
-		RequestCount: 3,
+		Id:              1,
+		Username:        "quota-race-user",
+		Password:        "password",
+		DisplayName:     "before",
+		Status:          common.UserStatusEnabled,
+		Quota:           1000,
+		UsedQuota:       20,
+		RequestCount:    3,
+		AffCount:        2,
+		AffQuota:        300,
+		AffHistoryQuota: 500,
 	}
 	require.NoError(t, DB.Create(&user).Error)
 
@@ -49,6 +52,9 @@ func TestUserUpdateDoesNotOverwriteAccountingFields(t *testing.T) {
 		"quota":         gorm.Expr("quota - ?", 400),
 		"used_quota":    gorm.Expr("used_quota + ?", 400),
 		"request_count": gorm.Expr("request_count + ?", 1),
+		"aff_count":     gorm.Expr("aff_count + ?", 1),
+		"aff_quota":     gorm.Expr("aff_quota - ?", 200),
+		"aff_history":   gorm.Expr("aff_history + ?", 100),
 	}).Error)
 
 	staleUser.DisplayName = "after"
@@ -60,6 +66,111 @@ func TestUserUpdateDoesNotOverwriteAccountingFields(t *testing.T) {
 	assert.Equal(t, 600, got.Quota)
 	assert.Equal(t, 420, got.UsedQuota)
 	assert.Equal(t, 4, got.RequestCount)
+	assert.Equal(t, 3, got.AffCount)
+	assert.Equal(t, 100, got.AffQuota)
+	assert.Equal(t, 600, got.AffHistoryQuota)
+}
+
+func TestUserFieldUpdatesDoNotOverwriteBalances(t *testing.T) {
+	setupUserUpdateTestState(t)
+
+	user := User{
+		Id:              3,
+		Username:        "field-update-user",
+		Password:        "password",
+		Status:          common.UserStatusEnabled,
+		Quota:           1200,
+		UsedQuota:       80,
+		RequestCount:    9,
+		AffCount:        4,
+		AffQuota:        250,
+		AffHistoryQuota: 700,
+	}
+	require.NoError(t, DB.Create(&user).Error)
+
+	require.NoError(t, UpdateUserAccessToken(user.Id, "field-update-access-token-0001"))
+	require.NoError(t, UpdateUserAffCode(user.Id, "aff3"))
+	require.NoError(t, UpdateUserExternalIdentity(user.Id, "github", "github-user-3"))
+
+	var got User
+	require.NoError(t, DB.First(&got, user.Id).Error)
+	assert.Equal(t, "field-update-access-token-0001", got.GetAccessToken())
+	assert.Equal(t, "aff3", got.AffCode)
+	assert.Equal(t, "github-user-3", got.GitHubId)
+	assert.Equal(t, 1200, got.Quota)
+	assert.Equal(t, 80, got.UsedQuota)
+	assert.Equal(t, 9, got.RequestCount)
+	assert.Equal(t, 4, got.AffCount)
+	assert.Equal(t, 250, got.AffQuota)
+	assert.Equal(t, 700, got.AffHistoryQuota)
+}
+
+func TestInviteUserOnlyIncrementsAffiliateFields(t *testing.T) {
+	setupUserUpdateTestState(t)
+
+	oldQuotaForInviter := common.QuotaForInviter
+	common.QuotaForInviter = 125
+	t.Cleanup(func() {
+		common.QuotaForInviter = oldQuotaForInviter
+	})
+
+	user := User{
+		Id:              4,
+		Username:        "inviter-user",
+		Password:        "password",
+		Status:          common.UserStatusEnabled,
+		Quota:           900,
+		UsedQuota:       100,
+		RequestCount:    6,
+		AffCount:        2,
+		AffQuota:        50,
+		AffHistoryQuota: 75,
+	}
+	require.NoError(t, DB.Create(&user).Error)
+	require.NoError(t, inviteUser(user.Id))
+
+	var got User
+	require.NoError(t, DB.First(&got, user.Id).Error)
+	assert.Equal(t, 900, got.Quota)
+	assert.Equal(t, 100, got.UsedQuota)
+	assert.Equal(t, 6, got.RequestCount)
+	assert.Equal(t, 3, got.AffCount)
+	assert.Equal(t, 175, got.AffQuota)
+	assert.Equal(t, 200, got.AffHistoryQuota)
+}
+
+func TestBindEmailDoesNotOverwriteBalancesFromStaleUser(t *testing.T) {
+	setupUserUpdateTestState(t)
+
+	user := User{
+		Id:              5,
+		Username:        "email-bind-user",
+		Password:        "password",
+		Status:          common.UserStatusEnabled,
+		Quota:           1000,
+		UsedQuota:       100,
+		RequestCount:    3,
+		AffQuota:        300,
+		AffHistoryQuota: 400,
+	}
+	require.NoError(t, DB.Create(&user).Error)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"quota":         gorm.Expr("quota - ?", 250),
+		"used_quota":    gorm.Expr("used_quota + ?", 250),
+		"request_count": gorm.Expr("request_count + ?", 1),
+		"aff_quota":     gorm.Expr("aff_quota - ?", 200),
+	}).Error)
+
+	require.NoError(t, BindEmailToUser(&user, "NewEmail@example.com"))
+
+	var got User
+	require.NoError(t, DB.First(&got, user.Id).Error)
+	assert.Equal(t, "newemail@example.com", got.Email)
+	assert.Equal(t, 750, got.Quota)
+	assert.Equal(t, 350, got.UsedQuota)
+	assert.Equal(t, 4, got.RequestCount)
+	assert.Equal(t, 100, got.AffQuota)
+	assert.Equal(t, 400, got.AffHistoryQuota)
 }
 
 func TestUpdateUserSettingOnlyUpdatesSetting(t *testing.T) {

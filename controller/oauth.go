@@ -280,8 +280,8 @@ func handleOAuthBind(c *gin.Context, provider oauth.Provider, pendingFlow *model
 		}
 	} else {
 		// Built-in provider: update user record directly
-		provider.SetProviderUserID(&user, oauthUser.ProviderUserID)
-		err = user.Update(false)
+		providerName := strings.TrimSuffix(provider.GetProviderPrefix(), "_")
+		err = model.UpdateUserExternalIdentity(user.Id, providerName, oauthUser.ProviderUserID)
 		if err != nil {
 			common.ApiError(c, err)
 			return

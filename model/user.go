@@ -174,6 +174,61 @@ func UpdateUserSetting(userId int, setting dto.UserSetting) error {
 	return updateUserSettingCache(userId, settingValue)
 }
 
+func UpdateUserAccessToken(userId int, accessToken string) error {
+	if userId == 0 {
+		return errors.New("id 为空！")
+	}
+	result := DB.Model(&User{}).Where("id = ?", userId).Update("access_token", accessToken)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func UpdateUserAffCode(userId int, affCode string) error {
+	if userId == 0 {
+		return errors.New("id 为空！")
+	}
+	result := DB.Model(&User{}).Where("id = ?", userId).Update("aff_code", affCode)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+var userExternalIdentityColumns = map[string]string{
+	"github":   "github_id",
+	"discord":  "discord_id",
+	"oidc":     "oidc_id",
+	"wechat":   "wechat_id",
+	"telegram": "telegram_id",
+	"linuxdo":  "linux_do_id",
+}
+
+func UpdateUserExternalIdentity(userId int, provider, providerUserID string) error {
+	if userId == 0 {
+		return errors.New("id 为空！")
+	}
+	column, ok := userExternalIdentityColumns[provider]
+	if !ok {
+		return errors.New("invalid external identity provider")
+	}
+	result := DB.Model(&User{}).Where("id = ?", userId).Update(column, providerUserID)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 // 根据用户角色生成默认的边栏配置
 func generateDefaultSidebarConfigForRole(userRole int) string {
 	defaultConfig := map[string]interface{}{}
@@ -499,15 +554,19 @@ func HardDeleteUserById(id int) error {
 	return user.HardDelete()
 }
 
-func inviteUser(inviterId int) (err error) {
-	user, err := GetUserById(inviterId, true)
-	if err != nil {
-		return err
+func inviteUser(inviterId int) error {
+	result := DB.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
+		"aff_count":   gorm.Expr("aff_count + ?", 1),
+		"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
+		"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
+	})
+	if result.Error != nil {
+		return result.Error
 	}
-	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
-	return DB.Save(user).Error
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int, reference string) error {
@@ -597,8 +656,14 @@ func BindEmailToUser(user *User, email string) error {
 			if err := ensureEmailAvailableWithTx(tx, email, user.Id); err != nil {
 				return err
 			}
-			user.Email = email
-			return user.UpdateWithTx(tx, false)
+			result := tx.Model(&User{}).Where("id = ?", user.Id).Update("email", email)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return gorm.ErrRecordNotFound
+			}
+			return tx.First(user, user.Id).Error
 		})
 	}); err != nil {
 		return err
@@ -661,8 +726,9 @@ func (user *User) finishInsert(inviterId int) {
 		if defaultSidebarConfig != "" {
 			currentSetting := createdUser.GetSetting()
 			currentSetting.SidebarModules = defaultSidebarConfig
-			createdUser.SetSetting(currentSetting)
-			createdUser.Update(false)
+			if err := UpdateUserSetting(createdUser.Id, currentSetting); err != nil {
+				common.SysError("failed to initialize user sidebar setting: " + err.Error())
+			}
 			common.SysLog(fmt.Sprintf("为新用户 %s (角色: %d) 初始化边栏配置", createdUser.Username, createdUser.Role))
 		}
 	}
@@ -718,8 +784,9 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 		if defaultSidebarConfig != "" {
 			currentSetting := createdUser.GetSetting()
 			currentSetting.SidebarModules = defaultSidebarConfig
-			createdUser.SetSetting(currentSetting)
-			createdUser.Update(false)
+			if err := UpdateUserSetting(createdUser.Id, currentSetting); err != nil {
+				common.SysError("failed to initialize OAuth user sidebar setting: " + err.Error())
+			}
 			common.SysLog(fmt.Sprintf("为新用户 %s (角色: %d) 初始化边栏配置", createdUser.Username, createdUser.Role))
 		}
 	}
@@ -772,9 +839,8 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 	if err = tx.First(&current, user.Id).Error; err != nil {
 		return err
 	}
-	// Updates(struct) ignores zero values. Match that behavior when deciding
-	// whether this request actually changes authentication-sensitive state;
-	// partial self-profile updates intentionally leave role/status/group empty.
+	// Preserve the historical partial-update behavior: self-profile requests
+	// intentionally leave role, status, and group empty.
 	authChanged := (updatePassword && current.Password != newUser.Password) ||
 		(newUser.Role != 0 && current.Role != newUser.Role) ||
 		(newUser.Status != 0 && current.Status != newUser.Status) ||
@@ -785,7 +851,29 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 			return err
 		}
 	}
-	if err = tx.Model(&current).Omit("quota", "used_quota", "request_count", "auth_version").Updates(newUser).Error; err != nil {
+	updates := map[string]interface{}{}
+	if newUser.Username != "" {
+		updates["username"] = newUser.Username
+	}
+	if newUser.DisplayName != "" {
+		updates["display_name"] = newUser.DisplayName
+	}
+	if newUser.Role != 0 {
+		updates["role"] = newUser.Role
+	}
+	if newUser.Status != 0 {
+		updates["status"] = newUser.Status
+	}
+	if newUser.Group != "" {
+		updates["group"] = newUser.Group
+	}
+	if newUser.Remark != "" {
+		updates["remark"] = newUser.Remark
+	}
+	if updatePassword {
+		updates["password"] = newUser.Password
+	}
+	if err = tx.Model(&current).Updates(updates).Error; err != nil {
 		return err
 	}
 	return tx.First(user, user.Id).Error
@@ -853,17 +941,13 @@ func (user *User) ClearBinding(bindingType string) error {
 		return errors.New("user id is empty")
 	}
 
-	bindingColumnMap := map[string]string{
-		"email":    "email",
-		"github":   "github_id",
-		"discord":  "discord_id",
-		"oidc":     "oidc_id",
-		"wechat":   "wechat_id",
-		"telegram": "telegram_id",
-		"linuxdo":  "linux_do_id",
+	column := "email"
+	var ok bool
+	if bindingType != "email" {
+		column, ok = userExternalIdentityColumns[bindingType]
+	} else {
+		ok = true
 	}
-
-	column, ok := bindingColumnMap[bindingType]
 	if !ok {
 		return errors.New("invalid binding type")
 	}
@@ -1024,7 +1108,7 @@ func (user *User) UpdateGitHubId(newGitHubId string) error {
 	if user.Id == 0 {
 		return errors.New("user id is empty")
 	}
-	return DB.Model(user).Update("github_id", newGitHubId).Error
+	return UpdateUserExternalIdentity(user.Id, "github", newGitHubId)
 }
 
 func (user *User) FillUserByDiscordId() error {
