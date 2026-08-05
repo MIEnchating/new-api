@@ -162,6 +162,7 @@ export function ApiKeysMutateDrawer({
     queryFn: getUserGroups,
     enabled: open,
     staleTime: 0,
+    refetchInterval: open ? 60_000 : false,
   })
 
   const {
@@ -196,6 +197,9 @@ export function ApiKeysMutateDrawer({
           label: key,
           desc: info.desc || key,
           ratio: info.ratio,
+          baseRatio: info.base_ratio,
+          scheduleEnabled: info.schedule_enabled,
+          scheduleActive: info.schedule_active,
           order: info.order,
         }))
         .sort(

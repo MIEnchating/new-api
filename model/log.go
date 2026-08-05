@@ -90,6 +90,11 @@ type RecentRelayRequestCounts struct {
 	Successes1h  int64 `gorm:"column:successes_1h"`
 }
 
+type RecentRelayRequestGroupCounts struct {
+	GroupName string `gorm:"column:group_name"`
+	RecentRelayRequestCounts
+}
+
 const recentRelayRequestSampleLimit = 5000
 
 func GetRecentRelayRequestCounts(now int64) (RecentRelayRequestCounts, error) {
@@ -121,6 +126,42 @@ func GetRecentRelayRequestCounts(now int64) (RecentRelayRequestCounts, error) {
 			COUNT(DISTINCT request_id) AS requests_1h,
 			COUNT(DISTINCT CASE WHEN type = ? THEN request_id END) AS successes_1h
 		`, cutoff5m, cutoff5m, LogTypeConsume, cutoff30m, cutoff30m, LogTypeConsume, LogTypeConsume).
+		Scan(&counts).Error
+	return counts, err
+}
+
+func GetRecentRelayRequestCountsByGroup(now int64) ([]RecentRelayRequestGroupCounts, error) {
+	if now <= 0 {
+		now = common.GetTimestamp()
+	}
+	cutoff5m := now - 5*60
+	cutoff30m := now - 30*60
+	cutoff1h := now - 60*60
+
+	order := "created_at DESC, id DESC"
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		order = clickHouseLogOrder("")
+	}
+	rows := applyUserVisibleLogFilter(
+		LOG_DB.Model(&Log{}).
+			Select("created_at", "type", "request_id", logGroupCol+" AS group_name").
+			Where("created_at >= ? AND type IN ? AND request_id <> ''", cutoff1h, []int{LogTypeConsume, LogTypeError}),
+		"other",
+	).Order(order).Limit(recentRelayRequestSampleLimit)
+
+	var counts []RecentRelayRequestGroupCounts
+	err := LOG_DB.Table("(?) AS recent_relay_requests", rows).
+		Select(`
+			group_name,
+			COUNT(DISTINCT CASE WHEN created_at >= ? THEN request_id END) AS requests_5m,
+			COUNT(DISTINCT CASE WHEN created_at >= ? AND type = ? THEN request_id END) AS successes_5m,
+			COUNT(DISTINCT CASE WHEN created_at >= ? THEN request_id END) AS requests_30m,
+			COUNT(DISTINCT CASE WHEN created_at >= ? AND type = ? THEN request_id END) AS successes_30m,
+			COUNT(DISTINCT request_id) AS requests_1h,
+			COUNT(DISTINCT CASE WHEN type = ? THEN request_id END) AS successes_1h
+		`, cutoff5m, cutoff5m, LogTypeConsume, cutoff30m, cutoff30m, LogTypeConsume, LogTypeConsume).
+		Group("group_name").
+		Order("group_name ASC").
 		Scan(&counts).Error
 	return counts, err
 }

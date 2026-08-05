@@ -292,6 +292,7 @@ export type BillingSettings = {
   'tool_price_setting.prices': string
   TopupGroupRatio: string
   GroupRatio: string
+  GroupRatioSchedule: string
   GroupDescriptions: string
   UserUsableGroups: string
   GroupGroupRatio: string

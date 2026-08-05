@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
+import { CalendarClock } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
@@ -56,17 +57,25 @@ function getQuotaProgressColor(percentage: number): string {
   return '[&_[data-slot=progress-indicator]]:bg-emerald-500'
 }
 
-function useGroupRatios(): Record<string, number | string> {
+type GroupRatioInfo = {
+  ratio: number | string
+  base_ratio?: number
+  schedule_enabled?: boolean
+  schedule_active?: boolean
+}
+
+function useGroupRatioInfo(): Record<string, GroupRatioInfo> {
   const { data } = useQuery({
     queryKey: ['user-groups'],
     queryFn: getUserGroups,
     staleTime: 0,
+    refetchInterval: 60_000,
     select: (res) => {
       if (!res.success || !res.data) return {}
-      const ratios: Record<string, number | string> = {}
+      const ratios: Record<string, GroupRatioInfo> = {}
       for (const [group, info] of Object.entries(res.data)) {
         if (typeof info.ratio === 'number' || typeof info.ratio === 'string') {
-          ratios[group] = info.ratio
+          ratios[group] = info
         }
       }
       return ratios
@@ -78,7 +87,7 @@ function useGroupRatios(): Record<string, number | string> {
 
 export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
   const { t, i18n } = useTranslation()
-  const groupRatios = useGroupRatios()
+  const groupRatioInfo = useGroupRatioInfo()
   const { setCurrentRow, setOpen } = useApiKeys()
   const shouldReduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
@@ -236,13 +245,36 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
               >
                 <span className='flex max-w-full min-w-0 items-center gap-1.5 overflow-hidden text-xs'>
                   {displayedRoutes.slice(0, 2).map((route) => {
-                    const ratio = groupRatios[route.group]
+                    const ratioInfo = groupRatioInfo[route.group]
                     return (
-                      <GroupBadge
+                      <span
                         key={route.group}
-                        group={route.group}
-                        ratio={typeof ratio === 'number' ? ratio : undefined}
-                      />
+                        className='flex items-center gap-1'
+                      >
+                        <GroupBadge
+                          group={route.group}
+                          ratio={
+                            typeof ratioInfo?.ratio === 'number'
+                              ? ratioInfo.ratio
+                              : undefined
+                          }
+                        />
+                        {ratioInfo?.schedule_enabled && (
+                          <CalendarClock
+                            className={cn(
+                              'size-3.5 shrink-0',
+                              ratioInfo.schedule_active
+                                ? 'text-emerald-600'
+                                : 'text-muted-foreground'
+                            )}
+                            aria-label={
+                              ratioInfo.schedule_active
+                                ? t('Scheduled ratio active')
+                                : t('Time-based ratio enabled')
+                            }
+                          />
+                        )}
+                      </span>
                     )
                   })}
                 </span>
@@ -265,7 +297,9 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         return (
           <ApiKeyGroupCell
             group={group}
-            ratio={groupRatios[group]}
+            ratio={groupRatioInfo[group]?.ratio}
+            scheduleEnabled={groupRatioInfo[group]?.schedule_enabled}
+            scheduleActive={groupRatioInfo[group]?.schedule_active}
             crossGroupRetry={apiKey.cross_group_retry}
             shouldReduceMotion={shouldReduceMotion}
           />

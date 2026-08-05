@@ -185,15 +185,27 @@ export function ChannelsPrimaryButtons() {
           </div>
         </div>
 
-        <Button
-          type='button'
-          variant='outline'
-          size='sm'
-          onClick={() => setExecutionDialogOpen(true)}
-        >
-          <Workflow className='h-4 w-4' />
-          <span>{t('Channel execution')}</span>
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={() => setExecutionDialogOpen(true)}
+                aria-label={t('Channel execution')}
+                data-mobile-compact-action='execution'
+                className='max-sm:px-2'
+              />
+            }
+          >
+            <Workflow className='h-4 w-4' />
+            <span className='sr-only sm:not-sr-only'>
+              {t('Channel execution')}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{t('Channel execution')}</TooltipContent>
+        </Tooltip>
 
         {/* Create Channel */}
         <Tooltip>
@@ -206,17 +218,21 @@ export function ChannelsPrimaryButtons() {
               }}
               size='sm'
               disabled={!canEditSensitive}
+              aria-label={t('Create Channel')}
+              data-mobile-compact-action='create'
+              className='max-sm:px-2'
             >
               <Plus className='h-4 w-4' />
-              <span className='max-sm:hidden'>{t('Create Channel')}</span>
-              <span className='sm:hidden'>{t('Create')}</span>
+              <span className='sr-only sm:not-sr-only'>
+                {t('Create Channel')}
+              </span>
             </Button>
           </TooltipTrigger>
-          {!canEditSensitive && (
-            <TooltipContent>
-              {t('No permission to perform this action')}
-            </TooltipContent>
-          )}
+          <TooltipContent>
+            {canEditSensitive
+              ? t('Create Channel')
+              : t('No permission to perform this action')}
+          </TooltipContent>
         </Tooltip>
 
         {/* More Actions */}

@@ -55,7 +55,7 @@ import { cn } from '@/lib/utils'
 import { getCacheMetrics, getOfficialProviderStatuses } from './api'
 import { CacheMonitor } from './cache-monitor'
 import { MonitorDetailsDrawer } from './monitor-details-drawer'
-import { getOrderedHeartbeats } from './monitor-utils'
+import { getMonitorRequestStats, getOrderedHeartbeats } from './monitor-utils'
 import { OfficialProviderStatuses } from './official-provider-status'
 import type {
   CacheMetricsResponse,
@@ -968,7 +968,10 @@ export function StatusMonitor() {
       <MonitorDetailsDrawer
         open={monitorDetailsOpen}
         monitor={selectedMonitor}
-        requestStats={requestStats}
+        requestStats={getMonitorRequestStats(
+          requestStats,
+          selectedMonitor?.name
+        )}
         onOpenChange={setMonitorDetailsOpen}
       />
     </>

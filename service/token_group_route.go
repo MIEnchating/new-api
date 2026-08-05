@@ -67,6 +67,10 @@ func getTokenGroupRoutes(c *gin.Context) []model.TokenGroupRoute {
 	return routes
 }
 
+func isLastTokenGroupRoute(routes []model.TokenGroupRoute, group string) bool {
+	return len(routes) > 0 && routes[len(routes)-1].Group == group
+}
+
 func tokenGroupRouteStateIndexKey(tokenID int) string {
 	return fmt.Sprintf("token_group_route_state:%d", tokenID)
 }
@@ -455,6 +459,10 @@ func MarkTokenGroupRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 			}
 		}
 	}
+	if cooldown && isLastTokenGroupRoute(routes, group) {
+		cooldown = false
+		logger.LogDebug(c, "Token group route kept final fallback active: %s", group)
+	}
 	until := int64(0)
 	if cooldown && cooldownSeconds > 0 {
 		until = FreezeTokenGroupRoute(tokenID, group, modelName, requestPath, cooldownSeconds)
@@ -542,6 +550,12 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 
 	now := common.GetTimestamp()
 	cooldowns := getTokenGroupRouteCooldownsUntil(tokenID, routes, param.ModelName, param.RequestPath, now)
+	lastRoute := routes[len(routes)-1]
+	if cooldowns[lastRoute.Group] > now {
+		ClearTokenGroupRouteCooldown(tokenID, lastRoute.Group, param.ModelName, param.RequestPath)
+		cooldowns[lastRoute.Group] = 0
+		logger.LogDebug(param.Ctx, "Token group route cleared final fallback cooldown: %s", lastRoute.Group)
+	}
 	selectGroup := routes[startGroupIndex].Group
 	skippedCooldown := false
 	if IsTokenGroupRouteStickyEnabled(param.Ctx) && startGroupIndex == 0 {

@@ -97,9 +97,10 @@ type RequestWindowStats struct {
 }
 
 type RecentRequestStats struct {
-	FiveMinutes   RequestWindowStats `json:"5m"`
-	ThirtyMinutes RequestWindowStats `json:"30m"`
-	OneHour       RequestWindowStats `json:"1h"`
+	FiveMinutes   RequestWindowStats            `json:"5m"`
+	ThirtyMinutes RequestWindowStats            `json:"30m"`
+	OneHour       RequestWindowStats            `json:"1h"`
+	ByGroup       map[string]RecentRequestStats `json:"by_group,omitempty"`
 }
 
 type bucketKey struct {

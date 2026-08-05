@@ -434,6 +434,7 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
                 </span>
               )}
             </Button>
+            {viewToggleNode}
           </div>
 
           {mobileFiltersOpen && (
@@ -450,15 +451,19 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
             </div>
           )}
 
-          <div className='flex min-w-0 items-center gap-1.5'>
-            {props.preActions}
-            <div className='ms-auto flex shrink-0 items-center gap-1.5'>
-              {searchButton}
-              {viewToggleNode}
-              {viewOptionsNode}
-              {expandToggle}
+          {(props.preActions != null ||
+            searchButton != null ||
+            viewOptionsNode != null ||
+            expandToggle != null) && (
+            <div className='flex min-w-0 items-center gap-1.5'>
+              {props.preActions}
+              <div className='ms-auto flex shrink-0 items-center gap-1.5'>
+                {searchButton}
+                {viewOptionsNode}
+                {expandToggle}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )
     }

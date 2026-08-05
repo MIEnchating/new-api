@@ -22,14 +22,8 @@ import type {
   PaginationState,
   RowSelectionState,
 } from '@tanstack/react-table'
-import {
-  FileCheck2,
-  ReceiptText,
-  type LucideIcon,
-  Undo2,
-  Users,
-} from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { ReceiptText, Undo2 } from 'lucide-react'
+import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -45,14 +39,14 @@ import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Skeleton } from '@/components/ui/skeleton'
+import { useMediaQuery } from '@/hooks'
 import dayjs from '@/lib/dayjs'
-import { formatNumber, formatQuota } from '@/lib/format'
 
 import { getTopUpStats, updateTopUpInvoice, updateTopUpInvoices } from './api'
 import { useTopUpStatsColumns } from './components/topup-stats-columns'
 import { TopUpStatsDetailsDialog } from './components/topup-stats-details-dialog'
 import { TopUpStatsMobileList } from './components/topup-stats-mobile-list'
+import { TopUpStatsSummaryRail } from './components/topup-stats-summary-rail'
 import type {
   BillingInvoiceTarget,
   InvoiceAction,
@@ -119,61 +113,6 @@ const emptyTypeQuotas: Record<TopUpStatsItem['type'], number> = {
   admin_adjustment: 0,
 }
 
-function TypeQuotaBadge(props: {
-  label: string
-  value: number
-  accent: string
-  loading: boolean
-}) {
-  return (
-    <span className='border-border/60 bg-muted/25 inline-flex h-9 min-w-0 items-center gap-2 rounded-md border px-2.5 text-xs shadow-xs max-sm:w-full'>
-      <span className={`h-4 w-0.5 shrink-0 rounded-full ${props.accent}`} />
-      <span className='text-muted-foreground min-w-0 flex-1 truncate'>
-        {props.label}
-      </span>
-      {props.loading ? (
-        <Skeleton className='h-3.5 w-7' />
-      ) : (
-        <span className='text-foreground/85 font-mono font-semibold tabular-nums'>
-          {formatQuota(props.value)}
-        </span>
-      )}
-    </span>
-  )
-}
-
-function SummaryMetricBadge(props: {
-  label: string
-  value: string
-  icon: LucideIcon
-  iconClassName: string
-  loading: boolean
-}) {
-  const Icon = props.icon
-  return (
-    <div className='border-border/60 bg-card grid h-12 min-w-0 grid-cols-[1.5rem_minmax(0,1fr)] grid-rows-2 items-center gap-x-2 rounded-md border px-2 shadow-xs sm:inline-flex sm:h-9 sm:px-2.5'>
-      <span
-        className={`row-span-2 flex size-6 shrink-0 items-center justify-center rounded sm:row-auto ${props.iconClassName}`}
-      >
-        <Icon className='size-3.5' aria-hidden='true' />
-      </span>
-      <span className='text-muted-foreground min-w-0 self-end truncate text-[11px] leading-4 sm:self-auto sm:text-xs sm:whitespace-nowrap'>
-        {props.label}
-      </span>
-      {props.loading ? (
-        <Skeleton className='h-4 w-10' />
-      ) : (
-        <span
-          className='min-w-0 self-start truncate font-mono text-xs leading-4 font-semibold tabular-nums sm:max-w-28 sm:self-auto sm:text-sm'
-          title={props.value}
-        >
-          {props.value}
-        </span>
-      )}
-    </div>
-  )
-}
-
 function getBillingInvoiceTarget(
   item: TopUpStatsItem
 ): BillingInvoiceTarget | null {
@@ -197,6 +136,7 @@ function getTodayRange(): StatsRange {
 
 export function TopUpStats() {
   const { t } = useTranslation()
+  const isMobile = useMediaQuery('(max-width: 640px)')
   const queryClient = useQueryClient()
   const [range, setRange] = useState<StatsRange>(getTodayRange)
   const [globalFilter, setGlobalFilter] = useState('')
@@ -439,30 +379,6 @@ export function TopUpStats() {
   )
   const selectedIds = new Set(selectedItems.map((item) => item.id))
 
-  const metrics = useMemo(
-    () => [
-      {
-        label: t('Successful orders'),
-        value: formatNumber(summary.order_count),
-        icon: ReceiptText,
-        iconClassName: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
-      },
-      {
-        label: t('Paying users'),
-        value: formatNumber(summary.user_count),
-        icon: Users,
-        iconClassName: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-      },
-      {
-        label: t('Invoiced orders'),
-        value: formatNumber(summary.invoice_count),
-        icon: FileCheck2,
-        iconClassName: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-      },
-    ],
-    [summary, t]
-  )
-
   let invoiceDialogDescription = ''
   if (invoiceTarget) {
     const count = invoiceTarget.items.length
@@ -581,22 +497,37 @@ export function TopUpStats() {
                 </DataTableBulkActions>
               }
               toolbarProps={{
-                customSearch: (
-                  <div className='grid min-w-0 grid-cols-1 gap-2 sm:contents'>
+                customSearch: isMobile ? (
+                  <Input
+                    value={userKeyword}
+                    onChange={(event) => setUserKeyword(event.target.value)}
+                    placeholder={t('Search users by ID or name...')}
+                    className='w-full'
+                  />
+                ) : (
+                  <div className='contents'>
                     <CompactDateTimeRangePicker
                       start={range.start}
                       end={range.end}
                       onChange={handleRangeChange}
-                      className='max-sm:w-full sm:min-w-[300px] sm:flex-[1.25]'
+                      className='min-w-[300px] flex-[1.25]'
                     />
                     <Input
                       value={userKeyword}
                       onChange={(event) => setUserKeyword(event.target.value)}
                       placeholder={t('Search users by ID or name...')}
-                      className='max-sm:w-full sm:min-w-[200px] sm:flex-[0.85]'
+                      className='min-w-[200px] flex-[0.85]'
                     />
                   </div>
                 ),
+                additionalSearch: isMobile ? (
+                  <CompactDateTimeRangePicker
+                    start={range.start}
+                    end={range.end}
+                    onChange={handleRangeChange}
+                    className='w-full'
+                  />
+                ) : undefined,
                 filters: [
                   {
                     columnId: 'type',
@@ -674,50 +605,18 @@ export function TopUpStats() {
                   readStringFilter('payment_method').length > 0,
                 ].filter(Boolean).length,
                 leftActions: (
-                  <div className='grid min-w-0 grid-cols-1 gap-2 sm:flex sm:flex-1 sm:flex-wrap sm:items-center'>
-                    <div className='grid min-w-0 grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center'>
-                      <TypeQuotaBadge
-                        label={t('Online payment')}
-                        value={typeQuotas.online_topup}
-                        accent='bg-emerald-500/70'
-                        loading={query.isLoading}
-                      />
-                      <TypeQuotaBadge
-                        label={t('Redemption Code')}
-                        value={typeQuotas.redemption}
-                        accent='bg-sky-500/70'
-                        loading={query.isLoading}
-                      />
-                      <TypeQuotaBadge
-                        label={t('Admin Adjustment')}
-                        value={typeQuotas.admin_adjustment}
-                        accent='bg-amber-500/70'
-                        loading={query.isLoading}
-                      />
-                      <TypeQuotaBadge
-                        label={t('Total Quota')}
-                        value={totalQuota}
-                        accent='bg-foreground/60'
-                        loading={query.isLoading}
-                      />
-                    </div>
-                    <div className='bg-border mx-0.5 hidden h-5 w-px shrink-0 xl:block' />
-                    <div className='grid min-w-0 grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center'>
-                      {metrics.map((metric) => (
-                        <SummaryMetricBadge
-                          key={metric.label}
-                          {...metric}
-                          loading={query.isLoading}
-                        />
-                      ))}
-                    </div>
-                  </div>
+                  <TopUpStatsSummaryRail
+                    typeQuotas={typeQuotas}
+                    totalQuota={totalQuota}
+                    summary={summary}
+                    loading={query.isLoading}
+                  />
                 ),
                 hasAdditionalFilters: !isToday || userKeyword.trim() !== '',
                 onReset: resetFilters,
                 onSearch: handleSearch,
                 searchLoading: query.isFetching,
-                hideViewOptions: false,
+                hideViewOptions: isMobile,
                 mobileCollapsibleFilters: true,
               }}
             />

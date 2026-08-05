@@ -34,7 +34,10 @@ import {
 import { useDelayedLoading } from '@/hooks/use-delayed-loading'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
-import { getUsageLogGroups } from '../group-options-api'
+import {
+  getUsageLogGroups,
+  includeSelectedUsageLogGroup,
+} from '../group-options-api'
 import { applyLogSearch, buildSearchParams } from '../lib/filter'
 import { isExpiredLegacyLiveRange } from '../lib/time-range'
 import { getDefaultTimeRange } from '../lib/utils'
@@ -334,10 +337,11 @@ export function CommonLogsFilterBar<TData>(
     [t]
   )
   const groupItems = useMemo(() => {
-    const groups = filters.group
-      ? [filters.group, ...availableGroups]
-      : availableGroups
-    return [...new Set(groups)].map((group) => ({
+    const groups = includeSelectedUsageLogGroup(
+      availableGroups,
+      filters.group
+    )
+    return groups.map((group) => ({
       value: group,
       label: group,
       selectedLabel: sensitiveVisible ? group : '******',

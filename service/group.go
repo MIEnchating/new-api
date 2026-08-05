@@ -3,6 +3,7 @@ package service
 import (
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -162,5 +163,32 @@ func GetUserGroupRatio(userGroup, group string) float64 {
 	if ok {
 		return ratio
 	}
-	return ratio_setting.GetGroupRatio(group)
+	ratio, _, _ = GetEffectiveGroupRatio(userGroup, group, time.Now())
+	return ratio
+}
+
+type GroupRatioStatus struct {
+	Ratio           float64 `json:"ratio"`
+	BaseRatio       float64 `json:"base_ratio"`
+	ScheduleEnabled bool    `json:"schedule_enabled"`
+	ScheduleActive  bool    `json:"schedule_active"`
+}
+
+func GetEffectiveGroupRatio(userGroup, group string, now time.Time) (float64, bool, bool) {
+	baseRatio, enabled, active := ratio_setting.GetEffectiveGroupRatio(group, now)
+	if specialRatio, ok := ratio_setting.GetGroupGroupRatio(userGroup, group); ok {
+		return specialRatio, false, false
+	}
+	return baseRatio, enabled, active
+}
+
+func GetGroupRatioStatus(userGroup, group string, now time.Time) GroupRatioStatus {
+	baseRatio := ratio_setting.GetGroupRatio(group)
+	ratio, enabled, active := GetEffectiveGroupRatio(userGroup, group, now)
+	return GroupRatioStatus{
+		Ratio:           ratio,
+		BaseRatio:       baseRatio,
+		ScheduleEnabled: enabled,
+		ScheduleActive:  active,
+	}
 }

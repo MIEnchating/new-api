@@ -16,7 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { UptimeHeartbeat } from '@/features/dashboard/types'
+import type {
+  RecentRequestStats,
+  UptimeHeartbeat,
+} from '@/features/dashboard/types'
 
 export function getOrderedHeartbeats(heartbeats?: UptimeHeartbeat[]) {
   return [...(heartbeats ?? [])]
@@ -26,4 +29,13 @@ export function getOrderedHeartbeats(heartbeats?: UptimeHeartbeat[]) {
       return leftTime - rightTime
     })
     .slice(-288)
+}
+
+export function getMonitorRequestStats(
+  stats: RecentRequestStats | null,
+  monitorName?: string
+): RecentRequestStats | null {
+  const group = monitorName?.trim()
+  if (!group) return null
+  return stats?.by_group?.[group] ?? null
 }

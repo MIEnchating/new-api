@@ -46,6 +46,16 @@ export function normalizeUsageLogGroups(data: GroupData): string[] {
     .map(([group]) => group)
 }
 
+export function includeSelectedUsageLogGroup(
+  availableGroups: string[],
+  selectedGroup?: string
+): string[] {
+  if (!selectedGroup || availableGroups.includes(selectedGroup)) {
+    return availableGroups
+  }
+  return [...availableGroups, selectedGroup]
+}
+
 export async function getUsageLogGroups(isAdmin: boolean): Promise<string[]> {
   const path = isAdmin ? '/api/group/' : '/api/user/self/groups'
   const res = await api.get<GroupResponse>(path)

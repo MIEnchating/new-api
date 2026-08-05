@@ -63,48 +63,60 @@ export function Channels() {
       channelRouteCooldownSeconds === 0
     const sameChannelRetries = channelRouteSameChannelRetries ?? 0
     const summaryContent = (
-      <span className='border-border bg-muted/20 inline-flex h-7 max-w-full items-center overflow-hidden rounded-md border text-xs font-medium'>
-        {channelRouteEnabled ? (
-          <>
-            <span className='text-success flex h-full shrink-0 items-center gap-1.5 px-2'>
-              <Route className='size-3.5' />
-              <span>{t('Channel routing')}</span>
-            </span>
-            <span className='border-border text-muted-foreground flex h-full shrink-0 items-center gap-1.5 border-l px-2'>
-              {cooldownDisabled ? (
-                <TimerOff className='size-3.5' />
-              ) : (
-                <TimerReset className='size-3.5' />
-              )}
-              <span>
-                {t('Cooldown')}:{' '}
-                {cooldownDisabled
-                  ? t('Disabled')
-                  : typeof channelRouteCooldownSeconds === 'number'
-                    ? `${channelRouteCooldownSeconds}s`
-                    : '-'}
+      <span
+        data-channel-ops-summary
+        className='border-border bg-muted/20 inline-flex size-8 max-w-full items-center justify-center overflow-hidden rounded-md border text-xs font-medium sm:h-7 sm:w-auto'
+      >
+        <span className='flex sm:hidden' aria-hidden='true'>
+          {channelRouteEnabled ? (
+            <Route className='text-success size-4' />
+          ) : (
+            <RefreshCw className='text-muted-foreground size-4' />
+          )}
+        </span>
+        <span className='hidden h-full sm:flex'>
+          {channelRouteEnabled ? (
+            <>
+              <span className='text-success flex h-full shrink-0 items-center gap-1.5 px-2'>
+                <Route className='size-3.5' />
+                <span>{t('Channel routing')}</span>
               </span>
-            </span>
-            <span className='border-border flex h-full shrink-0 items-center gap-1.5 border-l px-2'>
+              <span className='border-border text-muted-foreground flex h-full shrink-0 items-center gap-1.5 border-l px-2'>
+                {cooldownDisabled ? (
+                  <TimerOff className='size-3.5' />
+                ) : (
+                  <TimerReset className='size-3.5' />
+                )}
+                <span>
+                  {t('Cooldown')}:{' '}
+                  {cooldownDisabled
+                    ? t('Disabled')
+                    : typeof channelRouteCooldownSeconds === 'number'
+                      ? `${channelRouteCooldownSeconds}s`
+                      : '-'}
+                </span>
+              </span>
+              <span className='border-border flex h-full shrink-0 items-center gap-1.5 border-l px-2'>
+                <RefreshCw className='text-muted-foreground size-3.5' />
+                <span>
+                  {t('Retry')}: {sameChannelRetries}
+                </span>
+              </span>
+            </>
+          ) : (
+            <span className='flex h-full shrink-0 items-center gap-1.5 px-2'>
               <RefreshCw className='text-muted-foreground size-3.5' />
               <span>
-                {t('Retry')}: {sameChannelRetries}
+                {t('Max Retries')}: {retryTimes}
               </span>
             </span>
-          </>
-        ) : (
-          <span className='flex h-full shrink-0 items-center gap-1.5 px-2'>
-            <RefreshCw className='text-muted-foreground size-3.5' />
-            <span>
-              {t('Max Retries')}: {retryTimes}
+          )}
+          {isRoot ? (
+            <span className='border-border text-muted-foreground group-hover:text-foreground flex h-full w-7 shrink-0 items-center justify-center border-l transition-colors'>
+              <Settings2 className='size-3.5' />
             </span>
-          </span>
-        )}
-        {isRoot ? (
-          <span className='border-border text-muted-foreground group-hover:text-foreground flex h-full w-7 shrink-0 items-center justify-center border-l transition-colors'>
-            <Settings2 className='size-3.5' />
-          </span>
-        ) : null}
+          ) : null}
+        </span>
       </span>
     )
     const tooltipContent = channelRouteEnabled ? (

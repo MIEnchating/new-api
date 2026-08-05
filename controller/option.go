@@ -359,6 +359,14 @@ func UpdateOption(c *gin.Context) {
 			})
 			return
 		}
+	case ratio_setting.GroupRatioScheduleOptionKey:
+		if err = ratio_setting.CheckGroupRatioSchedule(option.Value.(string)); err != nil {
+			c.JSON(http.StatusOK, gin.H{
+				"success": false,
+				"message": err.Error(),
+			})
+			return
+		}
 	case "GroupOrder":
 		if _, err = setting.ParseGroupOrder(option.Value.(string)); err != nil {
 			c.JSON(http.StatusOK, gin.H{

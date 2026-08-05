@@ -517,13 +517,24 @@ func (loader *requestStatsLoader) currentTime() time.Time {
 	return time.Now()
 }
 
+func cloneRecentRequestStats(stats perfmetrics.RecentRequestStats) perfmetrics.RecentRequestStats {
+	cloned := stats
+	if stats.ByGroup != nil {
+		cloned.ByGroup = make(map[string]perfmetrics.RecentRequestStats, len(stats.ByGroup))
+		for group, groupStats := range stats.ByGroup {
+			cloned.ByGroup[group] = cloneRecentRequestStats(groupStats)
+		}
+	}
+	return cloned
+}
+
 func (loader *requestStatsLoader) cached(now time.Time) (perfmetrics.RecentRequestStats, bool) {
 	loader.mu.RLock()
 	defer loader.mu.RUnlock()
 	if loader.entry.expiresAt.IsZero() || !now.Before(loader.entry.expiresAt) {
 		return perfmetrics.RecentRequestStats{}, false
 	}
-	return loader.entry.stats, true
+	return cloneRecentRequestStats(loader.entry.stats), true
 }
 
 func (loader *requestStatsLoader) load(
@@ -545,10 +556,10 @@ func (loader *requestStatsLoader) load(
 		loader.mu.Lock()
 		loader.entry = requestStatsCacheEntry{
 			expiresAt: loader.currentTime().Add(uptimeStatusCacheTTL),
-			stats:     stats,
+			stats:     cloneRecentRequestStats(stats),
 		}
 		loader.mu.Unlock()
-		return stats, nil
+		return cloneRecentRequestStats(stats), nil
 	})
 
 	select {
@@ -562,7 +573,7 @@ func (loader *requestStatsLoader) load(
 		if !ok {
 			return perfmetrics.RecentRequestStats{}, errors.New("invalid request statistics cache result")
 		}
-		return stats, nil
+		return cloneRecentRequestStats(stats), nil
 	}
 }
 

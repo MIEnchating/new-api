@@ -519,15 +519,32 @@ func successRate(value counters) float64 {
 }
 
 func QueryRecentRequestStats() (RecentRequestStats, error) {
-	counts, err := model.GetRecentRelayRequestCounts(time.Now().Unix())
+	now := time.Now().Unix()
+	counts, err := model.GetRecentRelayRequestCounts(now)
 	if err != nil {
 		return RecentRequestStats{}, err
 	}
-	return RecentRequestStats{
+	groupCounts, err := model.GetRecentRelayRequestCountsByGroup(now)
+	if err != nil {
+		return RecentRequestStats{}, err
+	}
+	stats := RecentRequestStats{
 		FiveMinutes:   buildRequestWindowStats(counts.Requests5m, counts.Successes5m),
 		ThirtyMinutes: buildRequestWindowStats(counts.Requests30m, counts.Successes30m),
 		OneHour:       buildRequestWindowStats(counts.Requests1h, counts.Successes1h),
-	}, nil
+		ByGroup:       make(map[string]RecentRequestStats, len(groupCounts)),
+	}
+	for _, group := range groupCounts {
+		if group.GroupName == "" {
+			continue
+		}
+		stats.ByGroup[group.GroupName] = RecentRequestStats{
+			FiveMinutes:   buildRequestWindowStats(group.Requests5m, group.Successes5m),
+			ThirtyMinutes: buildRequestWindowStats(group.Requests30m, group.Successes30m),
+			OneHour:       buildRequestWindowStats(group.Requests1h, group.Successes1h),
+		}
+	}
+	return stats, nil
 }
 
 func buildRequestWindowStats(requests int64, successes int64) RequestWindowStats {

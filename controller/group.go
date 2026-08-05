@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
@@ -38,13 +39,18 @@ func GetUserGroups(c *gin.Context) {
 	userGroup, _ = model.GetUserGroup(userId, false)
 	userUsableGroups := service.GetUserUsableGroups(userGroup)
 	orderedGroups := service.GetOrderedGroupNames()
+	now := time.Now()
 	for order, groupName := range orderedGroups {
 		// UserUsableGroups contains the groups that the user can use
 		if desc, ok := userUsableGroups[groupName]; ok {
+			ratioStatus := service.GetGroupRatioStatus(userGroup, groupName, now)
 			usableGroups[groupName] = map[string]interface{}{
-				"ratio": service.GetUserGroupRatio(userGroup, groupName),
-				"desc":  desc,
-				"order": order,
+				"ratio":            ratioStatus.Ratio,
+				"base_ratio":       ratioStatus.BaseRatio,
+				"schedule_enabled": ratioStatus.ScheduleEnabled,
+				"schedule_active":  ratioStatus.ScheduleActive,
+				"desc":             desc,
+				"order":            order,
 			}
 		}
 	}

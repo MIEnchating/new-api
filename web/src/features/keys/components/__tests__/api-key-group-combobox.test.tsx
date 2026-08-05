@@ -83,6 +83,8 @@ await i18n.use(initReactI18next).init({
         'Search...': 'Search...',
         'No group found.': 'No group found.',
         'Select a group': 'Select a group',
+        'Scheduled ratio active': 'Scheduled ratio active',
+        'Time-based ratio enabled': 'Time-based ratio enabled',
       },
     },
   },
@@ -101,7 +103,14 @@ const options = [
     ratio: '自动',
   },
   { value: 'default', label: 'default', desc: 'User group', ratio: 1 },
-  { value: 'vip', label: 'vip', desc: 'Priority group', ratio: 3 },
+  {
+    value: 'vip',
+    label: 'vip',
+    desc: 'Priority group',
+    ratio: 3,
+    scheduleEnabled: true,
+    scheduleActive: true,
+  },
 ]
 
 function Harness(props: { initialValue: string }) {
@@ -251,6 +260,7 @@ describe('API key group combobox Auto effect', () => {
       false
     )
     const vipOption = getCommandItem('Priority group')
+    assert.ok(vipOption.querySelector('[data-group-ratio-schedule="active"]'))
     await act(async () => vipOption.click())
 
     assert.equal(
@@ -260,6 +270,7 @@ describe('API key group combobox Auto effect', () => {
     assert.equal(trigger.getAttribute('aria-expanded'), 'false')
     assert.equal(trigger.hasAttribute('data-auto-group-effect'), false)
     assert.equal(trigger.querySelector('[data-auto-group-flow-border]'), null)
+    assert.ok(trigger.querySelector('[data-group-ratio-schedule="active"]'))
 
     await act(async () => root.unmount())
     container.remove()

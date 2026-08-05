@@ -209,11 +209,11 @@ export function CompactDateTimeRangePicker({
       <PopoverContent
         align='start'
         collisionAvoidance={{ side: 'shift', align: 'shift' }}
-        collisionPadding={16}
-        className='max-h-[min(680px,calc(100dvh-2rem))] w-[min(36rem,calc(100vw-2rem))] overflow-y-auto p-0'
+        collisionPadding={8}
+        className='max-h-[calc(100dvh-1rem)] w-[min(36rem,calc(100vw-1rem))] overflow-y-auto overscroll-contain p-0 sm:max-h-[min(680px,calc(100dvh-2rem))] sm:w-[min(36rem,calc(100vw-2rem))]'
       >
         <div className='grid sm:grid-cols-[16rem_minmax(0,1fr)]'>
-          <div className='flex justify-center border-b p-3 sm:border-r sm:border-b-0'>
+          <div className='flex justify-center border-b p-2 sm:border-r sm:border-b-0 sm:p-3'>
             <Calendar
               mode='range'
               selected={selectedRange}
@@ -221,6 +221,7 @@ export function CompactDateTimeRangePicker({
               defaultMonth={draftStart ?? draftEnd}
               locale={calendarLocale}
               numberOfMonths={1}
+              className='max-sm:p-0'
               classNames={{
                 day_button:
                   'group-data-[focused=true]/day:border-0 group-data-[focused=true]/day:ring-0 focus-visible:ring-0',
@@ -228,13 +229,16 @@ export function CompactDateTimeRangePicker({
             />
           </div>
 
-          <div className='min-w-0 p-4 sm:flex sm:flex-col sm:justify-center'>
-            <div className='flex items-center gap-2 pb-3'>
+          <div className='min-w-0 p-3 sm:flex sm:flex-col sm:justify-center sm:p-4'>
+            <div className='flex items-center gap-2 pb-2 sm:pb-3'>
               <Clock3 className='text-muted-foreground size-4' />
               <span className='text-sm font-medium'>{t('Time')}</span>
             </div>
 
-            <div className='space-y-3'>
+            <div
+              data-mobile-time-grid
+              className='grid grid-cols-2 gap-3 sm:block sm:space-y-3'
+            >
               <div className='space-y-1.5'>
                 <div className='flex items-center justify-between gap-2'>
                   <span className='text-muted-foreground text-xs'>
@@ -278,11 +282,14 @@ export function CompactDateTimeRangePicker({
           </div>
         </div>
 
-        <div className='border-t px-4 py-3'>
-          <div className='text-muted-foreground mb-2 text-xs'>
+        <div className='border-t px-3 py-2.5 sm:px-4 sm:py-3'>
+          <div className='text-muted-foreground mb-1.5 text-xs sm:mb-2'>
             {t('Quick ranges')}
           </div>
-          <div className='grid grid-cols-2 gap-1.5 sm:grid-cols-5'>
+          <div
+            data-mobile-preset-grid
+            className='grid grid-cols-3 gap-1.5 sm:grid-cols-5'
+          >
             <PresetButton onClick={() => applyPreset('today')}>
               {t('Today')}
             </PresetButton>
@@ -304,7 +311,7 @@ export function CompactDateTimeRangePicker({
           </div>
         </div>
 
-        <div className='flex items-center justify-between border-t px-4 py-3'>
+        <div className='flex items-center justify-between border-t px-3 py-2 sm:px-4 sm:py-3'>
           <Button
             type='button'
             variant='ghost'
@@ -349,7 +356,7 @@ function TimeSelectRow({
   const minute = value?.getMinutes().toString().padStart(2, '0') ?? '00'
 
   return (
-    <div className='grid grid-cols-[1fr_auto_1fr] items-center gap-2'>
+    <div className='grid grid-cols-[1fr_auto_1fr] items-center gap-1 sm:gap-2'>
       <TimeSelect
         value={hour}
         options={hourOptions}

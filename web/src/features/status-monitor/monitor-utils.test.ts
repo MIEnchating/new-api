@@ -19,9 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import type { UptimeHeartbeat } from '@/features/dashboard/types'
+import type {
+  RecentRequestStats,
+  UptimeHeartbeat,
+} from '@/features/dashboard/types'
 
-import { getOrderedHeartbeats } from './monitor-utils'
+import { getMonitorRequestStats, getOrderedHeartbeats } from './monitor-utils'
 
 function heartbeat(time: string): UptimeHeartbeat {
   return { time, status: 1, ping: 10 }
@@ -52,5 +55,28 @@ describe('status monitor heartbeat ordering', () => {
     assert.equal(result.length, 288)
     assert.equal(result[0]?.time, new Date(12_000).toISOString())
     assert.equal(result.at(-1)?.time, new Date(299_000).toISOString())
+  })
+})
+
+describe('status monitor request statistics mapping', () => {
+  const emptyWindow = { success_rate: 0, has_data: false }
+  const groupStats: RecentRequestStats = {
+    '5m': { success_rate: 75, has_data: true },
+    '30m': emptyWindow,
+    '1h': emptyWindow,
+  }
+  const stats: RecentRequestStats = {
+    '5m': { success_rate: 99, has_data: true },
+    '30m': { success_rate: 98, has_data: true },
+    '1h': { success_rate: 97, has_data: true },
+    by_group: { 'group-a': groupStats },
+  }
+
+  test('returns statistics for the monitor name matching the log group', () => {
+    assert.equal(getMonitorRequestStats(stats, 'group-a'), groupStats)
+  })
+
+  test('does not fall back to global statistics for an unmatched monitor', () => {
+    assert.equal(getMonitorRequestStats(stats, 'missing-group'), null)
   })
 })

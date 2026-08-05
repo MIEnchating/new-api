@@ -203,6 +203,7 @@ export interface RecentRequestStats {
   '5m': RequestWindowStats
   '30m': RequestWindowStats
   '1h': RequestWindowStats
+  by_group?: Record<string, RecentRequestStats>
 }
 
 export interface UptimeStatusResponse {

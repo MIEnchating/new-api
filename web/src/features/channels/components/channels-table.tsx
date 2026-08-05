@@ -455,14 +455,47 @@ export function ChannelsTable() {
           resetModelFilterInput()
         },
         additionalSearch: (
-          <Input
-            placeholder={t('Filter by model...')}
-            value={modelFilterInput}
-            onChange={onModelFilterInputChange}
-            onCompositionStart={onModelFilterCompositionStart}
-            onCompositionEnd={onModelFilterCompositionEnd}
-            className='w-full sm:w-[150px] lg:w-[180px]'
-          />
+          <div className='grid min-w-0 gap-2 sm:contents'>
+            <Input
+              placeholder={t('Filter by model...')}
+              value={modelFilterInput}
+              onChange={onModelFilterInputChange}
+              onCompositionStart={onModelFilterCompositionStart}
+              onCompositionEnd={onModelFilterCompositionEnd}
+              className='w-full sm:w-[150px] lg:w-[180px]'
+            />
+            <div className='flex items-center justify-between gap-2 sm:hidden'>
+              <div className='border-input flex h-8 items-center gap-2 rounded-md border px-2'>
+                <Label
+                  htmlFor='channels-show-user-groups-mobile'
+                  className='text-muted-foreground cursor-pointer text-xs whitespace-nowrap'
+                >
+                  {t('Show user groups')}
+                </Label>
+                <Switch
+                  id='channels-show-user-groups-mobile'
+                  size='sm'
+                  checked={showUserGroups}
+                  onCheckedChange={handleShowUserGroupsChange}
+                />
+              </div>
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={() => setSensitiveVisible(!sensitiveVisible)}
+                aria-label={sensitiveVisible ? t('Hide') : t('Show')}
+                className='h-8 gap-1.5 px-2.5'
+              >
+                {sensitiveVisible ? (
+                  <Eye className='size-4' />
+                ) : (
+                  <EyeOff className='size-4' />
+                )}
+                {sensitiveVisible ? t('Hide') : t('Show')}
+              </Button>
+            </div>
+          </div>
         ),
         filters: [
           {
@@ -484,8 +517,8 @@ export function ChannelsTable() {
             singleSelect: true,
           },
         ],
-        preActions: (
-          <>
+        preActions: isMobile ? undefined : (
+          <div className='hidden items-center gap-1.5 sm:contents'>
             <div className='border-input flex h-8 items-center gap-2 rounded-md border px-2'>
               <Label
                 htmlFor='channels-show-user-groups'
@@ -518,8 +551,9 @@ export function ChannelsTable() {
                 {sensitiveVisible ? t('Hide') : t('Show')}
               </TooltipContent>
             </Tooltip>
-          </>
+          </div>
         ),
+        hideViewOptions: isMobile,
       }}
       getRowClassName={(row, { isMobile }) => {
         if (!isDisabledChannelRow(row.original)) {

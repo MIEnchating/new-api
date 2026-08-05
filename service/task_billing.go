@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -310,14 +311,19 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		return
 	}
 
-	groupRatio := ratio_setting.GetGroupRatio(group)
-	userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
-
 	var finalGroupRatio float64
-	if hasUserGroupRatio {
-		finalGroupRatio = userGroupRatio
+	if billingContext := task.PrivateData.BillingContext; billingContext != nil {
+		// Keep asynchronous settlement on the ratio selected when the task was
+		// submitted, even if a scheduled period ends before polling completes.
+		finalGroupRatio = billingContext.GroupRatio
 	} else {
-		finalGroupRatio = groupRatio
+		groupRatio, _, _ := ratio_setting.GetEffectiveGroupRatio(group, time.Now())
+		userGroupRatio, hasUserGroupRatio := ratio_setting.GetGroupGroupRatio(group, group)
+		if hasUserGroupRatio {
+			finalGroupRatio = userGroupRatio
+		} else {
+			finalGroupRatio = groupRatio
+		}
 	}
 
 	// 计算 OtherRatios 乘积（视频折扣、时长等）

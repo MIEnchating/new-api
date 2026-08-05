@@ -54,6 +54,40 @@ func TestGetRecentRelayRequestCountsUsesFinalVisibleRequests(t *testing.T) {
 	}, counts)
 }
 
+func TestGetRecentRelayRequestCountsByGroupSeparatesMonitoredGroups(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+
+	previousLogDB := LOG_DB
+	LOG_DB = db
+	t.Cleanup(func() { LOG_DB = previousLogDB })
+
+	now := int64(15_000)
+	logs := []Log{
+		{CreatedAt: now - 60, Type: LogTypeConsume, RequestId: "a-success", Group: "group-a"},
+		{CreatedAt: now - 10*60, Type: LogTypeError, RequestId: "a-failure", Group: "group-a"},
+		{CreatedAt: now - 120, Type: LogTypeError, RequestId: "b-failure", Group: "group-b"},
+		{CreatedAt: now - 40*60, Type: LogTypeConsume, RequestId: "b-success", Group: "group-b"},
+	}
+	require.NoError(t, db.Create(&logs).Error)
+
+	counts, err := GetRecentRelayRequestCountsByGroup(now)
+
+	require.NoError(t, err)
+	require.Len(t, counts, 2)
+	assert.Equal(t, "group-a", counts[0].GroupName)
+	assert.EqualValues(t, 1, counts[0].Requests5m)
+	assert.EqualValues(t, 1, counts[0].Successes5m)
+	assert.EqualValues(t, 2, counts[0].Requests30m)
+	assert.EqualValues(t, 1, counts[0].Successes30m)
+	assert.Equal(t, "group-b", counts[1].GroupName)
+	assert.EqualValues(t, 1, counts[1].Requests5m)
+	assert.EqualValues(t, 0, counts[1].Successes5m)
+	assert.EqualValues(t, 2, counts[1].Requests1h)
+	assert.EqualValues(t, 1, counts[1].Successes1h)
+}
+
 func TestGetRecentRelayRequestCountsLimitsSampleToLatestFiveThousand(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)

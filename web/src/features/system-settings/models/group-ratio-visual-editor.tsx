@@ -39,6 +39,7 @@ import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
+  CalendarClock,
   ChevronDown,
   GripVertical,
   Info,
@@ -51,6 +52,7 @@ import {
   useEffect,
   useCallback,
   memo,
+  useRef,
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -97,6 +99,11 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 import { safeJsonParse } from '../utils/json-parser'
@@ -105,11 +112,18 @@ import {
   serializeGroupPricingRows,
   type GroupPricingRow,
 } from './group-pricing-serialization'
+import {
+  parseGroupRatioSchedules,
+  removeGroupRatioSchedule,
+  renameGroupRatioSchedule,
+} from './group-ratio-schedule'
+import { GroupRatioScheduleEditor } from './group-ratio-schedule-editor'
 import { GroupSettingsSectionCard } from './group-settings-section-card'
 import { GroupSpecialUsableRulesEditor } from './group-special-usable-editor'
 
 type GroupRatioVisualEditorProps = {
   groupRatio: string
+  groupRatioSchedule: string
   topupGroupRatio: string
   groupDescriptions: string
   userUsableGroups: string
@@ -316,6 +330,7 @@ function GroupNameSelect(props: GroupNameSelectProps) {
 
 export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupRatio,
+  groupRatioSchedule,
   topupGroupRatio,
   groupDescriptions,
   userUsableGroups,
@@ -394,6 +409,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
     <div className='space-y-4'>
       <GroupPricingTable
         groupRatio={groupRatio}
+        groupRatioSchedule={groupRatioSchedule}
         groupDescriptions={groupDescriptions}
         userUsableGroups={userUsableGroups}
         topupGroupRatio={topupGroupRatio}
@@ -497,6 +513,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
 
 type GroupPricingTableProps = {
   groupRatio: string
+  groupRatioSchedule: string
   groupDescriptions: string
   userUsableGroups: string
   topupGroupRatio: string
@@ -507,6 +524,7 @@ type GroupPricingTableProps = {
 
 function GroupPricingTable({
   groupRatio,
+  groupRatioSchedule,
   groupDescriptions,
   userUsableGroups,
   topupGroupRatio,
@@ -523,6 +541,12 @@ function GroupPricingTable({
       topupGroupRatio,
       groupOrder
     )
+  )
+  const [scheduleGroupId, setScheduleGroupId] = useState<string | null>(null)
+  const editingGroupNameRef = useRef<Record<string, string>>({})
+  const schedules = useMemo(
+    () => parseGroupRatioSchedules(groupRatioSchedule),
+    [groupRatioSchedule]
   )
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -615,9 +639,16 @@ function GroupPricingTable({
 
   const removeRow = useCallback(
     (id: string) => {
+      const removed = rows.find((row) => row._id === id)
       emitRows(rows.filter((row) => row._id !== id))
+      if (removed) {
+        onChange(
+          'GroupRatioSchedule',
+          removeGroupRatioSchedule(groupRatioSchedule, removed.name)
+        )
+      }
     },
-    [emitRows, rows]
+    [emitRows, groupRatioSchedule, onChange, rows]
   )
 
   const moveRow = useCallback(
@@ -728,9 +759,25 @@ function GroupPricingTable({
                     cell: (row) => (
                       <Input
                         value={row.name}
+                        onFocus={() => {
+                          editingGroupNameRef.current[row._id] = row.name
+                        }}
                         onChange={(event) =>
                           updateRow(row._id, 'name', event.target.value)
                         }
+                        onBlur={() => {
+                          const previousName =
+                            editingGroupNameRef.current[row._id] || row.name
+                          delete editingGroupNameRef.current[row._id]
+                          const nextSchedule = renameGroupRatioSchedule(
+                            groupRatioSchedule,
+                            previousName,
+                            row.name
+                          )
+                          if (nextSchedule !== groupRatioSchedule) {
+                            onChange('GroupRatioSchedule', nextSchedule)
+                          }
+                        }}
                         aria-invalid={duplicateNames.includes(row.name.trim())}
                       />
                     ),
@@ -817,6 +864,30 @@ function GroupPricingTable({
                     cellClassName: 'text-right',
                     cell: (row, index) => (
                       <div className='flex justify-end gap-1'>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <Button
+                                variant='ghost'
+                                size='icon-sm'
+                                onClick={() => setScheduleGroupId(row._id)}
+                                disabled={!row.name.trim()}
+                                aria-label={t('Time-based ratio')}
+                                className={cn(
+                                  schedules[row.name.trim()]?.enabled &&
+                                    'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
+                                )}
+                              />
+                            }
+                          >
+                            <CalendarClock className='size-4' />
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            {schedules[row.name.trim()]?.enabled
+                              ? t('Time-based ratio enabled')
+                              : t('Configure time-based ratio')}
+                          </TooltipContent>
+                        </Tooltip>
                         <Button
                           variant='ghost'
                           size='icon-sm'
@@ -869,6 +940,21 @@ function GroupPricingTable({
           )}
         </div>
       </CardContent>
+      {(() => {
+        const selectedRow = rows.find((row) => row._id === scheduleGroupId)
+        return selectedRow ? (
+          <GroupRatioScheduleEditor
+            open
+            onOpenChange={(open) => {
+              if (!open) setScheduleGroupId(null)
+            }}
+            groupName={selectedRow.name.trim()}
+            baseRatio={normalizeRatio(selectedRow.ratio)}
+            value={groupRatioSchedule}
+            onChange={(value) => onChange('GroupRatioSchedule', value)}
+          />
+        ) : null
+      })()}
     </GroupSettingsSectionCard>
   )
 }

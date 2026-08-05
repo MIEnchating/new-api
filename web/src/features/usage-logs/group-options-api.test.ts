@@ -19,7 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { normalizeUsageLogGroups } from './group-options-api'
+import {
+  includeSelectedUsageLogGroup,
+  normalizeUsageLogGroups,
+} from './group-options-api'
 
 describe('usage log group options', () => {
   test('keeps the configured order returned to administrators', () => {
@@ -37,6 +40,20 @@ describe('usage log group options', () => {
         pro: { order: 1 },
       }),
       ['pro', 'default', 'auto']
+    )
+  })
+
+  test('keeps an existing selected group in its configured position', () => {
+    assert.deepEqual(
+      includeSelectedUsageLogGroup(['pro', 'default', 'auto'], 'auto'),
+      ['pro', 'default', 'auto']
+    )
+  })
+
+  test('appends a selected legacy group only when it is unavailable', () => {
+    assert.deepEqual(
+      includeSelectedUsageLogGroup(['pro', 'default'], 'legacy'),
+      ['pro', 'default', 'legacy']
     )
   })
 })

@@ -294,6 +294,11 @@ func TestRequestStatsLoaderCachesForUptimeTTL(t *testing.T) {
 		calls.Add(1)
 		return perfmetrics.RecentRequestStats{
 			FiveMinutes: perfmetrics.RequestWindowStats{SuccessRate: 99, HasData: true},
+			ByGroup: map[string]perfmetrics.RecentRequestStats{
+				"group-a": {
+					FiveMinutes: perfmetrics.RequestWindowStats{SuccessRate: 75, HasData: true},
+				},
+			},
 		}, nil
 	}
 
@@ -303,6 +308,12 @@ func TestRequestStatsLoaderCachesForUptimeTTL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, first, second)
 	assert.Equal(t, int32(1), calls.Load())
+	modified := first.ByGroup["group-a"]
+	modified.FiveMinutes.SuccessRate = 0
+	first.ByGroup["group-a"] = modified
+	third, err := loader.load(context.Background(), fetch)
+	require.NoError(t, err)
+	assert.Equal(t, float64(75), third.ByGroup["group-a"].FiveMinutes.SuccessRate)
 
 	now = now.Add(uptimeStatusCacheTTL)
 	_, err = loader.load(context.Background(), fetch)

@@ -64,6 +64,7 @@ import { GroupRatioVisualEditor } from './group-ratio-visual-editor'
 
 type GroupFormValues = {
   GroupRatio: string
+  GroupRatioSchedule: string
   TopupGroupRatio: string
   GroupDescriptions: string
   UserUsableGroups: string
@@ -165,6 +166,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           <div className='space-y-6'>
             <GroupRatioVisualEditor
               groupRatio={form.watch('GroupRatio')}
+              groupRatioSchedule={form.watch('GroupRatioSchedule')}
               topupGroupRatio={form.watch('TopupGroupRatio')}
               groupDescriptions={form.watch('GroupDescriptions')}
               userUsableGroups={form.watch('UserUsableGroups')}
@@ -226,6 +228,31 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                   <FormDescription>
                     {t(
                       'JSON map of group → ratio applied when the user selects the group explicitly.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='GroupRatioSchedule'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Time-based group ratios')}</FormLabel>
+                  <FormControl>
+                    <JsonCodeEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      textareaRef={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'JSON map of group time periods and their absolute target ratios.'
                     )}
                   </FormDescription>
                   <FormMessage />

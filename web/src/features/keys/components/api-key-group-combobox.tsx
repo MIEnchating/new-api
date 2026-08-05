@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Check, ChevronsUpDown } from 'lucide-react'
+import { CalendarClock, Check, ChevronsUpDown } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -34,6 +34,11 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import { useMediaQuery } from '@/hooks'
 import { cn } from '@/lib/utils'
 
@@ -48,6 +53,9 @@ export type ApiKeyGroupOption = {
   label: string
   desc?: string
   ratio?: number | string
+  baseRatio?: number
+  scheduleEnabled?: boolean
+  scheduleActive?: boolean
   order?: number
 }
 
@@ -137,11 +145,16 @@ export function ApiKeyGroupCombobox({
             )}
           </span>
           <span className='hidden sm:block'>
-            <GroupRatioBadge
-              ratio={selectedOption?.ratio}
-              isAuto={isAutoSelected}
-              shouldReduceMotion={shouldReduceMotion}
-            />
+            <span className='flex items-center gap-1.5'>
+              {selectedOption?.scheduleEnabled && (
+                <ScheduleIndicator active={selectedOption.scheduleActive} />
+              )}
+              <GroupRatioBadge
+                ratio={selectedOption?.ratio}
+                isAuto={isAutoSelected}
+                shouldReduceMotion={shouldReduceMotion}
+              />
+            </span>
           </span>
         </span>
         <ChevronsUpDown
@@ -205,11 +218,16 @@ export function ApiKeyGroupCombobox({
                         </span>
                       )}
                     </span>
-                    <GroupRatioBadge
-                      ratio={option.ratio}
-                      isAuto={isAutoOption}
-                      shouldReduceMotion={shouldReduceMotion}
-                    />
+                    <span className='flex items-center gap-1.5'>
+                      {option.scheduleEnabled && (
+                        <ScheduleIndicator active={option.scheduleActive} />
+                      )}
+                      <GroupRatioBadge
+                        ratio={option.ratio}
+                        isAuto={isAutoOption}
+                        shouldReduceMotion={shouldReduceMotion}
+                      />
+                    </span>
                   </CommandItem>
                 )
               })}
@@ -218,5 +236,33 @@ export function ApiKeyGroupCombobox({
         </Command>
       </PopoverContent>
     </Popover>
+  )
+}
+
+function ScheduleIndicator(props: { active?: boolean }) {
+  const { t } = useTranslation()
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className='inline-flex'
+            data-group-ratio-schedule={props.active ? 'active' : 'enabled'}
+          />
+        }
+      >
+        <CalendarClock
+          className={cn(
+            'size-3.5',
+            props.active ? 'text-emerald-600' : 'text-muted-foreground'
+          )}
+        />
+      </TooltipTrigger>
+      <TooltipContent>
+        {props.active
+          ? t('Scheduled ratio active')
+          : t('Time-based ratio enabled')}
+      </TooltipContent>
+    </Tooltip>
   )
 }

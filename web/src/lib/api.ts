@@ -59,7 +59,14 @@ export async function getUserGroups(): Promise<{
   message?: string
   data?: Record<
     string,
-    { desc: string; ratio: number | string; order?: number }
+    {
+      desc: string
+      ratio: number | string
+      base_ratio?: number
+      schedule_enabled?: boolean
+      schedule_active?: boolean
+      order?: number
+    }
   >
 }> {
   const res = await api.get('/api/user/self/groups')

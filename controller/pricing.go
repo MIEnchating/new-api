@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"time"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -38,8 +40,10 @@ func GetPricing(c *gin.Context) {
 	userId, exists := c.Get("id")
 	usableGroup := map[string]string{}
 	groupRatio := map[string]float64{}
-	for s, f := range ratio_setting.GetGroupRatioCopy() {
-		groupRatio[s] = f
+	now := time.Now()
+	for group := range ratio_setting.GetGroupRatioCopy() {
+		ratio, _, _ := ratio_setting.GetEffectiveGroupRatio(group, now)
+		groupRatio[group] = ratio
 	}
 	var group string
 	if exists {

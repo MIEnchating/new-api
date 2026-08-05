@@ -2,12 +2,44 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestGetGroupRatioStatusUsesScheduleUnlessUserOverrideExists(t *testing.T) {
+	originalRatios := ratio_setting.GroupRatio2JSONString()
+	originalOverrides := ratio_setting.GroupGroupRatio2JSONString()
+	originalSchedules := ratio_setting.GroupRatioSchedule2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalRatios))
+		require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(originalOverrides))
+		require.NoError(t, ratio_setting.UpdateGroupRatioScheduleByJSONString(originalSchedules))
+	})
+
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"vip":1}`))
+	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"special":{"vip":0.25}}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioScheduleByJSONString(`{
+		"vip":{"enabled":true,"periods":[
+			{"start":"00:00","end":"23:59","ratio":0.5}
+		]}
+	}`))
+	now := time.Date(2026, time.August, 5, 12, 0, 0, 0, time.UTC)
+
+	regular := GetGroupRatioStatus("regular", "vip", now)
+	assert.Equal(t, 0.5, regular.Ratio)
+	assert.Equal(t, 1.0, regular.BaseRatio)
+	assert.True(t, regular.ScheduleEnabled)
+	assert.True(t, regular.ScheduleActive)
+
+	special := GetGroupRatioStatus("special", "vip", now)
+	assert.Equal(t, 0.25, special.Ratio)
+	assert.False(t, special.ScheduleEnabled)
+	assert.False(t, special.ScheduleActive)
+}
 
 func TestGetUserUsableGroupsRespectsExplicitRemovalOfOwnGroup(t *testing.T) {
 	originalUsableGroups := setting.UserUsableGroups2JSONString()
