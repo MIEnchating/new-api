@@ -20,10 +20,11 @@ import { ArrowDown, ArrowUp, CalendarClock, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { DatePicker } from '@/components/date-picker'
 import { Dialog } from '@/components/dialog'
 import { StatusBadge } from '@/components/status-badge'
+import { TimePicker } from '@/components/time-picker'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -34,6 +35,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { WeekdayPicker } from '@/components/weekday-picker'
+import dayjs from '@/lib/dayjs'
 import { cn } from '@/lib/utils'
 
 import {
@@ -55,16 +58,6 @@ type GroupRatioScheduleEditorProps = {
   value: string
   onChange: (value: string) => void
 }
-
-const weekdayKeys = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-] as const
 
 function createPeriod(baseRatio: number): GroupRatioSchedulePeriod {
   return {
@@ -115,15 +108,6 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
         periodIndex === index ? update(period) : period
       ),
     }))
-  }
-
-  const toggleWeekday = (index: number, weekday: number, checked: boolean) => {
-    updatePeriod(index, (period) => {
-      const days = new Set(period.days || [])
-      if (checked) days.add(weekday)
-      else days.delete(weekday)
-      return { ...period, days: [...days].sort((a, b) => a - b) }
-    })
   }
 
   const movePeriod = (index: number, offset: -1 | 1) => {
@@ -184,7 +168,7 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
               />
             </div>
             <p className='text-muted-foreground mt-1 text-xs'>
-              {t('Base ratio')}: {props.baseRatio}x
+              {t('Base ratio')}: {props.baseRatio}&times;
             </p>
           </div>
           <Switch
@@ -333,26 +317,26 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
                     </div>
                     <div className='space-y-1.5'>
                       <Label>{t('Start time')}</Label>
-                      <Input
-                        type='time'
+                      <TimePicker
                         value={period.start}
-                        onChange={(event) =>
+                        aria-label={t('Start time')}
+                        onChange={(value) =>
                           updatePeriod(index, (current) => ({
                             ...current,
-                            start: event.target.value,
+                            start: value,
                           }))
                         }
                       />
                     </div>
                     <div className='space-y-1.5'>
                       <Label>{t('End time')}</Label>
-                      <Input
-                        type='time'
+                      <TimePicker
                         value={period.end}
-                        onChange={(event) =>
+                        aria-label={t('End time')}
+                        onChange={(value) =>
                           updatePeriod(index, (current) => ({
                             ...current,
-                            end: event.target.value,
+                            end: value,
                           }))
                         }
                       />
@@ -360,13 +344,18 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
                     {scope === 'date' && (
                       <div className='space-y-1.5 sm:col-span-2 lg:col-span-3'>
                         <Label>{t('Specific date')}</Label>
-                        <Input
-                          type='date'
-                          value={period.date || ''}
-                          onChange={(event) =>
+                        <DatePicker
+                          selected={
+                            period.date
+                              ? new Date(`${period.date}T00:00:00`)
+                              : undefined
+                          }
+                          onSelect={(date) =>
                             updatePeriod(index, (current) => ({
                               ...current,
-                              date: event.target.value,
+                              date: date
+                                ? dayjs(date).format('YYYY-MM-DD')
+                                : undefined,
                             }))
                           }
                         />
@@ -374,29 +363,15 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
                     )}
                     {scope === 'weekdays' && (
                       <div className='space-y-2 sm:col-span-2 lg:col-span-3'>
-                        <Label>{t('Weekdays')}</Label>
-                        <div className='grid grid-cols-4 gap-2 sm:grid-cols-7'>
-                          {weekdayKeys.map((weekdayKey, weekday) => (
-                            <label
-                              key={weekdayKey}
-                              className='bg-muted/25 flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-2 text-xs'
-                            >
-                              <Checkbox
-                                checked={
-                                  period.days?.includes(weekday) || false
-                                }
-                                onCheckedChange={(checked) =>
-                                  toggleWeekday(
-                                    index,
-                                    weekday,
-                                    checked === true
-                                  )
-                                }
-                              />
-                              <span className='truncate'>{t(weekdayKey)}</span>
-                            </label>
-                          ))}
-                        </div>
+                        <WeekdayPicker
+                          value={period.days || []}
+                          onChange={(days) =>
+                            updatePeriod(index, (current) => ({
+                              ...current,
+                              days,
+                            }))
+                          }
+                        />
                       </div>
                     )}
                     <div className='space-y-1.5'>
@@ -421,7 +396,7 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
                           }
                         />
                         <span className='text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs'>
-                          x
+                          &times;
                         </span>
                       </div>
                     </div>

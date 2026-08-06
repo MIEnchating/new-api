@@ -16,14 +16,17 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ChevronDownIcon } from 'lucide-react'
-import * as React from 'react'
-import { enUS, fr, ja, ru, vi, zhCN } from 'react-day-picker/locale'
+import { CalendarClock } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import {
+  getCalendarLocale,
+  getDateFormat,
+} from '@/components/date-time-picker-utils'
+import { TimePicker } from '@/components/time-picker'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
-import { Input } from '@/components/ui/input'
 import {
   Popover,
   PopoverContent,
@@ -32,20 +35,16 @@ import {
 import dayjs from '@/lib/dayjs'
 import { cn } from '@/lib/utils'
 
-const calendarLocales = {
-  en: enUS,
-  zh: zhCN,
-  fr,
-  ru,
-  ja,
-  vi,
-} as const
-
 interface DateTimePickerProps {
   value?: Date
   onChange?: (date: Date | undefined) => void
   placeholder?: string
   className?: string
+  disabled?: boolean
+}
+
+function toTime(date: Date | undefined) {
+  return date ? dayjs(date).format('HH:mm') : '00:00'
 }
 
 export function DateTimePicker({
@@ -53,113 +52,118 @@ export function DateTimePicker({
   onChange,
   placeholder,
   className,
+  disabled = false,
 }: DateTimePickerProps) {
   const { t, i18n } = useTranslation()
-  const placeholderText = placeholder ?? t('Select date')
-  const calendarLocale =
-    calendarLocales[i18n.language as keyof typeof calendarLocales] ?? enUS
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<Date | undefined>(value)
+  const [time, setTime] = useState(toTime(value))
+  const language = i18n.resolvedLanguage ?? i18n.language
+  const calendarLocale = getCalendarLocale(language)
   const currentYear = new Date().getFullYear()
-  const [open, setOpen] = React.useState(false)
-  const [date, setDate] = React.useState<Date | undefined>(value)
-  const [month, setMonth] = React.useState<Date | undefined>(value)
-  const [time, setTime] = React.useState<string>('00:00')
 
-  React.useEffect(() => {
-    setDate(value)
-    setMonth(value)
-    if (value) {
-      const hours = value.getHours().toString().padStart(2, '0')
-      const minutes = value.getMinutes().toString().padStart(2, '0')
-      setTime(`${hours}:${minutes}`)
-    }
+  useEffect(() => {
+    setDraft(value)
+    setTime(toTime(value))
   }, [value])
 
-  const handleDateSelect = (selectedDate: Date | undefined) => {
-    if (selectedDate) {
-      const [hours, minutes] = time.split(':').map(Number)
-      const newDate = new Date(selectedDate)
-      newDate.setHours(hours, minutes, 0, 0)
-      setDate(newDate)
-      setMonth(newDate)
-      onChange?.(newDate)
-      setOpen(false)
-    } else {
-      setDate(undefined)
-      setMonth(undefined)
-      onChange?.(undefined)
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (nextOpen) {
+      setDraft(value)
+      setTime(toTime(value))
     }
+    setOpen(nextOpen)
   }
 
-  const handleTimeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newTime = e.target.value
-    setTime(newTime)
-
-    if (date) {
-      const [hours, minutes] = newTime.split(':').map(Number)
-      const newDate = new Date(date)
-      newDate.setHours(hours, minutes, 0, 0)
-      setDate(newDate)
-      onChange?.(newDate)
-    }
-  }
-
-  const handleClear = () => {
-    setDate(undefined)
-    setMonth(undefined)
-    setTime('00:00')
-    onChange?.(undefined)
+  const mergeTime = (date: Date, nextTime: string) => {
+    const [hours, minutes] = nextTime.split(':').map(Number)
+    const next = new Date(date)
+    next.setHours(hours, minutes, 0, 0)
+    return next
   }
 
   return (
-    <div className={cn('flex gap-2', className)}>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger
-          render={
-            <Button
-              variant='outline'
-              className={cn(
-                'flex-1 justify-between font-normal',
-                !date && 'text-muted-foreground'
-              )}
-            />
-          }
-        >
-          {date ? dayjs(date).format('YYYY-MM-DD') : placeholderText}
-          <ChevronDownIcon className='h-4 w-4 opacity-50' />
-        </PopoverTrigger>
-        <PopoverContent className='w-auto overflow-hidden p-0' align='start'>
-          <Calendar
-            mode='single'
-            selected={date}
-            month={month}
-            onMonthChange={setMonth}
-            captionLayout='dropdown'
-            onSelect={handleDateSelect}
-            locale={calendarLocale}
-            startMonth={new Date(currentYear - 100, 0)}
-            endMonth={new Date(currentYear + 100, 11)}
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger
+        render={
+          <Button
+            type='button'
+            variant='outline'
+            disabled={disabled}
+            className={cn(
+              'w-full min-w-0 justify-start gap-2 px-2.5 font-normal tabular-nums',
+              !value && 'text-muted-foreground',
+              className
+            )}
           />
-        </PopoverContent>
-      </Popover>
-      <Input
-        type='time'
-        value={time}
-        onChange={handleTimeChange}
-        className='w-32 appearance-none [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none'
-        disabled={!date}
-      />
-      {date && (
-        <Button
-          type='button'
-          variant='outline'
-          size='icon'
-          onClick={handleClear}
-          className='shrink-0'
-          aria-label='Clear'
-        >
-          <span aria-hidden='true'>✕</span>
-        </Button>
-      )}
-    </div>
+        }
+      >
+        <CalendarClock className='text-muted-foreground size-4 shrink-0' />
+        <span className='truncate'>
+          {value
+            ? `${dayjs(value).format(getDateFormat(language))} ${dayjs(value).format('HH:mm')}`
+            : (placeholder ?? t('Select date'))}
+        </span>
+      </PopoverTrigger>
+      <PopoverContent
+        align='start'
+        collisionPadding={8}
+        className='w-auto max-w-[calc(100vw-1rem)] overflow-hidden p-0'
+      >
+        <Calendar
+          mode='single'
+          selected={draft}
+          defaultMonth={draft ?? value}
+          captionLayout='dropdown'
+          onSelect={(selectedDate) =>
+            setDraft(selectedDate ? mergeTime(selectedDate, time) : undefined)
+          }
+          locale={calendarLocale}
+          startMonth={new Date(currentYear - 100, 0)}
+          endMonth={new Date(currentYear + 100, 11)}
+        />
+        <div className='border-t p-3'>
+          <div className='text-muted-foreground mb-1.5 text-xs'>
+            {t('Time')}
+          </div>
+          <TimePicker
+            value={time}
+            disabled={!draft}
+            onChange={(nextTime) => {
+              setTime(nextTime)
+              setDraft((current) =>
+                current ? mergeTime(current, nextTime) : current
+              )
+            }}
+          />
+        </div>
+        <div className='flex items-center justify-between border-t px-3 py-2.5'>
+          <Button
+            type='button'
+            variant='ghost'
+            size='sm'
+            onClick={() => {
+              setDraft(undefined)
+              setTime('00:00')
+              onChange?.(undefined)
+              setOpen(false)
+            }}
+          >
+            {t('Clear')}
+          </Button>
+          <Button
+            type='button'
+            size='sm'
+            disabled={!draft}
+            onClick={() => {
+              onChange?.(draft)
+              setOpen(false)
+            }}
+          >
+            {t('Confirm')}
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
