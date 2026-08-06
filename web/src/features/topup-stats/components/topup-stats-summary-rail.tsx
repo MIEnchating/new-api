@@ -153,7 +153,7 @@ function SummaryMetricBadge(props: {
         <Skeleton className='h-4 w-8' />
       ) : (
         <span
-          className='min-w-0 max-w-20 truncate font-mono text-xs font-semibold tabular-nums sm:max-w-28 sm:text-sm'
+          className='max-w-20 min-w-0 truncate font-mono text-xs font-semibold tabular-nums sm:max-w-28 sm:text-sm'
           title={props.value}
         >
           {props.value}

@@ -174,7 +174,7 @@ function DataTableFacetedFilterInner<TData, TValue>({
       <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
         <DrawerContent className='max-h-[80dvh] p-0'>
-          <div className='mx-auto flex w-full max-w-md min-h-0 flex-1 flex-col'>
+          <div className='mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col'>
             <DrawerHeader className='border-border/70 border-b px-4 pt-3 pb-3 text-left'>
               <DrawerTitle>{title}</DrawerTitle>
               <DrawerDescription className='sr-only'>
@@ -269,11 +269,7 @@ function DataTableFacetedFilterInner<TData, TValue>({
 
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger
-        render={trigger}
-      >
-        {trigger.props.children}
-      </PopoverTrigger>
+      <PopoverTrigger render={trigger}>{trigger.props.children}</PopoverTrigger>
       <PopoverContent className='max-w-[360px] min-w-[200px] p-0' align='start'>
         <Command
           filter={(value, search, keywords) => {

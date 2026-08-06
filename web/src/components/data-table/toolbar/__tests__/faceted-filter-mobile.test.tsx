@@ -149,9 +149,9 @@ describe('data table faceted filter mobile selection', () => {
       'enabled,disabled'
     )
 
-    const clearButton = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
-      (button) => button.textContent?.trim() === 'Clear filters'
-    )
+    const clearButton = [
+      ...document.querySelectorAll<HTMLButtonElement>('button'),
+    ].find((button) => button.textContent?.trim() === 'Clear filters')
     assert.ok(clearButton)
     await act(async () => clearButton.click())
     assert.equal(

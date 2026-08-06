@@ -84,7 +84,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
 		if !shouldNormalizeSub2APIResponsesReasoningIDs(info) {
-			requestBody = common.ReaderOnly(storage)
+			requestBody = common.NewReplayableBodyReader(storage)
 		} else {
 			originalBody, err := storage.Bytes()
 			if err != nil {
@@ -96,9 +96,8 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			}
 			if removed > 0 {
 				requestBody = bytes.NewReader(normalizedBody)
-				info.UpstreamRequestBodySize = int64(len(normalizedBody))
 			} else {
-				requestBody = common.ReaderOnly(storage)
+				requestBody = common.NewReplayableBodyReader(storage)
 			}
 		}
 	} else {
@@ -132,13 +131,12 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		}
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)
-		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
 		defer closer.Close()
 		jsonData = nil
-		info.UpstreamRequestBodySize = size
 		requestBody = body
 	}
 

@@ -337,10 +337,7 @@ export function CommonLogsFilterBar<TData>(
     [t]
   )
   const groupItems = useMemo(() => {
-    const groups = includeSelectedUsageLogGroup(
-      availableGroups,
-      filters.group
-    )
+    const groups = includeSelectedUsageLogGroup(availableGroups, filters.group)
     return groups.map((group) => ({
       value: group,
       label: group,

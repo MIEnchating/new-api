@@ -174,6 +174,8 @@ func UpdateUserSetting(userId int, setting dto.UserSetting) error {
 	return updateUserSettingCache(userId, settingValue)
 }
 
+// UpdateUserAccessToken rotates a dashboard personal access token without
+// writing a stale user snapshot back over concurrently updated fields.
 func UpdateUserAccessToken(userId int, accessToken string) error {
 	if userId == 0 {
 		return errors.New("id 为空！")
@@ -586,7 +588,7 @@ func (user *User) TransferAffQuotaToQuota(quota int, reference string) error {
 	defer tx.Rollback() // 确保在函数退出时事务能回滚
 
 	// 加锁查询用户以确保数据一致性
-	err := lockForUpdate(tx).First(&user, user.Id).Error
+	err := lockForUpdate(tx).First(user, user.Id).Error
 	if err != nil {
 		return err
 	}
