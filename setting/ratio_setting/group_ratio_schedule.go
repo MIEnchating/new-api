@@ -20,6 +20,7 @@ const (
 // GroupRatioSchedulePeriod describes one absolute group-ratio override.
 // An empty Days and Date means that the period applies every day.
 type GroupRatioSchedulePeriod struct {
+	Name    string  `json:"name,omitempty"`
 	Date    string  `json:"date,omitempty"`
 	Days    []int   `json:"days,omitempty"`
 	Start   string  `json:"start"`
@@ -118,19 +119,24 @@ func parseGroupRatioSchedules(jsonString string) (map[string]GroupRatioSchedule,
 			return nil, fmt.Errorf("group %s cannot contain more than %d periods", group, groupRatioScheduleMaxPeriods)
 		}
 		for index, period := range schedule.Periods {
+			period.Name = strings.TrimSpace(period.Name)
 			if err := validateGroupRatioSchedulePeriod(period); err != nil {
 				return nil, fmt.Errorf("group %s period %d: %w", group, index+1, err)
 			}
+			schedule.Periods[index] = period
 		}
 		if rawGroup != group {
 			delete(parsed, rawGroup)
-			parsed[group] = schedule
 		}
+		parsed[group] = schedule
 	}
 	return parsed, nil
 }
 
 func validateGroupRatioSchedulePeriod(period GroupRatioSchedulePeriod) error {
+	if len([]rune(period.Name)) > 64 {
+		return errors.New("name cannot contain more than 64 characters")
+	}
 	if _, err := parseScheduleMinute(period.Start); err != nil {
 		return fmt.Errorf("invalid start time: %w", err)
 	}

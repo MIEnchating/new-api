@@ -21,6 +21,7 @@ import { useQuery } from '@tanstack/react-query'
 import {
   ChevronDown,
   KeyRound,
+  Layers3,
   Network,
   Plus,
   Settings2,
@@ -570,32 +571,71 @@ export function ApiKeysMutateDrawer({
                 control={form.control}
                 name='group_route_enabled'
                 render={({ field }) => (
-                  <FormItem className={sideDrawerSwitchItemClassName()}>
-                    <div className='flex flex-col gap-0.5'>
-                      <FormLabel className='text-sm'>
-                        {t('Group routing')}
-                      </FormLabel>
-                      <FormDescription className='text-xs'>
-                        {t(
-                          'Route this key across multiple groups by priority and cooldown.'
-                        )}
-                      </FormDescription>
-                    </div>
+                  <FormItem className='gap-2'>
+                    <FormLabel>{t('Routing mode')}</FormLabel>
                     <FormControl>
-                      <Switch
-                        checked={!!field.value}
-                        onCheckedChange={(checked) => {
-                          field.onChange(checked)
-                          if (checked && routeFields.fields.length === 0) {
-                            routeFields.append({
-                              group: '',
-                              priority: 1,
-                              cooldown_seconds: 60,
-                              enabled: true,
-                            })
-                          }
-                        }}
-                      />
+                      <div
+                        role='radiogroup'
+                        aria-label={t('Routing mode')}
+                        className='grid grid-cols-2 gap-2'
+                      >
+                        <button
+                          type='button'
+                          role='radio'
+                          aria-checked={!field.value}
+                          onClick={() => field.onChange(false)}
+                          className={cn(
+                            'border-border hover:bg-muted/40 focus-visible:ring-ring flex h-16 min-w-0 items-center gap-3 rounded-md border px-3 text-left outline-none transition-colors focus-visible:ring-2',
+                            !field.value &&
+                              'border-primary bg-primary/5 hover:bg-primary/5'
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md',
+                              !field.value && 'bg-primary/10 text-primary'
+                            )}
+                          >
+                            <Layers3 className='size-4' />
+                          </span>
+                          <span className='min-w-0 truncate text-sm font-medium'>
+                            {t('Single group')}
+                          </span>
+                        </button>
+                        <button
+                          type='button'
+                          role='radio'
+                          aria-checked={!!field.value}
+                          onClick={() => {
+                            field.onChange(true)
+                            if (routeFields.fields.length === 0) {
+                              routeFields.append({
+                                group: '',
+                                priority: 1,
+                                cooldown_seconds: 60,
+                                enabled: true,
+                              })
+                            }
+                          }}
+                          className={cn(
+                            'border-border hover:bg-muted/40 focus-visible:ring-ring flex h-16 min-w-0 items-center gap-3 rounded-md border px-3 text-left outline-none transition-colors focus-visible:ring-2',
+                            field.value &&
+                              'border-primary bg-primary/5 hover:bg-primary/5'
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md',
+                              field.value && 'bg-primary/10 text-primary'
+                            )}
+                          >
+                            <Network className='size-4' />
+                          </span>
+                          <span className='min-w-0 truncate text-sm font-medium'>
+                            {t('Group routing')}
+                          </span>
+                        </button>
+                      </div>
                     </FormControl>
                   </FormItem>
                 )}

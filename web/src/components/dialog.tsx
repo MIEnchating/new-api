@@ -91,6 +91,7 @@ export function Dialog({
         </DialogHeader>
 
         <div
+          data-slot='dialog-body'
           className={cn(
             '-mx-1 min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain',
             'h-[var(--dialog-content-height)] max-h-[calc(100vh-14rem)]'

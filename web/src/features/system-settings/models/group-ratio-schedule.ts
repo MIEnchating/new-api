@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 export type GroupRatioSchedulePeriod = {
+  name?: string
   date?: string
   days?: number[]
   start: string
@@ -66,6 +67,9 @@ export function isGroupRatioScheduleMap(value: unknown): boolean {
       if (!period || typeof period !== 'object') return false
       const item = period as GroupRatioSchedulePeriod
       if (
+        (item.name !== undefined &&
+          (typeof item.name !== 'string' ||
+            [...item.name.trim()].length > 64)) ||
         typeof item.start !== 'string' ||
         typeof item.end !== 'string' ||
         typeof item.ratio !== 'number' ||

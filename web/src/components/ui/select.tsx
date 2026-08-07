@@ -88,6 +88,7 @@ function SelectTrigger({
 function SelectContent({
   className,
   children,
+  portalContainer,
   side = 'bottom',
   sideOffset = 4,
   align = 'center',
@@ -98,7 +99,9 @@ function SelectContent({
   Pick<
     SelectPrimitive.Positioner.Props,
     'align' | 'alignOffset' | 'side' | 'sideOffset' | 'alignItemWithTrigger'
-  >) {
+  > & {
+    portalContainer?: SelectPrimitive.Portal.Props['container']
+  }) {
   const isMobile = useMediaQuery('(max-width: 640px)')
 
   const content = (
@@ -132,7 +135,11 @@ function SelectContent({
     return content
   }
 
-  return <SelectPrimitive.Portal>{content}</SelectPrimitive.Portal>
+  return (
+    <SelectPrimitive.Portal container={portalContainer}>
+      {content}
+    </SelectPrimitive.Portal>
+  )
 }
 
 function SelectLabel({

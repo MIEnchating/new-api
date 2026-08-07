@@ -67,7 +67,7 @@ reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 describe('compact date-time range picker mobile layout', () => {
   after(() => domWindow.close())
 
-  test('opens with two-column time controls and a compact preset grid', async () => {
+  test('places quick ranges inside the responsive time panel', async () => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
@@ -97,12 +97,17 @@ describe('compact date-time range picker mobile layout', () => {
     const presetGrid = document.querySelector<HTMLElement>(
       '[data-mobile-preset-grid]'
     )
+    const timePanel = document.querySelector<HTMLElement>(
+      '[data-slot="date-time-range-time-panel"]'
+    )
     assert.ok(timeGrid)
     assert.ok(presetGrid)
+    assert.ok(timePanel)
+    assert.equal(timePanel.contains(presetGrid), true)
     assert.equal(timeGrid.classList.contains('grid-cols-2'), true)
     assert.equal(timeGrid.classList.contains('sm:block'), true)
     assert.equal(presetGrid.classList.contains('grid-cols-3'), true)
-    assert.equal(presetGrid.classList.contains('sm:grid-cols-5'), true)
+    assert.equal(presetGrid.classList.contains('sm:grid-cols-2'), true)
 
     await act(async () => root.unmount())
     container.remove()

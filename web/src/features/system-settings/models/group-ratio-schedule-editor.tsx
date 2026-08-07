@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { ArrowDown, ArrowUp, CalendarClock, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { DatePicker } from '@/components/date-picker'
@@ -77,6 +77,7 @@ function readSchedule(value: string, groupName: string): GroupRatioSchedule {
     enabled: schedule.enabled,
     periods: schedule.periods.map((period) => ({
       ...period,
+      name: period.name?.trim() || undefined,
       date: period.date || undefined,
       days: period.days?.length ? [...period.days] : undefined,
     })),
@@ -88,9 +89,23 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
   const [draft, setDraft] = useState<GroupRatioSchedule>(() =>
     readSchedule(props.value, props.groupName)
   )
+  const [periodLabels, setPeriodLabels] = useState(() =>
+    readSchedule(props.value, props.groupName).periods.map(
+      (_, index) => index + 1
+    )
+  )
+  const nextPeriodLabel = useRef(periodLabels.length + 1)
+  const [showValidationErrors, setShowValidationErrors] = useState(false)
 
   useEffect(() => {
-    if (props.open) setDraft(readSchedule(props.value, props.groupName))
+    if (props.open) {
+      const nextDraft = readSchedule(props.value, props.groupName)
+      const nextLabels = nextDraft.periods.map((_, index) => index + 1)
+      setDraft(nextDraft)
+      setPeriodLabels(nextLabels)
+      nextPeriodLabel.current = nextLabels.length + 1
+      setShowValidationErrors(false)
+    }
   }, [props.groupName, props.open, props.value])
 
   const isValid = useMemo(
@@ -118,12 +133,48 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
       ;[periods[index], periods[target]] = [periods[target], periods[index]]
       return { ...current, periods }
     })
+    setPeriodLabels((current) => {
+      const labels = [...current]
+      ;[labels[index], labels[target]] = [labels[target], labels[index]]
+      return labels
+    })
+  }
+
+  const addPeriod = () => {
+    const label = nextPeriodLabel.current
+    nextPeriodLabel.current += 1
+    setDraft((current) => ({
+      ...current,
+      periods: [...current.periods, createPeriod(props.baseRatio)],
+    }))
+    setPeriodLabels((current) => [...current, label])
+  }
+
+  const deletePeriod = (index: number) => {
+    setDraft((current) => ({
+      ...current,
+      periods: current.periods.filter(
+        (_, periodIndex) => periodIndex !== index
+      ),
+    }))
+    setPeriodLabels((current) =>
+      current.filter((_, periodIndex) => periodIndex !== index)
+    )
   }
 
   const handleSave = () => {
-    if (!isValid) return
+    if (!isValid) {
+      setShowValidationErrors(true)
+      return
+    }
     const schedules = parseGroupRatioSchedules(props.value)
-    schedules[props.groupName] = draft
+    schedules[props.groupName] = {
+      ...draft,
+      periods: draft.periods.map((period) => ({
+        ...period,
+        name: period.name?.trim() || undefined,
+      })),
+    }
     props.onChange(serializeGroupRatioSchedules(schedules))
     props.onOpenChange(false)
   }
@@ -148,9 +199,7 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
           <Button variant='outline' onClick={() => props.onOpenChange(false)}>
             {t('Cancel')}
           </Button>
-          <Button onClick={handleSave} disabled={!isValid}>
-            {t('Save changes')}
-          </Button>
+          <Button onClick={handleSave}>{t('Save changes')}</Button>
         </>
       }
     >
@@ -189,16 +238,7 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
               })}
             </p>
           </div>
-          <Button
-            type='button'
-            size='sm'
-            onClick={() =>
-              setDraft((current) => ({
-                ...current,
-                periods: [...current.periods, createPeriod(props.baseRatio)],
-              }))
-            }
-          >
+          <Button type='button' size='sm' onClick={addPeriod}>
             <Plus className='mr-2 size-4' />
             {t('Add period')}
           </Button>
@@ -213,19 +253,34 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
             {draft.periods.map((period, index) => {
               const scope = getGroupRatioScheduleScope(period)
               const periodValid = isGroupRatioSchedulePeriodValid(period)
+              const periodLabel = periodLabels[index] ?? index + 1
               return (
                 <div
-                  key={index}
+                  key={periodLabel}
                   className={cn(
                     'rounded-lg border p-3 sm:p-4',
-                    !periodValid && 'border-destructive/60'
+                    showValidationErrors &&
+                      !periodValid &&
+                      'border-destructive/60'
                   )}
                 >
                   <div className='mb-3 flex items-center justify-between gap-3'>
-                    <div className='flex items-center gap-2'>
-                      <span className='text-sm font-medium'>
-                        {t('Period {{index}}', { index: index + 1 })}
-                      </span>
+                    <div className='flex min-w-0 items-center gap-2'>
+                      <Input
+                        value={period.name || ''}
+                        maxLength={64}
+                        aria-label={t('Period name')}
+                        placeholder={t('Period {{index}}', {
+                          index: periodLabel,
+                        })}
+                        onChange={(event) =>
+                          updatePeriod(index, (current) => ({
+                            ...current,
+                            name: event.target.value || undefined,
+                          }))
+                        }
+                        className='h-8 w-40 min-w-0 font-medium sm:w-52'
+                      />
                       <Switch
                         checked={period.enabled !== false}
                         onCheckedChange={(enabled) =>
@@ -262,14 +317,7 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
                         type='button'
                         variant='ghost'
                         size='icon-sm'
-                        onClick={() =>
-                          setDraft((current) => ({
-                            ...current,
-                            periods: current.periods.filter(
-                              (_, periodIndex) => periodIndex !== index
-                            ),
-                          }))
-                        }
+                        onClick={() => deletePeriod(index)}
                         aria-label={t('Delete period')}
                       >
                         <Trash2 className='size-4' />
@@ -345,6 +393,7 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
                       <div className='space-y-1.5 sm:col-span-2 lg:col-span-3'>
                         <Label>{t('Specific date')}</Label>
                         <DatePicker
+                          clearable={false}
                           selected={
                             period.date
                               ? new Date(`${period.date}T00:00:00`)
@@ -376,32 +425,26 @@ export function GroupRatioScheduleEditor(props: GroupRatioScheduleEditorProps) {
                     )}
                     <div className='space-y-1.5'>
                       <Label>{t('Target ratio')}</Label>
-                      <div className='relative'>
-                        <Input
-                          type='number'
-                          min={0}
-                          step={0.01}
-                          value={
-                            Number.isFinite(period.ratio) ? period.ratio : ''
-                          }
-                          className='pr-8'
-                          onChange={(event) =>
-                            updatePeriod(index, (current) => ({
-                              ...current,
-                              ratio:
-                                event.target.value === ''
-                                  ? Number.NaN
-                                  : Number(event.target.value),
-                            }))
-                          }
-                        />
-                        <span className='text-muted-foreground pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-xs'>
-                          &times;
-                        </span>
-                      </div>
+                      <Input
+                        type='number'
+                        min={0}
+                        step={0.01}
+                        value={
+                          Number.isFinite(period.ratio) ? period.ratio : ''
+                        }
+                        onChange={(event) =>
+                          updatePeriod(index, (current) => ({
+                            ...current,
+                            ratio:
+                              event.target.value === ''
+                                ? Number.NaN
+                                : Number(event.target.value),
+                          }))
+                        }
+                      />
                     </div>
                   </div>
-                  {!periodValid && (
+                  {showValidationErrors && !periodValid && (
                     <p className='text-destructive mt-2 text-xs'>
                       {t(
                         'Complete the time, scope, and ratio for this period.'

@@ -16,23 +16,30 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CalendarClock } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import {
+  fromDate,
+  getLocalTimeZone,
+  toCalendarDateTime,
+} from '@internationalized/date'
+import { CalendarClock, X } from 'lucide-react'
+import { useCallback, useRef, useState } from 'react'
+import {
+  Button,
+  DatePicker as ReactAriaDatePicker,
+  Group,
+  I18nProvider,
+} from 'react-aria-components'
 import { useTranslation } from 'react-i18next'
 
 import {
-  getCalendarLocale,
-  getDateFormat,
-} from '@/components/date-time-picker-utils'
-import { TimePicker } from '@/components/time-picker'
-import { Button } from '@/components/ui/button'
-import { Calendar } from '@/components/ui/calendar'
+  AriaCalendarPopover,
+  SegmentedDateInput,
+} from '@/components/aria-date-time-primitives'
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import dayjs from '@/lib/dayjs'
+  getCalendarPopoverPlacement,
+  getReactAriaLocale,
+  type CalendarPopoverPlacement,
+} from '@/components/date-time-picker-utils'
 import { cn } from '@/lib/utils'
 
 interface DateTimePickerProps {
@@ -43,10 +50,6 @@ interface DateTimePickerProps {
   disabled?: boolean
 }
 
-function toTime(date: Date | undefined) {
-  return date ? dayjs(date).format('HH:mm') : '00:00'
-}
-
 export function DateTimePicker({
   value,
   onChange,
@@ -55,115 +58,77 @@ export function DateTimePicker({
   disabled = false,
 }: DateTimePickerProps) {
   const { t, i18n } = useTranslation()
-  const [open, setOpen] = useState(false)
-  const [draft, setDraft] = useState<Date | undefined>(value)
-  const [time, setTime] = useState(toTime(value))
-  const language = i18n.resolvedLanguage ?? i18n.language
-  const calendarLocale = getCalendarLocale(language)
-  const currentYear = new Date().getFullYear()
-
-  useEffect(() => {
-    setDraft(value)
-    setTime(toTime(value))
-  }, [value])
-
-  const handleOpenChange = (nextOpen: boolean) => {
-    if (nextOpen) {
-      setDraft(value)
-      setTime(toTime(value))
-    }
-    setOpen(nextOpen)
-  }
-
-  const mergeTime = (date: Date, nextTime: string) => {
-    const [hours, minutes] = nextTime.split(':').map(Number)
-    const next = new Date(date)
-    next.setHours(hours, minutes, 0, 0)
-    return next
-  }
+  const timeZone = getLocalTimeZone()
+  const ariaValue = value ? toCalendarDateTime(fromDate(value, timeZone)) : null
+  const label = placeholder ?? t('Select date')
+  const [portalContainer, setPortalContainer] = useState<Element>()
+  const [calendarPlacement, setCalendarPlacement] =
+    useState<CalendarPopoverPlacement>('bottom start')
+  const groupElementRef = useRef<HTMLDivElement | null>(null)
+  const setGroupRef = useCallback((element: HTMLDivElement | null) => {
+    groupElementRef.current = element
+    setPortalContainer(
+      element?.closest(
+        '[data-slot="dialog-content"], [data-slot="sheet-content"]'
+      ) ?? undefined
+    )
+  }, [])
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger
-        render={
-          <Button
-            type='button'
-            variant='outline'
-            disabled={disabled}
-            className={cn(
-              'w-full min-w-0 justify-start gap-2 px-2.5 font-normal tabular-nums',
-              !value && 'text-muted-foreground',
-              className
-            )}
-          />
+    <I18nProvider
+      locale={getReactAriaLocale(
+        i18n.resolvedLanguage ?? i18n.language ?? 'en'
+      )}
+    >
+      <ReactAriaDatePicker
+        aria-label={label}
+        value={ariaValue}
+        placeholderValue={
+          ariaValue ?? toCalendarDateTime(fromDate(new Date(), timeZone))
         }
+        granularity='minute'
+        hourCycle={24}
+        isDisabled={disabled}
+        shouldCloseOnSelect
+        onChange={(nextValue) => {
+          const nextDate = nextValue?.toDate(timeZone)
+          nextDate?.setSeconds(0, 0)
+          onChange?.(nextDate)
+        }}
+        className={cn('w-full min-w-0', className)}
       >
-        <CalendarClock className='text-muted-foreground size-4 shrink-0' />
-        <span className='truncate'>
-          {value
-            ? `${dayjs(value).format(getDateFormat(language))} ${dayjs(value).format('HH:mm')}`
-            : (placeholder ?? t('Select date'))}
-        </span>
-      </PopoverTrigger>
-      <PopoverContent
-        align='start'
-        collisionPadding={8}
-        className='w-auto max-w-[calc(100vw-1rem)] overflow-hidden p-0'
-      >
-        <Calendar
-          mode='single'
-          selected={draft}
-          defaultMonth={draft ?? value}
-          captionLayout='dropdown'
-          onSelect={(selectedDate) =>
-            setDraft(selectedDate ? mergeTime(selectedDate, time) : undefined)
-          }
-          locale={calendarLocale}
-          startMonth={new Date(currentYear - 100, 0)}
-          endMonth={new Date(currentYear + 100, 11)}
-        />
-        <div className='border-t p-3'>
-          <div className='text-muted-foreground mb-1.5 text-xs'>
-            {t('Time')}
-          </div>
-          <TimePicker
-            value={time}
-            disabled={!draft}
-            onChange={(nextTime) => {
-              setTime(nextTime)
-              setDraft((current) =>
-                current ? mergeTime(current, nextTime) : current
+        <Group
+          ref={setGroupRef}
+          className='border-input focus-within:border-ring focus-within:ring-ring/50 dark:bg-input/30 flex min-h-9 w-full min-w-0 items-center rounded-lg border bg-transparent transition-colors focus-within:ring-3 data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50'
+        >
+          <SegmentedDateInput className='flex-wrap' />
+          {ariaValue && (
+            <button
+              type='button'
+              aria-label={t('Clear')}
+              className='text-muted-foreground hover:text-foreground focus-visible:ring-ring flex size-8 shrink-0 items-center justify-center rounded-md outline-none focus-visible:ring-2'
+              onClick={() => onChange?.(undefined)}
+            >
+              <X className='size-3.5' />
+            </button>
+          )}
+          <Button
+            aria-label={label}
+            onPress={() =>
+              setCalendarPlacement(
+                getCalendarPopoverPlacement(groupElementRef.current)
               )
-            }}
-          />
-        </div>
-        <div className='flex items-center justify-between border-t px-3 py-2.5'>
-          <Button
-            type='button'
-            variant='ghost'
-            size='sm'
-            onClick={() => {
-              setDraft(undefined)
-              setTime('00:00')
-              onChange?.(undefined)
-              setOpen(false)
-            }}
+            }
+            className='text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring mr-1 flex size-8 shrink-0 items-center justify-center rounded-md outline-none focus-visible:ring-2'
           >
-            {t('Clear')}
+            <CalendarClock className='size-4' />
           </Button>
-          <Button
-            type='button'
-            size='sm'
-            disabled={!draft}
-            onClick={() => {
-              onChange?.(draft)
-              setOpen(false)
-            }}
-          >
-            {t('Confirm')}
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
+        </Group>
+        <AriaCalendarPopover
+          portalContainer={portalContainer}
+          placement={calendarPlacement}
+        />
+      </ReactAriaDatePicker>
+    </I18nProvider>
   )
 }

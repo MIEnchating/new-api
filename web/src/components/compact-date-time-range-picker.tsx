@@ -195,7 +195,10 @@ export function CompactDateTimeRangePicker({
             />
           </div>
 
-          <div className='min-w-0 p-3 sm:flex sm:flex-col sm:justify-center sm:p-4'>
+          <div
+            data-slot='date-time-range-time-panel'
+            className='min-w-0 p-3 sm:flex sm:flex-col sm:justify-center sm:p-4'
+          >
             <div className='flex items-center gap-2 pb-2 sm:pb-3'>
               <Clock3 className='text-muted-foreground size-4' />
               <span className='text-sm font-medium'>{t('Time')}</span>
@@ -241,35 +244,35 @@ export function CompactDateTimeRangePicker({
                 />
               </div>
             </div>
-          </div>
-        </div>
 
-        <div className='border-t px-3 py-2.5 sm:px-4 sm:py-3'>
-          <div className='text-muted-foreground mb-1.5 text-xs sm:mb-2'>
-            {t('Quick ranges')}
-          </div>
-          <div
-            data-mobile-preset-grid
-            className='grid grid-cols-3 gap-1.5 sm:grid-cols-5'
-          >
-            <PresetButton onClick={() => applyPreset('today')}>
-              {t('Today')}
-            </PresetButton>
-            <PresetButton onClick={() => applyPreset('7d')}>
-              {t('7 Days')}
-            </PresetButton>
-            <PresetButton onClick={() => applyPreset('week')}>
-              {t('This week')}
-            </PresetButton>
-            <PresetButton onClick={() => applyPreset('30d')}>
-              {t('30 Days')}
-            </PresetButton>
-            <PresetButton
-              className='col-span-2 sm:col-span-1'
-              onClick={() => applyPreset('month')}
-            >
-              {t('This month')}
-            </PresetButton>
+            <div className='mt-4 border-t pt-3'>
+              <div className='text-muted-foreground mb-2 text-xs'>
+                {t('Quick ranges')}
+              </div>
+              <div
+                data-mobile-preset-grid
+                className='grid grid-cols-3 gap-1.5 sm:grid-cols-2'
+              >
+                <PresetButton onClick={() => applyPreset('today')}>
+                  {t('Today')}
+                </PresetButton>
+                <PresetButton onClick={() => applyPreset('7d')}>
+                  {t('7 Days')}
+                </PresetButton>
+                <PresetButton onClick={() => applyPreset('week')}>
+                  {t('This week')}
+                </PresetButton>
+                <PresetButton onClick={() => applyPreset('30d')}>
+                  {t('30 Days')}
+                </PresetButton>
+                <PresetButton
+                  className='col-span-2'
+                  onClick={() => applyPreset('month')}
+                >
+                  {t('This month')}
+                </PresetButton>
+              </div>
+            </div>
           </div>
         </div>
 

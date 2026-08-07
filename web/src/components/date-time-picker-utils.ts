@@ -35,6 +35,39 @@ export function getDateFormat(language: string) {
   return normalized.startsWith('zh') ? 'YYYY年M月D日' : 'YYYY-MM-DD'
 }
 
+export function getReactAriaLocale(language: string) {
+  const normalized = language.toLowerCase()
+  if (normalized === 'zh-tw' || normalized.startsWith('zh-hant')) {
+    return 'zh-TW'
+  }
+  if (normalized.startsWith('zh')) return 'zh-CN'
+  return language
+}
+
+export type CalendarPopoverPlacement = 'top start' | 'bottom start'
+
+export function getCalendarPopoverPlacement(
+  trigger: HTMLElement | null
+): CalendarPopoverPlacement {
+  if (!trigger) return 'bottom start'
+
+  const triggerRect = trigger.getBoundingClientRect()
+  const boundary = trigger.closest<HTMLElement>(
+    '[data-slot="dialog-body"], [data-slot="sheet-content"]'
+  )
+  const boundaryRect = boundary?.getBoundingClientRect()
+  const boundaryTop = boundaryRect?.top ?? 0
+  const boundaryBottom =
+    boundaryRect?.bottom ??
+    (typeof window === 'undefined' ? triggerRect.bottom : window.innerHeight)
+  const spaceAbove = triggerRect.top - boundaryTop
+  const spaceBelow = boundaryBottom - triggerRect.bottom
+  const calendarHeight = 320
+
+  if (spaceBelow >= calendarHeight) return 'bottom start'
+  return spaceAbove > spaceBelow ? 'top start' : 'bottom start'
+}
+
 export const hourOptions = Array.from({ length: 24 }, (_, index) =>
   index.toString().padStart(2, '0')
 )

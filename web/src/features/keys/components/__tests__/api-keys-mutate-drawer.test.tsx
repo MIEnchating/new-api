@@ -369,3 +369,37 @@ describe('API keys mutate drawer Auto group integration', () => {
     assert.deepEqual(createdPayloads[0]?.auto_groups, ['vip'])
   })
 })
+
+describe('API keys mutate drawer routing mode', () => {
+  test('switches between single-group and group-routing cards', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads)
+    await renderCreateDrawer()
+
+    const modeCards = [
+      ...document.querySelectorAll<HTMLButtonElement>('[role="radio"]'),
+    ]
+    assert.equal(modeCards.length, 2)
+    assert.equal(modeCards[0]?.getAttribute('aria-checked'), 'true')
+    assert.equal(modeCards[1]?.getAttribute('aria-checked'), 'false')
+
+    await act(async () => modeCards[1]?.click())
+    assert.equal(modeCards[0]?.getAttribute('aria-checked'), 'false')
+    assert.equal(modeCards[1]?.getAttribute('aria-checked'), 'true')
+    assert.equal(
+      document.body.textContent?.includes('Group routing rules'),
+      true
+    )
+    assert.equal(
+      document.querySelectorAll(
+        'button[aria-label="Remove group routing rule"]'
+      ).length,
+      1
+    )
+
+    await act(async () => modeCards[0]?.click())
+    assert.equal(modeCards[0]?.getAttribute('aria-checked'), 'true')
+    assert.equal(modeCards[1]?.getAttribute('aria-checked'), 'false')
+    assert.ok(getControlByLabel<HTMLButtonElement>('Group'))
+  })
+})

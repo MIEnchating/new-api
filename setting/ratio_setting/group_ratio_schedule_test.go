@@ -1,6 +1,8 @@
 package ratio_setting
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -114,4 +116,25 @@ func TestGroupRatioScheduleRejectsInvalidPeriodsWithoutReplacingState(t *testing
 
 	_, exists := GetGroupRatioSchedule("valid")
 	assert.True(t, exists)
+}
+
+func TestGroupRatioSchedulePreservesOptionalPeriodName(t *testing.T) {
+	setupGroupRatioScheduleTest(t)
+	require.NoError(t, UpdateGroupRatioScheduleByJSONString(`{
+		"vip": {"enabled": true, "periods": [
+			{"name":"  Member Day  ","start":"00:00","end":"23:59","ratio":0.5}
+		]}
+	}`))
+
+	schedule, exists := GetGroupRatioSchedule("vip")
+	require.True(t, exists)
+	require.Len(t, schedule.Periods, 1)
+	assert.Equal(t, "Member Day", schedule.Periods[0].Name)
+	assert.Contains(t, GroupRatioSchedule2JSONString(), `"name":"Member Day"`)
+
+	tooLong := strings.Repeat("a", 65)
+	require.Error(t, UpdateGroupRatioScheduleByJSONString(fmt.Sprintf(
+		`{"vip":{"enabled":true,"periods":[{"name":%q,"start":"00:00","end":"23:59","ratio":1}]}}`,
+		tooLong,
+	)))
 }

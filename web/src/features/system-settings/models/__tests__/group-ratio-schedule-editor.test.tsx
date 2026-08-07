@@ -150,9 +150,22 @@ describe('group ratio schedule editor', () => {
     assert.ok(ratioInput)
     assert.equal(ratioInput.value, '1')
 
+    const nameInput = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Period name"]'
+    )
+    assert.ok(nameInput)
+    await setInputValue(nameInput, '  Member Day  ')
+
     await setInputValue(ratioInput, '')
     assert.equal(ratioInput.value, '')
-    assert.equal(findButton('Save changes').disabled, true)
+    assert.equal(findButton('Save changes').disabled, false)
+    await act(async () => findButton('Save changes').click())
+    assert.equal(savedValues.length, 0)
+    assert.ok(
+      document.body.textContent?.includes(
+        'Complete the time, scope, and ratio for this period.'
+      )
+    )
 
     await setInputValue(ratioInput, '0.25')
     assert.equal(findButton('Save changes').disabled, false)
@@ -164,6 +177,7 @@ describe('group ratio schedule editor', () => {
         enabled: true,
         periods: [
           {
+            name: 'Member Day',
             start: '00:00',
             end: '23:59',
             ratio: 0.25,
@@ -231,5 +245,70 @@ describe('group ratio schedule editor', () => {
     await act(async () => root.unmount())
     container.remove()
     await i18n.changeLanguage('en')
+  })
+
+  test('moves the period label together with its content', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+
+    await act(async () =>
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <GroupRatioScheduleEditor
+            open
+            onOpenChange={() => {}}
+            groupName='vip'
+            baseRatio={1}
+            value={JSON.stringify({
+              vip: {
+                enabled: true,
+                periods: [
+                  {
+                    name: 'Morning',
+                    start: '08:00',
+                    end: '10:00',
+                    ratio: 1,
+                    enabled: true,
+                  },
+                  {
+                    name: 'Evening',
+                    start: '18:00',
+                    end: '20:00',
+                    ratio: 2,
+                    enabled: true,
+                  },
+                ],
+              },
+            })}
+            onChange={() => {}}
+          />
+        </I18nextProvider>
+      )
+    )
+    await act(async () => undefined)
+
+    const moveDown = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Move down"]'
+    )
+    assert.ok(moveDown)
+    await act(async () => moveDown.click())
+
+    const periodNames = [
+      ...document.querySelectorAll<HTMLInputElement>(
+        'input[aria-label="Period name"]'
+      ),
+    ].map((input) => ({ value: input.value, placeholder: input.placeholder }))
+    assert.deepEqual(periodNames, [
+      { value: 'Evening', placeholder: 'Period 2' },
+      { value: 'Morning', placeholder: 'Period 1' },
+    ])
+    const times = [
+      ...document.querySelectorAll<HTMLInputElement>('input[type="time"]'),
+    ].map((input) => input.value)
+    assert.deepEqual(times, ['18:00', '20:00', '08:00', '10:00'])
+
+    await act(async () => root.unmount())
+    container.remove()
   })
 })

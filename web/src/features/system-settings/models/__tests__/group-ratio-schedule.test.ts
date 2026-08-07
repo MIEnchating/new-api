@@ -36,7 +36,13 @@ describe('group ratio schedule serialization', () => {
       vip: {
         enabled: true,
         periods: [
-          { start: '23:00', end: '02:00', ratio: 0.5, enabled: true },
+          {
+            name: 'Member Day',
+            start: '23:00',
+            end: '02:00',
+            ratio: 0.5,
+            enabled: true,
+          },
           {
             days: [1, 3, 5],
             start: '08:00',
@@ -63,6 +69,7 @@ describe('group ratio schedule serialization', () => {
       'weekdays'
     )
     assert.equal(getGroupRatioScheduleScope(schedules.vip.periods[2]), 'date')
+    assert.equal(schedules.vip.periods[0].name, 'Member Day')
   })
 
   test('renames and removes schedule keys with their groups', () => {
@@ -191,6 +198,22 @@ describe('group ratio schedule serialization', () => {
         vip: {
           enabled: true,
           periods: [{ days: [1, 1], start: '00:00', end: '23:59', ratio: 0.5 }],
+        },
+      }),
+      false
+    )
+    assert.equal(
+      isGroupRatioScheduleMap({
+        vip: {
+          enabled: true,
+          periods: [
+            {
+              name: 'a'.repeat(65),
+              start: '00:00',
+              end: '23:59',
+              ratio: 0.5,
+            },
+          ],
         },
       }),
       false
