@@ -274,6 +274,12 @@ func migrateDB() error {
 		&Midjourney{},
 		&TopUp{},
 		&BillingTransaction{},
+		&AffiliateReward{},
+		&LotteryCampaign{},
+		&LotteryProfile{},
+		&LotteryDailyActivity{},
+		&LotteryChanceGrant{},
+		&LotteryDraw{},
 		&QuotaData{},
 		&Task{},
 		&Model{},
@@ -308,6 +314,9 @@ func migrateDB() error {
 		return err
 	}
 	if err := InitializeExternalIdentityClaims(); err != nil {
+		return err
+	}
+	if err := initializeLotteryCampaign(); err != nil {
 		return err
 	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
@@ -345,6 +354,12 @@ func migrateDBFast() error {
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
 		{&BillingTransaction{}, "BillingTransaction"},
+		{&AffiliateReward{}, "AffiliateReward"},
+		{&LotteryCampaign{}, "LotteryCampaign"},
+		{&LotteryProfile{}, "LotteryProfile"},
+		{&LotteryDailyActivity{}, "LotteryDailyActivity"},
+		{&LotteryChanceGrant{}, "LotteryChanceGrant"},
+		{&LotteryDraw{}, "LotteryDraw"},
 		{&QuotaData{}, "QuotaData"},
 		{&Task{}, "Task"},
 		{&Model{}, "Model"},
@@ -391,6 +406,9 @@ func migrateDBFast() error {
 		return err
 	}
 	if err := InitializeExternalIdentityClaims(); err != nil {
+		return err
+	}
+	if err := initializeLotteryCampaign(); err != nil {
 		return err
 	}
 	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {

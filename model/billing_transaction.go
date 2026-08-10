@@ -17,6 +17,8 @@ const (
 	BillingTypeRedemption      = "redemption"
 	BillingTypeAffiliate       = "affiliate_transfer"
 	BillingTypeAdminAdjustment = "admin_adjustment"
+	BillingTypeLottery         = "lottery_reward"
+	BillingTypeLotteryReversal = "lottery_reversal"
 )
 
 var billingHistoryTypes = map[string]struct{}{
@@ -24,6 +26,8 @@ var billingHistoryTypes = map[string]struct{}{
 	BillingTypeRedemption:      {},
 	BillingTypeAffiliate:       {},
 	BillingTypeAdminAdjustment: {},
+	BillingTypeLottery:         {},
+	BillingTypeLotteryReversal: {},
 }
 
 type BillingTransaction struct {
@@ -89,6 +93,8 @@ func newBillingHistoryTypeCounts() BillingHistoryTypeCounts {
 		BillingTypeRedemption:      0,
 		BillingTypeAffiliate:       0,
 		BillingTypeAdminAdjustment: 0,
+		BillingTypeLottery:         0,
+		BillingTypeLotteryReversal: 0,
 	}
 }
 
@@ -98,6 +104,8 @@ func newBillingHistoryTypeQuotas() BillingHistoryTypeQuotas {
 		BillingTypeRedemption:      0,
 		BillingTypeAffiliate:       0,
 		BillingTypeAdminAdjustment: 0,
+		BillingTypeLottery:         0,
+		BillingTypeLotteryReversal: 0,
 	}
 }
 
@@ -108,6 +116,8 @@ func normalizeBillingHistoryTypes(types []string) []string {
 			BillingTypeRedemption,
 			BillingTypeAffiliate,
 			BillingTypeAdminAdjustment,
+			BillingTypeLottery,
+			BillingTypeLotteryReversal,
 		}
 	}
 	normalized := make([]string, 0, len(types))
@@ -598,7 +608,10 @@ func GetBillingHistoryWithTypeStats(filter BillingHistoryFilter) ([]BillingHisto
 		typeQuotas[BillingTypeRedemption] = quota
 	}
 	for _, billingType := range filter.Types {
-		if billingType == BillingTypeAffiliate || billingType == BillingTypeAdminAdjustment {
+		if billingType == BillingTypeAffiliate ||
+			billingType == BillingTypeAdminAdjustment ||
+			billingType == BillingTypeLottery ||
+			billingType == BillingTypeLotteryReversal {
 			storedItems, count, quota, err := queryStoredBillingTransactions(filter, []string{billingType}, limit)
 			if err != nil {
 				return nil, 0, nil, nil, err

@@ -132,6 +132,14 @@ export function SidebarModulesSection({
         title: t('Profile'),
         description: t('Personal settings and profile management.'),
       },
+      affiliate: {
+        title: t('Invitation Rebates'),
+        description: t('Referral link, rewards, and invite income history.'),
+      },
+      lottery: {
+        title: t('Lottery Center'),
+        description: t('Usage rewards, activity streaks, and prize draws.'),
+      },
     },
     admin: {
       channel: {

@@ -48,12 +48,9 @@ import {
 } from '@/components/ui/sheet'
 import type {
   RecentRequestStats,
-  UptimeHeartbeat,
   UptimeMonitor,
 } from '@/features/dashboard/types'
 import { useMediaQuery } from '@/hooks'
-
-import { getOrderedHeartbeats } from './monitor-utils'
 
 type MonitorDetailsDrawerProps = {
   open: boolean
@@ -68,33 +65,19 @@ type MonitorChartPoint = {
   latency: number | null
 }
 
-function formatChartTime(
-  value: string | undefined,
-  options?: Intl.DateTimeFormatOptions
-) {
-  if (!value) return '--'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, {
-    ...options,
-    hourCycle: 'h23',
-  })
-}
-
-function buildChartData(heartbeats: UptimeHeartbeat[]): MonitorChartPoint[] {
-  return heartbeats.map((heartbeat) => {
-    return {
-      time: formatChartTime(heartbeat.time, {
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      fullTime: formatChartTime(heartbeat.time),
-      latency:
-        typeof heartbeat.ping === 'number' && Number.isFinite(heartbeat.ping)
-          ? heartbeat.ping
-          : null,
-    }
-  })
+function buildChartData(
+  stats: RecentRequestStats | null,
+  labels: { fiveMinutes: string; thirtyMinutes: string; oneHour: string }
+): MonitorChartPoint[] {
+  return [
+    { time: labels.fiveMinutes, stats: stats?.['5m'] },
+    { time: labels.thirtyMinutes, stats: stats?.['30m'] },
+    { time: labels.oneHour, stats: stats?.['1h'] },
+  ].map((item) => ({
+    time: item.time,
+    fullTime: item.time,
+    latency: item.stats?.has_data ? (item.stats.avg_latency_ms ?? null) : null,
+  }))
 }
 
 function RealRequestChart(props: { stats: RecentRequestStats | null }) {
@@ -199,6 +182,7 @@ function TrendChart(props: {
   unit: string
 }) {
   const { t } = useTranslation()
+  const hasData = props.data.some((item) => item[props.dataKey] !== null)
   const config = {
     [props.dataKey]: {
       label: props.title,
@@ -209,7 +193,7 @@ function TrendChart(props: {
   return (
     <section className='min-w-0 border-t pt-4 first:border-t-0 first:pt-0'>
       <h3 className='mb-3 text-sm font-medium'>{props.title}</h3>
-      {props.data.length > 0 ? (
+      {hasData ? (
         <ChartContainer
           config={config}
           className='aspect-auto h-52 w-full sm:h-60'
@@ -276,11 +260,15 @@ function TrendChart(props: {
 export function MonitorDetailsDrawer(props: MonitorDetailsDrawerProps) {
   const { t } = useTranslation()
   const isMobile = useMediaQuery('(max-width: 640px)')
-  const heartbeats = useMemo(
-    () => getOrderedHeartbeats(props.monitor?.heartbeats),
-    [props.monitor?.heartbeats]
+  const chartData = useMemo(
+    () =>
+      buildChartData(props.requestStats, {
+        fiveMinutes: t('5 minutes'),
+        thirtyMinutes: t('30 minutes'),
+        oneHour: t('1 hour'),
+      }),
+    [props.requestStats, t]
   )
-  const chartData = useMemo(() => buildChartData(heartbeats), [heartbeats])
 
   return (
     <Sheet open={props.open} onOpenChange={props.onOpenChange}>
@@ -316,7 +304,7 @@ export function MonitorDetailsDrawer(props: MonitorDetailsDrawerProps) {
         <div className='min-h-0 flex-1 overflow-y-auto px-4 pb-6 sm:px-6'>
           <div className='space-y-6 pt-4'>
             <TrendChart
-              title={t('Latency trend (last 24h)')}
+              title={t('Average latency')}
               data={chartData}
               dataKey='latency'
               color='var(--chart-1)'

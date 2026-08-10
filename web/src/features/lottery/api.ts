@@ -1,0 +1,71 @@
+import { api } from '@/lib/api'
+
+import type {
+  LotteryApiResponse,
+  LotteryConfig,
+  LotteryDrawPage,
+  LotteryDrawFilters,
+  LotteryDrawResult,
+  LotteryStatus,
+  LotteryUserDrawPage,
+} from './types'
+
+export async function getLotteryStatus(): Promise<
+  LotteryApiResponse<LotteryStatus>
+> {
+  const response = await api.get('/api/user/lottery')
+  return response.data
+}
+
+export async function drawLottery(): Promise<
+  LotteryApiResponse<LotteryDrawResult>
+> {
+  const response = await api.post('/api/user/lottery/draw', {}, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
+  return response.data
+}
+
+export async function updateLotteryConfig(
+  prizes: LotteryConfig['prizes']
+): Promise<LotteryApiResponse<LotteryConfig>> {
+  const response = await api.put('/api/user/lottery/config', { prizes })
+  return response.data
+}
+
+export async function getAllLotteryDraws(
+  page: number,
+  pageSize: number,
+  filters: LotteryDrawFilters
+): Promise<LotteryApiResponse<LotteryDrawPage>> {
+  const params = new URLSearchParams({
+    p: String(page),
+    page_size: String(pageSize),
+  })
+  if (filters.user) params.set('user', filters.user)
+  if (filters.result) params.set('result', filters.result)
+  const response = await api.get(`/api/user/lottery/draws?${params}`)
+  return response.data
+}
+
+export async function getUserLotteryDraws(
+  page: number,
+  pageSize: number
+): Promise<LotteryApiResponse<LotteryUserDrawPage>> {
+  const params = new URLSearchParams({
+    p: String(page),
+    page_size: String(pageSize),
+  })
+  const response = await api.get(`/api/user/lottery/draws/self?${params}`)
+  return response.data
+}
+
+export async function revokeLotteryReward(
+  drawId: number,
+  reason: string
+): Promise<LotteryApiResponse<null>> {
+  const response = await api.post(`/api/user/lottery/draws/${drawId}/revoke`, {
+    reason,
+  })
+  return response.data
+}

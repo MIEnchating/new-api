@@ -529,9 +529,9 @@ func QueryRecentRequestStats() (RecentRequestStats, error) {
 		return RecentRequestStats{}, err
 	}
 	stats := RecentRequestStats{
-		FiveMinutes:   buildRequestWindowStats(counts.Requests5m, counts.Successes5m),
-		ThirtyMinutes: buildRequestWindowStats(counts.Requests30m, counts.Successes30m),
-		OneHour:       buildRequestWindowStats(counts.Requests1h, counts.Successes1h),
+		FiveMinutes:   buildRequestWindowStats(counts.Requests5m, counts.Successes5m, counts.AvgUseTime5m, counts.LastRequest5m),
+		ThirtyMinutes: buildRequestWindowStats(counts.Requests30m, counts.Successes30m, counts.AvgUseTime30m, counts.LastRequest30m),
+		OneHour:       buildRequestWindowStats(counts.Requests1h, counts.Successes1h, counts.AvgUseTime1h, counts.LastRequest1h),
 		ByGroup:       make(map[string]RecentRequestStats, len(groupCounts)),
 	}
 	for _, group := range groupCounts {
@@ -539,24 +539,34 @@ func QueryRecentRequestStats() (RecentRequestStats, error) {
 			continue
 		}
 		stats.ByGroup[group.GroupName] = RecentRequestStats{
-			FiveMinutes:   buildRequestWindowStats(group.Requests5m, group.Successes5m),
-			ThirtyMinutes: buildRequestWindowStats(group.Requests30m, group.Successes30m),
-			OneHour:       buildRequestWindowStats(group.Requests1h, group.Successes1h),
+			FiveMinutes:   buildRequestWindowStats(group.Requests5m, group.Successes5m, group.AvgUseTime5m, group.LastRequest5m),
+			ThirtyMinutes: buildRequestWindowStats(group.Requests30m, group.Successes30m, group.AvgUseTime30m, group.LastRequest30m),
+			OneHour:       buildRequestWindowStats(group.Requests1h, group.Successes1h, group.AvgUseTime1h, group.LastRequest1h),
 		}
 	}
 	return stats, nil
 }
 
-func buildRequestWindowStats(requests int64, successes int64) RequestWindowStats {
+func buildRequestWindowStats(requests int64, successes int64, avgUseTimeSeconds float64, lastRequestAt int64) RequestWindowStats {
 	result := RequestWindowStats{
-		RequestCount: requests,
-		SuccessCount: successes,
-		HasData:      requests > 0,
+		RequestCount:  requests,
+		SuccessCount:  successes,
+		FailureCount:  maxInt64(requests-successes, 0),
+		AvgLatencyMs:  avgUseTimeSeconds * 1000,
+		LastRequestAt: lastRequestAt,
+		HasData:       requests > 0,
 	}
 	if requests > 0 {
 		result.SuccessRate = math.Round(float64(successes)/float64(requests)*10_000) / 100
 	}
 	return result
+}
+
+func maxInt64(value int64, minimum int64) int64 {
+	if value < minimum {
+		return minimum
+	}
+	return value
 }
 
 func cacheHitRate(value counters) float64 {

@@ -31,6 +31,9 @@ import type {
   StripePaymentResponse,
   AffiliateCodeResponse,
   AffiliateTransferResponse,
+  AffiliateRewardsResponse,
+  AffiliateAdminRewardsResponse,
+  AffiliateRewardFilters,
   BillingHistoryResponse,
   BillingHistoryParams,
   CompleteOrderRequest,
@@ -197,6 +200,34 @@ export async function transferAffiliateQuota(
   request: AffiliateTransferRequest
 ): Promise<AffiliateTransferResponse> {
   const res = await api.post('/api/user/aff_transfer', request)
+  return res.data
+}
+
+export async function getAffiliateRewards(
+  page: number,
+  pageSize: number
+): Promise<AffiliateRewardsResponse> {
+  const params = new URLSearchParams({
+    p: String(page),
+    page_size: String(pageSize),
+  })
+  const res = await api.get(`/api/user/aff/rewards?${params.toString()}`)
+  return res.data
+}
+
+export async function getAllAffiliateRewards(
+  page: number,
+  pageSize: number,
+  filters: AffiliateRewardFilters
+): Promise<AffiliateAdminRewardsResponse> {
+  const params = new URLSearchParams({
+    p: String(page),
+    page_size: String(pageSize),
+  })
+  if (filters.inviter) params.set('inviter', filters.inviter)
+  if (filters.invitee) params.set('invitee', filters.invitee)
+  if (filters.type) params.set('type', filters.type)
+  const res = await api.get(`/api/user/aff/rewards/all?${params.toString()}`)
   return res.data
 }
 

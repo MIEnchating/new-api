@@ -195,7 +195,12 @@ export interface UptimeGroupResult {
 }
 
 export interface RequestWindowStats {
+  request_count?: number
+  success_count?: number
+  failure_count?: number
   success_rate: number
+  avg_latency_ms?: number
+  last_request_at?: number
   has_data: boolean
 }
 

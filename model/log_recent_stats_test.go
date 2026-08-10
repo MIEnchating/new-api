@@ -22,10 +22,10 @@ func TestGetRecentRelayRequestCountsUsesFinalVisibleRequests(t *testing.T) {
 
 	now := int64(10_000)
 	logs := []Log{
-		{CreatedAt: now - 60, Type: LogTypeConsume, RequestId: "success-5m"},
-		{CreatedAt: now - 120, Type: LogTypeError, RequestId: "failure-5m"},
-		{CreatedAt: now - 10*60, Type: LogTypeConsume, RequestId: "success-30m"},
-		{CreatedAt: now - 40*60, Type: LogTypeError, RequestId: "failure-1h"},
+		{CreatedAt: now - 60, Type: LogTypeConsume, RequestId: "success-5m", UseTime: 2},
+		{CreatedAt: now - 120, Type: LogTypeError, RequestId: "failure-5m", UseTime: 4},
+		{CreatedAt: now - 10*60, Type: LogTypeConsume, RequestId: "success-30m", UseTime: 6},
+		{CreatedAt: now - 40*60, Type: LogTypeError, RequestId: "failure-1h", UseTime: 8},
 		{CreatedAt: now - 70*60, Type: LogTypeConsume, RequestId: "outside-window"},
 		{CreatedAt: now - 60, Type: LogTypeConsume, RequestId: ""},
 	}
@@ -45,13 +45,34 @@ func TestGetRecentRelayRequestCountsUsesFinalVisibleRequests(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, RecentRelayRequestCounts{
-		Requests5m:   2,
-		Successes5m:  1,
-		Requests30m:  3,
-		Successes30m: 2,
-		Requests1h:   4,
-		Successes1h:  2,
+		Requests5m:     2,
+		Successes5m:    1,
+		Requests30m:    3,
+		Successes30m:   2,
+		Requests1h:     4,
+		Successes1h:    2,
+		AvgUseTime5m:   3,
+		AvgUseTime30m:  4,
+		AvgUseTime1h:   5,
+		LastRequest5m:  now - 60,
+		LastRequest30m: now - 60,
+		LastRequest1h:  now - 60,
 	}, counts)
+}
+
+func TestGetRecentRelayRequestCountsHandlesEmptySample(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}))
+
+	previousLogDB := LOG_DB
+	LOG_DB = db
+	t.Cleanup(func() { LOG_DB = previousLogDB })
+
+	counts, err := GetRecentRelayRequestCounts(10_000)
+
+	require.NoError(t, err)
+	assert.Equal(t, RecentRelayRequestCounts{}, counts)
 }
 
 func TestGetRecentRelayRequestCountsByGroupSeparatesMonitoredGroups(t *testing.T) {
@@ -65,10 +86,10 @@ func TestGetRecentRelayRequestCountsByGroupSeparatesMonitoredGroups(t *testing.T
 
 	now := int64(15_000)
 	logs := []Log{
-		{CreatedAt: now - 60, Type: LogTypeConsume, RequestId: "a-success", Group: "group-a"},
-		{CreatedAt: now - 10*60, Type: LogTypeError, RequestId: "a-failure", Group: "group-a"},
-		{CreatedAt: now - 120, Type: LogTypeError, RequestId: "b-failure", Group: "group-b"},
-		{CreatedAt: now - 40*60, Type: LogTypeConsume, RequestId: "b-success", Group: "group-b"},
+		{CreatedAt: now - 60, Type: LogTypeConsume, RequestId: "a-success", Group: "group-a", UseTime: 2},
+		{CreatedAt: now - 10*60, Type: LogTypeError, RequestId: "a-failure", Group: "group-a", UseTime: 4},
+		{CreatedAt: now - 120, Type: LogTypeError, RequestId: "b-failure", Group: "group-b", UseTime: 6},
+		{CreatedAt: now - 40*60, Type: LogTypeConsume, RequestId: "b-success", Group: "group-b", UseTime: 8},
 	}
 	require.NoError(t, db.Create(&logs).Error)
 
@@ -81,11 +102,16 @@ func TestGetRecentRelayRequestCountsByGroupSeparatesMonitoredGroups(t *testing.T
 	assert.EqualValues(t, 1, counts[0].Successes5m)
 	assert.EqualValues(t, 2, counts[0].Requests30m)
 	assert.EqualValues(t, 1, counts[0].Successes30m)
+	assert.InDelta(t, 2, counts[0].AvgUseTime5m, 0.001)
+	assert.InDelta(t, 3, counts[0].AvgUseTime30m, 0.001)
+	assert.EqualValues(t, now-60, counts[0].LastRequest1h)
 	assert.Equal(t, "group-b", counts[1].GroupName)
 	assert.EqualValues(t, 1, counts[1].Requests5m)
 	assert.EqualValues(t, 0, counts[1].Successes5m)
 	assert.EqualValues(t, 2, counts[1].Requests1h)
 	assert.EqualValues(t, 1, counts[1].Successes1h)
+	assert.InDelta(t, 6, counts[1].AvgUseTime5m, 0.001)
+	assert.InDelta(t, 7, counts[1].AvgUseTime1h, 0.001)
 }
 
 func TestGetRecentRelayRequestCountsLimitsSampleToLatestFiveThousand(t *testing.T) {

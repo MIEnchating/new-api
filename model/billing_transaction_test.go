@@ -95,6 +95,31 @@ func TestGetBillingHistoryMergesSourcesAndFilters(t *testing.T) {
 	require.Equal(t, userTwoID, items[0].UserId)
 }
 
+func TestGetBillingHistoryIncludesLotteryRewards(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	now := common.GetTimestamp()
+	require.NoError(t, CreateBillingTransaction(nil, &BillingTransaction{
+		EventKey: "lottery-history-test", UserId: userOneID,
+		Type: BillingTypeLottery, Quota: 500,
+		Reference: "lottery-history-test", PaymentMethod: "lottery",
+		Status: "success", CreatedAt: now, Detail: LotteryPrizeOne,
+	}))
+
+	items, total, typeCounts, typeQuotas, err :=
+		GetBillingHistoryWithTypeStats(BillingHistoryFilter{
+			UserId:   userOneID,
+			Types:    []string{BillingTypeLottery},
+			PageInfo: &common.PageInfo{Page: 1, PageSize: 10},
+		})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+	require.Equal(t, BillingTypeLottery, items[0].Type)
+	require.False(t, items[0].InvoiceEligible)
+	require.EqualValues(t, 1, typeCounts[BillingTypeLottery])
+	require.EqualValues(t, 500, typeQuotas[BillingTypeLottery])
+}
+
 func TestUpdateBillingInvoiceStatusesSupportsRegularRedemptions(t *testing.T) {
 	userOneID, _ := setupBillingHistoryTest(t)
 	now := common.GetTimestamp()

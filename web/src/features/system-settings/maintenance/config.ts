@@ -71,6 +71,8 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
   personal: {
     enabled: true,
     topup: true,
+    affiliate: true,
+    lottery: true,
     personal: true,
   },
   admin: {

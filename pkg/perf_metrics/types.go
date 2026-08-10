@@ -90,10 +90,13 @@ type CacheQueryResult struct {
 }
 
 type RequestWindowStats struct {
-	RequestCount int64   `json:"-"`
-	SuccessCount int64   `json:"-"`
-	SuccessRate  float64 `json:"success_rate"`
-	HasData      bool    `json:"has_data"`
+	RequestCount  int64   `json:"request_count"`
+	SuccessCount  int64   `json:"success_count"`
+	FailureCount  int64   `json:"failure_count"`
+	SuccessRate   float64 `json:"success_rate"`
+	AvgLatencyMs  float64 `json:"avg_latency_ms"`
+	LastRequestAt int64   `json:"last_request_at,omitempty"`
+	HasData       bool    `json:"has_data"`
 }
 
 type RecentRequestStats struct {

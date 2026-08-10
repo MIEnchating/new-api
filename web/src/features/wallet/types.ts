@@ -41,6 +41,51 @@ export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
 export type StripePaymentResponse = ApiResponse<{ pay_link: string }>
 export type AffiliateCodeResponse = ApiResponse<string>
 export type AffiliateTransferResponse = ApiResponse
+export type AffiliateRewardType = 'registration' | 'first_topup'
+
+export interface AffiliateRewardItem {
+  id: number
+  type: AffiliateRewardType
+  quota: number
+  invitee_display: string
+  created_at: number
+}
+
+export interface AffiliateRewardAdminItem {
+  id: number
+  type: AffiliateRewardType
+  quota: number
+  inviter_id: number
+  inviter_username: string
+  invitee_id: number
+  invitee_username: string
+  created_at: number
+}
+
+export interface AffiliateRewardFilters {
+  inviter: string
+  invitee: string
+  type: AffiliateRewardType | ''
+}
+
+export interface AffiliateRewardsData {
+  items: AffiliateRewardItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type AffiliateRewardsResponse = ApiResponse<AffiliateRewardsData>
+
+export interface AffiliateAdminRewardsData {
+  items: AffiliateRewardAdminItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export type AffiliateAdminRewardsResponse =
+  ApiResponse<AffiliateAdminRewardsData>
 export type CreemPaymentResponse = ApiResponse<{ checkout_url: string }>
 export type WaffoPaymentResponse = ApiResponse<
   { payment_url?: string } | string
@@ -261,6 +306,8 @@ export type BillingRecordType =
   | 'redemption'
   | 'affiliate_transfer'
   | 'admin_adjustment'
+  | 'lottery_reward'
+  | 'lottery_reversal'
 
 export interface BillingRecord {
   /** Stable source-prefixed record ID */

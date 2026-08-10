@@ -488,6 +488,40 @@ func GetAffCode(c *gin.Context) {
 	return
 }
 
+func GetAffiliateRewards(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	items, total, err := model.GetAffiliateRewards(c.GetInt("id"), pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"items":     items,
+		"total":     total,
+		"page":      pageInfo.GetPage(),
+		"page_size": pageInfo.GetPageSize(),
+	})
+}
+
+func GetAllAffiliateRewards(c *gin.Context) {
+	pageInfo := common.GetPageQuery(c)
+	items, total, err := model.GetAllAffiliateRewards(pageInfo, model.AffiliateRewardAdminFilter{
+		InviterKeyword: c.Query("inviter"),
+		InviteeKeyword: c.Query("invitee"),
+		Type:           c.Query("type"),
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{
+		"items":     items,
+		"total":     total,
+		"page":      pageInfo.GetPage(),
+		"page_size": pageInfo.GetPageSize(),
+	})
+}
+
 func GetSelf(c *gin.Context) {
 	id := c.GetInt("id")
 	userRole := c.GetInt("role")

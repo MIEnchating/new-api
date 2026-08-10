@@ -130,7 +130,9 @@ func TestInviteUserOnlyIncrementsAffiliateFields(t *testing.T) {
 		AffHistoryQuota: 75,
 	}
 	require.NoError(t, DB.Create(&user).Error)
-	require.NoError(t, inviteUser(user.Id))
+	invitee := User{Id: 40, Username: "invitee-user", AffCode: "invitee_aff", Status: common.UserStatusEnabled}
+	require.NoError(t, DB.Create(&invitee).Error)
+	require.NoError(t, inviteUser(user.Id, invitee.Id))
 
 	var got User
 	require.NoError(t, DB.First(&got, user.Id).Error)

@@ -28,6 +28,8 @@ import {
   UserRoundCheck,
   ShieldCheck,
   CircleDollarSign,
+  Gift,
+  Undo2,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -117,6 +119,8 @@ export function BillingHistoryDialog({
       { value: 'redemption', label: t('Redemption Code') },
       { value: 'affiliate_transfer', label: t('Affiliate Transfer') },
       { value: 'admin_adjustment', label: t('Admin Adjustment') },
+      { value: 'lottery_reward', label: t('Lottery Reward') },
+      { value: 'lottery_reversal', label: t('Lottery Reward Reversal') },
     ],
     [t]
   )
@@ -138,6 +142,18 @@ export function BillingHistoryDialog({
         return {
           label: t('Admin Adjustment'),
           icon: ShieldCheck,
+          variant: 'warning' as const,
+        }
+      case 'lottery_reward':
+        return {
+          label: t('Lottery Reward'),
+          icon: Gift,
+          variant: 'success' as const,
+        }
+      case 'lottery_reversal':
+        return {
+          label: t('Lottery Reward Reversal'),
+          icon: Undo2,
           variant: 'warning' as const,
         }
       default:

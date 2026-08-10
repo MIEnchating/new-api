@@ -83,6 +83,9 @@ func TestInviteRechargeRebate_FirstTopUpOnly(t *testing.T) {
 	assert.Equal(t, 1000, invitee.Quota)
 	assert.Equal(t, 200, inviter.AffQuota)
 	assert.Equal(t, 200, inviter.AffHistoryQuota)
+	var rewardCount int64
+	require.NoError(t, DB.Model(&AffiliateReward{}).Where("inviter_id = ?", 1).Count(&rewardCount).Error)
+	assert.EqualValues(t, 1, rewardCount)
 
 	insertInviteRebateTopUp(t, "rebate-second", 2, 20)
 	require.NoError(t, RechargeEpay("rebate-second", "alipay", "127.0.0.1"))
@@ -92,6 +95,8 @@ func TestInviteRechargeRebate_FirstTopUpOnly(t *testing.T) {
 	assert.Equal(t, 3000, invitee.Quota)
 	assert.Equal(t, 200, inviter.AffQuota)
 	assert.Equal(t, 200, inviter.AffHistoryQuota)
+	require.NoError(t, DB.Model(&AffiliateReward{}).Where("inviter_id = ?", 1).Count(&rewardCount).Error)
+	assert.EqualValues(t, 1, rewardCount)
 }
 
 func TestInviteRechargeRebate_NoInviterNoRebate(t *testing.T) {

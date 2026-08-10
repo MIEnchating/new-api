@@ -254,9 +254,11 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 
 	// 个人中心区域 - 所有用户都可以访问
 	defaultConfig["personal"] = map[string]interface{}{
-		"enabled":  true,
-		"topup":    true,
-		"personal": true,
+		"enabled":   true,
+		"topup":     true,
+		"affiliate": true,
+		"lottery":   true,
+		"personal":  true,
 	}
 
 	// 管理员区域 - 根据角色决定
@@ -556,19 +558,36 @@ func HardDeleteUserById(id int) error {
 	return user.HardDelete()
 }
 
-func inviteUser(inviterId int) error {
-	result := DB.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
-		"aff_count":   gorm.Expr("aff_count + ?", 1),
-		"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
-		"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
-	})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
+func inviteUser(inviterId int, inviteeId int) error {
+	if inviterId <= 0 || inviteeId <= 0 {
 		return gorm.ErrRecordNotFound
 	}
-	return nil
+
+	return DB.Transaction(func(tx *gorm.DB) error {
+		created, err := createAffiliateRewardIfAbsent(tx, &AffiliateReward{
+			EventKey:  fmt.Sprintf("registration:%d", inviteeId),
+			InviterId: inviterId,
+			InviteeId: inviteeId,
+			Type:      AffiliateRewardTypeRegistration,
+			Quota:     common.QuotaForInviter,
+			SourceId:  int64(inviteeId),
+		})
+		if err != nil || !created {
+			return err
+		}
+		result := tx.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
+			"aff_count":   gorm.Expr("aff_count + ?", 1),
+			"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
+			"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int, reference string) error {
@@ -746,7 +765,7 @@ func (user *User) finishInsert(inviterId int) {
 		if common.QuotaForInviter > 0 {
 			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
+			_ = inviteUser(inviterId, user.Id)
 		}
 	}
 }
@@ -803,7 +822,7 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 		}
 		if common.QuotaForInviter > 0 {
 			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
+			_ = inviteUser(inviterId, user.Id)
 		}
 	}
 }

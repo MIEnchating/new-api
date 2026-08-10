@@ -37,16 +37,10 @@ import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip'
 import { getUptimeStatus } from '@/features/dashboard/api'
 import type {
   RecentRequestStats,
-  UptimeHeartbeat,
+  RequestWindowStats,
   UptimeGroupResult,
   UptimeMonitor,
 } from '@/features/dashboard/types'
@@ -55,7 +49,11 @@ import { cn } from '@/lib/utils'
 import { getCacheMetrics, getOfficialProviderStatuses } from './api'
 import { CacheMonitor } from './cache-monitor'
 import { MonitorDetailsDrawer } from './monitor-details-drawer'
-import { getMonitorRequestStats, getOrderedHeartbeats } from './monitor-utils'
+import {
+  getLatestRequestWindow,
+  getMonitorRequestStats,
+  getRealRequestStatus,
+} from './monitor-utils'
 import { OfficialProviderStatuses } from './official-provider-status'
 import type {
   CacheMetricsResponse,
@@ -118,20 +116,22 @@ function getStatusMeta(status: number) {
   return STATUS_META[status] ?? UNKNOWN_STATUS_META
 }
 
-function formatUptime(value: number | null | undefined) {
-  const numeric = Number(value ?? 0)
-  if (!Number.isFinite(numeric)) return '0.00%'
-  return `${(Math.max(0, numeric) * 100).toFixed(2)}%`
-}
-
-function formatOptionalUptime(value: number | null | undefined) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '--'
-  return formatUptime(value)
-}
-
 function formatPing(value: number | null | undefined) {
   if (typeof value !== 'number' || !Number.isFinite(value)) return '--'
   return `${Math.round(value)} ms`
+}
+
+function formatRequestRate(value: RequestWindowStats | null | undefined) {
+  if (!value?.has_data) return '--'
+  return `${value.success_rate.toFixed(2)}%`
+}
+
+function formatRequestTime(
+  value: number | null | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string
+) {
+  if (!value) return '--'
+  return getRelativeTime(new Date(value * 1000).toISOString(), t)
 }
 
 function formatDateTime(value: string | null | undefined) {
@@ -139,19 +139,6 @@ function formatDateTime(value: string | null | undefined) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString(undefined, { hourCycle: 'h23' })
-}
-
-function formatTimelineBoundary(value: string | null | undefined) {
-  if (!value) return '--'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-  })
 }
 
 function getRelativeTime(
@@ -176,10 +163,6 @@ function getRelativeTime(
 
   const days = Math.floor(hours / 24)
   return t('{{count}} days ago', { count: days })
-}
-
-function flattenMonitors(groups: UptimeGroupResult[]) {
-  return groups.flatMap((group) => group.monitors ?? [])
 }
 
 function getSourceKey(group: UptimeGroupResult, index: number) {
@@ -327,107 +310,6 @@ function MonitorStatusBadge(props: { status: number }) {
   )
 }
 
-const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
-  heartbeats?: UptimeHeartbeat[]
-}) {
-  const { t } = useTranslation()
-  const heartbeats = useMemo(
-    () => getOrderedHeartbeats(props.heartbeats).slice(-48),
-    [props.heartbeats]
-  )
-
-  if (heartbeats.length === 0) {
-    return (
-      <div className='bg-muted/30 text-muted-foreground flex h-12 items-center justify-center rounded-md border border-dashed text-xs'>
-        {t('No heartbeat data')}
-      </div>
-    )
-  }
-
-  return (
-    <>
-      <TooltipProvider delay={0}>
-        <div
-          className='grid h-10 min-w-0 items-end gap-px sm:h-12 sm:gap-1'
-          style={{
-            gridTemplateColumns: `repeat(${heartbeats.length}, minmax(4px, 1fr))`,
-          }}
-          aria-label={t('Heartbeat timeline')}
-        >
-          {heartbeats.map((heartbeat) => {
-            const meta = getStatusMeta(heartbeat.status)
-            const hasPing =
-              typeof heartbeat.ping === 'number' &&
-              Number.isFinite(heartbeat.ping)
-            let detail: string | null = null
-            if (heartbeat.msg) {
-              detail = heartbeat.msg
-            } else if (hasPing) {
-              detail = `${t('Latency')}: ${formatPing(heartbeat.ping)}`
-            }
-            const label = [
-              `${t('Status')}: ${t(meta.label)}`,
-              formatDateTime(heartbeat.time),
-              detail,
-            ]
-              .filter(Boolean)
-              .join(' · ')
-
-            return (
-              <Tooltip
-                key={`${heartbeat.time ?? 'heartbeat'}-${heartbeat.status}-${heartbeat.ping ?? 'na'}-${heartbeat.msg ?? ''}`}
-              >
-                <TooltipTrigger
-                  render={
-                    <span
-                      aria-label={label}
-                      className={cn(
-                        'block min-h-3 cursor-default rounded-full transition-[transform,filter,box-shadow] duration-150 ease-out hover:z-10 hover:-translate-y-1 hover:brightness-110 hover:shadow-sm',
-                        heartbeat.status === 1 ? 'h-10 sm:h-12' : 'h-7 sm:h-8',
-                        meta.dotClassName
-                      )}
-                    />
-                  }
-                />
-                <TooltipContent
-                  side='top'
-                  sideOffset={6}
-                  className='max-w-72 min-w-48 flex-col items-stretch gap-0 px-3 py-2.5'
-                >
-                  <span
-                    className={cn(
-                      'text-center text-sm font-semibold',
-                      meta.textClassName
-                    )}
-                  >
-                    {t(meta.label)}
-                  </span>
-                  <span className='mt-1 text-center text-xs tabular-nums opacity-75'>
-                    {formatDateTime(heartbeat.time)}
-                  </span>
-                  {detail ? (
-                    <span className='border-background/15 mt-2 border-t pt-2 text-xs leading-relaxed break-words'>
-                      {detail}
-                    </span>
-                  ) : null}
-                </TooltipContent>
-              </Tooltip>
-            )
-          })}
-        </div>
-      </TooltipProvider>
-      <div className='text-muted-foreground mt-1.5 flex items-center justify-between gap-3 text-[11px] tabular-nums'>
-        <span className='truncate'>
-          {formatTimelineBoundary(heartbeats[0]?.time)}
-        </span>
-        <span className='truncate text-right'>
-          {formatTimelineBoundary(heartbeats.at(-1)?.time)}
-        </span>
-      </div>
-    </>
-  )
-})
-
 function MetricItem(props: { label: string; value: string }) {
   return (
     <div className='bg-card min-w-0 px-3 py-2.5 sm:px-3.5 sm:py-3'>
@@ -443,10 +325,13 @@ function MetricItem(props: { label: string; value: string }) {
 
 const MonitorRow = memo(function MonitorRow(props: {
   monitor: UptimeMonitor
+  requestStats: RecentRequestStats | null
   onSelect: (monitor: UptimeMonitor) => void
 }) {
   const { t } = useTranslation()
-  const meta = getStatusMeta(props.monitor.status)
+  const status = getRealRequestStatus(props.requestStats)
+  const meta = getStatusMeta(status)
+  const latestWindow = getLatestRequestWindow(props.requestStats)
 
   return (
     <article className='bg-background/80 hover:border-foreground/20 overflow-hidden rounded-lg border transition-[box-shadow,border-color] duration-200 ease-out hover:shadow-md'>
@@ -478,45 +363,94 @@ const MonitorRow = memo(function MonitorRow(props: {
             </div>
           </div>
           <div className='flex shrink-0 items-center gap-1'>
-            <MonitorStatusBadge status={props.monitor.status} />
+            <MonitorStatusBadge status={status} />
             <ChevronRight className='text-muted-foreground size-4' />
           </div>
         </div>
 
         <div className='bg-border mt-3 grid min-w-0 grid-cols-2 gap-px border-y sm:mt-4 sm:grid-cols-3'>
           <MetricItem
-            label={t('30-minute uptime')}
-            value={formatOptionalUptime(props.monitor.uptime30m)}
+            label={`5 ${t('minutes')} · ${t('Success')}`}
+            value={formatRequestRate(props.requestStats?.['5m'])}
           />
           <MetricItem
-            label={t('1-hour uptime')}
-            value={formatOptionalUptime(props.monitor.uptime1h)}
+            label={`30 ${t('minutes')} · ${t('Success')}`}
+            value={formatRequestRate(props.requestStats?.['30m'])}
           />
           <MetricItem
-            label={t('24-hour uptime')}
-            value={formatUptime(props.monitor.uptime24 ?? props.monitor.uptime)}
+            label={`${t('1 hour')} · ${t('Success')}`}
+            value={formatRequestRate(props.requestStats?.['1h'])}
           />
           <MetricItem
-            label={t('7-day uptime')}
-            value={formatOptionalUptime(props.monitor.uptime7)}
+            label={`${t('1 hour')} · ${t('Requests')}`}
+            value={String(props.requestStats?.['1h']?.request_count ?? 0)}
           />
           <MetricItem
-            label={t('Latency')}
-            value={formatPing(props.monitor.ping)}
+            label={t('Average latency')}
+            value={formatPing(latestWindow?.avg_latency_ms)}
           />
           <MetricItem
             label={t('Last check')}
-            value={getRelativeTime(props.monitor.lastChecked, t)}
+            value={formatRequestTime(latestWindow?.last_request_at, t)}
           />
         </div>
       </button>
 
       <div className='px-3 py-3 sm:px-4 sm:py-4'>
-        <HeartbeatTimeline heartbeats={props.monitor.heartbeats} />
+        <RealRequestActivity stats={props.requestStats} />
       </div>
     </article>
   )
 })
+
+function RealRequestActivity(props: { stats: RecentRequestStats | null }) {
+  const { t } = useTranslation()
+  const windows = [
+    { label: `5 ${t('minutes')}`, value: props.stats?.['5m'] },
+    { label: `30 ${t('minutes')}`, value: props.stats?.['30m'] },
+    { label: t('1 hour'), value: props.stats?.['1h'] },
+  ]
+
+  if (!windows.some((item) => item.value?.has_data)) {
+    return (
+      <div className='bg-muted/20 text-muted-foreground flex h-16 items-center justify-center rounded-md border border-dashed text-xs'>
+        {t('No recent requests for this group')}
+      </div>
+    )
+  }
+
+  return (
+    <div className='grid gap-2 sm:grid-cols-3'>
+      {windows.map((item) => {
+        const value = item.value
+        const rate = value?.has_data ? value.success_rate : 0
+        return (
+          <div key={item.label} className='bg-muted/20 rounded-md border p-2.5'>
+            <div className='flex items-center justify-between gap-2 text-xs'>
+              <span className='text-muted-foreground'>{item.label}</span>
+              <span className='font-medium tabular-nums'>
+                {value?.has_data ? `${value.request_count ?? 0}` : '--'}
+              </span>
+            </div>
+            <div className='bg-destructive/20 mt-2 h-1.5 overflow-hidden rounded-full'>
+              <div
+                className='bg-success h-full rounded-full transition-[width] duration-300'
+                style={{ width: `${Math.max(0, Math.min(100, rate))}%` }}
+              />
+            </div>
+            <div className='text-muted-foreground mt-1.5 flex items-center justify-between gap-2 text-[11px] tabular-nums'>
+              <span>{formatRequestRate(value)}</span>
+              <span>
+                {t('Success')} {value?.success_count ?? 0} / {t('Failed')}{' '}
+                {value?.failure_count ?? 0}
+              </span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 function LoadingState() {
   return (
@@ -689,19 +623,56 @@ export function StatusMonitor() {
     providerStatusLoading,
   ])
 
-  const monitors = useMemo(() => flattenMonitors(groups), [groups])
   const monitorItems = useMemo(
-    () =>
-      groups.flatMap((group, sourceIndex) => {
+    () => {
+      const items = groups.flatMap((group, sourceIndex) => {
         const sourceKey = getSourceKey(group, sourceIndex)
 
-        return (group.monitors ?? []).map((monitor) => ({
-          key: getMonitorKey(sourceKey, monitor),
-          groupKey: getUptimeGroupKey(monitor.group),
+        return (group.monitors ?? []).map((monitor) => {
+          const stats = getMonitorRequestStats(
+            requestStats,
+            monitor.name,
+            monitor.group
+          )
+          return {
+            key: getMonitorKey(sourceKey, monitor),
+            groupKey: getUptimeGroupKey(monitor.group),
+            groupLabel: monitor.group?.trim() || t('Ungrouped'),
+            monitor,
+            requestStats: stats,
+          }
+        })
+      })
+
+      const representedGroups = new Set(
+        items.flatMap((item) =>
+          [item.monitor.name, item.monitor.group]
+            .map((name) => name?.trim())
+            .filter((name): name is string => Boolean(name))
+            .filter((name) => Boolean(requestStats?.by_group?.[name]))
+        )
+      )
+      for (const [groupName, stats] of Object.entries(
+        requestStats?.by_group ?? {}
+      )) {
+        if (!groupName.trim() || representedGroups.has(groupName)) continue
+        const monitor: UptimeMonitor = {
+          name: groupName,
+          uptime: 0,
+          status: -1,
+        }
+        items.push({
+          key: `real-request-${groupName}`,
+          groupKey: 'real-request-groups',
+          groupLabel: t('Real request statistics'),
           monitor,
-        }))
-      }),
-    [groups]
+          requestStats: stats,
+        })
+      }
+
+      return items
+    },
+    [groups, requestStats, t]
   )
   const groupOptions = useMemo(() => {
     const optionMap = new Map<
@@ -714,7 +685,7 @@ export function StatusMonitor() {
     >()
 
     for (const item of monitorItems) {
-      const label = item.monitor.group?.trim() || t('Ungrouped')
+      const label = item.groupLabel
       const option = optionMap.get(item.groupKey)
 
       if (option) {
@@ -729,7 +700,7 @@ export function StatusMonitor() {
     }
 
     return [...optionMap.values()]
-  }, [monitorItems, t])
+  }, [monitorItems])
   const groupOptionMap = useMemo(
     () => new Map(groupOptions.map((group) => [group.key, group])),
     [groupOptions]
@@ -739,11 +710,6 @@ export function StatusMonitor() {
 
     return groupOptionMap.get(activeGroupKey)?.monitorItems ?? []
   }, [activeGroupKey, groupOptionMap, monitorItems])
-  const visibleMonitors = useMemo(
-    () => visibleMonitorItems.map((item) => item.monitor),
-    [visibleMonitorItems]
-  )
-
   useEffect(() => {
     if (
       activeGroupKey !== ALL_GROUP_KEY &&
@@ -754,18 +720,26 @@ export function StatusMonitor() {
   }, [activeGroupKey, groupOptions])
 
   const summary = useMemo(() => {
-    const total = visibleMonitors.length
-    const operational = visibleMonitors.filter(
-      (monitor) => monitor.status === 1
+    const total = visibleMonitorItems.length
+    const statuses = visibleMonitorItems.map((item) =>
+      getRealRequestStatus(item.requestStats)
+    )
+    const operational = statuses.filter(
+      (status) => status === 1
     ).length
-    const affected = total - operational
+    const affected = statuses.filter(
+      (status) => status === 0 || status === 2
+    ).length
+    const requestCount = visibleMonitorItems.reduce(
+      (sum, item) => sum + (item.requestStats?.['1h']?.request_count ?? 0),
+      0
+    )
+    const successCount = visibleMonitorItems.reduce(
+      (sum, item) => sum + (item.requestStats?.['1h']?.success_count ?? 0),
+      0
+    )
     const average =
-      total === 0
-        ? 0
-        : visibleMonitors.reduce(
-            (sum, monitor) => sum + (monitor.uptime ?? 0),
-            0
-          ) / total
+      requestCount > 0 ? (successCount / requestCount) * 100 : null
 
     return {
       total,
@@ -773,7 +747,7 @@ export function StatusMonitor() {
       affected,
       average,
     }
-  }, [visibleMonitors])
+  }, [visibleMonitorItems])
 
   const handleManualRefresh = useCallback(() => {
     switch (activeTab) {
@@ -817,8 +791,8 @@ export function StatusMonitor() {
         description={t('Check the configured Uptime Kuma URL and slug.')}
       />
     )
-  } else if (!groups.length || monitors.length === 0) {
-    content = <EmptyState title={t('No uptime monitoring configured')} />
+  } else if (monitorItems.length === 0) {
+    content = <EmptyState title={t('No data available')} />
   } else {
     content = (
       <div className='space-y-3'>
@@ -832,7 +806,7 @@ export function StatusMonitor() {
             <TabsTrigger value={ALL_GROUP_KEY} className='gap-1.5'>
               <span>{t('All')}</span>
               <span className='text-muted-foreground text-xs tabular-nums'>
-                {monitors.length}
+                {monitorItems.length}
               </span>
             </TabsTrigger>
             {groupOptions.map((group) => (
@@ -852,12 +826,13 @@ export function StatusMonitor() {
           </TabsList>
         </Tabs>
 
-        {visibleMonitors.length > 0 ? (
+        {visibleMonitorItems.length > 0 ? (
           <div className='grid min-w-0 gap-3 lg:grid-cols-2'>
             {visibleMonitorItems.map((item) => (
               <MonitorRow
                 key={item.key}
                 monitor={item.monitor}
+                requestStats={item.requestStats}
                 onSelect={handleMonitorSelect}
               />
             ))}
@@ -937,8 +912,12 @@ export function StatusMonitor() {
                   tone={summary.affected > 0 ? 'warning' : 'default'}
                 />
                 <SummaryMetric
-                  label={t('Average uptime')}
-                  value={formatUptime(summary.average)}
+                  label={`${t('1 hour')} · ${t('Success')}`}
+                  value={
+                    summary.average === null
+                      ? '--'
+                      : `${summary.average.toFixed(2)}%`
+                  }
                   icon={CircleDashed}
                 />
               </div>
@@ -970,7 +949,8 @@ export function StatusMonitor() {
         monitor={selectedMonitor}
         requestStats={getMonitorRequestStats(
           requestStats,
-          selectedMonitor?.name
+          selectedMonitor?.name,
+          selectedMonitor?.group
         )}
         onOpenChange={setMonitorDetailsOpen}
       />

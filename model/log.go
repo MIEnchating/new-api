@@ -82,12 +82,18 @@ type Log struct {
 }
 
 type RecentRelayRequestCounts struct {
-	Requests5m   int64 `gorm:"column:requests_5m"`
-	Successes5m  int64 `gorm:"column:successes_5m"`
-	Requests30m  int64 `gorm:"column:requests_30m"`
-	Successes30m int64 `gorm:"column:successes_30m"`
-	Requests1h   int64 `gorm:"column:requests_1h"`
-	Successes1h  int64 `gorm:"column:successes_1h"`
+	Requests5m     int64   `gorm:"column:requests_5m"`
+	Successes5m    int64   `gorm:"column:successes_5m"`
+	Requests30m    int64   `gorm:"column:requests_30m"`
+	Successes30m   int64   `gorm:"column:successes_30m"`
+	Requests1h     int64   `gorm:"column:requests_1h"`
+	Successes1h    int64   `gorm:"column:successes_1h"`
+	AvgUseTime5m   float64 `gorm:"column:avg_use_time_5m"`
+	AvgUseTime30m  float64 `gorm:"column:avg_use_time_30m"`
+	AvgUseTime1h   float64 `gorm:"column:avg_use_time_1h"`
+	LastRequest5m  int64   `gorm:"column:last_request_5m"`
+	LastRequest30m int64   `gorm:"column:last_request_30m"`
+	LastRequest1h  int64   `gorm:"column:last_request_1h"`
 }
 
 type RecentRelayRequestGroupCounts struct {
@@ -111,7 +117,7 @@ func GetRecentRelayRequestCounts(now int64) (RecentRelayRequestCounts, error) {
 	}
 	rows := applyUserVisibleLogFilter(
 		LOG_DB.Model(&Log{}).
-			Select("created_at", "type", "request_id").
+			Select("created_at", "type", "request_id", "use_time").
 			Where("created_at >= ? AND type IN ? AND request_id <> ''", cutoff1h, []int{LogTypeConsume, LogTypeError}),
 		"other",
 	).Order(order).Limit(recentRelayRequestSampleLimit)
@@ -124,8 +130,14 @@ func GetRecentRelayRequestCounts(now int64) (RecentRelayRequestCounts, error) {
 			COUNT(DISTINCT CASE WHEN created_at >= ? THEN request_id END) AS requests_30m,
 			COUNT(DISTINCT CASE WHEN created_at >= ? AND type = ? THEN request_id END) AS successes_30m,
 			COUNT(DISTINCT request_id) AS requests_1h,
-			COUNT(DISTINCT CASE WHEN type = ? THEN request_id END) AS successes_1h
-		`, cutoff5m, cutoff5m, LogTypeConsume, cutoff30m, cutoff30m, LogTypeConsume, LogTypeConsume).
+			COUNT(DISTINCT CASE WHEN type = ? THEN request_id END) AS successes_1h,
+			AVG(CASE WHEN created_at >= ? THEN use_time END) AS avg_use_time_5m,
+			AVG(CASE WHEN created_at >= ? THEN use_time END) AS avg_use_time_30m,
+			AVG(use_time) AS avg_use_time_1h,
+			MAX(CASE WHEN created_at >= ? THEN created_at END) AS last_request_5m,
+			MAX(CASE WHEN created_at >= ? THEN created_at END) AS last_request_30m,
+			MAX(created_at) AS last_request_1h
+		`, cutoff5m, cutoff5m, LogTypeConsume, cutoff30m, cutoff30m, LogTypeConsume, LogTypeConsume, cutoff5m, cutoff30m, cutoff5m, cutoff30m).
 		Scan(&counts).Error
 	return counts, err
 }
@@ -144,7 +156,7 @@ func GetRecentRelayRequestCountsByGroup(now int64) ([]RecentRelayRequestGroupCou
 	}
 	rows := applyUserVisibleLogFilter(
 		LOG_DB.Model(&Log{}).
-			Select("created_at", "type", "request_id", logGroupCol+" AS group_name").
+			Select("created_at", "type", "request_id", "use_time", logGroupCol+" AS group_name").
 			Where("created_at >= ? AND type IN ? AND request_id <> ''", cutoff1h, []int{LogTypeConsume, LogTypeError}),
 		"other",
 	).Order(order).Limit(recentRelayRequestSampleLimit)
@@ -158,8 +170,14 @@ func GetRecentRelayRequestCountsByGroup(now int64) ([]RecentRelayRequestGroupCou
 			COUNT(DISTINCT CASE WHEN created_at >= ? THEN request_id END) AS requests_30m,
 			COUNT(DISTINCT CASE WHEN created_at >= ? AND type = ? THEN request_id END) AS successes_30m,
 			COUNT(DISTINCT request_id) AS requests_1h,
-			COUNT(DISTINCT CASE WHEN type = ? THEN request_id END) AS successes_1h
-		`, cutoff5m, cutoff5m, LogTypeConsume, cutoff30m, cutoff30m, LogTypeConsume, LogTypeConsume).
+			COUNT(DISTINCT CASE WHEN type = ? THEN request_id END) AS successes_1h,
+			AVG(CASE WHEN created_at >= ? THEN use_time END) AS avg_use_time_5m,
+			AVG(CASE WHEN created_at >= ? THEN use_time END) AS avg_use_time_30m,
+			AVG(use_time) AS avg_use_time_1h,
+			MAX(CASE WHEN created_at >= ? THEN created_at END) AS last_request_5m,
+			MAX(CASE WHEN created_at >= ? THEN created_at END) AS last_request_30m,
+			MAX(created_at) AS last_request_1h
+		`, cutoff5m, cutoff5m, LogTypeConsume, cutoff30m, cutoff30m, LogTypeConsume, LogTypeConsume, cutoff5m, cutoff30m, cutoff5m, cutoff30m).
 		Group("group_name").
 		Order("group_name ASC").
 		Scan(&counts).Error

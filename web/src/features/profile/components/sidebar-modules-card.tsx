@@ -125,6 +125,16 @@ export function SidebarModulesCard() {
           title: t('Personal Settings'),
           description: t('Personal info settings'),
         },
+        {
+          key: 'affiliate',
+          title: t('Invitation Rebates'),
+          description: t('Referral link and invite income history'),
+        },
+        {
+          key: 'lottery',
+          title: t('Lottery Center'),
+          description: t('Usage rewards and prize draws'),
+        },
       ],
     },
   ]

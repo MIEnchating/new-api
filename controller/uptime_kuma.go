@@ -598,6 +598,14 @@ func GetUptimeKumaStatus(c *gin.Context) {
 
 	snapshot, err := defaultUptimeStatusLoader.load(c.Request.Context(), groups, fetchUptimeStatusSnapshot)
 	if err != nil {
+		common.SysError("failed to load uptime monitor catalog: " + err.Error())
+		c.JSON(http.StatusOK, gin.H{
+			"success":       true,
+			"message":       "",
+			"data":          []UptimeGroupResult{},
+			"request_stats": requestStats,
+			"degraded":      true,
+		})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{

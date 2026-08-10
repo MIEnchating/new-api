@@ -24,7 +24,12 @@ import type {
   UptimeHeartbeat,
 } from '@/features/dashboard/types'
 
-import { getMonitorRequestStats, getOrderedHeartbeats } from './monitor-utils'
+import {
+  getLatestRequestWindow,
+  getMonitorRequestStats,
+  getOrderedHeartbeats,
+  getRealRequestStatus,
+} from './monitor-utils'
 
 function heartbeat(time: string): UptimeHeartbeat {
   return { time, status: 1, ping: 10 }
@@ -78,5 +83,44 @@ describe('status monitor request statistics mapping', () => {
 
   test('does not fall back to global statistics for an unmatched monitor', () => {
     assert.equal(getMonitorRequestStats(stats, 'missing-group'), null)
+  })
+
+  test('falls back to the configured monitor group name', () => {
+    assert.equal(
+      getMonitorRequestStats(stats, 'display-name', 'group-a'),
+      groupStats
+    )
+  })
+
+  test('uses the shortest request window with data', () => {
+    assert.equal(getLatestRequestWindow(groupStats), groupStats['5m'])
+    assert.equal(
+      getLatestRequestWindow({
+        ...groupStats,
+        '5m': emptyWindow,
+        '30m': { success_rate: 80, has_data: true },
+      })?.success_rate,
+      80
+    )
+  })
+
+  test('derives request health from actual success and failure counts', () => {
+    const withWindow = (successCount: number, failureCount: number) => ({
+      ...groupStats,
+      '5m': {
+        success_rate:
+          successCount + failureCount > 0
+            ? (successCount / (successCount + failureCount)) * 100
+            : 0,
+        success_count: successCount,
+        failure_count: failureCount,
+        has_data: successCount + failureCount > 0,
+      },
+    })
+
+    assert.equal(getRealRequestStatus(withWindow(3, 0)), 1)
+    assert.equal(getRealRequestStatus(withWindow(2, 1)), 2)
+    assert.equal(getRealRequestStatus(withWindow(0, 3)), 0)
+    assert.equal(getRealRequestStatus(withWindow(0, 0)), -1)
   })
 })
