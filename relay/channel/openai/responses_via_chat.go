@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -53,6 +54,9 @@ func OaiChatToResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		responsesResp.Usage = relayconvert.UsageFromChatUsage(usage)
 	}
+	if info.ChannelSetting.StripThinkingTags {
+		stripThinkingTagsFromResponsesResponse(responsesResp)
+	}
 
 	responseBody, err := common.Marshal(responsesResp)
 	if err != nil {
@@ -78,6 +82,9 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 	streamErr := (*types.NewAPIError)(nil)
+	thinkingTagFilters := make(map[int]*ThinkingTagFilter)
+	var rawResponseText strings.Builder
+	var rawToolCount int
 
 	sendEvent := func(event relayconvert.ChatToResponsesStreamEvent) bool {
 		data, err := common.Marshal(event.Payload)
@@ -111,6 +118,10 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			sr.Error(err)
 			return
 		}
+		if info.ChannelSetting.StripThinkingTags {
+			_ = ProcessStreamResponse(chunk, &rawResponseText, &rawToolCount)
+			StripThinkingTagsFromChatStreamResponse(&chunk, thinkingTagFilters)
+		}
 
 		results, err := relayconvert.ConvertStreamResponseChunk(c, info, state, &chunk)
 		if err != nil {
@@ -138,7 +149,11 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 
 	usage := state.Usage()
 	if usage == nil || usage.TotalTokens == 0 {
-		usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
+		usageText := state.UsageText()
+		if info.ChannelSetting.StripThinkingTags {
+			usageText = rawResponseText.String()
+		}
+		usage = service.ResponseText2Usage(c, usageText, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		state.SetUsage(usage)
 	}
 

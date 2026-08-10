@@ -295,14 +295,25 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         }
         const group = row.getValue('group') as string
         return (
-          <ApiKeyGroupCell
-            group={group}
-            ratio={groupRatioInfo[group]?.ratio}
-            scheduleEnabled={groupRatioInfo[group]?.schedule_enabled}
-            scheduleActive={groupRatioInfo[group]?.schedule_active}
-            crossGroupRetry={apiKey.cross_group_retry}
-            shouldReduceMotion={shouldReduceMotion}
-          />
+          <Button
+            type='button'
+            variant='ghost'
+            className='-ml-2 h-auto max-w-full justify-start px-2 py-1'
+            aria-label={`${t('Edit')}: ${group || '-'}`}
+            onClick={() => {
+              setCurrentRow(apiKey)
+              setOpen('update')
+            }}
+          >
+            <ApiKeyGroupCell
+              group={group}
+              ratio={groupRatioInfo[group]?.ratio}
+              scheduleEnabled={groupRatioInfo[group]?.schedule_enabled}
+              scheduleActive={groupRatioInfo[group]?.schedule_active}
+              crossGroupRetry={apiKey.cross_group_retry}
+              shouldReduceMotion={shouldReduceMotion}
+            />
+          </Button>
         )
       },
       size: 220,

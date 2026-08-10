@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import type { TFunction } from 'i18next'
 import { Clock, Loader2, Network, RotateCcw, Save } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -90,6 +90,7 @@ export function ApiKeyRouteDetailDialog() {
   const [isSaving, setIsSaving] = useState(false)
   const [draftRoutes, setDraftRoutes] = useState<ApiKeyGroupRoute[]>([])
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000))
+  const dialogContentRef = useRef<HTMLDivElement>(null)
   const storedRoutes = useMemo(
     () => parseApiKeyGroupRouteConfig(currentRow?.group_route_config),
     [currentRow?.group_route_config]
@@ -204,7 +205,11 @@ export function ApiKeyRouteDetailDialog() {
 
   return (
     <Dialog open={open === 'route-detail'} onOpenChange={() => setOpen(null)}>
-      <DialogContent className='sm:max-w-xl'>
+      <DialogContent
+        ref={dialogContentRef}
+        className='sm:max-w-xl'
+        initialFocus={dialogContentRef}
+      >
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>
             <Network className='size-4' />

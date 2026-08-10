@@ -37,6 +37,14 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
+	if info.ChannelSetting.StripThinkingTags {
+		stripThinkingTagsFromResponsesResponse(&responsesResponse)
+		responseBody, err = common.Marshal(responsesResponse)
+		if err != nil {
+			return nil, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
+		}
+	}
+
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
 
@@ -88,6 +96,8 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var streamError *types.NewAPIError
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
+	thinkingTagFilters := make(map[int]*ThinkingTagFilter)
+	visibleText := make(map[int]*strings.Builder)
 	type pendingStreamEvent struct {
 		response dto.ResponsesStreamResponse
 		data     string
@@ -117,6 +127,21 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			streamError = streamErr
 			sr.Stop(streamErr)
 			return
+		}
+		rawDelta := streamResponse.Delta
+		if info.ChannelSetting.StripThinkingTags {
+			filteredData, err := stripThinkingTagsFromResponsesStreamData(
+				&streamResponse,
+				data,
+				thinkingTagFilters,
+				visibleText,
+			)
+			if err != nil {
+				streamError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
+				sr.Stop(streamError)
+				return
+			}
+			data = filteredData
 		}
 		if streamResponse.Type == "response.created" || streamResponse.Type == "response.in_progress" {
 			pendingPreamble = append(pendingPreamble, pendingStreamEvent{response: streamResponse, data: data})
@@ -176,7 +201,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		case "response.output_text.delta":
 			// 处理输出文本
-			responseTextBuilder.WriteString(streamResponse.Delta)
+			responseTextBuilder.WriteString(rawDelta)
 		case dto.ResponsesOutputTypeItemDone:
 			if streamResponse.Item != nil {
 				switch streamResponse.Item.Type {

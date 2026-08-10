@@ -285,6 +285,7 @@ const SENSITIVE_FORM_FIELDS = [
   'azure_responses_version',
   'force_format',
   'thinking_to_content',
+  'strip_thinking_tags',
   'proxy',
   'http_protocol',
   'http2_connection_shards',
@@ -342,6 +343,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.system_prompt?.trim() ||
     values.force_format ||
     values.thinking_to_content ||
+    values.strip_thinking_tags ||
     values.pass_through_body_enabled ||
     values.system_prompt_override ||
     (values.http_protocol && values.http_protocol !== 'auto') ||
@@ -4125,6 +4127,31 @@ export function ChannelMutateDrawer({
                                       <FormDescription>
                                         {t(
                                           'Convert reasoning_content to <think> tag in content'
+                                        )}
+                                      </FormDescription>
+                                    </div>
+                                    <FormControl>
+                                      <Switch
+                                        checked={field.value}
+                                        onCheckedChange={field.onChange}
+                                      />
+                                    </FormControl>
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name='strip_thinking_tags'
+                                render={({ field }) => (
+                                  <FormItem className='flex items-center justify-between px-4 py-3'>
+                                    <div className='space-y-0.5'>
+                                      <FormLabel>
+                                        {t('Filter Thinking Tags')}
+                                      </FormLabel>
+                                      <FormDescription>
+                                        {t(
+                                          'Remove upstream <thinking> blocks from Chat Completions and Responses text output'
                                         )}
                                       </FormDescription>
                                     </div>
