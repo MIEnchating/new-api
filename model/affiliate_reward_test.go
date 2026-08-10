@@ -55,10 +55,10 @@ func TestAffiliateRewardPagination(t *testing.T) {
 func TestAllAffiliateRewardsFiltersInviterInviteeAndType(t *testing.T) {
 	truncateTables(t)
 	users := []User{
-		{Id: 11, Username: "alice-inviter", DisplayName: "Alice", Status: common.UserStatusEnabled},
-		{Id: 12, Username: "bob-inviter", DisplayName: "Bob", Status: common.UserStatusEnabled},
-		{Id: 21, Username: "carol-invitee", DisplayName: "Carol", Status: common.UserStatusEnabled},
-		{Id: 22, Username: "dave-invitee", DisplayName: "Dave", Status: common.UserStatusEnabled},
+		{Id: 11, Username: "alice-inviter", DisplayName: "Alice", AffCode: "alice_aff", Status: common.UserStatusEnabled},
+		{Id: 12, Username: "bob-inviter", DisplayName: "Bob", AffCode: "bob_aff", Status: common.UserStatusEnabled},
+		{Id: 21, Username: "carol-invitee", DisplayName: "Carol", AffCode: "carol_aff", Status: common.UserStatusEnabled},
+		{Id: 22, Username: "dave-invitee", DisplayName: "Dave", AffCode: "dave_aff", Status: common.UserStatusEnabled},
 	}
 	require.NoError(t, DB.Create(&users).Error)
 	rewards := []AffiliateReward{

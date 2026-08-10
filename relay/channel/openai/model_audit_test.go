@@ -20,7 +20,10 @@ func TestOaiResponsesHandlerAuditsModelWithoutChangingResponse(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	info := &relaycommon.RelayInfo{OriginModelName: "gpt-5.6-sol"}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+	}
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(body)),
@@ -51,7 +54,11 @@ func TestOaiResponsesStreamHandlerAuditsCompletedEventModel(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	info := &relaycommon.RelayInfo{OriginModelName: "gpt-5.6-sol", IsStream: true}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-sol",
+		IsStream:        true,
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+	}
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(body)),
@@ -71,7 +78,10 @@ func TestOaiResponsesHandlerLeavesAuditEmptyWhenModelIsMissing(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	info := &relaycommon.RelayInfo{OriginModelName: "gpt-5.6-sol"}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.6-sol",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+	}
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(strings.NewReader(body)),

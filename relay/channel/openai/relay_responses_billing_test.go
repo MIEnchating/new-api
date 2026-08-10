@@ -46,6 +46,7 @@ func TestOaiResponsesHandlerCountsOutputCallsNotDeclarations(t *testing.T) {
 
 	info := &relaycommon.RelayInfo{
 		OriginModelName: "gpt-5.1",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
 		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
 			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
 				dto.BuildInToolWebSearchPreview: {ToolName: dto.BuildInToolWebSearchPreview, CallCount: 0},
@@ -90,6 +91,7 @@ func TestOaiResponsesHandlerDeclaredToolsWithoutOutputCountZero(t *testing.T) {
 
 	info := &relaycommon.RelayInfo{
 		OriginModelName: "gpt-5.1",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
 		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
 			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
 				dto.BuildInToolWebSearchPreview: {ToolName: dto.BuildInToolWebSearchPreview, CallCount: 0},
@@ -141,7 +143,10 @@ func TestOaiResponsesHandlerCountsCompletedImageGenerationOutputs(t *testing.T) 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
-	info := &relaycommon.RelayInfo{OriginModelName: "gpt-5.1"}
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "gpt-5.1",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+	}
 	resp := &http.Response{
 		StatusCode: http.StatusOK,
 		Body:       io.NopCloser(bytes.NewReader(body)),
@@ -177,6 +182,7 @@ func TestOaiResponsesHandlerIncompleteStatusCommitsZeroImageGeneration(t *testin
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	info := &relaycommon.RelayInfo{
 		OriginModelName: "gpt-5.1",
+		ChannelMeta:     &relaycommon.ChannelMeta{},
 		ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
 			BuiltInTools: map[string]*relaycommon.BuildInToolInfo{
 				dto.BuildInToolImageGeneration: {ToolName: dto.BuildInToolImageGeneration, CallCount: 0},

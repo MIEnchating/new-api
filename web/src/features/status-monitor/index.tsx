@@ -623,57 +623,54 @@ export function StatusMonitor() {
     providerStatusLoading,
   ])
 
-  const monitorItems = useMemo(
-    () => {
-      const items = groups.flatMap((group, sourceIndex) => {
-        const sourceKey = getSourceKey(group, sourceIndex)
+  const monitorItems = useMemo(() => {
+    const items = groups.flatMap((group, sourceIndex) => {
+      const sourceKey = getSourceKey(group, sourceIndex)
 
-        return (group.monitors ?? []).map((monitor) => {
-          const stats = getMonitorRequestStats(
-            requestStats,
-            monitor.name,
-            monitor.group
-          )
-          return {
-            key: getMonitorKey(sourceKey, monitor),
-            groupKey: getUptimeGroupKey(monitor.group),
-            groupLabel: monitor.group?.trim() || t('Ungrouped'),
-            monitor,
-            requestStats: stats,
-          }
-        })
-      })
-
-      const representedGroups = new Set(
-        items.flatMap((item) =>
-          [item.monitor.name, item.monitor.group]
-            .map((name) => name?.trim())
-            .filter((name): name is string => Boolean(name))
-            .filter((name) => Boolean(requestStats?.by_group?.[name]))
+      return (group.monitors ?? []).map((monitor) => {
+        const stats = getMonitorRequestStats(
+          requestStats,
+          monitor.name,
+          monitor.group
         )
-      )
-      for (const [groupName, stats] of Object.entries(
-        requestStats?.by_group ?? {}
-      )) {
-        if (!groupName.trim() || representedGroups.has(groupName)) continue
-        const monitor: UptimeMonitor = {
-          name: groupName,
-          uptime: 0,
-          status: -1,
-        }
-        items.push({
-          key: `real-request-${groupName}`,
-          groupKey: 'real-request-groups',
-          groupLabel: t('Real request statistics'),
+        return {
+          key: getMonitorKey(sourceKey, monitor),
+          groupKey: getUptimeGroupKey(monitor.group),
+          groupLabel: monitor.group?.trim() || t('Ungrouped'),
           monitor,
           requestStats: stats,
-        })
-      }
+        }
+      })
+    })
 
-      return items
-    },
-    [groups, requestStats, t]
-  )
+    const representedGroups = new Set(
+      items.flatMap((item) =>
+        [item.monitor.name, item.monitor.group]
+          .map((name) => name?.trim())
+          .filter((name): name is string => Boolean(name))
+          .filter((name) => Boolean(requestStats?.by_group?.[name]))
+      )
+    )
+    for (const [groupName, stats] of Object.entries(
+      requestStats?.by_group ?? {}
+    )) {
+      if (!groupName.trim() || representedGroups.has(groupName)) continue
+      const monitor: UptimeMonitor = {
+        name: groupName,
+        uptime: 0,
+        status: -1,
+      }
+      items.push({
+        key: `real-request-${groupName}`,
+        groupKey: 'real-request-groups',
+        groupLabel: t('Real request statistics'),
+        monitor,
+        requestStats: stats,
+      })
+    }
+
+    return items
+  }, [groups, requestStats, t])
   const groupOptions = useMemo(() => {
     const optionMap = new Map<
       string,
@@ -724,9 +721,7 @@ export function StatusMonitor() {
     const statuses = visibleMonitorItems.map((item) =>
       getRealRequestStatus(item.requestStats)
     )
-    const operational = statuses.filter(
-      (status) => status === 1
-    ).length
+    const operational = statuses.filter((status) => status === 1).length
     const affected = statuses.filter(
       (status) => status === 0 || status === 2
     ).length

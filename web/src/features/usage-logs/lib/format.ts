@@ -223,6 +223,25 @@ export function getUpstreamRequestIds(
   ]
 }
 
+export function getReasoningEffortVariant(
+  effort: string | undefined
+): StatusBadgeProps['variant'] {
+  switch (effort?.trim().toLowerCase()) {
+    case 'max':
+    case 'xhigh':
+    case 'high':
+      return 'orange'
+    case 'medium':
+      return 'yellow'
+    case 'low':
+    case 'minimal':
+      return 'green'
+    case 'none':
+    default:
+      return 'grey'
+  }
+}
+
 /**
  * Get time color based on duration (in seconds)
  */
