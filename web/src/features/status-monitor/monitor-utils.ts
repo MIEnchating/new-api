@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type {
   RecentRequestStats,
-  RequestWindowStats,
   UptimeHeartbeat,
 } from '@/features/dashboard/types'
 
@@ -45,28 +44,4 @@ export function getMonitorRequestStats(
     if (matched) return matched
   }
   return null
-}
-
-export function getLatestRequestWindow(
-  stats: RecentRequestStats | null | undefined
-): RequestWindowStats | null {
-  if (stats?.['5m']?.has_data) return stats['5m']
-  if (stats?.['30m']?.has_data) return stats['30m']
-  if (stats?.['1h']?.has_data) return stats['1h']
-  return null
-}
-
-export function getRealRequestStatus(
-  stats: RecentRequestStats | null | undefined
-): number {
-  const window = getLatestRequestWindow(stats)
-  if (!window) return -1
-  if (window.failure_count !== undefined) {
-    if (window.failure_count <= 0) return 1
-    if ((window.success_count ?? 0) <= 0) return 0
-    return 2
-  }
-  if (window.success_rate >= 100) return 1
-  if (window.success_rate <= 0) return 0
-  return 2
 }
