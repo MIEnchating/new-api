@@ -20,7 +20,9 @@ import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
 import {
+  parseGroupList,
   parseGroupExclusions,
+  serializeGroupList,
   serializeGroupExclusions,
 } from '../route-exclusions'
 
@@ -56,6 +58,17 @@ describe('route exclusion settings', () => {
         default: { mode: 'all', enabled: false },
       }),
       '{"default":{"mode":"all","enabled":false}}'
+    )
+  })
+
+  test('normalizes cooldown exclusion group lists', () => {
+    assert.deepEqual(parseGroupList('[" premium ","default","default"]'), [
+      'default',
+      'premium',
+    ])
+    assert.equal(
+      serializeGroupList(['premium', 'default', 'premium']),
+      '["default","premium"]'
     )
   })
 })

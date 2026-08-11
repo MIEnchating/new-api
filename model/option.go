@@ -50,6 +50,7 @@ func InitOptionMap() {
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["ChannelRouteCooldownEnabled"] = strconv.FormatBool(common.ChannelRouteCooldownEnabled)
 	common.OptionMap["ChannelRouteCooldownSeconds"] = strconv.Itoa(common.ChannelRouteCooldownSeconds)
+	common.OptionMap["ChannelRouteCooldownExcludedGroups"] = setting.ChannelRouteCooldownExcludedGroups2JSONString()
 	common.OptionMap["ChannelRouteSameChannelRetries"] = strconv.Itoa(common.ChannelRouteSameChannelRetries)
 	common.OptionMap["ChannelRouteGroupExclusionsEnabled"] = strconv.FormatBool(setting.ChannelRouteGroupExclusionsEnabled)
 	common.OptionMap["ChannelRouteGroupExclusions"] = setting.ChannelRouteGroupExclusions2JSONString()
@@ -625,6 +626,8 @@ func updateOptionMap(key string, value string) (err error) {
 		common.RetryTimes, _ = strconv.Atoi(value)
 	case "ChannelRouteCooldownSeconds":
 		common.ChannelRouteCooldownSeconds, _ = strconv.Atoi(value)
+	case "ChannelRouteCooldownExcludedGroups":
+		err = setting.UpdateChannelRouteCooldownExcludedGroupsByJSONString(value)
 	case "ChannelRouteSameChannelRetries":
 		common.ChannelRouteSameChannelRetries, _ = strconv.Atoi(value)
 	case "ChannelRouteGroupExclusions":

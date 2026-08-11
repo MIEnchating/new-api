@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   CreditCard,
+  Gift,
+  RotateCcw,
   ShieldCheck,
   TicketPercent,
   UserRoundCheck,
@@ -51,8 +53,33 @@ export function getBillingTypeConfig(type: BillingRecordType, t: Translate) {
       icon: ShieldCheck,
       variant: 'warning' as StatusVariant,
     },
+    lottery_reward: {
+      label: t('Lottery Reward'),
+      icon: Gift,
+      variant: 'pink' as StatusVariant,
+    },
+    lottery_reversal: {
+      label: t('Lottery Reward Reversal'),
+      icon: RotateCcw,
+      variant: 'danger' as StatusVariant,
+    },
   }
   return configs[type]
+}
+
+type BillingTypeQuotas = Record<BillingRecordType, number>
+
+export function getLotteryNetQuota(typeQuotas: BillingTypeQuotas) {
+  return (typeQuotas.lottery_reward ?? 0) + (typeQuotas.lottery_reversal ?? 0)
+}
+
+export function getOrderManagementTotalQuota(typeQuotas: BillingTypeQuotas) {
+  return (
+    typeQuotas.online_topup +
+    typeQuotas.redemption +
+    typeQuotas.admin_adjustment -
+    getLotteryNetQuota(typeQuotas)
+  )
 }
 
 export function getInvoiceStatusConfig(status: InvoiceStatus, t: Translate) {

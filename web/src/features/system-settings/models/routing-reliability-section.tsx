@@ -41,6 +41,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import * as z from 'zod'
 
+import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -92,7 +93,9 @@ import {
   resolveSameChannelRetryToggle,
 } from './route-cooldown'
 import {
+  parseGroupList,
   parseGroupExclusions,
+  serializeGroupList,
   serializeGroupExclusions,
 } from './route-exclusions'
 
@@ -137,6 +140,7 @@ const routingReliabilitySchema = z.object({
   RetryTimes: z.coerce.number(),
   ChannelRouteCooldownEnabled: z.boolean(),
   ChannelRouteCooldownSeconds: z.coerce.number(),
+  ChannelRouteCooldownExcludedGroups: z.string(),
   ChannelRouteSameChannelRetries: z.coerce.number(),
   ChannelRouteGroupExclusionsEnabled: z.boolean(),
   ChannelRouteGroupExclusions: z.string(),
@@ -320,6 +324,7 @@ type RoutingReliabilitySectionProps = {
     RetryTimes: number
     ChannelRouteCooldownEnabled: boolean
     ChannelRouteCooldownSeconds: number
+    ChannelRouteCooldownExcludedGroups: string
     ChannelRouteSameChannelRetries: number
     ChannelRouteGroupExclusionsEnabled: boolean
     ChannelRouteGroupExclusions: string
@@ -439,6 +444,7 @@ type NormalizedRoutingReliabilityValues = {
   RetryTimes: number
   ChannelRouteCooldownEnabled: boolean
   ChannelRouteCooldownSeconds: number
+  ChannelRouteCooldownExcludedGroups: string
   ChannelRouteSameChannelRetries: number
   ChannelRouteGroupExclusionsEnabled: boolean
   ChannelRouteGroupExclusions: string
@@ -512,6 +518,9 @@ const buildFormDefaults = (
     : (defaults.RetryTimes ?? 0),
   ChannelRouteCooldownEnabled: defaults.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: defaults.ChannelRouteCooldownSeconds ?? 60,
+  ChannelRouteCooldownExcludedGroups: serializeGroupList(
+    parseGroupList(defaults.ChannelRouteCooldownExcludedGroups)
+  ),
   ChannelRouteSameChannelRetries: defaults.ChannelRouteSameChannelRetries ?? 0,
   ChannelRouteGroupExclusionsEnabled:
     defaults.ChannelRouteGroupExclusionsEnabled,
@@ -553,6 +562,9 @@ const normalizeDefaults = (
   RetryTimes: defaults.RetryTimes ?? 0,
   ChannelRouteCooldownEnabled: defaults.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: defaults.ChannelRouteCooldownSeconds ?? 60,
+  ChannelRouteCooldownExcludedGroups: serializeGroupList(
+    parseGroupList(defaults.ChannelRouteCooldownExcludedGroups)
+  ),
   ChannelRouteSameChannelRetries: defaults.ChannelRouteSameChannelRetries ?? 0,
   ChannelRouteGroupExclusionsEnabled:
     defaults.ChannelRouteGroupExclusionsEnabled,
@@ -598,6 +610,9 @@ const normalizeFormValues = (
   RetryTimes: values.ChannelRouteCooldownEnabled ? 0 : values.RetryTimes,
   ChannelRouteCooldownEnabled: values.ChannelRouteCooldownEnabled,
   ChannelRouteCooldownSeconds: values.ChannelRouteCooldownSeconds,
+  ChannelRouteCooldownExcludedGroups: serializeGroupList(
+    parseGroupList(values.ChannelRouteCooldownExcludedGroups)
+  ),
   ChannelRouteSameChannelRetries: values.ChannelRouteSameChannelRetries,
   ChannelRouteGroupExclusionsEnabled: values.ChannelRouteGroupExclusionsEnabled,
   ChannelRouteGroupExclusions: serializeGroupExclusions(
@@ -695,7 +710,14 @@ export function RoutingReliabilitySection({
     queryFn: () => getChannelFilterGroups(true),
     enabled: view === 'routing',
   })
-  const groupOptions = groupOptionsQuery.data?.data ?? []
+  const groupOptions = useMemo(
+    () => groupOptionsQuery.data?.data ?? [],
+    [groupOptionsQuery.data?.data]
+  )
+  const cooldownGroupOptions = useMemo(
+    () => groupOptions.map((group) => ({ label: group, value: group })),
+    [groupOptions]
+  )
 
   const autoDisableStatusCodes = form.watch('AutomaticDisableStatusCodes')
   const autoRetryStatusCodes = form.watch('AutomaticRetryStatusCodes')
@@ -1277,6 +1299,42 @@ export function RoutingReliabilitySection({
                               </FormItem>
                             )
                           }}
+                        />
+                        <FormField
+                          control={form.control}
+                          name='ChannelRouteCooldownExcludedGroups'
+                          render={({ field }) => (
+                            <FormItem className='mt-4 border-t pt-3'>
+                              <FormLabel>
+                                {t('Groups without cooldown')}
+                              </FormLabel>
+                              <FormControl>
+                                <MultiSelect
+                                  options={cooldownGroupOptions}
+                                  selected={parseGroupList(field.value)}
+                                  onChange={(groups) =>
+                                    field.onChange(serializeGroupList(groups))
+                                  }
+                                  placeholder={t('Select groups')}
+                                  emptyText={t('No groups found')}
+                                  disabled={
+                                    !channelRouteCooldownEnabled ||
+                                    Number(
+                                      form.watch('ChannelRouteCooldownSeconds')
+                                    ) === 0 ||
+                                    groupOptionsQuery.isLoading
+                                  }
+                                  maxVisibleChips={3}
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Failures in these groups can still switch channels, but the failed channel will not enter cooldown.'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
                         />
                       </div>
                     </div>

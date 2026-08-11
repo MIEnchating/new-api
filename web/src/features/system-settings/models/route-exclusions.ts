@@ -75,3 +75,26 @@ export function parseGroupExclusions(value: string): GroupExclusions {
 export function serializeGroupExclusions(value: GroupExclusions) {
   return JSON.stringify(value)
 }
+
+export function parseGroupList(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value || '[]')
+    if (!Array.isArray(parsed)) return []
+    return [
+      ...new Set(
+        parsed
+          .filter((group): group is string => typeof group === 'string')
+          .map((group) => group.trim())
+          .filter(Boolean)
+      ),
+    ].sort()
+  } catch {
+    return []
+  }
+}
+
+export function serializeGroupList(groups: string[]) {
+  return JSON.stringify(
+    [...new Set(groups.map((group) => group.trim()).filter(Boolean))].sort()
+  )
+}

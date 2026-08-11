@@ -76,6 +76,8 @@ const MODELS_SECTIONS = [
           RetryTimes: settings.RetryTimes,
           ChannelRouteCooldownEnabled: settings.ChannelRouteCooldownEnabled,
           ChannelRouteCooldownSeconds: settings.ChannelRouteCooldownSeconds,
+          ChannelRouteCooldownExcludedGroups:
+            settings.ChannelRouteCooldownExcludedGroups,
           ChannelRouteSameChannelRetries:
             settings.ChannelRouteSameChannelRetries,
           ChannelRouteGroupExclusionsEnabled:
@@ -117,6 +119,8 @@ const MODELS_SECTIONS = [
           RetryTimes: settings.RetryTimes,
           ChannelRouteCooldownEnabled: settings.ChannelRouteCooldownEnabled,
           ChannelRouteCooldownSeconds: settings.ChannelRouteCooldownSeconds,
+          ChannelRouteCooldownExcludedGroups:
+            settings.ChannelRouteCooldownExcludedGroups,
           ChannelRouteSameChannelRetries:
             settings.ChannelRouteSameChannelRetries,
           ChannelRouteGroupExclusionsEnabled:

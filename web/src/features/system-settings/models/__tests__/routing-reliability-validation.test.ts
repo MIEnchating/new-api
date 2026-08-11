@@ -34,6 +34,7 @@ function values() {
     RetryTimes: 2,
     ChannelRouteCooldownEnabled: true,
     ChannelRouteCooldownSeconds: 60,
+    ChannelRouteCooldownExcludedGroups: '[]',
     ChannelRouteSameChannelRetries: 2,
     ChannelRouteGroupExclusionsEnabled: false,
     ChannelRouteGroupExclusions: '{}',

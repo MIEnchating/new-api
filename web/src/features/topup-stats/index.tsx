@@ -47,6 +47,7 @@ import { useTopUpStatsColumns } from './components/topup-stats-columns'
 import { TopUpStatsDetailsDialog } from './components/topup-stats-details-dialog'
 import { TopUpStatsMobileList } from './components/topup-stats-mobile-list'
 import { TopUpStatsSummaryRail } from './components/topup-stats-summary-rail'
+import { getLotteryNetQuota, getOrderManagementTotalQuota } from './lib'
 import type {
   BillingInvoiceTarget,
   InvoiceAction,
@@ -89,7 +90,12 @@ function areAppliedFiltersEqual(left: AppliedFilters, right: AppliedFilters) {
   )
 }
 
-const DEFAULT_ORDER_TYPES = ['online_topup', 'redemption'] as const
+const DEFAULT_ORDER_TYPES = [
+  'online_topup',
+  'redemption',
+  'lottery_reward',
+  'lottery_reversal',
+] as const
 const ORDER_MANAGEMENT_TYPES = [
   ...DEFAULT_ORDER_TYPES,
   'admin_adjustment',
@@ -111,6 +117,8 @@ const emptyTypeQuotas: Record<TopUpStatsItem['type'], number> = {
   redemption: 0,
   affiliate_transfer: 0,
   admin_adjustment: 0,
+  lottery_reward: 0,
+  lottery_reversal: 0,
 }
 
 function getBillingInvoiceTarget(
@@ -296,10 +304,8 @@ export function TopUpStats() {
   const rows = query.data?.items ?? []
   const summary = query.data?.summary ?? emptySummary
   const typeQuotas = query.data?.type_quotas ?? emptyTypeQuotas
-  const totalQuota =
-    typeQuotas.online_topup +
-    typeQuotas.redemption +
-    typeQuotas.admin_adjustment
+  const lotteryQuota = getLotteryNetQuota(typeQuotas)
+  const totalQuota = getOrderManagementTotalQuota(typeQuotas)
 
   const { table } = useDataTable({
     data: rows,
@@ -547,6 +553,14 @@ export function TopUpStats() {
                         label: t('Admin Adjustment'),
                         value: 'admin_adjustment',
                       },
+                      {
+                        label: t('Lottery Reward'),
+                        value: 'lottery_reward',
+                      },
+                      {
+                        label: t('Lottery Reward Reversal'),
+                        value: 'lottery_reversal',
+                      },
                     ],
                   },
                   {
@@ -607,6 +621,7 @@ export function TopUpStats() {
                 leftActions: (
                   <TopUpStatsSummaryRail
                     typeQuotas={typeQuotas}
+                    lotteryQuota={lotteryQuota}
                     totalQuota={totalQuota}
                     summary={summary}
                     loading={query.isLoading}

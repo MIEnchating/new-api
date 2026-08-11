@@ -130,6 +130,7 @@ var routingReliabilityBulkOptionKeys = map[string]struct{}{
 	"RetryTimes":                                {},
 	"ChannelRouteCooldownEnabled":               {},
 	"ChannelRouteCooldownSeconds":               {},
+	"ChannelRouteCooldownExcludedGroups":        {},
 	"ChannelRouteSameChannelRetries":            {},
 	"ChannelRouteGroupExclusionsEnabled":        {},
 	"ChannelRouteGroupExclusions":               {},
@@ -171,6 +172,9 @@ func validateRoutingReliabilityOption(key string, value string) error {
 		if err != nil || seconds < 0 || seconds > 31536000 {
 			return fmt.Errorf("渠道路由冷却时间必须在 0 到 31536000 秒之间")
 		}
+	case "ChannelRouteCooldownExcludedGroups":
+		_, err := setting.ParseChannelRouteCooldownExcludedGroups(value)
+		return err
 	case "ChannelRouteSameChannelRetries":
 		retries, err := strconv.Atoi(strings.TrimSpace(value))
 		if err != nil || retries < 0 || retries > 10 {
@@ -219,6 +223,7 @@ var optionAuditValueKeys = map[string]struct{}{
 	"AutomaticRetryStatusCodes":          {},
 	"ChannelRouteCooldownEnabled":        {},
 	"ChannelRouteCooldownSeconds":        {},
+	"ChannelRouteCooldownExcludedGroups": {},
 	"ChannelRouteSameChannelRetries":     {},
 	"ChannelRouteGroupExclusionsEnabled": {},
 	"ChannelRouteGroupExclusions":        {},

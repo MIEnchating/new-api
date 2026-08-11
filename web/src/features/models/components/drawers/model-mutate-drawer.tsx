@@ -331,6 +331,7 @@ export function ModelMutateDrawer({
       RetryTimes: 0,
       ChannelRouteCooldownEnabled: false,
       ChannelRouteCooldownSeconds: 60,
+      ChannelRouteCooldownExcludedGroups: '[]',
       ChannelRouteSameChannelRetries: 0,
       ChannelRouteGroupExclusionsEnabled: true,
       ChannelRouteGroupExclusions: '{}',

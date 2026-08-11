@@ -27,6 +27,7 @@ import type { TopUpStatsItem, TopUpStatsSummary } from '../types'
 
 type TopUpStatsSummaryRailProps = {
   typeQuotas: Record<TopUpStatsItem['type'], number>
+  lotteryQuota: number
   totalQuota: number
   summary: TopUpStatsSummary
   loading: boolean
@@ -79,6 +80,12 @@ export function TopUpStatsSummaryRail(props: TopUpStatsSummaryRailProps) {
         label={t('Admin Adjustment')}
         value={props.typeQuotas.admin_adjustment}
         accent='bg-amber-500/70'
+        loading={props.loading}
+      />
+      <TypeQuotaBadge
+        label={t('Lottery amount')}
+        value={props.lotteryQuota}
+        accent='bg-pink-500/70'
         loading={props.loading}
       />
       <TypeQuotaBadge

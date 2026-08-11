@@ -92,7 +92,7 @@ func GetChannelRouteCooldownUntil(group string, channelID int, now int64) int64 
 	if !IsChannelRouteCooldownEnabled() {
 		return 0
 	}
-	if group == "" || channelID <= 0 {
+	if group == "" || channelID <= 0 || setting.IsChannelRouteCooldownExcluded(group) {
 		return 0
 	}
 	if common.RedisEnabled && common.RDB != nil {
@@ -113,7 +113,7 @@ func GetChannelRouteCooldownUntil(group string, channelID int, now int64) int64 
 // fallback semantics on a per-channel basis.
 func getChannelRouteCooldownsUntil(group string, channelIDs []int, now int64) map[int]int64 {
 	cooldowns := make(map[int]int64, len(channelIDs))
-	if !IsChannelRouteCooldownEnabled() || group == "" || len(channelIDs) == 0 {
+	if !IsChannelRouteCooldownEnabled() || group == "" || len(channelIDs) == 0 || setting.IsChannelRouteCooldownExcluded(group) {
 		return cooldowns
 	}
 
@@ -198,7 +198,7 @@ func channelRouteCooldownFromSnapshot(cooldowns map[int]int64, batched bool, gro
 }
 
 func FreezeChannelRoute(group string, channelID int, cooldownSeconds int) int64 {
-	if group == "" || channelID <= 0 || cooldownSeconds <= 0 {
+	if group == "" || channelID <= 0 || cooldownSeconds <= 0 || setting.IsChannelRouteCooldownExcluded(group) {
 		return 0
 	}
 	duration := time.Duration(cooldownSeconds) * time.Second
@@ -563,6 +563,10 @@ func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 			logger.LogDebug(c, "channel route cooldown skipped because no alternative channel is available: group=%s channel=%d", group, channelID)
 			return false
 		}
+	}
+	if setting.IsChannelRouteCooldownExcluded(group) {
+		logger.LogDebug(c, "channel route cooldown skipped for excluded group: group=%s channel=%d", group, channelID)
+		return switchChannel
 	}
 	if !cooldown || cooldownSeconds <= 0 {
 		logger.LogDebug(c, "channel route cooldown disabled: group=%s channel=%d", group, channelID)

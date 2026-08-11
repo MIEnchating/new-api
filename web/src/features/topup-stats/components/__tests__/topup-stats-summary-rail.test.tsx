@@ -57,7 +57,7 @@ reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 describe('order management mobile summary rail', () => {
   after(() => domWindow.close())
 
-  test('keeps all seven summaries in one non-wrapping mobile rail', async () => {
+  test('keeps all eight summaries in one non-wrapping mobile rail', async () => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
@@ -71,8 +71,11 @@ describe('order management mobile summary rail', () => {
               redemption: 200,
               affiliate_transfer: 0,
               admin_adjustment: 300,
+              lottery_reward: 80,
+              lottery_reversal: -20,
             }}
-            totalQuota={600}
+            lotteryQuota={60}
+            totalQuota={540}
             summary={{
               order_count: 4,
               user_count: 3,
@@ -91,7 +94,8 @@ describe('order management mobile summary rail', () => {
     assert.ok(rail)
     assert.equal(rail.classList.contains('overflow-x-auto'), true)
     assert.equal(rail.classList.contains('no-scrollbar'), true)
-    assert.equal(rail.querySelectorAll('[data-summary-item]').length, 7)
+    assert.equal(rail.querySelectorAll('[data-summary-item]').length, 8)
+    assert.equal(rail.textContent?.includes('Lottery amount'), true)
     assert.equal(rail.textContent?.includes('Total Quota'), true)
     assert.equal(rail.textContent?.includes('Successful orders'), true)
 

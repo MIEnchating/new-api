@@ -31,6 +31,8 @@ export type BillingRecordType =
   | 'redemption'
   | 'affiliate_transfer'
   | 'admin_adjustment'
+  | 'lottery_reward'
+  | 'lottery_reversal'
 
 export type TopUpStatsItem = {
   id: string

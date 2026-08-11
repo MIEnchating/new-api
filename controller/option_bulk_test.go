@@ -22,12 +22,14 @@ func TestPrepareRoutingReliabilityOptionUpdatesNormalizesValues(t *testing.T) {
 	updates, err := prepareRoutingReliabilityOptionUpdates([]OptionUpdateRequest{
 		{Key: "ChannelRouteCooldownEnabled", Value: true},
 		{Key: "ChannelRouteCooldownSeconds", Value: 60},
+		{Key: "ChannelRouteCooldownExcludedGroups", Value: `["batch"]`},
 		{Key: "AutomaticRetryStatusCodes", Value: "429,500-503"},
 	})
 
 	require.NoError(t, err)
 	assert.Equal(t, "true", updates["ChannelRouteCooldownEnabled"])
 	assert.Equal(t, "60", updates["ChannelRouteCooldownSeconds"])
+	assert.Equal(t, `["batch"]`, updates["ChannelRouteCooldownExcludedGroups"])
 	assert.Equal(t, "429,500-503", updates["AutomaticRetryStatusCodes"])
 }
 

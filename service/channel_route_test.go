@@ -244,6 +244,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	oldChannelRouteSameChannelRetries := common.ChannelRouteSameChannelRetries
 	oldChannelRouteGroupExclusionsEnabled := setting.ChannelRouteGroupExclusionsEnabled
 	oldChannelRouteGroupExclusions := setting.ChannelRouteGroupExclusions2JSONString()
+	oldChannelRouteCooldownExcludedGroups := setting.ChannelRouteCooldownExcludedGroups2JSONString()
 	oldRetryTimes := common.RetryTimes
 	oldDB := model.DB
 	oldLogDB := model.LOG_DB
@@ -254,6 +255,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	common.ChannelRouteSameChannelRetries = 0
 	setting.ChannelRouteGroupExclusionsEnabled = true
 	require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString("{}"))
+	require.NoError(t, setting.UpdateChannelRouteCooldownExcludedGroupsByJSONString("[]"))
 	common.RetryTimes = 0
 	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	channelRouteCooldowns = sync.Map{}
@@ -294,6 +296,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 		common.ChannelRouteSameChannelRetries = oldChannelRouteSameChannelRetries
 		setting.ChannelRouteGroupExclusionsEnabled = oldChannelRouteGroupExclusionsEnabled
 		require.NoError(t, setting.UpdateChannelRouteGroupExclusionsByJSONString(oldChannelRouteGroupExclusions))
+		require.NoError(t, setting.UpdateChannelRouteCooldownExcludedGroupsByJSONString(oldChannelRouteCooldownExcludedGroups))
 		common.RetryTimes = oldRetryTimes
 		channelRouteCooldowns = sync.Map{}
 		channelRouteCooldownWrites.Store(0)
@@ -368,6 +371,23 @@ func TestShouldRetrySameChannelRouteHonorsGroupExclusions(t *testing.T) {
 
 	setting.ChannelRouteGroupExclusionsEnabled = false
 	assert.True(t, ShouldRetrySameChannelRouteForGroup(routeErr, 0, "no-retry"))
+}
+
+func TestChannelRouteCooldownExcludedGroupStillSwitchesWithoutCooling(t *testing.T) {
+	db := setupChannelRouteTest(t)
+	require.NoError(t, setting.UpdateChannelRouteCooldownExcludedGroupsByJSONString(`["no-cooldown"]`))
+	seedChannelRouteChannel(t, db, 42, "no-cooldown", 2)
+	seedChannelRouteChannel(t, db, 43, "no-cooldown", 1)
+	model.InitChannelCache()
+
+	now := common.GetTimestamp()
+	assert.Zero(t, FreezeChannelRoute("no-cooldown", 42, 60))
+	assert.Zero(t, GetChannelRouteCooldownUntil("no-cooldown", 42, now))
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	TrackChannelRouteSelection(c, "no-cooldown", channelRouteTestModel, "/v1/chat/completions", 42)
+	assert.True(t, MarkChannelRouteFailure(c, newChannelRouteFailure()))
+	assert.Zero(t, GetChannelRouteCooldownUntilInMemory("no-cooldown", 42, now))
 }
 
 func TestTransientStreamEventUsesSameChannelRetryAndFailoverWithoutCooldown(t *testing.T) {

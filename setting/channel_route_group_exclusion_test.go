@@ -70,3 +70,21 @@ func TestParseChannelRouteGroupExclusionsRejectsInvalidInput(t *testing.T) {
 	_, err = ParseChannelRouteGroupExclusions(`{"default":{"mode":"all","enabled":"yes"}}`)
 	require.Error(t, err)
 }
+
+func TestChannelRouteCooldownExcludedGroups(t *testing.T) {
+	original := ChannelRouteCooldownExcludedGroups2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, UpdateChannelRouteCooldownExcludedGroupsByJSONString(original))
+	})
+
+	require.NoError(t, UpdateChannelRouteCooldownExcludedGroupsByJSONString(`[" premium ","default","default"]`))
+	assert.True(t, IsChannelRouteCooldownExcluded("premium"))
+	assert.True(t, IsChannelRouteCooldownExcluded("default"))
+	assert.False(t, IsChannelRouteCooldownExcluded("other"))
+	assert.JSONEq(t, `["default","premium"]`, ChannelRouteCooldownExcludedGroups2JSONString())
+
+	_, err := ParseChannelRouteCooldownExcludedGroups(`["", "default"]`)
+	assert.Error(t, err)
+	_, err = ParseChannelRouteCooldownExcludedGroups(`{"default":true}`)
+	assert.Error(t, err)
+}

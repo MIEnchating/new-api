@@ -452,6 +452,7 @@ const OPTION_KEY_LABELS: Record<string, string> = {
   AutomaticRetryStatusCodes: 'Auto-retry status codes',
   ChannelRouteCooldownEnabled: 'Channel routing',
   ChannelRouteCooldownSeconds: 'Cooldown time (seconds)',
+  ChannelRouteCooldownExcludedGroups: 'Groups without cooldown',
   ChannelRouteSameChannelRetries: 'Same-channel retries',
   ChannelRouteGroupExclusionsEnabled: 'Route exclusion groups',
   ChannelRouteGroupExclusions: 'Route exclusion groups',

@@ -42,6 +42,7 @@ describe('routing reliability menu merge', () => {
       RetryTimes: 3,
       ChannelRouteCooldownEnabled: true,
       ChannelRouteCooldownSeconds: 60,
+      ChannelRouteCooldownExcludedGroups: '["batch"]',
       ChannelRouteSameChannelRetries: 2,
       ChannelRouteGroupExclusionsEnabled: true,
       ChannelRouteGroupExclusions: '{"batch":{"mode":"all"}}',
@@ -56,6 +57,7 @@ describe('routing reliability menu merge', () => {
       view: string
       defaultValues: {
         ChannelRouteCooldownEnabled: boolean
+        ChannelRouteCooldownExcludedGroups: string
         ChannelRouteSameChannelRetries: number
         ChannelRouteGroupExclusionsEnabled: boolean
         ChannelRouteGroupExclusions: string
@@ -67,6 +69,10 @@ describe('routing reliability menu merge', () => {
     assert.equal(section.type, RoutingReliabilitySection)
     assert.equal(section.props.view, 'routing')
     assert.equal(section.props.defaultValues.ChannelRouteCooldownEnabled, true)
+    assert.equal(
+      section.props.defaultValues.ChannelRouteCooldownExcludedGroups,
+      '["batch"]'
+    )
     assert.equal(section.props.defaultValues.ChannelRouteSameChannelRetries, 2)
     assert.equal(
       section.props.defaultValues.ChannelRouteGroupExclusionsEnabled,
