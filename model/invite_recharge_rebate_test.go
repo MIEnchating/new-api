@@ -76,7 +76,8 @@ func TestInviteRechargeRebate_FirstTopUpOnly(t *testing.T) {
 	insertInviteRebateUser(t, 2, "rebate_invitee", 1)
 	insertInviteRebateTopUp(t, "rebate-first", 2, 10)
 
-	require.NoError(t, RechargeEpay("rebate-first", "alipay", "127.0.0.1"))
+	_, err := RechargeEpay("rebate-first", "alipay", "127.0.0.1")
+	require.NoError(t, err)
 
 	invitee := getInviteRebateUser(t, 2)
 	inviter := getInviteRebateUser(t, 1)
@@ -88,7 +89,8 @@ func TestInviteRechargeRebate_FirstTopUpOnly(t *testing.T) {
 	assert.EqualValues(t, 1, rewardCount)
 
 	insertInviteRebateTopUp(t, "rebate-second", 2, 20)
-	require.NoError(t, RechargeEpay("rebate-second", "alipay", "127.0.0.1"))
+	_, err = RechargeEpay("rebate-second", "alipay", "127.0.0.1")
+	require.NoError(t, err)
 
 	invitee = getInviteRebateUser(t, 2)
 	inviter = getInviteRebateUser(t, 1)
@@ -107,7 +109,8 @@ func TestInviteRechargeRebate_NoInviterNoRebate(t *testing.T) {
 	insertInviteRebateUser(t, 3, "rebate_solo", 0)
 	insertInviteRebateTopUp(t, "rebate-solo-first", 3, 10)
 
-	require.NoError(t, RechargeEpay("rebate-solo-first", "alipay", "127.0.0.1"))
+	_, err := RechargeEpay("rebate-solo-first", "alipay", "127.0.0.1")
+	require.NoError(t, err)
 
 	user := getInviteRebateUser(t, 3)
 	assert.Equal(t, 1000, user.Quota)

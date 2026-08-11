@@ -46,7 +46,7 @@ func TestGetTokenByKeyRejectsLegacyCacheWithoutRoutingFields(t *testing.T) {
 	legacy := token
 	legacy.Group = ""
 	legacy.CacheSchema = 0
-	require.NoError(t, common.RedisHSetObj(tokenCacheKey(token.Key), &legacy, 0))
+	require.NoError(t, common.RedisHSetObj(getTokenCacheKey(token.Key), &legacy, 0))
 
 	loaded, err := GetTokenByKey(token.Key, false)
 
@@ -57,34 +57,12 @@ func TestGetTokenByKeyRejectsLegacyCacheWithoutRoutingFields(t *testing.T) {
 	assert.Equal(t, "codex-pro", cached.Group)
 }
 
-func TestTokenCacheGenerationRejectsDelayedStaleFill(t *testing.T) {
-	server := useTokenCacheTestDatabase(t)
-	stale := Token{
-		Id: 1, UserId: 1, Key: "generation-key", Name: "pro",
-		Status: common.TokenStatusEnabled, ExpiredTime: -1,
-		UnlimitedQuota: true, Group: "vue源码分组",
-	}
-	generation, err := cacheGetTokenGeneration(stale.Key)
-	require.NoError(t, err)
-	require.NoError(t, cacheDeleteToken(stale.Key))
-
-	require.NoError(t, cacheSetTokenAtGeneration(stale, generation))
-	assert.False(t, server.Exists(tokenCacheKey(stale.Key)))
-
-	currentGeneration, err := cacheGetTokenGeneration(stale.Key)
-	require.NoError(t, err)
-	fresh := stale
-	fresh.Group = "codex-pro"
-	require.NoError(t, cacheSetTokenAtGeneration(fresh, currentGeneration))
-	cached, err := cacheGetTokenByKey(stale.Key)
-	require.NoError(t, err)
-	assert.Equal(t, "codex-pro", cached.Group)
-}
-
 func TestTokenQuotaDeltaDoesNotCreatePartialCache(t *testing.T) {
 	server := useTokenCacheTestDatabase(t)
 
-	require.NoError(t, cacheIncrTokenQuota("missing-token", 10))
+	result, err := cacheApplyTokenQuotaDelta(1, "missing-token", 10)
+	require.NoError(t, err)
+	assert.Equal(t, cacheQuotaMiss, result)
 
-	assert.False(t, server.Exists(tokenCacheKey("missing-token")))
+	assert.False(t, server.Exists(getTokenCacheKey("missing-token")))
 }

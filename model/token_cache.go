@@ -2,23 +2,21 @@ package model
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
-	"github.com/go-redis/redis/v8"
 )
 
 const tokenCacheSchemaVersion = 3
 
-func tokenCacheKey(key string) string {
+func getTokenCacheKey(key string) string {
 	return fmt.Sprintf("token:%s", common.GenerateHMAC(key))
 }
 
-func tokenCacheGenerationKey(key string) string {
-	return fmt.Sprintf("token:version:%s", common.GenerateHMAC(key))
+func getTokenCacheFenceKey(key string) string {
+	return fmt.Sprintf("token:fence:%s", common.GenerateHMAC(key))
 }
 
 func tokenCacheTTLSeconds() int {
@@ -29,129 +27,84 @@ func tokenCacheTTLSeconds() int {
 	return ttl
 }
 
-func tokenCacheGenerationTTLSeconds() int {
-	ttl := tokenCacheTTLSeconds() * 2
-	if ttl < 120 {
-		return 120
+// tokenCacheFenceSeconds must outlive a token mutation's database write plus
+// any in-flight reader's DB-read-to-cache-init gap. The fence is not deleted
+// after commit; it expires naturally so a reader holding a pre-mutation
+// snapshot cannot publish it right after the mutation cleared the cache.
+// While the fence exists readers simply serve the database without caching.
+const tokenCacheFenceSeconds = 10
+
+// invalidateTokenCacheForMutation is called before a token metadata mutation
+// writes to the database: it raises the fence and drops the cached hash so no
+// reader can act on (or re-publish) the pre-mutation state.
+func invalidateTokenCacheForMutation(key string) error {
+	if !common.RedisEnabled || key == "" {
+		return nil
 	}
-	return ttl
+	ctx := context.Background()
+	err := common.RDB.Set(ctx, getTokenCacheFenceKey(key), 1, time.Duration(tokenCacheFenceSeconds)*time.Second).Err()
+	if err != nil {
+		return err
+	}
+	return common.RDB.Del(ctx, getTokenCacheKey(key)).Err()
 }
 
-func cacheGetTokenGeneration(key string) (int64, error) {
-	value, err := common.RDB.Get(context.Background(), tokenCacheGenerationKey(key)).Result()
-	if errors.Is(err, redis.Nil) {
+// cacheInitToken publishes a database snapshot only when no mutation fence is
+// active and the hash is cold. An existing hash only gets its TTL refreshed:
+// its RemainQuota may already be ahead of this snapshot because atomic
+// pre-consume decrements Redis first, so a snapshot must never overwrite any
+// field of a live hash.
+// 返回值：0=被 fence 拦截，1=完成初始化，2=哈希已存在，仅刷新 TTL。
+func cacheInitToken(token Token) (int, error) {
+	if !common.RedisEnabled {
 		return 0, nil
 	}
-	if err != nil {
-		return 0, err
-	}
-	return strconv.ParseInt(value, 10, 64)
-}
-
-func cacheSetTokenAtGeneration(token Token, generation int64) error {
 	allowIps := ""
 	if token.AllowIps != nil {
 		allowIps = *token.AllowIps
 	}
 	const script = `
-local current = tonumber(redis.call('GET', KEYS[2]) or '0')
-local incoming = tonumber(ARGV[1])
-if current ~= incoming then
+if redis.call('EXISTS', KEYS[2]) == 1 then
   return 0
+end
+if redis.call('EXISTS', KEYS[1]) == 1
+  and tonumber(redis.call('HGET', KEYS[1], 'CacheSchema') or '0') == tonumber(ARGV[19]) then
+  redis.call('EXPIRE', KEYS[1], ARGV[20])
+  return 2
 end
 redis.call('HSET', KEYS[1],
-  'Id', ARGV[2], 'UserId', ARGV[3], 'Status', ARGV[4],
-  'Name', ARGV[5], 'CreatedTime', ARGV[6], 'AccessedTime', ARGV[7],
-  'ExpiredTime', ARGV[8], 'RemainQuota', ARGV[9],
-  'UnlimitedQuota', ARGV[10], 'ModelLimitsEnabled', ARGV[11],
-  'ModelLimits', ARGV[12], 'AllowIps', ARGV[13], 'UsedQuota', ARGV[14],
-  'Group', ARGV[15], 'CrossGroupRetry', ARGV[16],
-  'GroupRouteConfig', ARGV[17], 'GroupRouteSticky', ARGV[18],
-  'AutoGroups', ARGV[19], 'CacheSchema', ARGV[20])
-redis.call('EXPIRE', KEYS[1], ARGV[21])
+  'Id', ARGV[1], 'UserId', ARGV[2], 'Status', ARGV[3], 'Name', ARGV[4],
+  'CreatedTime', ARGV[5], 'AccessedTime', ARGV[6], 'ExpiredTime', ARGV[7],
+  'UnlimitedQuota', ARGV[8], 'ModelLimitsEnabled', ARGV[9], 'ModelLimits', ARGV[10],
+  'AllowIps', ARGV[11], 'Group', ARGV[12], 'CrossGroupRetry', ARGV[13],
+  'GroupRouteConfig', ARGV[14], 'GroupRouteSticky', ARGV[15], 'AutoGroups', ARGV[16],
+  'RemainQuota', ARGV[17], 'UsedQuota', ARGV[18], 'CacheSchema', ARGV[19])
+redis.call('EXPIRE', KEYS[1], ARGV[20])
 return 1`
-	return common.RDB.Eval(
-		context.Background(),
-		script,
-		[]string{tokenCacheKey(token.Key), tokenCacheGenerationKey(token.Key)},
-		generation,
-		token.Id,
-		token.UserId,
-		token.Status,
-		token.Name,
-		token.CreatedTime,
-		token.AccessedTime,
-		token.ExpiredTime,
-		token.RemainQuota,
-		strconv.FormatBool(token.UnlimitedQuota),
-		strconv.FormatBool(token.ModelLimitsEnabled),
-		token.ModelLimits,
-		allowIps,
-		token.UsedQuota,
-		token.Group,
-		strconv.FormatBool(token.CrossGroupRetry),
-		token.GroupRouteConfig,
-		strconv.FormatBool(token.GroupRouteSticky),
-		token.AutoGroups,
-		tokenCacheSchemaVersion,
-		tokenCacheTTLSeconds(),
-	).Err()
+
+	return common.RDB.Eval(context.Background(), script, []string{
+		getTokenCacheKey(token.Key), getTokenCacheFenceKey(token.Key),
+	},
+		token.Id, token.UserId, token.Status, token.Name,
+		token.CreatedTime, token.AccessedTime, token.ExpiredTime,
+		strconv.FormatBool(token.UnlimitedQuota), strconv.FormatBool(token.ModelLimitsEnabled),
+		token.ModelLimits, allowIps, token.Group, strconv.FormatBool(token.CrossGroupRetry),
+		token.GroupRouteConfig, strconv.FormatBool(token.GroupRouteSticky), token.AutoGroups,
+		token.RemainQuota, token.UsedQuota, tokenCacheSchemaVersion, tokenCacheTTLSeconds(),
+	).Int()
 }
 
-func cacheDeleteToken(key string) error {
-	const script = `
-local current = tonumber(redis.call('GET', KEYS[2])) or 0
-redis.call('SET', KEYS[2], current + 1, 'EX', ARGV[1])
-redis.call('DEL', KEYS[1])
-return 1`
-	return common.RDB.Eval(
-		context.Background(),
-		script,
-		[]string{tokenCacheKey(key), tokenCacheGenerationKey(key)},
-		tokenCacheGenerationTTLSeconds(),
-	).Err()
-}
-
-func cacheIncrTokenQuota(key string, increment int64) error {
-	const script = `
-if redis.call('EXISTS', KEYS[1]) == 0 then
-  return 0
-end
-redis.call('HINCRBY', KEYS[1], ARGV[1], ARGV[2])
-return 1`
-	return common.RDB.Eval(
-		context.Background(),
-		script,
-		[]string{tokenCacheKey(key)},
-		constant.TokenFiledRemainQuota,
-		increment,
-	).Err()
-}
-
-func cacheDecrTokenQuota(key string, decrement int64) error {
-	return cacheIncrTokenQuota(key, -decrement)
-}
-
-func cacheSetTokenField(key string, field string, value string) error {
-	err := common.RedisHSetField(tokenCacheKey(key), field, value)
-	if err != nil {
-		return err
-	}
-	return nil
-}
-
-// CacheGetTokenByKey 从缓存中获取 token，如果缓存中不存在，则从数据库中获取
+// cacheGetTokenByKey 从缓存读取 token；不完整的哈希（如仅有配额字段）会被拒绝。
 func cacheGetTokenByKey(key string) (*Token, error) {
 	if !common.RedisEnabled {
 		return nil, fmt.Errorf("redis is not enabled")
 	}
 	var token Token
-	err := common.RedisHGetObj(tokenCacheKey(key), &token)
-	if err != nil {
+	if err := common.RedisHGetObj(getTokenCacheKey(key), &token); err != nil {
 		return nil, err
 	}
 	if token.Id <= 0 || token.CacheSchema != tokenCacheSchemaVersion {
-		return nil, fmt.Errorf("token cache schema is stale")
+		return nil, fmt.Errorf("token cache is incomplete")
 	}
 	token.Key = key
 	return &token, nil
