@@ -85,6 +85,10 @@ export function useUpdateOption() {
       // Always refresh system-options
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
 
+      if (variables.key === 'CustomMenuPages') {
+        queryClient.invalidateQueries({ queryKey: ['custom-menu-pages'] })
+      }
+
       // If updating frontend-display-related config, also refresh status
       if (shouldRefreshStatusForOption(variables.key)) {
         queryClient.invalidateQueries({ queryKey: ['status'] })

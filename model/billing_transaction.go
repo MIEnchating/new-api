@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -86,6 +87,15 @@ type BillingHistoryFilter struct {
 
 type BillingHistoryTypeCounts map[string]int64
 type BillingHistoryTypeQuotas map[string]int64
+
+type BillingHistoryDailyStat struct {
+	Date            string `json:"date"`
+	OnlineTopup     int64  `json:"online_topup"`
+	Redemption      int64  `json:"redemption"`
+	AdminAdjustment int64  `json:"admin_adjustment"`
+	Lottery         int64  `json:"lottery"`
+	Total           int64  `json:"total"`
+}
 
 func newBillingHistoryTypeCounts() BillingHistoryTypeCounts {
 	return BillingHistoryTypeCounts{
@@ -641,6 +651,89 @@ func GetBillingHistoryWithTypeStats(filter BillingHistoryFilter) ([]BillingHisto
 func GetBillingHistoryWithTypeCounts(filter BillingHistoryFilter) ([]BillingHistoryItem, int64, BillingHistoryTypeCounts, error) {
 	items, total, typeCounts, _, err := GetBillingHistoryWithTypeStats(filter)
 	return items, total, typeCounts, err
+}
+
+// GetBillingHistoryDailyStats aggregates successful quota changes by local calendar day.
+// It intentionally reuses the same filters and type semantics as the order table.
+func GetBillingHistoryDailyStats(filter BillingHistoryFilter) ([]BillingHistoryDailyStat, error) {
+	items := make([]BillingHistoryItem, 0)
+	filter.Types = normalizeBillingHistoryTypes(filter.Types)
+	if containsBillingType(filter.Types, BillingTypeOnlineTopup) {
+		pageItems, _, _, err := queryOnlineTopups(filter, maxBillingHistoryFetchLimit)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, pageItems...)
+	}
+	if containsBillingType(filter.Types, BillingTypeRedemption) {
+		pageItems, _, _, _, err := queryRedemptions(filter, maxBillingHistoryFetchLimit)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, pageItems...)
+	}
+	storedTypes := make([]string, 0, 3)
+	for _, billingType := range filter.Types {
+		if billingType == BillingTypeAdminAdjustment ||
+			billingType == BillingTypeLottery ||
+			billingType == BillingTypeLotteryReversal {
+			storedTypes = append(storedTypes, billingType)
+		}
+	}
+	if len(storedTypes) > 0 {
+		pageItems, _, _, err := queryStoredBillingTransactions(filter, storedTypes, maxBillingHistoryFetchLimit)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, pageItems...)
+	}
+
+	byDate := make(map[string]*BillingHistoryDailyStat)
+	for _, item := range items {
+		if item.Status != common.TopUpStatusSuccess && item.Status != "success" {
+			continue
+		}
+		date := time.Unix(item.CreatedAt, 0).In(time.Local).Format("2006-01-02")
+		stat := byDate[date]
+		if stat == nil {
+			stat = &BillingHistoryDailyStat{Date: date}
+			byDate[date] = stat
+		}
+		switch item.Type {
+		case BillingTypeOnlineTopup:
+			stat.OnlineTopup += int64(item.Quota)
+		case BillingTypeRedemption:
+			if !item.ExcludedFromStats {
+				stat.Redemption += int64(item.Quota)
+			}
+		case BillingTypeAdminAdjustment:
+			stat.AdminAdjustment += int64(item.Quota)
+		case BillingTypeLottery, BillingTypeLotteryReversal:
+			stat.Lottery += int64(item.Quota)
+		}
+	}
+
+	localStart := time.Unix(filter.StartTime, 0).In(time.Local)
+	localEnd := time.Unix(filter.EndTime, 0).In(time.Local)
+	start := time.Date(localStart.Year(), localStart.Month(), localStart.Day(), 0, 0, 0, 0, time.Local)
+	end := time.Date(localEnd.Year(), localEnd.Month(), localEnd.Day(), 0, 0, 0, 0, time.Local)
+	if filter.StartTime <= 0 || filter.EndTime <= 0 || end.Before(start) {
+		return []BillingHistoryDailyStat{}, nil
+	}
+	if end.Sub(start) > 366*24*time.Hour {
+		return nil, fmt.Errorf("daily billing statistics range cannot exceed 366 days")
+	}
+	result := make([]BillingHistoryDailyStat, 0, int(end.Sub(start)/(24*time.Hour))+1)
+	for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {
+		date := day.Format("2006-01-02")
+		stat := byDate[date]
+		if stat == nil {
+			stat = &BillingHistoryDailyStat{Date: date}
+		}
+		stat.Total = stat.OnlineTopup + stat.Redemption + stat.AdminAdjustment + stat.Lottery
+		result = append(result, *stat)
+	}
+	return result, nil
 }
 
 func GetBillingHistory(filter BillingHistoryFilter) ([]BillingHistoryItem, int64, error) {

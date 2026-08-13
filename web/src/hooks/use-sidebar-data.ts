@@ -37,10 +37,12 @@ import {
   User,
   Users,
   Wallet,
+  PanelsTopLeft,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
+import { useCustomMenuPages } from '@/hooks/use-custom-menu-pages'
 import { ROLE } from '@/lib/roles'
 
 /**
@@ -51,6 +53,33 @@ import { ROLE } from '@/lib/roles'
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
+  const { data: customPages = [] } = useCustomMenuPages()
+  const toNavItem = (page: (typeof customPages)[number]) => ({
+    title: page.name,
+    url: `/pages/${page.id}`,
+    icon: page.icon ? undefined : PanelsTopLeft,
+    iconSrc: page.icon,
+  })
+  const userPagesBySection = {
+    chat: customPages
+      .filter((page) => page.visibility === 'public' && page.section === 'chat')
+      .map(toNavItem),
+    general: customPages
+      .filter(
+        (page) =>
+          page.visibility === 'public' &&
+          (page.section === undefined || page.section === 'general')
+      )
+      .map(toNavItem),
+    personal: customPages
+      .filter(
+        (page) => page.visibility === 'public' && page.section === 'personal'
+      )
+      .map(toNavItem),
+  }
+  const adminPages = customPages
+    .filter((page) => page.visibility === 'admin')
+    .map((page) => ({ ...toNavItem(page), requiredRole: ROLE.ADMIN }))
 
   return {
     navGroups: [
@@ -68,6 +97,7 @@ export function useSidebarData(): SidebarData {
             icon: MessageSquare,
             type: 'chat-presets',
           },
+          ...userPagesBySection.chat,
         ],
       },
       {
@@ -106,6 +136,7 @@ export function useSidebarData(): SidebarData {
             url: '/status-monitor',
             icon: HeartPulse,
           },
+          ...userPagesBySection.general,
         ],
       },
       {
@@ -132,6 +163,7 @@ export function useSidebarData(): SidebarData {
             url: '/lottery',
             icon: Dices,
           },
+          ...userPagesBySection.personal,
         ],
       },
       {
@@ -181,6 +213,7 @@ export function useSidebarData(): SidebarData {
             activeUrls: ['/system-settings'],
             icon: Settings,
           },
+          ...adminPages,
         ],
       },
     ],

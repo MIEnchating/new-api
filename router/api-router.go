@@ -29,6 +29,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.PUT("/status-monitor/cache/groups", middleware.AdminAuth(), controller.UpdateCacheMonitorGroups)
 		apiRouter.GET("/status-monitor/providers", middleware.UserAuth(), controller.GetOfficialProviderStatuses)
 		apiRouter.GET("/models", middleware.UserAuth(), controller.DashboardListModels)
+		apiRouter.GET("/custom-menu-pages", middleware.UserAuth(), controller.GetCustomMenuPages)
 		apiRouter.GET("/status/test", middleware.AdminAuth(), controller.TestStatus)
 		apiRouter.GET("/notice", controller.GetNotice)
 		apiRouter.GET("/user-agreement", controller.GetUserAgreement)

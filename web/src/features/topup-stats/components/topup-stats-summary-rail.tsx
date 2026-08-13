@@ -16,14 +16,37 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { FileCheck2, ReceiptText, Users } from 'lucide-react'
+import { FileCheck2 } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  XAxis,
+  YAxis,
+} from 'recharts'
 
+import { CompactDateTimeRangePicker } from '@/components/compact-date-time-range-picker'
+import { Dialog } from '@/components/dialog'
+import { Button } from '@/components/ui/button'
+import {
+  ChartContainer,
+  ChartLegend,
+  ChartLegendContent,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@/components/ui/chart'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatNumber, formatQuota } from '@/lib/format'
 
-import type { TopUpStatsItem, TopUpStatsSummary } from '../types'
+import type {
+  TopUpStatsDailyStat,
+  TopUpStatsItem,
+  TopUpStatsSummary,
+} from '../types'
 
 type TopUpStatsSummaryRailProps = {
   typeQuotas: Record<TopUpStatsItem['type'], number>
@@ -35,29 +58,6 @@ type TopUpStatsSummaryRailProps = {
 
 export function TopUpStatsSummaryRail(props: TopUpStatsSummaryRailProps) {
   const { t } = useTranslation()
-  const metrics = useMemo(
-    () => [
-      {
-        label: t('Successful orders'),
-        value: formatNumber(props.summary.order_count),
-        icon: ReceiptText,
-        iconClassName: 'bg-sky-500/10 text-sky-600 dark:text-sky-400',
-      },
-      {
-        label: t('Paying users'),
-        value: formatNumber(props.summary.user_count),
-        icon: Users,
-        iconClassName: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
-      },
-      {
-        label: t('Invoiced orders'),
-        value: formatNumber(props.summary.invoice_count),
-        icon: FileCheck2,
-        iconClassName: 'bg-violet-500/10 text-violet-600 dark:text-violet-400',
-      },
-    ],
-    [props.summary, t]
-  )
 
   return (
     <div
@@ -94,18 +94,182 @@ export function TopUpStatsSummaryRail(props: TopUpStatsSummaryRailProps) {
         accent='bg-foreground/60'
         loading={props.loading}
       />
-      <div className='bg-border mx-0.5 hidden h-5 w-px shrink-0 xl:block' />
-      {metrics.map((metric) => (
-        <SummaryMetricBadge
-          key={metric.label}
-          label={metric.label}
-          value={metric.value}
-          icon={metric.icon}
-          iconClassName={metric.iconClassName}
-          loading={props.loading}
-        />
-      ))}
+      <SummaryMetricBadge
+        label={t('Invoiced orders')}
+        value={formatNumber(props.summary.invoice_count)}
+        icon={FileCheck2}
+        iconClassName='bg-violet-500/10 text-violet-600 dark:text-violet-400'
+        loading={props.loading}
+      />
     </div>
+  )
+}
+
+type TopUpStatsSummaryDialogProps = TopUpStatsSummaryRailProps & {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  dailyStats: TopUpStatsDailyStat[]
+  dailyStatsLoading: boolean
+  statisticsRange: { start: Date; end: Date }
+  onStatisticsRangeChange: (range: { start?: Date; end?: Date }) => void
+}
+
+export function TopUpStatsSummaryDialog(props: TopUpStatsSummaryDialogProps) {
+  const { t } = useTranslation()
+  const chartConfig = useMemo<ChartConfig>(
+    () => ({
+      online_topup: {
+        label: t('Online payment'),
+        color: 'var(--success)',
+      },
+      redemption: {
+        label: t('Redemption Code'),
+        color: 'var(--chart-2)',
+      },
+      admin_adjustment: {
+        label: t('Admin Adjustment'),
+        color: 'var(--warning)',
+      },
+      lottery: {
+        label: t('Lottery amount'),
+        color: 'var(--chart-5)',
+      },
+      total: {
+        label: t('Total Quota'),
+        color: 'var(--foreground)',
+      },
+    }),
+    [t]
+  )
+  return (
+    <Dialog
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      title={t('Top-up Stats')}
+      showCloseButton
+      contentClassName='sm:max-w-2xl'
+      footer={
+        <Button
+          type='button'
+          variant='outline'
+          onClick={() => props.onOpenChange(false)}
+        >
+          {t('Close')}
+        </Button>
+      }
+    >
+      <div className='space-y-5' data-statistics-chart>
+        <div className='flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-end sm:justify-between'>
+          <div className='space-y-1'>
+            <div className='text-muted-foreground text-xs'>
+              {t('Quota trend')}
+            </div>
+            <p className='text-sm font-medium'>{t('Daily quota changes')}</p>
+          </div>
+          <CompactDateTimeRangePicker
+            start={props.statisticsRange.start}
+            end={props.statisticsRange.end}
+            onChange={props.onStatisticsRangeChange}
+            className='w-full sm:w-[21rem]'
+          />
+        </div>
+
+        {props.dailyStatsLoading ? (
+          <Skeleton className='h-60 w-full' />
+        ) : (
+          <ChartContainer
+            config={chartConfig}
+            className='aspect-auto h-60 w-full [&_.recharts-surface]:outline-none! [&_.recharts-wrapper]:outline-none!'
+          >
+            <LineChart
+              accessibilityLayer={false}
+              data={props.dailyStats}
+              margin={{ top: 8, right: 18, bottom: 4, left: 8 }}
+            >
+              <CartesianGrid vertical={false} strokeDasharray='3 3' />
+              <XAxis
+                dataKey='date'
+                tickLine={false}
+                axisLine={false}
+                minTickGap={22}
+                tickFormatter={(value) => String(value).slice(5)}
+              />
+              <YAxis
+                width={74}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(value) => formatQuota(Number(value))}
+              />
+              <ReferenceLine y={0} stroke='var(--border)' />
+              <ChartTooltip
+                cursor={{ fill: 'var(--muted)', opacity: 0.45 }}
+                content={
+                  <ChartTooltipContent
+                    labelFormatter={(value) => String(value)}
+                    formatter={(value, name) => (
+                      <div className='flex min-w-36 items-center justify-between gap-4'>
+                        <span className='text-muted-foreground'>
+                          {chartConfig[String(name)]?.label ?? String(name)}
+                        </span>
+                        <span className='font-mono font-semibold tabular-nums'>
+                          {formatQuota(Number(value))}
+                        </span>
+                      </div>
+                    )}
+                  />
+                }
+              />
+              <ChartLegend
+                verticalAlign='top'
+                align='right'
+                content={<ChartLegendContent />}
+              />
+              <Line
+                dataKey='online_topup'
+                name={t('Online payment')}
+                stroke='var(--color-online_topup)'
+                strokeWidth={2}
+                type='monotone'
+                dot={false}
+              />
+              <Line
+                dataKey='redemption'
+                name={t('Redemption Code')}
+                stroke='var(--color-redemption)'
+                strokeWidth={2}
+                type='monotone'
+                dot={false}
+              />
+              <Line
+                dataKey='admin_adjustment'
+                name={t('Admin Adjustment')}
+                stroke='var(--color-admin_adjustment)'
+                strokeWidth={2}
+                type='monotone'
+                dot={false}
+              />
+              <Line
+                dataKey='lottery'
+                name={t('Lottery amount')}
+                stroke='var(--color-lottery)'
+                strokeWidth={2}
+                type='monotone'
+                dot={false}
+              />
+              <Line
+                dataKey='total'
+                name={t('Total Quota')}
+                stroke='var(--color-total)'
+                strokeWidth={2.5}
+                strokeDasharray='5 4'
+                type='monotone'
+                dot={false}
+              />
+            </LineChart>
+          </ChartContainer>
+        )}
+      </div>
+    </Dialog>
   )
 }
 
@@ -138,7 +302,7 @@ function TypeQuotaBadge(props: {
 function SummaryMetricBadge(props: {
   label: string
   value: string
-  icon: typeof ReceiptText
+  icon: typeof FileCheck2
   iconClassName: string
   loading: boolean
 }) {

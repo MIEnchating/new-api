@@ -28,6 +28,7 @@ import { NoticeSection } from '../maintenance/notice-section'
 import { SidebarModulesSection } from '../maintenance/sidebar-modules-section'
 import type { SiteSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { CustomMenuPagesSection } from './custom-menu-pages-section'
 
 const SITE_SECTIONS = [
   {
@@ -74,6 +75,13 @@ const SITE_SECTIONS = [
         />
       )
     },
+  },
+  {
+    id: 'custom-menu-pages',
+    titleKey: 'Custom menu pages',
+    build: (settings: SiteSettings) => (
+      <CustomMenuPagesSection value={settings.CustomMenuPages} />
+    ),
   },
   {
     id: 'sidebar-modules',

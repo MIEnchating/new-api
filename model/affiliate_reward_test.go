@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAffiliateRewardLedgerIsIdempotentAndMasksInvitee(t *testing.T) {
+func TestAffiliateRewardLedgerIsIdempotentAndMasksInviteeUsername(t *testing.T) {
 	truncateTables(t)
 	require.NoError(t, DB.Create(&User{Id: 21, Username: "inviter", AffCode: "inviter_aff", Status: common.UserStatusEnabled}).Error)
 	require.NoError(t, DB.Create(&User{Id: 142, Username: "invitee", AffCode: "invitee_aff", Status: common.UserStatusEnabled}).Error)
@@ -27,7 +27,7 @@ func TestAffiliateRewardLedgerIsIdempotentAndMasksInvitee(t *testing.T) {
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
-	assert.Equal(t, "****42", items[0].InviteeDisplay)
+	assert.Equal(t, "i****e", items[0].InviteeDisplay)
 	assert.NotContains(t, items[0].InviteeDisplay, "invitee")
 	payload, err := common.Marshal(items[0])
 	require.NoError(t, err)
@@ -39,6 +39,14 @@ func TestAffiliateRewardLedgerIsIdempotentAndMasksInvitee(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, otherItems)
 	assert.Zero(t, otherTotal)
+}
+
+func TestMaskAffiliateUsername(t *testing.T) {
+	assert.Equal(t, "****", maskAffiliateUsername(""))
+	assert.Equal(t, "****", maskAffiliateUsername("李"))
+	assert.Equal(t, "张**", maskAffiliateUsername("张三"))
+	assert.Equal(t, "b*b", maskAffiliateUsername("bob"))
+	assert.Equal(t, "i****e", maskAffiliateUsername("invitee"))
 }
 
 func TestAffiliateRewardPagination(t *testing.T) {

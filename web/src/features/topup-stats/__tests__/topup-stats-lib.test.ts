@@ -19,7 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import { getLotteryNetQuota, getOrderManagementTotalQuota } from '../lib'
+import {
+  getLotteryNetQuota,
+  getOrderManagementTotalQuota,
+  getOrderManagementTypes,
+} from '../lib'
 import type { BillingRecordType } from '../types'
 
 describe('order management quota summaries', () => {
@@ -35,5 +39,24 @@ describe('order management quota summaries', () => {
 
     assert.equal(getLotteryNetQuota(quotas), 60)
     assert.equal(getOrderManagementTotalQuota(quotas), 1540)
+  })
+})
+
+describe('order management type filters', () => {
+  test('keeps lottery records opt-in through the type filter', () => {
+    assert.deepEqual(getOrderManagementTypes(['online_topup', 'redemption']), [
+      'online_topup',
+      'redemption',
+    ])
+    assert.deepEqual(getOrderManagementTypes([]), [
+      'online_topup',
+      'redemption',
+      'admin_adjustment',
+      'lottery_reward',
+      'lottery_reversal',
+    ])
+    assert.deepEqual(getOrderManagementTypes(['lottery_reward']), [
+      'lottery_reward',
+    ])
   })
 })

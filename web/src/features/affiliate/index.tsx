@@ -546,9 +546,7 @@ export function Affiliate() {
                                 </>
                               ) : (
                                 <span className='font-mono text-xs'>
-                                  {t('User {{identifier}}', {
-                                    identifier: userItem.invitee_display,
-                                  })}
+                                  {userItem.invitee_display}
                                 </span>
                               )}
                             </TableCell>

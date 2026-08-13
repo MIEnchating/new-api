@@ -16,21 +16,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { SiteSettings } from '../types'
+import assert from 'node:assert/strict'
+import { describe, test } from 'node:test'
 
-export const defaultSiteSettings: SiteSettings = {
-  Notice: '',
-  SystemName: 'New API',
-  Logo: '',
-  Footer: '',
-  About: '',
-  HomePageContent: '',
-  ServerAddress: '',
-  TrustedSiteOrigins: '',
-  'legal.user_agreement': '',
-  'legal.privacy_policy': '',
-  HeaderNavModules: '',
-  'general_setting.docs_link': '',
-  SidebarModulesAdmin: '',
-  CustomMenuPages: '[]',
-}
+import { renderToStaticMarkup } from 'react-dom/server'
+
+import { ChannelTestModeSelect } from '../routing-reliability-section'
+
+describe('channel test mode select layout', () => {
+  test('uses the full form-column width so long mode labels remain visible', () => {
+    const markup = renderToStaticMarkup(
+      <ChannelTestModeSelect value='scheduled_all' onValueChange={() => {}} />
+    )
+
+    assert.match(markup, /data-slot="select-trigger"/)
+    assert.match(markup, /class="[^"]*w-full[^"]*min-w-0[^"]*"/)
+  })
+})

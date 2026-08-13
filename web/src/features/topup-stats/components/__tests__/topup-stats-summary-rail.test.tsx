@@ -36,12 +36,21 @@ for (const key of [
     value: domWindow[key],
   })
 }
+Object.defineProperty(globalThis, 'requestAnimationFrame', {
+  configurable: true,
+  value: (callback: FrameRequestCallback) => setTimeout(callback, 0),
+})
+Object.defineProperty(globalThis, 'cancelAnimationFrame', {
+  configurable: true,
+  value: (handle: number) => clearTimeout(handle),
+})
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
-const { TopUpStatsSummaryRail } = await import('../topup-stats-summary-rail')
+const { TopUpStatsSummaryDialog, TopUpStatsSummaryRail } =
+  await import('../topup-stats-summary-rail')
 
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
@@ -57,7 +66,7 @@ reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 describe('order management mobile summary rail', () => {
   after(() => domWindow.close())
 
-  test('keeps all eight summaries in one non-wrapping mobile rail', async () => {
+  test('keeps six primary summaries in one non-wrapping mobile rail', async () => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
@@ -94,10 +103,74 @@ describe('order management mobile summary rail', () => {
     assert.ok(rail)
     assert.equal(rail.classList.contains('overflow-x-auto'), true)
     assert.equal(rail.classList.contains('no-scrollbar'), true)
-    assert.equal(rail.querySelectorAll('[data-summary-item]').length, 8)
+    assert.equal(rail.querySelectorAll('[data-summary-item]').length, 6)
     assert.equal(rail.textContent?.includes('Lottery amount'), true)
     assert.equal(rail.textContent?.includes('Total Quota'), true)
-    assert.equal(rail.textContent?.includes('Successful orders'), true)
+    assert.equal(rail.textContent?.includes('Successful orders'), false)
+    assert.equal(rail.textContent?.includes('Paying users'), false)
+    assert.equal(rail.textContent?.includes('Invoiced orders'), true)
+
+    await act(async () => root.unmount())
+    container.remove()
+  })
+
+  test('shows daily quota trend chart and order metrics in the statistics dialog', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+
+    await act(async () =>
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <TopUpStatsSummaryDialog
+            open
+            onOpenChange={() => {}}
+            typeQuotas={{
+              online_topup: 100,
+              redemption: 200,
+              affiliate_transfer: 0,
+              admin_adjustment: 300,
+              lottery_reward: 80,
+              lottery_reversal: -20,
+            }}
+            lotteryQuota={60}
+            totalQuota={540}
+            summary={{
+              order_count: 4,
+              user_count: 3,
+              total_money: 10,
+              invoice_count: 2,
+            }}
+            loading={false}
+            dailyStats={[
+              {
+                date: '2026-08-13',
+                online_topup: 100,
+                redemption: 20,
+                admin_adjustment: 0,
+                lottery: 0,
+                total: 120,
+              },
+            ]}
+            dailyStatsLoading={false}
+            statisticsRange={{ start: new Date(), end: new Date() }}
+            onStatisticsRangeChange={() => {}}
+          />
+        </I18nextProvider>
+      )
+    )
+
+    assert.ok(document.querySelector('[data-statistics-chart]'))
+    assert.ok(document.querySelector('[data-slot="chart"]'))
+    assert.equal(document.querySelectorAll('[data-statistics-item]').length, 0)
+    assert.match(document.body.textContent || '', /Quota trend/)
+    assert.match(document.body.textContent || '', /Daily quota changes/)
+    assert.equal(
+      document.body.textContent?.includes('Successful orders'),
+      false
+    )
+    assert.equal(document.body.textContent?.includes('Paying users'), false)
+    assert.equal(document.body.textContent?.includes('Invoiced orders'), false)
 
     await act(async () => root.unmount())
     container.remove()

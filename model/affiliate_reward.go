@@ -85,15 +85,16 @@ func GetAffiliateRewards(inviterId int, pageInfo *common.PageInfo) ([]AffiliateR
 	}
 
 	type rewardRow struct {
-		Id        int64
-		Type      string
-		Quota     int
-		InviteeId int
-		CreatedAt int64
+		Id              int64
+		Type            string
+		Quota           int
+		InviteeUsername string
+		CreatedAt       int64
 	}
 	rows := make([]rewardRow, 0, pageInfo.GetPageSize())
 	err := query.
-		Select("rewards.id, rewards.type, rewards.quota, rewards.invitee_id, rewards.created_at").
+		Joins("LEFT JOIN users AS invitees ON invitees.id = rewards.invitee_id").
+		Select("rewards.id, rewards.type, rewards.quota, COALESCE(invitees.username, '') AS invitee_username, rewards.created_at").
 		Order("rewards.created_at DESC, rewards.id DESC").
 		Offset(pageInfo.GetStartIdx()).
 		Limit(pageInfo.GetPageSize()).
@@ -108,7 +109,7 @@ func GetAffiliateRewards(inviterId int, pageInfo *common.PageInfo) ([]AffiliateR
 			Id:             row.Id,
 			Type:           row.Type,
 			Quota:          row.Quota,
-			InviteeDisplay: maskAffiliateInvitee(row.InviteeId),
+			InviteeDisplay: maskAffiliateUsername(row.InviteeUsername),
 			CreatedAt:      row.CreatedAt,
 		})
 	}
@@ -175,6 +176,18 @@ func applyAffiliateRewardUserFilter(query *gorm.DB, userIdColumn string, userAli
 	), nil
 }
 
-func maskAffiliateInvitee(userId int) string {
-	return fmt.Sprintf("****%02d", userId%100)
+func maskAffiliateUsername(username string) string {
+	runes := []rune(strings.TrimSpace(username))
+	switch len(runes) {
+	case 0, 1:
+		return "****"
+	case 2:
+		return string(runes[0]) + "**"
+	default:
+		maskLength := len(runes) - 2
+		if maskLength > 4 {
+			maskLength = 4
+		}
+		return string(runes[0]) + strings.Repeat("*", maskLength) + string(runes[len(runes)-1])
+	}
 }

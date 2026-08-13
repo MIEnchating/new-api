@@ -22,7 +22,7 @@ import type {
   PaginationState,
   RowSelectionState,
 } from '@tanstack/react-table'
-import { ReceiptText, Undo2 } from 'lucide-react'
+import { BarChart3, ReceiptText, Undo2 } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -46,8 +46,15 @@ import { getTopUpStats, updateTopUpInvoice, updateTopUpInvoices } from './api'
 import { useTopUpStatsColumns } from './components/topup-stats-columns'
 import { TopUpStatsDetailsDialog } from './components/topup-stats-details-dialog'
 import { TopUpStatsMobileList } from './components/topup-stats-mobile-list'
-import { TopUpStatsSummaryRail } from './components/topup-stats-summary-rail'
-import { getLotteryNetQuota, getOrderManagementTotalQuota } from './lib'
+import {
+  TopUpStatsSummaryDialog,
+  TopUpStatsSummaryRail,
+} from './components/topup-stats-summary-rail'
+import {
+  getLotteryNetQuota,
+  getOrderManagementTotalQuota,
+  getOrderManagementTypes,
+} from './lib'
 import type {
   BillingInvoiceTarget,
   InvoiceAction,
@@ -58,6 +65,14 @@ import type {
 type StatsRange = {
   start: Date
   end: Date
+}
+
+function getLastSevenDaysRange(): StatsRange {
+  const now = dayjs()
+  return {
+    start: now.subtract(6, 'day').startOf('day').toDate(),
+    end: now.endOf('day').toDate(),
+  }
 }
 
 type AppliedFilters = {
@@ -90,19 +105,9 @@ function areAppliedFiltersEqual(left: AppliedFilters, right: AppliedFilters) {
   )
 }
 
-const DEFAULT_ORDER_TYPES = [
-  'online_topup',
-  'redemption',
-  'lottery_reward',
-  'lottery_reversal',
-] as const
-const ORDER_MANAGEMENT_TYPES = [
-  ...DEFAULT_ORDER_TYPES,
-  'admin_adjustment',
-] as const
-
+const DEFAULT_VISIBLE_ORDER_TYPES = ['online_topup', 'redemption'] as const
 function getDefaultColumnFilters(): ColumnFiltersState {
-  return [{ id: 'type', value: [...DEFAULT_ORDER_TYPES] }]
+  return [{ id: 'type', value: [...DEFAULT_VISIBLE_ORDER_TYPES] }]
 }
 
 const emptySummary: TopUpStatsSummary = {
@@ -157,7 +162,7 @@ export function TopUpStats() {
     range: getTodayRange(),
     keyword: '',
     userKeyword: '',
-    types: [...DEFAULT_ORDER_TYPES],
+    types: getOrderManagementTypes([...DEFAULT_VISIBLE_ORDER_TYPES]),
     statuses: [],
     paymentMethods: [],
     invoiceStatuses: [],
@@ -169,6 +174,10 @@ export function TopUpStats() {
   const [returnConfirmed, setReturnConfirmed] = useState(false)
   const [detailsTarget, setDetailsTarget] = useState<TopUpStatsItem | null>(
     null
+  )
+  const [statisticsOpen, setStatisticsOpen] = useState(false)
+  const [statisticsRange, setStatisticsRange] = useState<StatsRange>(
+    getLastSevenDaysRange
   )
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
@@ -271,6 +280,42 @@ export function TopUpStats() {
   })
   const { refetch } = query
 
+  const statisticsStartTime = Math.floor(statisticsRange.start.getTime() / 1000)
+  const statisticsEndTime = Math.floor(statisticsRange.end.getTime() / 1000)
+  const statisticsQuery = useQuery({
+    queryKey: [
+      'admin-topup-daily-stats',
+      statisticsStartTime,
+      statisticsEndTime,
+      appliedFilters.userKeyword,
+      appliedFilters.keyword,
+      appliedFilters.types.join(','),
+      appliedFilters.statuses.join(','),
+      appliedFilters.paymentMethods.join(','),
+      appliedFilters.invoiceStatuses.join(','),
+    ],
+    enabled: statisticsOpen,
+    queryFn: async () => {
+      const response = await getTopUpStats({
+        start_time: statisticsStartTime,
+        end_time: statisticsEndTime,
+        keyword: appliedFilters.keyword || undefined,
+        user_keyword: appliedFilters.userKeyword || undefined,
+        types: appliedFilters.types.join(',') || undefined,
+        status: appliedFilters.statuses.join(',') || undefined,
+        payment_method: appliedFilters.paymentMethods.join(',') || undefined,
+        invoice_status: appliedFilters.invoiceStatuses.join(',') || undefined,
+        include_daily: true,
+        p: 1,
+        page_size: 1,
+      })
+      if (!response.success || !response.data) {
+        throw new Error(response.message || t('Failed to load order history'))
+      }
+      return response.data.daily_stats ?? []
+    },
+  })
+
   const handleRangeChange = useCallback(
     (nextRange: { start?: Date; end?: Date }) => {
       if (!nextRange.start || !nextRange.end) return
@@ -289,7 +334,7 @@ export function TopUpStats() {
       range: today,
       keyword: '',
       userKeyword: '',
-      types: [...DEFAULT_ORDER_TYPES],
+      types: getOrderManagementTypes([...DEFAULT_VISIBLE_ORDER_TYPES]),
       statuses: [],
       paymentMethods: [],
       invoiceStatuses: [],
@@ -343,8 +388,7 @@ export function TopUpStats() {
       range,
       keyword: globalFilter.trim(),
       userKeyword: userKeyword.trim(),
-      types:
-        selectedTypes.length > 0 ? selectedTypes : [...ORDER_MANAGEMENT_TYPES],
+      types: getOrderManagementTypes(selectedTypes),
       statuses: readStringFilter('status'),
       paymentMethods: readStringFilter('payment_method'),
       invoiceStatuses: readStringFilter('invoice_status'),
@@ -627,6 +671,17 @@ export function TopUpStats() {
                     loading={query.isLoading}
                   />
                 ),
+                preActions: (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    onClick={() => setStatisticsOpen(true)}
+                  >
+                    <BarChart3 data-icon='inline-start' />
+                    {t('Top-up Stats')}
+                  </Button>
+                ),
                 hasAdditionalFilters: !isToday || userKeyword.trim() !== '',
                 onReset: resetFilters,
                 onSearch: handleSearch,
@@ -685,6 +740,23 @@ export function TopUpStats() {
         item={detailsTarget}
         onOpenChange={(open) => {
           if (!open) setDetailsTarget(null)
+        }}
+      />
+      <TopUpStatsSummaryDialog
+        open={statisticsOpen}
+        onOpenChange={setStatisticsOpen}
+        typeQuotas={typeQuotas}
+        lotteryQuota={lotteryQuota}
+        totalQuota={totalQuota}
+        summary={summary}
+        loading={query.isLoading}
+        dailyStats={statisticsQuery.data ?? []}
+        dailyStatsLoading={statisticsQuery.isLoading}
+        statisticsRange={statisticsRange}
+        onStatisticsRangeChange={(nextRange) => {
+          if (nextRange.start && nextRange.end) {
+            setStatisticsRange({ start: nextRange.start, end: nextRange.end })
+          }
         }}
       />
     </>

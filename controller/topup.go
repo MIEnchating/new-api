@@ -559,6 +559,23 @@ func GetTopUpStats(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	var dailyStats []model.BillingHistoryDailyStat
+	if c.Query("include_daily") == "true" {
+		dailyStats, err = model.GetBillingHistoryDailyStats(model.BillingHistoryFilter{
+			UserKeyword:     statsFilter.UserKeyword,
+			Reference:       statsFilter.Reference,
+			Types:           types,
+			Statuses:        statsFilter.Statuses,
+			PaymentMethods:  statsFilter.PaymentMethods,
+			InvoiceStatuses: statsFilter.InvoiceStatuses,
+			StartTime:       startTime,
+			EndTime:         endTime,
+		})
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
 
 	common.ApiSuccess(c, gin.H{
 		"summary":     summary,
@@ -568,6 +585,7 @@ func GetTopUpStats(c *gin.Context) {
 		"total":       total,
 		"page":        pageInfo.GetPage(),
 		"page_size":   pageInfo.GetPageSize(),
+		"daily_stats": dailyStats,
 	})
 }
 

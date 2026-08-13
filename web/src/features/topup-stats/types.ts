@@ -74,6 +74,16 @@ export type TopUpStatsData = {
   total: number
   page: number
   page_size: number
+  daily_stats?: TopUpStatsDailyStat[]
+}
+
+export type TopUpStatsDailyStat = {
+  date: string
+  online_topup: number
+  redemption: number
+  admin_adjustment: number
+  lottery: number
+  total: number
 }
 
 export type TopUpStatsResponse = {
@@ -93,6 +103,7 @@ export type TopUpStatsParams = {
   status?: string
   payment_method?: string
   invoice_status?: string
+  include_daily?: boolean
 }
 
 export type TopUpInvoiceBatchResponse = {

@@ -207,7 +207,7 @@ test('keeps the current records visible while an administrator loads and searche
               id: 1,
               type: 'registration',
               quota: 100000,
-              invitee_display: '****21',
+              invitee_display: 'i****e',
               created_at: 1_786_363_100,
             },
           ],
@@ -256,7 +256,7 @@ test('keeps the current records visible while an administrator loads and searche
     )
     await flushRequests()
   })
-  assert.match(container.textContent || '', /用户 \*\*\*\*21/)
+  assert.match(container.textContent || '', /i\*\*\*\*e/)
 
   const allRecordsButton = [...container.querySelectorAll('button')].find(
     (button) => button.textContent?.includes('全部记录')
@@ -271,7 +271,7 @@ test('keeps the current records visible while an administrator loads and searche
     await flushRequests()
   })
 
-  assert.match(container.textContent || '', /用户 \*\*\*\*21/)
+  assert.match(container.textContent || '', /i\*\*\*\*e/)
   assert.equal(
     container.querySelector('[data-testid="affiliate-records-skeleton"]'),
     null

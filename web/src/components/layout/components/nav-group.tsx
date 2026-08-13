@@ -135,7 +135,11 @@ function SidebarMenuLink({ item, href }: { item: NavLink; href: string }) {
           />
         }
       >
-        {item.icon && <item.icon className='shrink-0' />}
+        {item.iconSrc ? (
+          <img src={item.iconSrc} alt='' className='size-4 shrink-0' />
+        ) : (
+          item.icon && <item.icon className='shrink-0' />
+        )}
         <span className='min-w-0 flex-1 truncate'>{item.title}</span>
         {item.badge && <NavBadge>{item.badge}</NavBadge>}
       </SidebarMenuButton>
@@ -178,7 +182,11 @@ function SidebarMenuCollapsible({
         className='group/collapsible-trigger'
         render={<SidebarMenuButton tooltip={item.title} />}
       >
-        {item.icon && <item.icon className='shrink-0' />}
+        {item.iconSrc ? (
+          <img src={item.iconSrc} alt='' className='size-4 shrink-0' />
+        ) : (
+          item.icon && <item.icon className='shrink-0' />
+        )}
         <span className='min-w-0 flex-1 truncate'>{item.title}</span>
         {item.badge && <NavBadge>{item.badge}</NavBadge>}
         <ChevronRight className='ms-auto size-4 shrink-0 transition-transform duration-200 group-data-[panel-open]/collapsible-trigger:rotate-90' />
@@ -197,7 +205,15 @@ function SidebarMenuCollapsible({
                   />
                 }
               >
-                {subItem.icon && <subItem.icon className='shrink-0' />}
+                {subItem.iconSrc ? (
+                  <img
+                    src={subItem.iconSrc}
+                    alt=''
+                    className='size-4 shrink-0'
+                  />
+                ) : (
+                  subItem.icon && <subItem.icon className='shrink-0' />
+                )}
                 <span className='min-w-0 flex-1 truncate'>{subItem.title}</span>
                 {subItem.badge && <NavBadge>{subItem.badge}</NavBadge>}
               </SidebarMenuSubButton>
@@ -231,7 +247,11 @@ function SidebarMenuCollapsedDropdown({
             />
           }
         >
-          {item.icon && <item.icon className='shrink-0' />}
+          {item.iconSrc ? (
+            <img src={item.iconSrc} alt='' className='size-4 shrink-0' />
+          ) : (
+            item.icon && <item.icon className='shrink-0' />
+          )}
           <span className='min-w-0 flex-1 truncate'>{item.title}</span>
           {item.badge && <NavBadge>{item.badge}</NavBadge>}
           <ChevronRight className='ms-auto size-4 shrink-0 transition-transform duration-200 group-data-[popup-open]/dropdown-trigger:rotate-90' />

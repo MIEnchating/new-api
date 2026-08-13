@@ -74,6 +74,7 @@ func InitOptionMap() {
 	common.OptionMap["SMTPInsecureSkipVerify"] = strconv.FormatBool(common.SMTPInsecureSkipVerify)
 	common.OptionMap["SMTPForceAuthLogin"] = strconv.FormatBool(common.SMTPForceAuthLogin)
 	common.OptionMap["Notice"] = ""
+	common.OptionMap[CustomMenuPagesOptionKey] = "[]"
 	common.OptionMap["About"] = ""
 	common.OptionMap["HomePageContent"] = ""
 	common.OptionMap["Footer"] = common.Footer
@@ -218,6 +219,9 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == CustomMenuPagesOptionKey {
+		return validateCustomMenuPagesJSON(value)
+	}
 	if key == LotteryPrizePoolOptionKey {
 		return validateLotteryPrizePoolJSON(value)
 	}

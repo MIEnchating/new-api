@@ -124,6 +124,7 @@ export type SiteSettings = {
   HeaderNavModules: string
   'general_setting.docs_link': string
   SidebarModulesAdmin: string
+  CustomMenuPages: string
 }
 
 export type AuthSettings = {

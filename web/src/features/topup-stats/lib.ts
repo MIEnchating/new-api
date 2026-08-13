@@ -69,6 +69,20 @@ export function getBillingTypeConfig(type: BillingRecordType, t: Translate) {
 
 type BillingTypeQuotas = Record<BillingRecordType, number>
 
+const SELECTABLE_ORDER_TYPES: BillingRecordType[] = [
+  'online_topup',
+  'redemption',
+  'admin_adjustment',
+  'lottery_reward',
+  'lottery_reversal',
+]
+
+export function getOrderManagementTypes(selectedTypes: string[]) {
+  const visibleTypes =
+    selectedTypes.length > 0 ? selectedTypes : SELECTABLE_ORDER_TYPES
+  return visibleTypes
+}
+
 export function getLotteryNetQuota(typeQuotas: BillingTypeQuotas) {
   return (typeQuotas.lottery_reward ?? 0) + (typeQuotas.lottery_reversal ?? 0)
 }
