@@ -22,6 +22,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -32,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import {
   createCustomMenuPageId,
   parseCustomMenuPages,
@@ -123,6 +125,7 @@ export function CustomMenuPagesSection(props: CustomMenuPagesSectionProps) {
         url: '',
         visibility: 'public',
         section: 'general',
+        enabled: true,
       },
     ])
   }
@@ -140,6 +143,7 @@ export function CustomMenuPagesSection(props: CustomMenuPagesSectionProps) {
           ...page,
           name: page.name.trim(),
           url: page.url.trim(),
+          enabled: page.enabled !== false,
         }))
       ),
     })
@@ -212,22 +216,39 @@ function MenuPageEditor(props: {
   }
 
   return (
-    <section className='bg-muted/15 min-w-0 space-y-4 rounded-lg border p-4'>
+    <section
+      className='bg-muted/15 min-w-0 space-y-4 rounded-lg border p-4 transition-colors'
+      data-enabled={props.page.enabled !== false}
+    >
       <div className='flex items-center justify-between gap-3'>
-        <h3 className='text-sm font-medium'>
-          {t('Menu item #{{index}}', { index: props.index + 1 })}
-        </h3>
-        <Button
-          type='button'
-          size='icon-sm'
-          variant='ghost'
-          className='text-destructive hover:text-destructive'
-          aria-label={t('Delete menu item')}
-          title={t('Delete menu item')}
-          onClick={props.onRemove}
-        >
-          <Trash2 />
-        </Button>
+        <div className='flex min-w-0 items-center gap-2'>
+          <h3 className='truncate text-sm font-medium'>
+            {t('Menu item #{{index}}', { index: props.index + 1 })}
+          </h3>
+          <StatusBadge
+            label={props.page.enabled !== false ? t('Enabled') : t('Disabled')}
+            variant={props.page.enabled !== false ? 'success' : 'neutral'}
+            copyable={false}
+          />
+        </div>
+        <div className='flex shrink-0 items-center gap-3'>
+          <Switch
+            checked={props.page.enabled !== false}
+            onCheckedChange={(enabled) => props.onChange({ enabled })}
+            aria-label={t('Enable menu item')}
+          />
+          <Button
+            type='button'
+            size='icon-sm'
+            variant='ghost'
+            className='text-destructive hover:text-destructive'
+            aria-label={t('Delete menu item')}
+            title={t('Delete menu item')}
+            onClick={props.onRemove}
+          >
+            <Trash2 />
+          </Button>
+        </div>
       </div>
 
       <div className='grid gap-4 sm:grid-cols-2'>

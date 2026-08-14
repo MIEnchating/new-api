@@ -19,7 +19,8 @@ func TestGetCustomMenuPagesFiltersAdminPages(t *testing.T) {
 	previous := common.OptionMap[model.CustomMenuPagesOptionKey]
 	common.OptionMap[model.CustomMenuPagesOptionKey] = `[
 		{"id":"page_public1","name":"帮助中心","url":"https://example.com/help","visibility":"public"},
-		{"id":"page_admin01","name":"内部面板","url":"https://example.com/admin","visibility":"admin"}
+		{"id":"page_admin01","name":"内部面板","url":"https://example.com/admin","visibility":"admin"},
+		{"id":"page_disabled","name":"暂停页面","url":"https://example.com/disabled","visibility":"public","enabled":false}
 	]`
 	common.OptionMapRWMutex.Unlock()
 	t.Cleanup(func() {

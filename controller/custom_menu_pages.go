@@ -22,6 +22,9 @@ func GetCustomMenuPages(c *gin.Context) {
 	role := c.GetInt("role")
 	visible := make([]model.CustomMenuPage, 0, len(pages))
 	for _, page := range pages {
+		if !page.IsEnabled() {
+			continue
+		}
 		if page.Visibility == model.CustomMenuVisibilityAdmin && role < common.RoleAdminUser {
 			continue
 		}

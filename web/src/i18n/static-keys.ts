@@ -64,6 +64,7 @@ export const STATIC_I18N_KEYS = [
   'Custom menu pages support up to 20 items',
   'Add menu item',
   'Menu item #{{index}}',
+  'Enable menu item',
   'Delete menu item',
   'Menu name',
   'For example: Help Center',

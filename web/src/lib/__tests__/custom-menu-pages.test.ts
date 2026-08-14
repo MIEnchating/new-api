@@ -52,6 +52,24 @@ describe('custom menu pages', () => {
       pages.map((page) => page.id),
       ['page_public1', 'page_admin01']
     )
+    assert.deepEqual(
+      pages.map((page) => page.enabled),
+      [true, true]
+    )
+  })
+
+  test('preserves an explicitly disabled menu page', () => {
+    const pages = parseCustomMenuPages([
+      {
+        id: 'page_disabled',
+        name: 'Paused',
+        url: 'https://example.com/paused',
+        visibility: 'public',
+        enabled: false,
+      },
+    ])
+
+    assert.equal(pages[0]?.enabled, false)
   })
 
   test('drops malformed menu entries from API data', () => {

@@ -5931,6 +5931,7 @@
     "Custom menu pages support up to 20 items": "自定义菜单页面最多支持 20 项",
     "Add menu item": "添加菜单项",
     "Menu item #{{index}}": "菜单项 #{{index}}",
+    "Enable menu item": "启用菜单项",
     "Delete menu item": "删除菜单项",
     "Menu name": "菜单名称",
     "For example: Help Center": "例如：帮助中心",

@@ -13,6 +13,28 @@ func TestParseCustomMenuPages(t *testing.T) {
 	}
 }
 
+func TestParseCustomMenuPagesTreatsMissingEnabledAsEnabled(t *testing.T) {
+	raw := `[{"id":"page_12345678","name":"帮助中心","url":"https://example.com/help","visibility":"public"}]`
+	pages, err := ParseCustomMenuPages(raw)
+	if err != nil {
+		t.Fatalf("ParseCustomMenuPages() error = %v", err)
+	}
+	if len(pages) != 1 || !pages[0].IsEnabled() {
+		t.Fatalf("legacy page should remain enabled: %#v", pages)
+	}
+}
+
+func TestParseCustomMenuPagesPreservesDisabledState(t *testing.T) {
+	raw := `[{"id":"page_12345678","name":"帮助中心","url":"https://example.com/help","visibility":"public","enabled":false}]`
+	pages, err := ParseCustomMenuPages(raw)
+	if err != nil {
+		t.Fatalf("ParseCustomMenuPages() error = %v", err)
+	}
+	if len(pages) != 1 || pages[0].IsEnabled() {
+		t.Fatalf("disabled page should remain disabled: %#v", pages)
+	}
+}
+
 func TestParseCustomMenuPagesRejectsUnsafeURL(t *testing.T) {
 	raw := `[{"id":"page_12345678","name":"坏地址","url":"javascript:alert(1)","visibility":"public"}]`
 	if _, err := ParseCustomMenuPages(raw); err == nil {

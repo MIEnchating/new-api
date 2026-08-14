@@ -53,7 +53,8 @@ import { ROLE } from '@/lib/roles'
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
-  const { data: customPages = [] } = useCustomMenuPages()
+  const { data: allCustomPages = [] } = useCustomMenuPages()
+  const customPages = allCustomPages.filter((page) => page.enabled !== false)
   const toNavItem = (page: (typeof customPages)[number]) => ({
     title: page.name,
     url: `/pages/${page.id}`,

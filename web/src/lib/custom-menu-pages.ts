@@ -26,6 +26,7 @@ export type CustomMenuPage = {
   visibility: CustomMenuPageVisibility
   section?: CustomMenuPageSection
   icon?: string
+  enabled?: boolean
 }
 
 const VALID_ID = /^[a-zA-Z0-9_-]{8,64}$/
@@ -45,10 +46,10 @@ export function parseCustomMenuPages(value: unknown): CustomMenuPage[] {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) : value
     if (!Array.isArray(parsed)) return []
-    return parsed.filter((entry): entry is CustomMenuPage => {
-      if (!entry || typeof entry !== 'object') return false
+    return parsed.flatMap((entry): CustomMenuPage[] => {
+      if (!entry || typeof entry !== 'object') return []
       const page = entry as Record<string, unknown>
-      return (
+      const valid =
         typeof page.id === 'string' &&
         VALID_ID.test(page.id) &&
         typeof page.name === 'string' &&
@@ -61,8 +62,16 @@ export function parseCustomMenuPages(value: unknown): CustomMenuPage[] {
           page.section === 'personal') &&
         (page.icon === undefined ||
           (typeof page.icon === 'string' &&
-            page.icon.startsWith('data:image/svg+xml;base64,')))
-      )
+            page.icon.startsWith('data:image/svg+xml;base64,'))) &&
+        (page.enabled === undefined || typeof page.enabled === 'boolean')
+      if (!valid) return []
+
+      return [
+        {
+          ...(page as CustomMenuPage),
+          enabled: page.enabled !== false,
+        },
+      ]
     })
   } catch {
     return []

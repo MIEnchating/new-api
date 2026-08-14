@@ -5931,6 +5931,7 @@
     "Custom menu pages support up to 20 items": "自訂選單頁面最多支援 20 項",
     "Add menu item": "新增選單項目",
     "Menu item #{{index}}": "選單項目 #{{index}}",
+    "Enable menu item": "啟用選單項目",
     "Delete menu item": "刪除選單項目",
     "Menu name": "選單名稱",
     "For example: Help Center": "例如：幫助中心",

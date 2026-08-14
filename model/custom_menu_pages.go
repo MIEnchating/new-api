@@ -31,6 +31,11 @@ type CustomMenuPage struct {
 	Visibility string `json:"visibility"`
 	Section    string `json:"section,omitempty"`
 	Icon       string `json:"icon,omitempty"`
+	Enabled    *bool  `json:"enabled,omitempty"`
+}
+
+func (page CustomMenuPage) IsEnabled() bool {
+	return page.Enabled == nil || *page.Enabled
 }
 
 func ParseCustomMenuPages(raw string) ([]CustomMenuPage, error) {
