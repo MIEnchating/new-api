@@ -16,9 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export type CCSwitchAppType = 'claude' | 'codex' | 'gemini'
+export type CCSwitchAppType =
+  | 'claude'
+  | 'codex'
+  | 'gemini'
+  | 'grokbuild'
+  | 'opencode'
+  | 'openclaw'
+  | 'hermes'
 
 export const CC_SWITCH_USAGE_AUTO_INTERVAL = 5
+export const CC_SWITCH_LATEST_RELEASE_URL =
+  'https://github.com/farion1231/cc-switch/releases/latest'
 
 export const CC_SWITCH_USAGE_SCRIPT = `({
   request: {
@@ -186,7 +195,8 @@ export function getDefaultCCSwitchEndpoint(
   serverAddress: string
 ): string {
   const normalizedAddress = normalizeServerAddress(serverAddress)
-  return app === 'codex' && !/\/v1$/i.test(normalizedAddress)
+  const usesOpenAICompatibleEndpoint = app !== 'claude' && app !== 'gemini'
+  return usesOpenAICompatibleEndpoint && !/\/v1$/i.test(normalizedAddress)
     ? `${normalizedAddress}/v1`
     : normalizedAddress
 }

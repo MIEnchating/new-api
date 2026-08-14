@@ -16,7 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { FileCheck2 } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -40,19 +39,14 @@ import {
   type ChartConfig,
 } from '@/components/ui/chart'
 import { Skeleton } from '@/components/ui/skeleton'
-import { formatNumber, formatQuota } from '@/lib/format'
+import { formatQuota } from '@/lib/format'
 
-import type {
-  TopUpStatsDailyStat,
-  TopUpStatsItem,
-  TopUpStatsSummary,
-} from '../types'
+import type { TopUpStatsDailyStat, TopUpStatsItem } from '../types'
 
 type TopUpStatsSummaryRailProps = {
   typeQuotas: Record<TopUpStatsItem['type'], number>
   lotteryQuota: number
   totalQuota: number
-  summary: TopUpStatsSummary
   loading: boolean
 }
 
@@ -92,13 +86,6 @@ export function TopUpStatsSummaryRail(props: TopUpStatsSummaryRailProps) {
         label={t('Total Quota')}
         value={props.totalQuota}
         accent='bg-foreground/60'
-        loading={props.loading}
-      />
-      <SummaryMetricBadge
-        label={t('Invoiced orders')}
-        value={formatNumber(props.summary.invoice_count)}
-        icon={FileCheck2}
-        iconClassName='bg-violet-500/10 text-violet-600 dark:text-violet-400'
         loading={props.loading}
       />
     </div>
@@ -296,40 +283,5 @@ function TypeQuotaBadge(props: {
         </span>
       )}
     </span>
-  )
-}
-
-function SummaryMetricBadge(props: {
-  label: string
-  value: string
-  icon: typeof FileCheck2
-  iconClassName: string
-  loading: boolean
-}) {
-  const Icon = props.icon
-  return (
-    <div
-      data-summary-item
-      className='border-border/60 bg-card inline-flex h-8 min-w-[8.5rem] shrink-0 items-center gap-2 rounded-md border px-2 shadow-xs sm:h-9 sm:min-w-0 sm:shrink sm:px-2.5'
-    >
-      <span
-        className={`flex size-5 shrink-0 items-center justify-center rounded sm:size-6 ${props.iconClassName}`}
-      >
-        <Icon className='size-3.5' aria-hidden='true' />
-      </span>
-      <span className='text-muted-foreground min-w-0 flex-1 truncate text-[11px] sm:text-xs sm:whitespace-nowrap'>
-        {props.label}
-      </span>
-      {props.loading ? (
-        <Skeleton className='h-4 w-8' />
-      ) : (
-        <span
-          className='max-w-20 min-w-0 truncate font-mono text-xs font-semibold tabular-nums sm:max-w-28 sm:text-sm'
-          title={props.value}
-        >
-          {props.value}
-        </span>
-      )}
-    </div>
   )
 }

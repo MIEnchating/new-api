@@ -5841,7 +5841,6 @@
     "Mark as invoiced": "Отметить как выставленный",
     "Return invoice": "Отозвать счёт",
     "Order time": "Время заказа",
-    "Invoiced orders": "Заказы со счётом",
     "Failed to update invoice": "Не удалось обновить статус счёта",
     "Invoice marked": "Счёт отмечен",
     "Invoice returned": "Счёт отозван",

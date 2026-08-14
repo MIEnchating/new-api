@@ -66,7 +66,7 @@ reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 describe('order management mobile summary rail', () => {
   after(() => domWindow.close())
 
-  test('keeps six primary summaries in one non-wrapping mobile rail', async () => {
+  test('keeps five quota summaries in one non-wrapping mobile rail', async () => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
@@ -85,12 +85,6 @@ describe('order management mobile summary rail', () => {
             }}
             lotteryQuota={60}
             totalQuota={540}
-            summary={{
-              order_count: 4,
-              user_count: 3,
-              total_money: 10,
-              invoice_count: 2,
-            }}
             loading={false}
           />
         </I18nextProvider>
@@ -103,18 +97,18 @@ describe('order management mobile summary rail', () => {
     assert.ok(rail)
     assert.equal(rail.classList.contains('overflow-x-auto'), true)
     assert.equal(rail.classList.contains('no-scrollbar'), true)
-    assert.equal(rail.querySelectorAll('[data-summary-item]').length, 6)
+    assert.equal(rail.querySelectorAll('[data-summary-item]').length, 5)
     assert.equal(rail.textContent?.includes('Lottery amount'), true)
     assert.equal(rail.textContent?.includes('Total Quota'), true)
     assert.equal(rail.textContent?.includes('Successful orders'), false)
     assert.equal(rail.textContent?.includes('Paying users'), false)
-    assert.equal(rail.textContent?.includes('Invoiced orders'), true)
+    assert.equal(rail.textContent?.includes('Invoiced orders'), false)
 
     await act(async () => root.unmount())
     container.remove()
   })
 
-  test('shows daily quota trend chart and order metrics in the statistics dialog', async () => {
+  test('shows the daily quota trend chart in the statistics dialog', async () => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
@@ -135,12 +129,6 @@ describe('order management mobile summary rail', () => {
             }}
             lotteryQuota={60}
             totalQuota={540}
-            summary={{
-              order_count: 4,
-              user_count: 3,
-              total_money: 10,
-              invoice_count: 2,
-            }}
             loading={false}
             dailyStats={[
               {

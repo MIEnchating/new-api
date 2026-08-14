@@ -17,13 +17,30 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
+import {
+  Bot,
+  Braces,
+  Code2,
+  Hammer,
+  Send,
+  Sparkles,
+  SquareTerminal,
+} from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
-import { ComboboxInput } from '@/components/ui/combobox-input'
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from '@/components/ui/combobox'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { useStatus } from '@/hooks/use-status'
@@ -41,8 +58,9 @@ import {
 
 const APP_CONFIGS = {
   claude: {
-    label: 'Claude',
-    defaultName: 'My Claude',
+    label: 'Claude Code',
+    icon: SquareTerminal,
+    defaultName: 'Claude Code',
     modelFields: [
       { key: 'model', labelKey: 'Primary Model', required: true },
       { key: 'haikuModel', labelKey: 'Haiku Model', required: false },
@@ -52,12 +70,38 @@ const APP_CONFIGS = {
   },
   codex: {
     label: 'Codex',
-    defaultName: 'My Codex',
+    icon: Code2,
+    defaultName: 'Codex',
     modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
   },
   gemini: {
-    label: 'Gemini',
-    defaultName: 'My Gemini',
+    label: 'Gemini CLI',
+    icon: Sparkles,
+    defaultName: 'Gemini CLI',
+    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
+  },
+  grokbuild: {
+    label: 'Grok Build',
+    icon: Hammer,
+    defaultName: 'Grok Build',
+    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
+  },
+  opencode: {
+    label: 'OpenCode',
+    icon: Braces,
+    defaultName: 'OpenCode',
+    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
+  },
+  openclaw: {
+    label: 'OpenClaw',
+    icon: Bot,
+    defaultName: 'OpenClaw',
+    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
+  },
+  hermes: {
+    label: 'Hermes',
+    icon: Send,
+    defaultName: 'Hermes',
     modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
   },
 } as const
@@ -69,6 +113,125 @@ interface Props {
   onOpenChange: (open: boolean) => void
   tokenId: number
   tokenKey: string
+}
+
+interface SelectOption {
+  value: string
+  label: string
+  description?: string
+  hint?: string
+  icon?: React.ReactNode
+}
+
+interface CCSwitchComboboxFieldProps {
+  value: string
+  options: SelectOption[]
+  onValueChange: (value: string) => void
+  placeholder?: string
+  emptyText: string
+  allowCustomValue?: boolean
+}
+
+function CCSwitchComboboxField({
+  value,
+  options,
+  onValueChange,
+  placeholder,
+  emptyText,
+  allowCustomValue = false,
+}: CCSwitchComboboxFieldProps) {
+  const optionValues = useMemo(
+    () => options.map((option) => option.value),
+    [options]
+  )
+  const optionMap = useMemo(
+    () => new Map(options.map((option) => [option.value, option])),
+    [options]
+  )
+  const selectedOption = optionMap.get(value)
+  const hasDetailedOptions = options.some(
+    (option) => option.description || option.hint || option.icon
+  )
+
+  return (
+    <Combobox
+      items={optionValues}
+      value={value || null}
+      itemToStringLabel={(optionValue) =>
+        optionMap.get(optionValue)?.label ?? optionValue
+      }
+      itemToStringValue={(optionValue) => optionValue}
+      onValueChange={(nextValue) => {
+        if (typeof nextValue === 'string') onValueChange(nextValue)
+      }}
+      {...(allowCustomValue
+        ? {
+            inputValue: value,
+            onInputValueChange: onValueChange,
+          }
+        : {})}
+    >
+      <ComboboxInput
+        className={cn(
+          'bg-background h-9 w-full',
+          hasDetailedOptions &&
+            'hover:border-ring/60 hover:bg-muted/20 [&>input]:cursor-pointer [&>input]:pl-8'
+        )}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        readOnly={!allowCustomValue}
+      >
+        {hasDetailedOptions && selectedOption?.icon ? (
+          <span className='pointer-events-none absolute left-3 flex size-3 items-center justify-center'>
+            {selectedOption.icon}
+          </span>
+        ) : null}
+      </ComboboxInput>
+      <ComboboxContent>
+        <ComboboxList className='max-h-64'>
+          {optionValues.map((optionValue) => {
+            const option = optionMap.get(optionValue)
+            if (!option) return null
+
+            return (
+              <ComboboxItem
+                key={optionValue}
+                value={optionValue}
+                className={cn(
+                  'px-2.5 pr-9',
+                  hasDetailedOptions ? 'min-h-12 py-1.5' : 'min-h-9 py-1.5'
+                )}
+              >
+                {option.icon ? (
+                  <span className='flex size-3.5 shrink-0 items-center justify-center self-start pt-1'>
+                    {option.icon}
+                  </span>
+                ) : null}
+                <span className='min-w-0 flex-1'>
+                  <span className='block truncate font-medium'>
+                    {option.label}
+                  </span>
+                  {option.description ? (
+                    <span className='mt-0.5 flex min-w-0 items-center gap-2'>
+                      <span className='text-muted-foreground min-w-0 truncate font-mono text-[11px]'>
+                        {option.description}
+                      </span>
+                      {option.hint ? (
+                        <span className='bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-[10px] leading-none'>
+                          {option.hint}
+                        </span>
+                      ) : null}
+                    </span>
+                  ) : null}
+                </span>
+              </ComboboxItem>
+            )
+          })}
+        </ComboboxList>
+        <ComboboxEmpty>{emptyText}</ComboboxEmpty>
+      </ComboboxContent>
+    </Combobox>
+  )
 }
 
 export function CCSwitchDialog(props: Props) {
@@ -118,7 +281,8 @@ export function CCSwitchDialog(props: Props) {
   const endpointOptions = endpointInfo.map((item) => ({
     value: item.url,
     label: item.route || item.url,
-    description: [item.url, item.description].filter(Boolean).join(' · '),
+    description: item.url,
+    hint: item.description,
     icon: item.color ? (
       <span
         className={cn('block size-2 rounded-full', getBgColorClass(item.color))}
@@ -159,11 +323,8 @@ export function CCSwitchDialog(props: Props) {
       open={props.open}
       onOpenChange={props.onOpenChange}
       title={t('Import to CC Switch')}
-      contentClassName='sm:max-w-md'
+      contentClassName='sm:max-w-3xl'
       contentHeight='auto'
-      bodyClassName={
-        currentConfig.modelFields.length === 1 ? 'space-y-4 pb-52' : 'space-y-4'
-      }
       footer={
         <>
           <Button variant='outline' onClick={() => props.onOpenChange(false)}>
@@ -173,13 +334,12 @@ export function CCSwitchDialog(props: Props) {
         </>
       }
     >
-      <div className='space-y-4'>
-        <div className='space-y-2'>
-          <Label>{t('Application')}</Label>
+      <div className='grid gap-5 md:min-h-[21.25rem] md:grid-cols-[12rem_minmax(0,1fr)] md:items-stretch'>
+        <div className='md:h-full'>
           <RadioGroup
             value={app}
             onValueChange={handleAppChange}
-            className='flex gap-4'
+            className='bg-muted/60 grid grid-cols-2 gap-1 rounded-lg p-1 md:h-full md:grid-cols-1 md:content-between'
           >
             {(
               Object.entries(APP_CONFIGS) as [
@@ -187,59 +347,80 @@ export function CCSwitchDialog(props: Props) {
                 (typeof APP_CONFIGS)[AppType],
               ][]
             ).map(([key, cfg]) => (
-              <div key={key} className='flex items-center gap-2'>
-                <RadioGroupItem value={key} id={`app-${key}`} />
-                <Label htmlFor={`app-${key}`} className='cursor-pointer'>
-                  {cfg.label}
-                </Label>
-              </div>
+              <Label
+                key={key}
+                htmlFor={`app-${key}`}
+                className={cn(
+                  'text-muted-foreground hover:text-foreground flex h-9 min-w-0 cursor-pointer items-center gap-2 rounded-md px-3 text-xs font-medium transition-[background-color,color,box-shadow] md:justify-start',
+                  app === key &&
+                    'bg-background text-foreground shadow-sm dark:bg-background/80'
+                )}
+              >
+                <RadioGroupItem
+                  value={key}
+                  id={`app-${key}`}
+                  className='sr-only'
+                />
+                <cfg.icon className='size-4 shrink-0' strokeWidth={1.8} />
+                <span className='min-w-0 truncate'>{cfg.label}</span>
+              </Label>
             ))}
           </RadioGroup>
         </div>
 
-        <div className='space-y-2'>
-          <Label>{t('Name')}</Label>
-          <ComboboxInput
-            options={[]}
-            value={name}
-            onValueChange={setName}
-            placeholder={currentConfig.defaultName}
-            emptyText=''
-            allowCustomValue
-          />
-        </div>
-
-        {endpointOptions.length > 1 && (
-          <div className='space-y-2'>
-            <Label>{t('API Endpoint')}</Label>
-            <ComboboxInput
-              options={endpointOptions}
-              value={endpointAddress}
-              onValueChange={setEndpointAddress}
-              emptyText=''
-            />
-          </div>
-        )}
-
-        {currentConfig.modelFields.map((field) => (
-          <div key={field.key} className='space-y-2'>
-            <Label>
-              {t(field.labelKey)}
-              {field.required && (
-                <span className='text-destructive ml-0.5'>*</span>
-              )}
+        <div className='border-border divide-border min-w-0 divide-y overflow-hidden rounded-lg border md:h-full'>
+          <div className='grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 sm:grid-cols-[7rem_minmax(0,1fr)]'>
+            <Label htmlFor='cc-switch-name' className='text-muted-foreground'>
+              {t('Name')}
             </Label>
-            <ComboboxInput
-              options={modelOptions}
-              value={models[field.key] || ''}
-              onValueChange={(v) =>
-                setModels((prev) => ({ ...prev, [field.key]: v }))
-              }
-              placeholder={t('Select or enter model name')}
-              emptyText={t('No models found')}
+            <Input
+              id='cc-switch-name'
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder={currentConfig.defaultName}
+              className='bg-background h-9 min-w-0'
             />
           </div>
-        ))}
+
+          {endpointOptions.length > 1 && (
+            <div className='grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 sm:grid-cols-[7rem_minmax(0,1fr)]'>
+              <Label className='text-muted-foreground'>
+                {t('API Endpoint')}
+              </Label>
+              <CCSwitchComboboxField
+                options={endpointOptions}
+                value={endpointAddress}
+                onValueChange={setEndpointAddress}
+                placeholder={t('API Endpoint')}
+                emptyText={t('No matching items')}
+              />
+            </div>
+          )}
+
+          {currentConfig.modelFields.map((field) => (
+            <div
+              key={field.key}
+              className='grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 sm:grid-cols-[7rem_minmax(0,1fr)]'
+            >
+              <Label className='text-muted-foreground'>
+                {t(field.labelKey)}
+                {field.required && (
+                  <span className='text-destructive ml-0.5'>*</span>
+                )}
+              </Label>
+              <CCSwitchComboboxField
+                options={modelOptions}
+                value={models[field.key] || ''}
+                onValueChange={(v) =>
+                  setModels((prev) => ({ ...prev, [field.key]: v }))
+                }
+                placeholder={t('Select or enter model name')}
+                emptyText={t('No models found')}
+                allowCustomValue
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </Dialog>
   )

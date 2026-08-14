@@ -484,8 +484,7 @@ func GetAllTopUps(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
-// GetTopUpStats returns successful top-up summaries and paginated order details
-// for administrators.
+// GetTopUpStats returns paginated order details and quota statistics for administrators.
 func GetTopUpStats(c *gin.Context) {
 	now := time.Now()
 	defaultStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
@@ -515,42 +514,19 @@ func GetTopUpStats(c *gin.Context) {
 
 	pageInfo := common.GetPageQuery(c)
 	types := parseBillingHistoryTypes(c.Query("types"))
-	statsFilter := model.TopUpStatsFilter{
-		Reference:       strings.TrimSpace(c.Query("keyword")),
-		UserKeyword:     strings.TrimSpace(c.Query("user_keyword")),
-		Statuses:        parseTopUpStatsStringValues(c.Query("status")),
-		PaymentMethods:  parseTopUpStatsStringValues(c.Query("payment_method")),
-		InvoiceStatuses: parseTopUpStatsIntValues(c.Query("invoice_status")),
-	}
-	summary := model.TopUpStatsSummary{}
-	includeOnlineTopUp := len(types) == 0
-	for _, billingType := range types {
-		if billingType == model.BillingTypeOnlineTopup {
-			includeOnlineTopUp = true
-			break
-		}
-	}
-	if includeOnlineTopUp {
-		summary, _, _, err = model.GetUserTopUpStats(
-			startTime,
-			endTime,
-			"",
-			&common.PageInfo{Page: 1, PageSize: 1},
-			statsFilter,
-		)
-		if err != nil {
-			common.ApiError(c, err)
-			return
-		}
-	}
+	reference := strings.TrimSpace(c.Query("keyword"))
+	userKeyword := strings.TrimSpace(c.Query("user_keyword"))
+	statuses := parseTopUpStatsStringValues(c.Query("status"))
+	paymentMethods := parseTopUpStatsStringValues(c.Query("payment_method"))
+	invoiceStatuses := parseTopUpStatsIntValues(c.Query("invoice_status"))
 
 	items, total, typeCounts, typeQuotas, err := model.GetBillingHistoryWithTypeStats(model.BillingHistoryFilter{
-		UserKeyword:     statsFilter.UserKeyword,
-		Reference:       statsFilter.Reference,
+		UserKeyword:     userKeyword,
+		Reference:       reference,
 		Types:           types,
-		Statuses:        statsFilter.Statuses,
-		PaymentMethods:  statsFilter.PaymentMethods,
-		InvoiceStatuses: statsFilter.InvoiceStatuses,
+		Statuses:        statuses,
+		PaymentMethods:  paymentMethods,
+		InvoiceStatuses: invoiceStatuses,
 		StartTime:       startTime,
 		EndTime:         endTime,
 		PageInfo:        pageInfo,
@@ -562,12 +538,12 @@ func GetTopUpStats(c *gin.Context) {
 	var dailyStats []model.BillingHistoryDailyStat
 	if c.Query("include_daily") == "true" {
 		dailyStats, err = model.GetBillingHistoryDailyStats(model.BillingHistoryFilter{
-			UserKeyword:     statsFilter.UserKeyword,
-			Reference:       statsFilter.Reference,
+			UserKeyword:     userKeyword,
+			Reference:       reference,
 			Types:           types,
-			Statuses:        statsFilter.Statuses,
-			PaymentMethods:  statsFilter.PaymentMethods,
-			InvoiceStatuses: statsFilter.InvoiceStatuses,
+			Statuses:        statuses,
+			PaymentMethods:  paymentMethods,
+			InvoiceStatuses: invoiceStatuses,
 			StartTime:       startTime,
 			EndTime:         endTime,
 		})
@@ -578,7 +554,6 @@ func GetTopUpStats(c *gin.Context) {
 	}
 
 	common.ApiSuccess(c, gin.H{
-		"summary":     summary,
 		"type_counts": typeCounts,
 		"type_quotas": typeQuotas,
 		"items":       items,

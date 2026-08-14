@@ -5841,7 +5841,6 @@
     "Mark as invoiced": "発行済みにする",
     "Return invoice": "請求書を取り消す",
     "Order time": "注文日時",
-    "Invoiced orders": "請求書発行済み注文",
     "Failed to update invoice": "請求書ステータスの更新に失敗しました",
     "Invoice marked": "請求書発行済みにしました",
     "Invoice returned": "請求書を取り消しました",

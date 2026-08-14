@@ -59,7 +59,6 @@ import type {
   BillingInvoiceTarget,
   InvoiceAction,
   TopUpStatsItem,
-  TopUpStatsSummary,
 } from './types'
 
 type StatsRange = {
@@ -106,15 +105,12 @@ function areAppliedFiltersEqual(left: AppliedFilters, right: AppliedFilters) {
 }
 
 const DEFAULT_VISIBLE_ORDER_TYPES = ['online_topup', 'redemption'] as const
+const DEFAULT_ORDER_STATUSES = ['success'] as const
 function getDefaultColumnFilters(): ColumnFiltersState {
-  return [{ id: 'type', value: [...DEFAULT_VISIBLE_ORDER_TYPES] }]
-}
-
-const emptySummary: TopUpStatsSummary = {
-  order_count: 0,
-  user_count: 0,
-  total_money: 0,
-  invoice_count: 0,
+  return [
+    { id: 'type', value: [...DEFAULT_VISIBLE_ORDER_TYPES] },
+    { id: 'status', value: [...DEFAULT_ORDER_STATUSES] },
+  ]
 }
 
 const emptyTypeQuotas: Record<TopUpStatsItem['type'], number> = {
@@ -163,7 +159,7 @@ export function TopUpStats() {
     keyword: '',
     userKeyword: '',
     types: getOrderManagementTypes([...DEFAULT_VISIBLE_ORDER_TYPES]),
-    statuses: [],
+    statuses: [...DEFAULT_ORDER_STATUSES],
     paymentMethods: [],
     invoiceStatuses: [],
   }))
@@ -335,7 +331,7 @@ export function TopUpStats() {
       keyword: '',
       userKeyword: '',
       types: getOrderManagementTypes([...DEFAULT_VISIBLE_ORDER_TYPES]),
-      statuses: [],
+      statuses: [...DEFAULT_ORDER_STATUSES],
       paymentMethods: [],
       invoiceStatuses: [],
     })
@@ -347,7 +343,6 @@ export function TopUpStats() {
     dayjs(range.start).isSame(dayjs(), 'day') &&
     dayjs(range.end).isSame(dayjs(), 'day')
   const rows = query.data?.items ?? []
-  const summary = query.data?.summary ?? emptySummary
   const typeQuotas = query.data?.type_quotas ?? emptyTypeQuotas
   const lotteryQuota = getLotteryNetQuota(typeQuotas)
   const totalQuota = getOrderManagementTotalQuota(typeQuotas)
@@ -667,7 +662,6 @@ export function TopUpStats() {
                     typeQuotas={typeQuotas}
                     lotteryQuota={lotteryQuota}
                     totalQuota={totalQuota}
-                    summary={summary}
                     loading={query.isLoading}
                   />
                 ),
@@ -748,7 +742,6 @@ export function TopUpStats() {
         typeQuotas={typeQuotas}
         lotteryQuota={lotteryQuota}
         totalQuota={totalQuota}
-        summary={summary}
         loading={query.isLoading}
         dailyStats={statisticsQuery.data ?? []}
         dailyStatsLoading={statisticsQuery.isLoading}

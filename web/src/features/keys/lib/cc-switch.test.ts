@@ -22,6 +22,7 @@ import { runInNewContext } from 'node:vm'
 
 import {
   buildCCSwitchURL,
+  CC_SWITCH_LATEST_RELEASE_URL,
   CC_SWITCH_USAGE_AUTO_INTERVAL,
   getCCSwitchUsageBaseUrl,
   getDefaultCCSwitchEndpoint,
@@ -55,6 +56,12 @@ function getUsageConfig() {
 }
 
 describe('CC Switch provider import', () => {
+  test('links to the official latest release page', () => {
+    const url = new URL(CC_SWITCH_LATEST_RELEASE_URL)
+    assert.equal(url.hostname, 'github.com')
+    assert.equal(url.pathname, '/farion1231/cc-switch/releases/latest')
+  })
+
   test('prefers the configured HTTPS server over the development origin', () => {
     assert.equal(
       resolveCCSwitchServerAddress(
@@ -142,6 +149,21 @@ describe('CC Switch provider import', () => {
       getDefaultCCSwitchEndpoint('claude', 'https://www.yunmian.tech/'),
       'https://www.yunmian.tech'
     )
+    assert.equal(
+      getDefaultCCSwitchEndpoint('gemini', 'https://www.yunmian.tech/'),
+      'https://www.yunmian.tech'
+    )
+    for (const app of [
+      'grokbuild',
+      'opencode',
+      'openclaw',
+      'hermes',
+    ] as const) {
+      assert.equal(
+        getDefaultCCSwitchEndpoint(app, 'https://www.yunmian.tech/'),
+        'https://www.yunmian.tech/v1'
+      )
+    }
     assert.equal(isValidCCSwitchEndpoint('https://api.yunmian.tech/v1'), true)
     assert.equal(isValidCCSwitchEndpoint('ftp://api.yunmian.tech'), false)
     assert.equal(isValidCCSwitchEndpoint('/v1'), false)
@@ -149,6 +171,34 @@ describe('CC Switch provider import', () => {
       getCCSwitchUsageBaseUrl('https://api.yunmian.tech/v1/'),
       'https://api.yunmian.tech'
     )
+  })
+
+  test('maps application choices to identifiers supported by CC Switch', () => {
+    const apps = [
+      'claude',
+      'codex',
+      'gemini',
+      'grokbuild',
+      'opencode',
+      'openclaw',
+      'hermes',
+    ] as const
+
+    for (const app of apps) {
+      const url = new URL(
+        buildCCSwitchURL({
+          app,
+          name: app,
+          models: { model: 'test-model' },
+          apiKey: 'sk-test-key',
+          serverAddress: 'https://www.yunmian.tech',
+          endpoint: getDefaultCCSwitchEndpoint(app, 'https://www.yunmian.tech'),
+        })
+      )
+
+      assert.equal(url.searchParams.get('app'), app)
+      assert.equal(url.searchParams.get('model'), 'test-model')
+    }
   })
 
   test('imports the selected API endpoint instead of forcing the default', () => {

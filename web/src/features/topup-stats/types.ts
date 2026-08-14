@@ -16,13 +16,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export type TopUpStatsSummary = {
-  order_count: number
-  user_count: number
-  total_money: number
-  invoice_count: number
-}
-
 export type TopUpStatus = 'success' | 'pending' | 'failed' | 'expired'
 export type InvoiceStatus = 0 | 1 | 2
 export type InvoiceAction = 'issue' | 'return'
@@ -67,7 +60,6 @@ export type TopUpInvoiceResponse = {
 }
 
 export type TopUpStatsData = {
-  summary: TopUpStatsSummary
   type_counts: Record<BillingRecordType, number>
   type_quotas: Record<BillingRecordType, number>
   items: TopUpStatsItem[]

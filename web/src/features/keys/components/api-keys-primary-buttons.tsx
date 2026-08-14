@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Plus } from 'lucide-react'
+import { Download, Plus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
 
+import { CC_SWITCH_LATEST_RELEASE_URL } from '../lib/cc-switch'
 import { useApiKeys } from './api-keys-provider'
 
 export function ApiKeysPrimaryButtons() {
@@ -29,8 +30,22 @@ export function ApiKeysPrimaryButtons() {
   return (
     <div className='flex gap-2'>
       <Button size='sm' onClick={() => setOpen('create')}>
-        <Plus className='h-4 w-4' />
+        <Plus data-icon='inline-start' />
         {t('Create API Key')}
+      </Button>
+      <Button
+        variant='outline'
+        size='sm'
+        render={
+          <a
+            href={CC_SWITCH_LATEST_RELEASE_URL}
+            target='_blank'
+            rel='noopener noreferrer'
+          />
+        }
+      >
+        <Download data-icon='inline-start' />
+        {t('Download')} CC Switch
       </Button>
     </div>
   )

@@ -3,9 +3,6 @@ package model
 import (
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
-	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -31,43 +28,6 @@ type TopUp struct {
 	InvoicedBy        int     `json:"invoiced_by"`
 	InvoiceReturnedAt int64   `json:"invoice_returned_at"`
 	InvoiceReturnedBy int     `json:"invoice_returned_by"`
-}
-
-type TopUpStatsSummary struct {
-	OrderCount   int64   `json:"order_count"`
-	UserCount    int64   `json:"user_count"`
-	TotalMoney   float64 `json:"total_money"`
-	InvoiceCount int64   `json:"invoice_count"`
-}
-
-type TopUpStatsOrder struct {
-	Id                int     `json:"id"`
-	TradeNo           string  `json:"trade_no"`
-	UserId            int     `json:"user_id"`
-	Username          string  `json:"username"`
-	DisplayName       string  `json:"display_name"`
-	PaymentMethod     string  `json:"payment_method"`
-	PaymentProvider   string  `json:"payment_provider"`
-	Amount            int64   `json:"amount"`
-	Money             float64 `json:"money"`
-	Status            string  `json:"status"`
-	CreateTime        int64   `json:"create_time"`
-	CompleteTime      int64   `json:"complete_time"`
-	OrderTime         int64   `json:"order_time"`
-	InvoiceStatus     int     `json:"invoice_status"`
-	InvoicedAt        int64   `json:"invoiced_at"`
-	InvoicedBy        int     `json:"invoiced_by"`
-	InvoiceReturnedAt int64   `json:"invoice_returned_at"`
-	InvoiceReturnedBy int     `json:"invoice_returned_by"`
-}
-
-type TopUpStatsFilter struct {
-	Keyword         string
-	Reference       string
-	UserKeyword     string
-	Statuses        []string
-	PaymentMethods  []string
-	InvoiceStatuses []int
 }
 
 const (
@@ -479,100 +439,6 @@ func GetAllTopUps(pageInfo *common.PageInfo) (topups []*TopUp, total int64, err 
 	}
 
 	return topups, total, nil
-}
-
-func applyTopUpStatsKeyword(query *gorm.DB, keyword string) (*gorm.DB, error) {
-	keyword = strings.TrimSpace(keyword)
-	if keyword == "" {
-		return query, nil
-	}
-
-	conditions := make([]string, 0, 2)
-	args := make([]interface{}, 0, 4)
-	if userId, err := strconv.Atoi(keyword); err == nil && userId > 0 {
-		conditions = append(conditions, "t.user_id = ?")
-		args = append(args, userId)
-	}
-
-	lowerKeyword := strings.ToLower(keyword)
-	if utf8.RuneCountInString(keyword) >= 2 {
-		pattern, err := sanitizeLikePattern("%" + lowerKeyword + "%")
-		if err != nil {
-			return nil, err
-		}
-		conditions = append(conditions, "(LOWER(COALESCE(u.username, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(u.display_name, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(t.trade_no, '')) LIKE ? ESCAPE '!')")
-		args = append(args, pattern, pattern, pattern)
-	} else {
-		conditions = append(conditions, "(LOWER(COALESCE(u.username, '')) = ? OR LOWER(COALESCE(u.display_name, '')) = ? OR LOWER(COALESCE(t.trade_no, '')) = ?)")
-		args = append(args, lowerKeyword, lowerKeyword, lowerKeyword)
-	}
-
-	return query.Where("("+strings.Join(conditions, " OR ")+")", args...), nil
-}
-
-// GetUserTopUpStats returns successful-order statistics and all top-up orders
-// in an inclusive time range. It uses the same timestamp rule as wallet
-// billing history: positive complete_time first, otherwise create_time.
-func GetUserTopUpStats(startTime int64, endTime int64, keyword string, pageInfo *common.PageInfo, filters ...TopUpStatsFilter) (summary TopUpStatsSummary, items []TopUpStatsOrder, total int64, err error) {
-	filter := TopUpStatsFilter{Keyword: keyword}
-	if len(filters) > 0 {
-		filter = filters[0]
-		filter.Keyword = keyword
-	}
-	baseQuery := DB.Table("top_ups AS t").
-		Joins("LEFT JOIN users AS u ON u.id = t.user_id")
-	baseQuery, err = applyTopUpStatsKeyword(baseQuery, filter.Keyword)
-	if err != nil {
-		return summary, nil, 0, err
-	}
-	if reference := strings.TrimSpace(filter.Reference); reference != "" {
-		pattern, patternErr := sanitizeLikePattern("%" + reference + "%")
-		if patternErr != nil {
-			return summary, nil, 0, patternErr
-		}
-		baseQuery = baseQuery.Where("t.trade_no LIKE ? ESCAPE '!'", pattern)
-	}
-	baseQuery, err = applyBillingUserFilter(baseQuery, "t.user_id", BillingHistoryFilter{UserKeyword: filter.UserKeyword})
-	if err != nil {
-		return summary, nil, 0, err
-	}
-	if len(filter.Statuses) > 0 {
-		baseQuery = baseQuery.Where("t.status IN ?", filter.Statuses)
-	}
-	if len(filter.PaymentMethods) > 0 {
-		baseQuery = baseQuery.Where("t.payment_method IN ?", filter.PaymentMethods)
-	}
-	if len(filter.InvoiceStatuses) > 0 {
-		baseQuery = baseQuery.Where("t.invoice_status IN ?", filter.InvoiceStatuses)
-	}
-
-	effectiveOrderTimeExpr := "CASE WHEN t.complete_time > 0 THEN t.complete_time ELSE t.create_time END"
-	if err = baseQuery.Session(&gorm.Session{}).
-		Where("t.status = ? AND ("+effectiveOrderTimeExpr+") >= ? AND ("+effectiveOrderTimeExpr+") <= ?", common.TopUpStatusSuccess, startTime, endTime).
-		Select("COUNT(*) AS order_count, COUNT(DISTINCT t.user_id) AS user_count, COALESCE(SUM(t.money), 0) AS total_money, COALESCE(SUM(CASE WHEN t.invoice_status = ? THEN 1 ELSE 0 END), 0) AS invoice_count", TopUpInvoiceStatusIssued).
-		Scan(&summary).Error; err != nil {
-		return summary, nil, 0, err
-	}
-
-	orderTimeExpr := effectiveOrderTimeExpr
-	listQuery := baseQuery.Session(&gorm.Session{}).
-		Where("("+orderTimeExpr+") >= ? AND ("+orderTimeExpr+") <= ?", startTime, endTime)
-	if err = listQuery.Session(&gorm.Session{}).Count(&total).Error; err != nil {
-		return summary, nil, 0, err
-	}
-
-	items = make([]TopUpStatsOrder, 0)
-	if total == 0 {
-		return summary, items, 0, nil
-	}
-
-	err = listQuery.Session(&gorm.Session{}).
-		Select("t.id AS id, t.trade_no AS trade_no, t.user_id AS user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, COALESCE(t.payment_method, '') AS payment_method, COALESCE(t.payment_provider, '') AS payment_provider, t.amount AS amount, t.money AS money, t.status AS status, t.create_time AS create_time, t.complete_time AS complete_time, " + orderTimeExpr + " AS order_time, COALESCE(t.invoice_status, 0) AS invoice_status, COALESCE(t.invoiced_at, 0) AS invoiced_at, COALESCE(t.invoiced_by, 0) AS invoiced_by, COALESCE(t.invoice_returned_at, 0) AS invoice_returned_at, COALESCE(t.invoice_returned_by, 0) AS invoice_returned_by").
-		Order("order_time DESC, t.id DESC").
-		Limit(pageInfo.GetPageSize()).
-		Offset(pageInfo.GetStartIdx()).
-		Scan(&items).Error
-	return summary, items, total, err
 }
 
 // UpdateTopUpInvoiceStatus changes only the internal invoice marker. It never
