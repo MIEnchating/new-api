@@ -18,7 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { describe, test } from 'node:test'
+import { resolve } from 'node:path'
+
+import { describe, test } from 'vitest'
 
 import { DEFAULT_LOGO } from '../constants'
 import { normalizeSystemLogo } from '../system-branding'
@@ -49,10 +51,7 @@ describe('system branding', () => {
   })
 
   test('shows a logo-free loading indicator before React mounts', () => {
-    const indexHtml = readFileSync(
-      new URL('../../../index.html', import.meta.url),
-      'utf8'
-    )
+    const indexHtml = readFileSync(resolve('index.html'), 'utf8')
 
     assert.match(indexHtml, /id="app-bootstrap-mark"/)
     assert.match(indexHtml, /app-bootstrap-wave/)

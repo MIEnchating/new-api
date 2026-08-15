@@ -17,9 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
 
 import type { ReactElement } from 'react'
+import { describe, test } from 'vitest'
 
 import { SystemInfoSection } from '../../general/system-info-section'
 import { HeaderNavigationSection } from '../../maintenance/header-navigation-section'

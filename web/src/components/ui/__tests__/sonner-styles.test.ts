@@ -18,12 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { describe, test } from 'node:test'
+import { resolve } from 'node:path'
 
-const styles = readFileSync(
-  new URL('../../../styles/index.css', import.meta.url),
-  'utf8'
-)
+import { describe, test } from 'vitest'
+
+const styles = readFileSync(resolve('src/styles/index.css'), 'utf8')
 
 describe('Sonner close button styles', () => {
   test('excludes the close control from the global button press transform', () => {

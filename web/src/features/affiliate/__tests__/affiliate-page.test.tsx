@@ -17,9 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { after, test } from 'node:test'
 
 import { Window } from 'happy-dom'
+import { afterAll, test } from 'vitest'
 
 import zh from '@/i18n/locales/zh.json'
 
@@ -34,6 +34,7 @@ for (const key of [
   'Element',
   'Image',
   'MouseEvent',
+  'MutationObserver',
 ] as const) {
   Object.defineProperty(globalThis, key, {
     configurable: true,
@@ -329,4 +330,4 @@ test('keeps the current records visible while an administrator loads and searche
   await act(async () => root.unmount())
 })
 
-after(() => domWindow.close())
+afterAll(() => domWindow.close())

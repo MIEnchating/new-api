@@ -17,11 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
 
 import { createInstance } from 'i18next'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { I18nextProvider } from 'react-i18next'
+import { test } from 'vitest'
 
 import zh from '@/i18n/locales/zh.json'
 import type { ChannelExecutionTimelineItem } from '@/lib/channel-execution-timeline'

@@ -17,9 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { after, describe, test } from 'node:test'
 
 import { Window } from 'happy-dom'
+import { afterAll, describe, test } from 'vitest'
 
 const domWindow = new Window()
 for (const key of [
@@ -65,7 +65,7 @@ const reactTestGlobals = globalThis as typeof globalThis & {
 reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 
 describe('compact date-time range picker mobile layout', () => {
-  after(() => domWindow.close())
+  afterAll(() => domWindow.close())
 
   test('places quick ranges inside the responsive time panel', async () => {
     const container = document.createElement('div')

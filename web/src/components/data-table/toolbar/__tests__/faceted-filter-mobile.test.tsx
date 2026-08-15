@@ -17,9 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { after, describe, test } from 'node:test'
 
 import { Window } from 'happy-dom'
+import { afterAll, describe, test } from 'vitest'
 
 const domWindow = new Window()
 for (const key of [
@@ -124,7 +124,7 @@ function getMobileOption(value: string) {
 }
 
 describe('data table faceted filter mobile selection', () => {
-  after(() => domWindow.close())
+  afterAll(() => domWindow.close())
 
   test('commits a single-select option from the mobile drawer', async () => {
     const { container, root } = await renderFilter(true)

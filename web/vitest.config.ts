@@ -16,23 +16,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-import { describe, test } from 'vitest'
+import { defineConfig } from 'vitest/config'
 
-import { getModelCategory } from '../model-categories'
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
-describe('fetched model categories', () => {
-  test('classifies Qwen TTS models as Qwen', () => {
-    assert.equal(getModelCategory('qwen3-tts-flash'), 'Qwen')
-  })
-
-  test('keeps standalone OpenAI TTS models in the OpenAI category', () => {
-    assert.equal(getModelCategory('tts-1-hd'), 'OpenAI')
-    assert.equal(getModelCategory('openai/tts-1'), 'OpenAI')
-  })
-
-  test('does not treat an embedded TTS suffix as an OpenAI identifier', () => {
-    assert.equal(getModelCategory('acme-tts-voice'), 'Other')
-  })
+export default defineConfig({
+  resolve: {
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test-setup.ts'],
+    clearMocks: true,
+    restoreMocks: true,
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
+  },
 })
