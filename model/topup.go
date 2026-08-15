@@ -68,12 +68,14 @@ func calculateTopUpCreditedQuota(paymentProvider string, amount int64, money flo
 }
 
 var (
-	ErrPaymentMethodMismatch = errors.New("payment method mismatch")
-	ErrTopUpNotFound         = errors.New("topup not found")
-	ErrTopUpStatusInvalid    = errors.New("topup status invalid")
-	ErrTopUpInvoiceAction    = errors.New("invalid invoice action")
-	ErrTopUpInvoiceStatus    = errors.New("invalid invoice status")
-	ErrTopUpInvoiceBatch     = errors.New("invalid invoice batch")
+	ErrPaymentMethodMismatch   = errors.New("payment method mismatch")
+	ErrTopUpNotFound           = errors.New("topup not found")
+	ErrTopUpStatusInvalid      = errors.New("topup status invalid")
+	ErrInvalidTopUpQuota       = errors.New("invalid top-up quota")
+	ErrTopUpQuotaLimitExceeded = errors.New("top-up quota limit exceeded")
+	ErrTopUpInvoiceAction      = errors.New("invalid invoice action")
+	ErrTopUpInvoiceStatus      = errors.New("invalid invoice status")
+	ErrTopUpInvoiceBatch       = errors.New("invalid invoice batch")
 )
 
 type inviteRechargeRebateResult struct {
@@ -102,7 +104,7 @@ func completePendingTopUpTx(tx *gorm.DB, topUp *TopUp, quotaToAdd int, userUpdat
 		return nil, errors.New("invalid topup")
 	}
 	if quotaToAdd <= 0 {
-		return nil, errors.New("无效的充值额度")
+		return nil, ErrInvalidTopUpQuota
 	}
 
 	var user User
@@ -121,18 +123,8 @@ func completePendingTopUpTx(tx *gorm.DB, topUp *TopUp, quotaToAdd int, userUpdat
 		return nil, err
 	}
 
-	updates := map[string]interface{}{
-		"quota": gorm.Expr("quota + ?", quotaToAdd),
-	}
-	for key, value := range userUpdates {
-		updates[key] = value
-	}
-	result := tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updates)
-	if result.Error != nil {
-		return nil, result.Error
-	}
-	if result.RowsAffected != 1 {
-		return nil, gorm.ErrRecordNotFound
+	if err := creditTopUpQuota(tx, topUp.UserId, quotaToAdd, userUpdates); err != nil {
+		return nil, err
 	}
 
 	rebateQuota := calculateInviteRechargeRebateQuota(quotaToAdd)
@@ -190,6 +182,67 @@ func (topUp *TopUp) Insert() error {
 	var err error
 	err = DB.Create(topUp).Error
 	return err
+}
+
+func topUpQuotaMaxCurrent(creditedQuota int) (int, error) {
+	if creditedQuota <= 0 || creditedQuota >= common.MaxQuota {
+		return 0, ErrInvalidTopUpQuota
+	}
+	return common.MaxQuota - 1 - creditedQuota, nil
+}
+
+// ValidateTopUpQuotaCapacity performs the user-facing pre-payment check. The
+// settlement path repeats the same invariant with an atomic conditional
+// update, because the wallet balance can change after checkout creation.
+func ValidateTopUpQuotaCapacity(userId int, creditedQuota int) error {
+	maxCurrentQuota, err := topUpQuotaMaxCurrent(creditedQuota)
+	if err != nil {
+		return err
+	}
+
+	var user User
+	if err := DB.Select("quota").Where("id = ?", userId).First(&user).Error; err != nil {
+		return err
+	}
+	if user.Quota > maxCurrentQuota {
+		return ErrTopUpQuotaLimitExceeded
+	}
+	return nil
+}
+
+// creditTopUpQuota atomically enforces the int32 wallet ceiling while adding
+// quota. Keeping the predicate and increment in one UPDATE prevents two
+// concurrent callbacks from both passing a separate read/check.
+func creditTopUpQuota(tx *gorm.DB, userId int, creditedQuota int, updates map[string]interface{}) error {
+	maxCurrentQuota, err := topUpQuotaMaxCurrent(creditedQuota)
+	if err != nil {
+		return err
+	}
+
+	updateFields := make(map[string]interface{}, len(updates)+1)
+	for key, value := range updates {
+		updateFields[key] = value
+	}
+	updateFields["quota"] = gorm.Expr("quota + ?", creditedQuota)
+
+	result := tx.Model(&User{}).
+		Where("id = ? AND quota <= ?", userId, maxCurrentQuota).
+		Updates(updateFields)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+
+	var count int64
+	if err := tx.Model(&User{}).Where("id = ?", userId).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return ErrTopUpQuotaLimitExceeded
 }
 
 func (topUp *TopUp) Update() error {
@@ -284,7 +337,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 			decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
 		)
 		if quotaErr != nil || quotaToAdd <= 0 {
-			return errors.New("无效的充值额度")
+			return ErrInvalidTopUpQuota
 		}
 		rebateResult, quotaErr = completePendingTopUpTx(tx, topUp, quotaToAdd, nil)
 		return quotaErr
@@ -343,7 +396,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 			decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
 		)
 		if err != nil || quotaToAdd <= 0 {
-			return errors.New("无效的充值额度")
+			return ErrInvalidTopUpQuota
 		}
 		rebateResult, err = completePendingTopUpTx(tx, topUp, quotaToAdd, map[string]interface{}{
 			"stripe_customer": customerId,
@@ -684,7 +737,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 			)
 		}
 		if quotaErr != nil || quotaToAdd <= 0 {
-			return errors.New("无效的充值额度")
+			return ErrInvalidTopUpQuota
 		}
 
 		var err error
@@ -751,7 +804,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		// Creem 直接使用 Amount 作为充值额度（整数）
 		quotaToAdd, err = common.QuotaFromDecimalStrict(decimal.NewFromInt(topUp.Amount))
 		if err != nil || quotaToAdd <= 0 {
-			return errors.New("无效的充值额度")
+			return ErrInvalidTopUpQuota
 		}
 
 		// 构建更新字段，优先使用邮箱，如果邮箱为空则使用用户名
@@ -830,7 +883,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 			decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
 		)
 		if err != nil || quotaToAdd <= 0 {
-			return errors.New("无效的充值额度")
+			return ErrInvalidTopUpQuota
 		}
 
 		rebateResult, err = completePendingTopUpTx(tx, topUp, quotaToAdd, nil)
@@ -891,7 +944,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 			decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
 		)
 		if err != nil || quotaToAdd <= 0 {
-			return errors.New("无效的充值额度")
+			return ErrInvalidTopUpQuota
 		}
 
 		rebateResult, err = completePendingTopUpTx(tx, topUp, quotaToAdd, nil)
