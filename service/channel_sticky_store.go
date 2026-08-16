@@ -45,10 +45,6 @@ func newStickyChannelStore(config stickyChannelStoreConfig) *stickyChannelStore 
 	}
 }
 
-func (s *stickyChannelStore) FullKey(key string) string {
-	return s.cache.FullKey(key)
-}
-
 func (s *stickyChannelStore) Get(key string) (int, bool, error) {
 	channelID, found, err := s.cache.Get(key)
 	if err != nil {
@@ -90,53 +86,12 @@ func (s *stickyChannelStore) Algorithm() (string, string) {
 	return s.cache.Algorithm()
 }
 
-func (s *stickyChannelStore) Delete(key string) (bool, error) {
-	deleted, err := s.DeleteMany([]string{key})
-	if err != nil {
-		return false, err
-	}
-	return deleted[s.FullKey(key)], nil
-}
-
 func (s *stickyChannelStore) ClearAll() (int, error) {
 	keys, err := s.Keys()
 	if err != nil {
 		return 0, err
 	}
 	deleted, err := s.DeleteMany(keys)
-	if err != nil {
-		return 0, err
-	}
-	count := 0
-	for _, ok := range deleted {
-		if ok {
-			count++
-		}
-	}
-	return count, nil
-}
-
-func (s *stickyChannelStore) DeleteByChannelID(channelID int) (int, error) {
-	if channelID <= 0 {
-		return 0, fmt.Errorf("invalid channel ID")
-	}
-
-	keys, err := s.Keys()
-	if err != nil {
-		return 0, err
-	}
-	values, getErr := s.cache.GetMany(keys)
-	if getErr != nil {
-		common.SysError(fmt.Sprintf("sticky channel cache batch read failed: err=%v", getErr))
-	}
-	matched := make([]string, 0)
-	for key, storedChannelID := range values {
-		if storedChannelID == channelID {
-			matched = append(matched, key)
-		}
-	}
-
-	deleted, err := s.DeleteMany(matched)
 	if err != nil {
 		return 0, err
 	}

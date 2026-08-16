@@ -27,16 +27,6 @@ func GetUserOAuthBindingsByUserId(userId int) ([]*UserOAuthBinding, error) {
 	return bindings, err
 }
 
-// GetUserOAuthBinding returns a specific binding for a user and provider
-func GetUserOAuthBinding(userId, providerId int) (*UserOAuthBinding, error) {
-	var binding UserOAuthBinding
-	err := DB.Where("user_id = ? AND provider_id = ?", userId, providerId).First(&binding).Error
-	if err != nil {
-		return nil, err
-	}
-	return &binding, nil
-}
-
 // GetUserByOAuthBinding finds a user by provider ID and provider user ID
 func GetUserByOAuthBinding(providerId int, providerUserId string) (*User, error) {
 	var binding UserOAuthBinding

@@ -49,7 +49,7 @@ function toNumber(value: unknown, fallback: number): number {
 /**
  * Map `/api/status` response data to our persisted system config structure
  */
-export function mapStatusDataToConfig(
+function mapStatusDataToConfig(
   data: SystemStatus | undefined
 ): Partial<SystemConfig> {
   if (!data) return {}

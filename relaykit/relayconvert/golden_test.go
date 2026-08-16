@@ -318,7 +318,7 @@ func TestGoldenRequestConversionMatrix(t *testing.T) {
 			}
 			name := fmt.Sprintf("request/%s_to_%s", from, to)
 			t.Run(name, func(t *testing.T) {
-				result, err := ConvertRequest(nil, goldenInfo(), to, deepCopyFixture(t, requests[from]))
+				result, err := ConvertRequest(context.Background(), goldenInfo(), to, deepCopyFixture(t, requests[from]))
 				require.NoError(t, err)
 				checkGolden(t, name, marshalGolden(t, result.Value))
 			})
@@ -335,7 +335,7 @@ func TestGoldenResponseConversionMatrix(t *testing.T) {
 			}
 			name := fmt.Sprintf("response/%s_to_%s", from, to)
 			t.Run(name, func(t *testing.T) {
-				result, err := ConvertResponse(nil, goldenInfo(), to, deepCopyFixture(t, responses[from]))
+				result, err := ConvertResponse(context.Background(), goldenInfo(), to, deepCopyFixture(t, responses[from]))
 				require.NoError(t, err)
 				checkGolden(t, name, marshalGolden(t, result.Value))
 			})
@@ -361,13 +361,13 @@ func TestGoldenStreamConversionMatrix(t *testing.T) {
 
 				var outputs []any
 				for _, chunk := range chunkSets[from] {
-					results, err := ConvertStreamResponseChunk(nil, info, state, deepCopyFixture(t, chunk))
+					results, err := ConvertStreamResponseChunk(context.Background(), info, state, deepCopyFixture(t, chunk))
 					require.NoError(t, err)
 					for _, r := range results {
 						outputs = append(outputs, r.Value)
 					}
 				}
-				finals, err := FinalizeStreamResponse(nil, info, state)
+				finals, err := FinalizeStreamResponse(context.Background(), info, state)
 				require.NoError(t, err)
 				for _, r := range finals {
 					outputs = append(outputs, r.Value)
@@ -386,10 +386,6 @@ func TestGoldenStreamConversionMatrix(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Fixture helpers
 // ---------------------------------------------------------------------------
-
-func rawJSON(s string) json.RawMessage {
-	return json.RawMessage(s)
-}
 
 // deepCopyFixture guards against converters mutating shared fixture state
 // between subtests (JSON round-trip through the concrete type).

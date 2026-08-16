@@ -1125,7 +1125,7 @@ const TAB_META: Record<
   api: { icon: Code2, labelKey: 'API' },
 }
 
-export interface ModelDetailsContentProps {
+interface ModelDetailsContentProps {
   model: PricingModel
   groupRatio: Record<string, number>
   usableGroup: Record<string, { desc: string; ratio: number }>
@@ -1137,7 +1137,7 @@ export interface ModelDetailsContentProps {
   showRechargePrice?: boolean
 }
 
-export function ModelDetailsContent(props: ModelDetailsContentProps) {
+function ModelDetailsContent(props: ModelDetailsContentProps) {
   const { t } = useTranslation()
   const showRechargePrice = props.showRechargePrice ?? false
 

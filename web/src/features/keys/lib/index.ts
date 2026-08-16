@@ -24,7 +24,6 @@ export {
   canConfigureGroupRouteCooldown,
   getApiKeyFormSchema,
   type ApiKeyFormValues,
-  API_KEY_FORM_DEFAULT_VALUES,
   getApiKeyFormDefaultValues,
   getAutomaticGroupRoutePriorities,
   parseApiKeyGroupRouteConfig,

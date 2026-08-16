@@ -139,9 +139,6 @@ func UnmarshalBodyReusable(c *gin.Context, v any) error {
 		err = parseFormData(requestBody, v)
 	} else if strings.Contains(contentType, gin.MIMEMultipartPOSTForm) {
 		err = parseMultipartFormData(c, requestBody, v)
-	} else {
-		// skip for now
-		// TODO: someday non json request have variant model, we will need to implementation this
 	}
 	if err != nil {
 		return err
@@ -172,10 +169,6 @@ func GetContextKeyInt(c *gin.Context, key constant.ContextKey) int {
 
 func GetContextKeyBool(c *gin.Context, key constant.ContextKey) bool {
 	return c.GetBool(string(key))
-}
-
-func GetContextKeyStringSlice(c *gin.Context, key constant.ContextKey) []string {
-	return c.GetStringSlice(string(key))
 }
 
 func GetContextKeyStringMap(c *gin.Context, key constant.ContextKey) map[string]any {

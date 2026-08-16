@@ -162,6 +162,8 @@ jobs:
           while IFS= read -r -d '' file; do
             directory="$(dirname "$file")"
             filename="$(basename "$file")"
+            # sed is intentional here because the replacement uses a regex character class.
+            # shellcheck disable=SC2001
             safe_filename="$(sed 's/[^A-Za-z0-9._+-]/-/g' <<< "$filename")"
             if [[ "$filename" != "$safe_filename" ]]; then
               if [[ -e "$directory/$safe_filename" ]]; then

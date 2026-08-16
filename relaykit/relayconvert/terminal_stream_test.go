@@ -1,6 +1,7 @@
 package relayconvert
 
 import (
+	"context"
 	"testing"
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -60,7 +61,7 @@ func TestGeminiToOpenAIStatefulStreamTerminal(t *testing.T) {
 			)
 			require.NoError(t, err)
 
-			results, err := ConvertStreamResponseChunk(nil, info, state, tt.chunk)
+			results, err := ConvertStreamResponseChunk(context.Background(), info, state, tt.chunk)
 			require.NoError(t, err)
 			chunkFinishes := terminalTestFinishedChatChunks(t, results)
 			if tt.wantFinishOnFinalize {
@@ -69,7 +70,7 @@ func TestGeminiToOpenAIStatefulStreamTerminal(t *testing.T) {
 				require.Len(t, chunkFinishes, 1)
 			}
 
-			finalResults, err := FinalizeStreamResponse(nil, info, state)
+			finalResults, err := FinalizeStreamResponse(context.Background(), info, state)
 			require.NoError(t, err)
 			finalFinishes := terminalTestFinishedChatChunks(t, finalResults)
 			if tt.wantFinishOnFinalize {
@@ -96,7 +97,7 @@ func TestGeminiToOpenAIStatefulStreamTerminal(t *testing.T) {
 				assert.Empty(t, finish.Choices[0].Delta.ToolCalls)
 			}
 
-			repeatedFinal, err := FinalizeStreamResponse(nil, info, state)
+			repeatedFinal, err := FinalizeStreamResponse(context.Background(), info, state)
 			require.NoError(t, err)
 			assert.Empty(t, repeatedFinal)
 		})
@@ -192,12 +193,12 @@ func TestClaudeTargetStatefulStreamTerminalTail(t *testing.T) {
 
 			var results []ResponseResult
 			for _, chunk := range tt.chunks {
-				chunkResults, err := ConvertStreamResponseChunk(nil, info, state, chunk)
+				chunkResults, err := ConvertStreamResponseChunk(context.Background(), info, state, chunk)
 				require.NoError(t, err)
 				results = append(results, chunkResults...)
 			}
 
-			finalResults, err := FinalizeStreamResponse(nil, info, state)
+			finalResults, err := FinalizeStreamResponse(context.Background(), info, state)
 			require.NoError(t, err)
 			if tt.wantFinalizerTerminals {
 				require.Len(t, finalResults, 3)
@@ -209,7 +210,7 @@ func TestClaudeTargetStatefulStreamTerminalTail(t *testing.T) {
 			terminalTestAssertClaudeTail(t, results, tt.wantStopReason)
 			assert.True(t, info.ClaudeConvertInfo.Done)
 
-			repeatedFinal, err := FinalizeStreamResponse(nil, info, state)
+			repeatedFinal, err := FinalizeStreamResponse(context.Background(), info, state)
 			require.NoError(t, err)
 			assert.Empty(t, repeatedFinal)
 		})
@@ -249,7 +250,7 @@ func TestClaudeTargetStatefulStreamTerminalTail(t *testing.T) {
 			},
 		}
 		for _, chunk := range chunks {
-			_, err := ConvertStreamResponseChunk(nil, info, state, chunk)
+			_, err := ConvertStreamResponseChunk(context.Background(), info, state, chunk)
 			require.NoError(t, err)
 		}
 
@@ -259,7 +260,7 @@ func TestClaudeTargetStatefulStreamTerminalTail(t *testing.T) {
 			TotalTokens:      18,
 		}
 		info.ClaudeConvertInfo.Usage = preseeded
-		finalResults, err := FinalizeStreamResponse(nil, info, state)
+		finalResults, err := FinalizeStreamResponse(context.Background(), info, state)
 		require.NoError(t, err)
 		require.Len(t, finalResults, 3)
 		assert.Same(t, preseeded, info.ClaudeConvertInfo.Usage)
@@ -279,8 +280,7 @@ func TestConvertStreamResponseKeepsStatelessCompatibility(t *testing.T) {
 			ChannelMetaAttached: true,
 			UpstreamModelName:   "upstream-model",
 		}
-		result, err := ConvertStreamResponse(
-			nil,
+		result, err := ConvertStreamResponse(context.Background(),
 			info,
 			types.RelayFormatOpenAI,
 			terminalTestGeminiChunk("Hello", "STOP", false),
@@ -307,8 +307,7 @@ func TestConvertStreamResponseKeepsStatelessCompatibility(t *testing.T) {
 				LastMessagesType: convmeta.LastMessageTypeNone,
 			},
 		}
-		result, err := ConvertStreamResponse(
-			nil,
+		result, err := ConvertStreamResponse(context.Background(),
 			info,
 			types.RelayFormatClaude,
 			&dto.ChatCompletionsStreamResponse{

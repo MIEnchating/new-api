@@ -118,9 +118,6 @@ func getHeaderPassthroughRegex(pattern string) (*regexp.Regexp, error) {
 	return compiled, nil
 }
 
-func IsHeaderPassthroughRuleKey(key string) bool {
-	return isHeaderPassthroughRuleKey(key)
-}
 func isHeaderPassthroughRuleKey(key string) bool {
 	key = strings.TrimSpace(key)
 	if key == "" {
@@ -391,9 +388,6 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("dial failed to %s: %w", common.SanitizeURLForLog(fullRequestURL), err)
 	}
-	// send request body
-	//all, err := io.ReadAll(requestBody)
-	//err = service.WssString(c, targetConn, string(all))
 	return targetConn, nil
 }
 

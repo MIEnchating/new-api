@@ -185,6 +185,8 @@ func serveTraceRedisConnection(connection net.Conn) {
 
 func newTraceRedisTestClient(t *testing.T, hook redis.Hook) *redis.Client {
 	t.Helper()
+	oldRDB := common.RDB
+	oldRedisEnabled := common.RedisEnabled
 	client := redis.NewClient(&redis.Options{
 		Addr:       "trace-redis-test",
 		MaxRetries: -1,
@@ -197,8 +199,32 @@ func newTraceRedisTestClient(t *testing.T, hook redis.Hook) *redis.Client {
 	if hook != nil {
 		client.AddHook(hook)
 	}
-	t.Cleanup(func() { _ = client.Close() })
+	common.RDB = client
+	common.RedisEnabled = true
+	t.Cleanup(func() {
+		stopChannelExecutionTraceRuntimeForTest()
+		common.RDB = oldRDB
+		common.RedisEnabled = oldRedisEnabled
+		_ = client.Close()
+	})
 	return client
+}
+
+func stopChannelExecutionTraceRuntimeForTest() {
+	if channelExecutionRecoveryStop != nil {
+		close(channelExecutionRecoveryStop)
+		channelExecutionRecoveryWG.Wait()
+	}
+	if channelExecutionPublisherStop != nil {
+		close(channelExecutionPublisherStop)
+		channelExecutionPublisherWG.Wait()
+	}
+	channelExecutionRecoveryOnce = sync.Once{}
+	channelExecutionRecoveryWake = nil
+	channelExecutionRecoveryStop = nil
+	channelExecutionPublisherOnce = sync.Once{}
+	channelExecutionPublishInput = nil
+	channelExecutionPublisherStop = nil
 }
 
 func (hook *rejectRedisCommandsHook) BeforeProcess(ctx context.Context, cmd redis.Cmder) (context.Context, error) {
@@ -227,15 +253,10 @@ func (hook *rejectRedisCommandsHook) AfterProcessPipeline(context.Context, []red
 	return nil
 }
 
-func (hook *rejectRedisCommandsHook) pipelineCount() int {
-	hook.mu.Lock()
-	defer hook.mu.Unlock()
-	return len(hook.pipelines)
-}
-
 func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	t.Helper()
 
+	stopChannelExecutionTraceRuntimeForTest()
 	gin.SetMode(gin.TestMode)
 	oldRedisEnabled := common.RedisEnabled
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
@@ -283,6 +304,7 @@ func setupChannelRouteTest(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Log{}))
 
 	t.Cleanup(func() {
+		stopChannelExecutionTraceRuntimeForTest()
 		channelExecutionRecentMu.Lock()
 		channelExecutionRecent = make(map[string]map[string]ChannelExecutionTrace)
 		channelExecutionFallback = make(map[string]*channelExecutionFallbackEntry)
@@ -489,22 +511,6 @@ func TestGetChannelRouteCooldownsUntilUsesSingleRedisMGet(t *testing.T) {
 	assert.Zero(t, cooldowns[3])
 }
 
-func TestLoadChannelRouteCooldownSnapshotSkipsCandidateQueryWithoutMemoryCache(t *testing.T) {
-	setupChannelRouteTest(t)
-	common.MemoryCacheEnabled = false
-
-	cooldowns, batched, err := loadChannelRouteCooldownSnapshot(
-		"default",
-		channelRouteTestModel,
-		"/v1/chat/completions",
-		common.GetTimestamp(),
-	)
-
-	require.NoError(t, err)
-	assert.False(t, batched)
-	assert.Nil(t, cooldowns)
-}
-
 func TestChannelRouteSelectionReusesDatabaseCandidateSnapshotForTrace(t *testing.T) {
 	db := setupChannelRouteTest(t)
 	seedChannelRouteChannel(t, db, 1, "default", 2)
@@ -665,14 +671,8 @@ func TestPublishChannelExecutionTraceRedisUsesSinglePipeline(t *testing.T) {
 
 func TestChannelExecutionTraceDebouncesRunningRedisPublishes(t *testing.T) {
 	setupChannelRouteTest(t)
-	oldRDB := common.RDB
 	hook := &blockingTraceRedisHook{requestID: "debounced-running-publish"}
-	client := newTraceRedisTestClient(t, hook)
-	common.RDB = client
-	common.RedisEnabled = true
-	t.Cleanup(func() {
-		common.RDB = oldRDB
-	})
+	newTraceRedisTestClient(t, hook)
 
 	ctx := newChannelRouteContext()
 	ctx.Set(common.RequestIdKey, "debounced-running-publish")
@@ -705,18 +705,12 @@ func TestChannelExecutionTraceDebouncesRunningRedisPublishes(t *testing.T) {
 
 func TestChannelExecutionTraceTerminalPublishCannotBeOverwrittenByRunningSnapshot(t *testing.T) {
 	setupChannelRouteTest(t)
-	oldRDB := common.RDB
 	hook := &blockingTraceRedisHook{
 		requestID:    "terminal-publish-order",
 		firstStarted: make(chan struct{}),
 		releaseFirst: make(chan struct{}),
 	}
-	client := newTraceRedisTestClient(t, hook)
-	common.RDB = client
-	common.RedisEnabled = true
-	t.Cleanup(func() {
-		common.RDB = oldRDB
-	})
+	newTraceRedisTestClient(t, hook)
 
 	ctx := newChannelRouteContext()
 	ctx.Set(common.RequestIdKey, "terminal-publish-order")
@@ -757,12 +751,8 @@ func TestChannelExecutionTraceTerminalPublishCannotBeOverwrittenByRunningSnapsho
 
 func TestChannelExecutionTraceTerminalPublishRetriesAfterRedisRecovery(t *testing.T) {
 	setupChannelRouteTest(t)
-	oldRDB := common.RDB
 	hook := &blockingTraceRedisHook{requestID: "terminal-publish-recovery", failuresRemaining: 1, rejectCommands: true}
-	client := newTraceRedisTestClient(t, hook)
-	common.RDB = client
-	common.RedisEnabled = true
-	t.Cleanup(func() { common.RDB = oldRDB })
+	newTraceRedisTestClient(t, hook)
 
 	ctx := newChannelRouteContext()
 	ctx.Set(common.RequestIdKey, "terminal-publish-recovery")
@@ -794,12 +784,8 @@ func TestChannelExecutionTraceTerminalPublishRetriesAfterRedisRecovery(t *testin
 
 func TestChannelExecutionTraceReadsPersistedFallbackWhenRedisFails(t *testing.T) {
 	db := setupChannelRouteTest(t)
-	oldRDB := common.RDB
 	hook := &blockingTraceRedisHook{rejectCommands: true}
-	client := newTraceRedisTestClient(t, hook)
-	common.RDB = client
-	common.RedisEnabled = true
-	t.Cleanup(func() { common.RDB = oldRDB })
+	newTraceRedisTestClient(t, hook)
 
 	requestID := "persisted-redis-fallback"
 	trace := ChannelExecutionTrace{
@@ -896,16 +882,12 @@ func TestChannelExecutionTraceFallbackIsBoundedWithoutRecentIndexAmplification(t
 
 func TestChannelExecutionTraceRevisionPublishesSameMillisecondUpdate(t *testing.T) {
 	setupChannelRouteTest(t)
-	oldRDB := common.RDB
 	hook := &blockingTraceRedisHook{
 		requestID:    "same-millisecond-revision",
 		firstStarted: make(chan struct{}),
 		releaseFirst: make(chan struct{}),
 	}
-	client := newTraceRedisTestClient(t, hook)
-	common.RDB = client
-	common.RedisEnabled = true
-	t.Cleanup(func() { common.RDB = oldRDB })
+	newTraceRedisTestClient(t, hook)
 
 	ctx := newChannelRouteContext()
 	ctx.Set(common.RequestIdKey, "same-millisecond-revision")
@@ -949,12 +931,8 @@ func TestChannelExecutionTraceRevisionPublishesSameMillisecondUpdate(t *testing.
 
 func TestChannelExecutionTraceErrorSnapshotIsImmediateWithRedis(t *testing.T) {
 	setupChannelRouteTest(t)
-	oldRDB := common.RDB
 	hook := &blockingTraceRedisHook{requestID: "immediate-error-snapshot"}
-	client := newTraceRedisTestClient(t, hook)
-	common.RDB = client
-	common.RedisEnabled = true
-	t.Cleanup(func() { common.RDB = oldRDB })
+	newTraceRedisTestClient(t, hook)
 
 	ctx := newChannelRouteContext()
 	ctx.Set(common.RequestIdKey, "immediate-error-snapshot")

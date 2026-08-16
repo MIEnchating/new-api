@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
@@ -277,12 +278,10 @@ func (channel *Channel) GetNextEnabledKey() (string, int, *types.NewAPIError) {
 		}
 		defer func() {
 			if common.DebugEnabled {
-				logger.LogDebug(nil, "channel %d polling index: %d", channel.Id, channel.ChannelInfo.MultiKeyPollingIndex)
+				logger.LogDebug(context.Background(), "channel %d polling index: %d", channel.Id, channel.ChannelInfo.MultiKeyPollingIndex)
 			}
 			if !common.MemoryCacheEnabled {
 				_ = channel.SaveChannelInfo()
-			} else {
-				// CacheUpdateChannel(channel)
 			}
 		}()
 		// Start from the saved polling index and look for the next enabled key
@@ -681,26 +680,6 @@ func GetChannelPollingLock(channelId int) *sync.Mutex {
 	return actual.(*sync.Mutex)
 }
 
-// CleanupChannelPollingLocks removes locks for channels that no longer exist
-// This is optional and can be called periodically to prevent memory leaks
-func CleanupChannelPollingLocks() {
-	var activeChannelIds []int
-	DB.Model(&Channel{}).Pluck("id", &activeChannelIds)
-
-	activeChannelSet := make(map[int]bool)
-	for _, id := range activeChannelIds {
-		activeChannelSet[id] = true
-	}
-
-	channelPollingLocks.Range(func(key, value interface{}) bool {
-		channelId := key.(int)
-		if !activeChannelSet[channelId] {
-			channelPollingLocks.Delete(channelId)
-		}
-		return true
-	})
-}
-
 func handlerMultiKeyUpdate(channel *Channel, usingKey string, status int, reason string) {
 	keys := channel.GetKeys()
 	if len(keys) == 0 {
@@ -791,8 +770,6 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			if beforeStatus != channelCache.Status {
 				CacheUpdateChannelStatus(channelId, channelCache.Status)
 			}
-			//CacheUpdateChannel(channelCache)
-			//return true
 		} else {
 			// 如果缓存渠道存在，且状态已是目标状态，直接返回
 			if channelCache.Status == status {
@@ -931,18 +908,9 @@ func updateChannelUsedQuota(id int, quota int) {
 	}
 }
 
-func DeleteChannelByStatus(status int64) (int64, error) {
-	result := DB.Where("status = ?", status).Delete(&Channel{})
-	return result.RowsAffected, result.Error
-}
-
 func DeleteDisabledChannel() (int64, error) {
 	result := DB.Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).Delete(&Channel{})
 	return result.RowsAffected, result.Error
-}
-
-func GetPaginatedTags(offset int, limit int) ([]*string, error) {
-	return GetPaginatedChannelTags(DB.Model(&Channel{}), offset, limit)
 }
 
 func GetPaginatedChannelTags(query *gorm.DB, offset int, limit int) ([]*string, error) {
@@ -1145,56 +1113,8 @@ func BatchSetChannelTag(ids []int, tag *string) error {
 	return tx.Commit().Error
 }
 
-// CountAllChannels returns total channels in DB
-func CountAllChannels() (int64, error) {
-	var total int64
-	err := DB.Model(&Channel{}).Count(&total).Error
-	return total, err
-}
-
-// CountAllTags returns number of non-empty distinct tags
-func CountAllTags() (int64, error) {
-	return CountChannelTags(DB.Model(&Channel{}))
-}
-
 func CountChannelTags(query *gorm.DB) (int64, error) {
 	var total int64
 	err := query.Where("tag is not null AND tag != ''").Distinct("tag").Count(&total).Error
 	return total, err
-}
-
-// Get channels of specified type with pagination
-func GetChannelsByType(startIdx int, num int, idSort bool, channelType int) ([]*Channel, error) {
-	var channels []*Channel
-	order := "priority desc"
-	if idSort {
-		order = "id desc"
-	}
-	err := DB.Where("type = ?", channelType).Order(order).Limit(num).Offset(startIdx).Omit("key").Find(&channels).Error
-	return channels, err
-}
-
-// Count channels of specific type
-func CountChannelsByType(channelType int) (int64, error) {
-	var count int64
-	err := DB.Model(&Channel{}).Where("type = ?", channelType).Count(&count).Error
-	return count, err
-}
-
-// Return map[type]count for all channels
-func CountChannelsGroupByType() (map[int64]int64, error) {
-	type result struct {
-		Type  int64 `gorm:"column:type"`
-		Count int64 `gorm:"column:count"`
-	}
-	var results []result
-	err := DB.Model(&Channel{}).Select("type, count(*) as count").Group("type").Find(&results).Error
-	if err != nil {
-		return nil, err
-	}
-	counts := make(map[int64]int64)
-	for _, r := range results {
-		counts[r.Type] = r.Count
-	}
-	return counts, nil
 }

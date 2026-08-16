@@ -25,7 +25,7 @@ export const ROLE = {
   SUPER_ADMIN: 100,
 } as const
 
-export type RoleValue = (typeof ROLE)[keyof typeof ROLE]
+type RoleValue = (typeof ROLE)[keyof typeof ROLE]
 
 const DEFAULT_ROLE = ROLE.GUEST
 

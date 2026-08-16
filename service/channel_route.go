@@ -47,10 +47,6 @@ func channelRouteMemoryKey(group string, channelID int) string {
 	return fmt.Sprintf("%s:%d", group, channelID)
 }
 
-func isChannelRouteFrozenInMemory(group string, channelID int, now int64) bool {
-	return GetChannelRouteCooldownUntilInMemory(group, channelID, now) > now
-}
-
 func GetChannelRouteCooldownUntilInMemory(group string, channelID int, now int64) int64 {
 	key := channelRouteMemoryKey(group, channelID)
 	value, ok := channelRouteCooldowns.Load(key)
@@ -161,26 +157,6 @@ func getChannelRouteCooldownsUntil(group string, channelIDs []int, now int64) ma
 	return cooldowns
 }
 
-// loadChannelRouteCooldownSnapshot batches cooldown reads for the in-memory
-// channel-selection path. When channel caching is disabled, callers keep the
-// existing per-candidate lookup so this helper does not add a duplicate DB
-// query just to discover candidate IDs.
-func loadChannelRouteCooldownSnapshot(group string, modelName string, requestPath string, now int64, extraChannelIDs ...int) (map[int]int64, bool, error) {
-	if !common.MemoryCacheEnabled {
-		return nil, false, nil
-	}
-	candidates, err := model.ListSatisfiedChannelCandidates(group, modelName, requestPath)
-	if err != nil {
-		return nil, false, err
-	}
-	channelIDs := make([]int, 0, len(candidates)+len(extraChannelIDs))
-	for _, candidate := range candidates {
-		channelIDs = append(channelIDs, candidate.ChannelID)
-	}
-	channelIDs = append(channelIDs, extraChannelIDs...)
-	return getChannelRouteCooldownsUntil(group, channelIDs, now), true, nil
-}
-
 func channelRouteCooldownSnapshotForCandidates(group string, candidates []model.ChannelSelectionCandidate, now int64, extraChannelIDs ...int) map[int]int64 {
 	channelIDs := make([]int, 0, len(candidates)+len(extraChannelIDs))
 	for _, candidate := range candidates {
@@ -188,13 +164,6 @@ func channelRouteCooldownSnapshotForCandidates(group string, candidates []model.
 	}
 	channelIDs = append(channelIDs, extraChannelIDs...)
 	return getChannelRouteCooldownsUntil(group, channelIDs, now)
-}
-
-func channelRouteCooldownFromSnapshot(cooldowns map[int]int64, batched bool, group string, channelID int, now int64) int64 {
-	if batched {
-		return cooldowns[channelID]
-	}
-	return GetChannelRouteCooldownUntil(group, channelID, now)
 }
 
 func FreezeChannelRoute(group string, channelID int, cooldownSeconds int) int64 {

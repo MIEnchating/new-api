@@ -76,7 +76,7 @@ export type CodexCredentialRefreshResponse = {
   }
 }
 
-export type ChannelExecutionCandidate = {
+type ChannelExecutionCandidate = {
   channel_id: number
   channel_name: string
   priority: number
@@ -97,7 +97,7 @@ export type ChannelExecutionPlan = {
   }>
 }
 
-export type ChannelExecutionEvent = {
+type ChannelExecutionEvent = {
   sequence: number
   timestamp: number
   group?: string
@@ -120,13 +120,13 @@ export type ChannelExecutionEvent = {
   cooldown_until?: number
 }
 
-export type ChannelExecutionRouteGroupStatus = {
+type ChannelExecutionRouteGroupStatus = {
   group: string
   status: 'pending' | 'active' | 'cooling' | 'skipped' | 'success' | 'failed'
   cooldown_until?: number
 }
 
-export type ChannelExecutionFinalError = {
+type ChannelExecutionFinalError = {
   status_code?: number
   message?: string
 }
@@ -532,7 +532,7 @@ export async function resetCodexUsage(
 /**
  * Manage multi-key channel operations
  */
-export async function manageMultiKeys(
+async function manageMultiKeys(
   params: MultiKeyManageParams
 ): Promise<MultiKeyStatusResponse | { success: boolean; message?: string }> {
   const res = await api.post(
@@ -781,17 +781,6 @@ export async function getEnabledModels(): Promise<{
 // ============================================================================
 // Ollama Utilities
 // ============================================================================
-
-/**
- * Check Ollama version for a given channel
- */
-export async function getOllamaVersion(
-  channelId: number
-): Promise<{ success: boolean; message?: string; data?: { version: string } }> {
-  const res = await api.get(`/api/channel/ollama/version/${channelId}`)
-  return res.data
-}
-
 // ============================================================================
 // Group Management
 // ============================================================================

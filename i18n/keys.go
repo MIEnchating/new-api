@@ -25,7 +25,6 @@ const (
 	MsgDeleteFailed      = "common.delete_failed"
 	MsgAlreadyExists     = "common.already_exists"
 	MsgNameCannotBeEmpty = "common.name_cannot_be_empty"
-	MsgBatchTooMany      = "common.batch_too_many"
 )
 
 // Auth middleware messages

@@ -474,11 +474,6 @@ func reasoningEffortFromRequest(request dto.Request) string {
 }
 
 func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
-
-	//channelType := common.GetContextKeyInt(c, constant.ContextKeyChannelType)
-	//channelId := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
-	//paramOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelParamOverride)
-
 	tokenGroup := common.GetContextKeyString(c, constant.ContextKeyTokenGroup)
 	// 当令牌分组为空时，表示使用用户分组
 	if tokenGroup == "" {
@@ -496,8 +491,6 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		isStream = request.IsStream(c.Request)
 	}
 	c.Set(string(constant.ContextKeyIsStream), isStream)
-
-	// firstResponseTime = time.Now() - 1 second
 
 	reqId := common.GetContextKeyString(c, common.RequestIdKey)
 	if reqId == "" {
@@ -535,7 +528,6 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 			SendLastThinkingContent: false,
 		},
 		TokenCountMeta: TokenCountMeta{
-			//promptTokens: common.GetContextKeyInt(c, constant.ContextKeyPromptTokens),
 			estimatePromptTokens: common.GetContextKeyInt(c, constant.ContextKeyEstimatedTokens),
 		},
 	}
@@ -709,10 +701,6 @@ func GenRelayInfoAlphaSearch(c *gin.Context, request *dto.AlphaSearchRequest) *R
 	}
 	return info
 }
-
-//func (info *RelayInfo) SetPromptTokens(promptTokens int) {
-//	info.promptTokens = promptTokens
-//}
 
 func (info *RelayInfo) SetEstimatePromptTokens(promptTokens int) {
 	if info == nil {
@@ -1104,48 +1092,4 @@ func hasRemovableDisabledField(jsonData []byte, channelOtherSettings dto.Channel
 		(channelOtherSettings.DisableStore && values[3].Exists()) ||
 		(!channelOtherSettings.AllowSafetyIdentifier && values[4].Exists()) ||
 		(!channelOtherSettings.AllowIncludeObfuscation && values[5].Exists())
-}
-
-// RemoveGeminiDisabledFields removes disabled fields from Gemini request JSON data
-// Currently supports removing functionResponse.id field which Vertex AI does not support
-func RemoveGeminiDisabledFields(jsonData []byte) ([]byte, error) {
-	if !model_setting.GetGeminiSettings().RemoveFunctionResponseIdEnabled {
-		return jsonData, nil
-	}
-
-	var data map[string]interface{}
-	if err := common.Unmarshal(jsonData, &data); err != nil {
-		common.SysError("RemoveGeminiDisabledFields Unmarshal error: " + err.Error())
-		return jsonData, nil
-	}
-
-	// Process contents array
-	// Handle both camelCase (functionResponse) and snake_case (function_response)
-	if contents, ok := data["contents"].([]interface{}); ok {
-		for _, content := range contents {
-			if contentMap, ok := content.(map[string]interface{}); ok {
-				if parts, ok := contentMap["parts"].([]interface{}); ok {
-					for _, part := range parts {
-						if partMap, ok := part.(map[string]interface{}); ok {
-							// Check functionResponse (camelCase)
-							if funcResp, ok := partMap["functionResponse"].(map[string]interface{}); ok {
-								delete(funcResp, "id")
-							}
-							// Check function_response (snake_case)
-							if funcResp, ok := partMap["function_response"].(map[string]interface{}); ok {
-								delete(funcResp, "id")
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	jsonDataAfter, err := common.Marshal(data)
-	if err != nil {
-		common.SysError("RemoveGeminiDisabledFields Marshal error: " + err.Error())
-		return jsonData, nil
-	}
-	return jsonDataAfter, nil
 }

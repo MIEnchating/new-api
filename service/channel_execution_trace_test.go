@@ -8,6 +8,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func rememberChannelExecutionTraceFallback(trace ChannelExecutionTrace) {
+	rememberChannelExecutionTraceFallbackForState(trace, nil)
+}
+
+func forgetChannelExecutionTraceFallback(requestID string) {
+	channelExecutionRecentMu.Lock()
+	defer channelExecutionRecentMu.Unlock()
+	removeChannelExecutionFallbackLocked(requestID)
+}
+
+func pruneChannelExecutionRecent(cutoff int64) (int, int) {
+	channelExecutionRecentMu.Lock()
+	defer channelExecutionRecentMu.Unlock()
+	return pruneChannelExecutionRecentLocked(cutoff)
+}
+
 func TestChannelExecutionTraceMergePrefersLatestAndTerminalTie(t *testing.T) {
 	running := ChannelExecutionTrace{
 		RequestID: "merge-latest-trace",

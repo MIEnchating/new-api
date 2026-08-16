@@ -124,7 +124,7 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 	scanner.Split(bufio.ScanLines)
 	SetEventStreamHeaders(c)
 
-	ctx = context.WithValue(ctx, "stop_chan", stopChan)
+	ctx = context.WithValue(ctx, constant.ContextKeyStopChan, stopChan)
 
 	// Handle ping data sending with improved error handling
 	if pingEnabled && pingTicker != nil {

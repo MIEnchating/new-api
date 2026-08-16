@@ -1,7 +1,6 @@
 package ionet
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -133,70 +132,4 @@ func (c *Client) ListLocations() (*LocationsResponse, error) {
 	}
 
 	return &locations, nil
-}
-
-// GetHardwareType retrieves details about a specific hardware type
-func (c *Client) GetHardwareType(hardwareID int) (*HardwareType, error) {
-	if hardwareID <= 0 {
-		return nil, fmt.Errorf("hardware ID must be greater than 0")
-	}
-
-	endpoint := fmt.Sprintf("/hardware/types/%d", hardwareID)
-
-	resp, err := c.makeRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get hardware type: %w", err)
-	}
-
-	// API response format not documented, assuming direct format
-	var hardwareType HardwareType
-	if err := json.Unmarshal(resp.Body, &hardwareType); err != nil {
-		return nil, fmt.Errorf("failed to parse hardware type: %w", err)
-	}
-
-	return &hardwareType, nil
-}
-
-// GetLocation retrieves details about a specific location
-func (c *Client) GetLocation(locationID int) (*Location, error) {
-	if locationID <= 0 {
-		return nil, fmt.Errorf("location ID must be greater than 0")
-	}
-
-	endpoint := fmt.Sprintf("/locations/%d", locationID)
-
-	resp, err := c.makeRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get location: %w", err)
-	}
-
-	// API response format not documented, assuming direct format
-	var location Location
-	if err := json.Unmarshal(resp.Body, &location); err != nil {
-		return nil, fmt.Errorf("failed to parse location: %w", err)
-	}
-
-	return &location, nil
-}
-
-// GetLocationAvailability retrieves real-time availability for a specific location
-func (c *Client) GetLocationAvailability(locationID int) (*LocationAvailability, error) {
-	if locationID <= 0 {
-		return nil, fmt.Errorf("location ID must be greater than 0")
-	}
-
-	endpoint := fmt.Sprintf("/locations/%d/availability", locationID)
-
-	resp, err := c.makeRequest("GET", endpoint, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get location availability: %w", err)
-	}
-
-	// API response format not documented, assuming direct format
-	var availability LocationAvailability
-	if err := json.Unmarshal(resp.Body, &availability); err != nil {
-		return nil, fmt.Errorf("failed to parse location availability: %w", err)
-	}
-
-	return &availability, nil
 }

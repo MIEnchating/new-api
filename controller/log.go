@@ -55,7 +55,7 @@ func GetUserLogs(c *gin.Context) {
 	return
 }
 
-// Deprecated: SearchAllLogs 已废弃，前端未使用该接口。
+// Deprecated: SearchAllLogs 已废弃，保留兼容响应，避免旧客户端收到 404。
 func SearchAllLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": false,
@@ -63,7 +63,7 @@ func SearchAllLogs(c *gin.Context) {
 	})
 }
 
-// Deprecated: SearchUserLogs 已废弃，前端未使用该接口。
+// Deprecated: SearchUserLogs 已废弃，保留兼容响应，避免旧客户端收到 404。
 func SearchUserLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": false,
@@ -109,7 +109,6 @@ func GetLogsStat(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, "")
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -136,7 +135,6 @@ func GetLogsSelfStat(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	//tokenNum := model.SumUsedToken(logType, startTimestamp, endTimestamp, modelName, username, tokenName)
 	c.JSON(200, gin.H{
 		"success": true,
 		"message": "",

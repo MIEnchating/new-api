@@ -54,12 +54,6 @@ func GetEnabledModels() []string {
 	return models
 }
 
-func GetAllEnableAbilities() []Ability {
-	var abilities []Ability
-	DB.Find(&abilities, "enabled = ?", true)
-	return abilities
-}
-
 func getPriority(group string, model string, retry int) (int, error) {
 
 	var priorities []int
@@ -105,10 +99,6 @@ func getChannelQuery(group string, model string, retry int) (*gorm.DB, error) {
 	return channelQuery, nil
 }
 
-func GetChannel(group string, model string, retry int, requestPath string) (*Channel, error) {
-	return getChannelWithoutFilter(group, model, retry, requestPath)
-}
-
 func getChannelWithoutFilter(group string, model string, retry int, requestPath string) (*Channel, error) {
 	var abilities []Ability
 
@@ -137,7 +127,6 @@ func getChannelWithoutFilter(group string, model string, retry int, requestPath 
 		weight := common.GetRandomInt(int(weightSum))
 		for _, ability_ := range abilities {
 			weight -= int(ability_.Weight) + 10
-			//log.Printf("weight: %d, ability weight: %d", weight, *ability_.Weight)
 			if weight <= 0 {
 				channel.Id = ability_.ChannelId
 				break

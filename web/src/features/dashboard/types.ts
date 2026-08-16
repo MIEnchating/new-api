@@ -194,7 +194,7 @@ export interface UptimeGroupResult {
   monitors: UptimeMonitor[]
 }
 
-export interface RequestWindowStats {
+interface RequestWindowStats {
   request_count?: number
   success_count?: number
   failure_count?: number
@@ -226,6 +226,7 @@ export interface DashboardFilters {
   end_timestamp?: Date
   time_granularity?: TimeGranularity
   username?: string
+  token_name?: string
 }
 
 export type ConsumptionDistributionChartType = 'bar' | 'area'

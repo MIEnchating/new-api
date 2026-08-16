@@ -31,6 +31,7 @@ const tokenRouteTestPath = "/v1/chat/completions"
 func setupTokenGroupRouteTest(t *testing.T) *gorm.DB {
 	t.Helper()
 
+	stopChannelExecutionTraceRuntimeForTest()
 	gin.SetMode(gin.TestMode)
 	oldRedisEnabled := common.RedisEnabled
 	oldRDB := common.RDB
@@ -50,6 +51,7 @@ func setupTokenGroupRouteTest(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
 
 	t.Cleanup(func() {
+		stopChannelExecutionTraceRuntimeForTest()
 		common.RedisEnabled = oldRedisEnabled
 		common.RDB = oldRDB
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled

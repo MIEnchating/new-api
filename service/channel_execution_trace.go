@@ -176,8 +176,12 @@ var channelExecutionFallbackOrder = list.New()
 var channelExecutionRecentWrites uint64
 var channelExecutionPublisherOnce sync.Once
 var channelExecutionPublishInput chan channelExecutionPublishRequest
+var channelExecutionPublisherStop chan struct{}
+var channelExecutionPublisherWG sync.WaitGroup
 var channelExecutionRecoveryOnce sync.Once
 var channelExecutionRecoveryWake chan struct{}
+var channelExecutionRecoveryStop chan struct{}
+var channelExecutionRecoveryWG sync.WaitGroup
 var channelExecutionInputQueueSaturation atomic.Uint64
 var channelExecutionPendingQueueSaturation atomic.Uint64
 var channelExecutionTerminalRetryAttempts atomic.Uint64
@@ -516,13 +520,19 @@ func publishChannelExecutionTrace(state *channelExecutionTraceState) {
 func startChannelExecutionTracePublisher() {
 	channelExecutionPublisherOnce.Do(func() {
 		channelExecutionPublishInput = make(chan channelExecutionPublishRequest, channelExecutionPublishQueueSize)
+		channelExecutionPublisherStop = make(chan struct{})
 		jobs := make(chan *channelExecutionTraceState, channelExecutionPublishJobSize)
+		channelExecutionPublisherWG.Add(1)
 		go func() {
+			defer channelExecutionPublisherWG.Done()
+			defer close(jobs)
 			ticker := time.NewTicker(channelExecutionPublishDebounce / 4)
 			defer ticker.Stop()
 			pending := make(map[*channelExecutionTraceState]time.Time, channelExecutionPublishQueueSize)
 			for {
 				select {
+				case <-channelExecutionPublisherStop:
+					return
 				case request := <-channelExecutionPublishInput:
 					if currentDue, exists := pending[request.state]; exists {
 						if request.due.Before(currentDue) {
@@ -562,7 +572,9 @@ func startChannelExecutionTracePublisher() {
 			}
 		}()
 		for range channelExecutionPublishWorkers {
+			channelExecutionPublisherWG.Add(1)
 			go func() {
+				defer channelExecutionPublisherWG.Done()
 				for state := range jobs {
 					result := publishChannelExecutionTraceSnapshot(state, true)
 					state.mu.Lock()
@@ -602,11 +614,16 @@ func channelExecutionTerminalRecoveryDelay(attempts int) time.Duration {
 func startChannelExecutionTerminalRecovery() {
 	channelExecutionRecoveryOnce.Do(func() {
 		channelExecutionRecoveryWake = make(chan struct{}, 1)
+		channelExecutionRecoveryStop = make(chan struct{})
+		channelExecutionRecoveryWG.Add(1)
 		go func() {
+			defer channelExecutionRecoveryWG.Done()
 			ticker := time.NewTicker(channelExecutionRecoveryInterval)
 			defer ticker.Stop()
 			for {
 				select {
+				case <-channelExecutionRecoveryStop:
+					return
 				case <-channelExecutionRecoveryWake:
 				case <-ticker.C:
 				}
@@ -718,7 +735,11 @@ func scheduleChannelExecutionTracePublishLocked(state *channelExecutionTraceStat
 		return false
 	}
 	startChannelExecutionTracePublisher()
-	return scheduleChannelExecutionTracePublishToLocked(state, delay, channelExecutionPublishInput)
+	queued := scheduleChannelExecutionTracePublishToLocked(state, delay, channelExecutionPublishInput)
+	if !queued && isChannelExecutionTraceTerminal(state.trace) {
+		signalChannelExecutionTerminalRecovery()
+	}
+	return queued
 }
 
 func scheduleChannelExecutionTracePublishToLocked(state *channelExecutionTraceState, delay time.Duration, input chan<- channelExecutionPublishRequest) bool {
@@ -740,9 +761,6 @@ func scheduleChannelExecutionTracePublishToLocked(state *channelExecutionTraceSt
 	default:
 		state.publishQueued = false
 		observeChannelExecutionPublisherSaturation("input queue", &channelExecutionInputQueueSaturation)
-		if isChannelExecutionTraceTerminal(state.trace) {
-			signalChannelExecutionTerminalRecovery()
-		}
 		return false
 	}
 }
@@ -910,10 +928,6 @@ func indexChannelExecutionTraceMemory(trace ChannelExecutionTrace, keys []string
 	}
 }
 
-func rememberChannelExecutionTraceFallback(trace ChannelExecutionTrace) {
-	rememberChannelExecutionTraceFallbackForState(trace, nil)
-}
-
 func rememberChannelExecutionTraceFallbackForState(trace ChannelExecutionTrace, state *channelExecutionTraceState) {
 	if trace.RequestID == "" {
 		return
@@ -947,15 +961,6 @@ func rememberChannelExecutionTraceFallbackForState(trace ChannelExecutionTrace, 
 	if shouldSignalRecovery {
 		signalChannelExecutionTerminalRecovery()
 	}
-}
-
-func forgetChannelExecutionTraceFallback(requestID string) {
-	if requestID == "" {
-		return
-	}
-	channelExecutionRecentMu.Lock()
-	removeChannelExecutionFallbackLocked(requestID)
-	channelExecutionRecentMu.Unlock()
 }
 
 func forgetPublishedChannelExecutionTraceFallback(published ChannelExecutionTrace) bool {
@@ -1043,12 +1048,6 @@ func pruneChannelExecutionRecentLocked(cutoff int64) (int, int) {
 		}
 	}
 	return deletedKeys, deletedTraces
-}
-
-func pruneChannelExecutionRecent(cutoff int64) (int, int) {
-	channelExecutionRecentMu.Lock()
-	defer channelExecutionRecentMu.Unlock()
-	return pruneChannelExecutionRecentLocked(cutoff)
 }
 
 func traceTouchesChannelGroup(trace ChannelExecutionTrace, channelID int, group string) bool {

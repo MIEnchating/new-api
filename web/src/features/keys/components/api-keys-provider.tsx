@@ -22,7 +22,7 @@ import { toast } from 'sonner'
 
 import useDialogState from '@/hooks/use-dialog'
 
-import { fetchTokenKey, fetchTokenKeysBatch } from '../api'
+import { fetchTokenKey } from '../api'
 import { ERROR_MESSAGES } from '../constants'
 import type { ApiKey, ApiKeysDialogType } from '../types'
 
@@ -36,7 +36,6 @@ type ApiKeysContextType = {
   resolvedKey: string
   setResolvedKey: React.Dispatch<React.SetStateAction<string>>
   resolveRealKey: (id: number) => Promise<string | null>
-  resolveRealKeysBatch: (ids: number[]) => Promise<Record<number, string>>
   resolvedKeys: Record<number, string>
   loadingKeys: Record<number, boolean>
   copiedKeyId: number | null
@@ -108,52 +107,6 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
     [resolvedKeys, t]
   )
 
-  const resolveRealKeysBatch = useCallback(
-    async (ids: number[]): Promise<Record<number, string>> => {
-      const uncachedIds = ids.filter((id) => !resolvedKeys[id])
-      if (uncachedIds.length === 0) {
-        const result: Record<number, string> = {}
-        for (const id of ids) result[id] = resolvedKeys[id]
-        return result
-      }
-
-      for (const id of uncachedIds) {
-        setLoadingKeys((prev) => ({ ...prev, [id]: true }))
-      }
-
-      try {
-        const res = await fetchTokenKeysBatch(uncachedIds)
-        if (res.success && res.data?.keys) {
-          const newKeys: Record<number, string> = {}
-          for (const [idStr, key] of Object.entries(res.data.keys)) {
-            newKeys[Number(idStr)] = `sk-${key}`
-          }
-          setResolvedKeys((prev) => ({ ...prev, ...newKeys }))
-
-          const result: Record<number, string> = { ...newKeys }
-          for (const id of ids) {
-            if (resolvedKeys[id]) result[id] = resolvedKeys[id]
-          }
-          return result
-        }
-        toast.error(res.message || t(ERROR_MESSAGES.UNEXPECTED))
-        return {}
-      } catch {
-        toast.error(t(ERROR_MESSAGES.UNEXPECTED))
-        return {}
-      } finally {
-        for (const id of uncachedIds) {
-          setLoadingKeys((prev) => {
-            const next = { ...prev }
-            delete next[id]
-            return next
-          })
-        }
-      }
-    },
-    [resolvedKeys, t]
-  )
-
   return (
     <ApiKeysContext
       value={{
@@ -166,7 +119,6 @@ export function ApiKeysProvider({ children }: { children: React.ReactNode }) {
         resolvedKey,
         setResolvedKey,
         resolveRealKey,
-        resolveRealKeysBatch,
         resolvedKeys,
         loadingKeys,
         copiedKeyId,

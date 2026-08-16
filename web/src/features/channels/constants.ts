@@ -20,8 +20,6 @@ For commercial licensing, please contact support@quantumnous.com
 // Channel Types (from constant/channel.go)
 // All label/name values are i18n keys; use t(value) when displaying.
 // ============================================================================
-
-export const CHANNEL_TYPE_ANTHROPIC = 14
 export const CHANNEL_TYPE_SUB2_API = 59
 export const CHANNEL_TYPE_NEW_API = 60
 
@@ -157,18 +155,11 @@ export const CHANNEL_STATUS_CONFIG = {
 // Multi-Key Status
 // ============================================================================
 
-export const MULTI_KEY_STATUS = {
+const MULTI_KEY_STATUS = {
   ENABLED: 1,
   MANUAL_DISABLED: 2,
   AUTO_DISABLED: 3,
 } as const
-
-export const MULTI_KEY_STATUS_LABELS = {
-  [MULTI_KEY_STATUS.ENABLED]: 'Enabled',
-  [MULTI_KEY_STATUS.MANUAL_DISABLED]: 'Manual Disabled',
-  [MULTI_KEY_STATUS.AUTO_DISABLED]: 'Auto Disabled',
-} as const
-
 export const MULTI_KEY_STATUS_CONFIG = {
   [MULTI_KEY_STATUS.ENABLED]: {
     variant: 'success' as const,
@@ -187,12 +178,6 @@ export const MULTI_KEY_STATUS_CONFIG = {
 // ============================================================================
 // Multi-Key Modes
 // ============================================================================
-
-export const MULTI_KEY_MODES = [
-  { value: 'random', label: 'Random' },
-  { value: 'polling', label: 'Polling' },
-] as const
-
 export const ADD_MODE_OPTIONS = [
   { value: 'single', label: 'Single Key' },
   { value: 'batch', label: 'Batch Add (one key per line)' },
@@ -227,12 +212,6 @@ export const MULTI_KEY_CONFIRM_MESSAGES = {
 // ============================================================================
 // Auto Ban Options
 // ============================================================================
-
-export const AUTO_BAN_OPTIONS = [
-  { value: 1, label: 'Enabled' },
-  { value: 0, label: 'Disabled' },
-] as const
-
 // ============================================================================
 // Error / Success Messages (i18n keys: use t(ERROR_MESSAGES.xxx) when displaying)
 // ============================================================================
@@ -279,49 +258,15 @@ export const SUCCESS_MESSAGES = {
 // ============================================================================
 
 export const DEFAULT_PAGE_SIZE = 20
-
-export const DEFAULT_CHANNEL_VALUES = {
-  name: '',
-  type: 0,
-  base_url: '',
-  key: '',
-  models: '',
-  group: 'default',
-  status: CHANNEL_STATUS.ENABLED,
-  priority: 0,
-  weight: 0,
-  auto_ban: 1,
-  remark: '',
-} as const
-
 // ============================================================================
 // Table Configuration
 // ============================================================================
-
-export const CHANNELS_TABLE_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
-
 // ============================================================================
 // Sort Options (label values are i18n keys)
 // ============================================================================
-
-export const SORT_OPTIONS = [
-  { value: 'priority', label: 'Priority (Default)' },
-  { value: 'id', label: 'ID' },
-  { value: 'name', label: 'Name' },
-  { value: 'balance', label: 'Balance' },
-  { value: 'response_time', label: 'Response Time' },
-] as const
-
 // ============================================================================
 // Balance Display
 // ============================================================================
-
-export const BALANCE_THRESHOLDS = {
-  LOW: 1,
-  MEDIUM: 10,
-  HIGH: 100,
-} as const
-
 // ============================================================================
 // Response Time Thresholds (in ms)
 // ============================================================================

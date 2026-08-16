@@ -67,11 +67,3 @@ export function getCalendarPopoverPlacement(
   if (spaceBelow >= calendarHeight) return 'bottom start'
   return spaceAbove > spaceBelow ? 'top start' : 'bottom start'
 }
-
-export const hourOptions = Array.from({ length: 24 }, (_, index) =>
-  index.toString().padStart(2, '0')
-)
-
-export const minuteOptions = Array.from({ length: 60 }, (_, index) =>
-  index.toString().padStart(2, '0')
-)

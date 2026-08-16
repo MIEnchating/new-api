@@ -155,18 +155,6 @@ func GetGroupsEnabledModels(groups []string) []string {
 	return models
 }
 
-// GetUserGroupRatio 获取用户使用某个分组的倍率
-// userGroup 用户分组
-// group 需要获取倍率的分组
-func GetUserGroupRatio(userGroup, group string) float64 {
-	ratio, ok := ratio_setting.GetGroupGroupRatio(userGroup, group)
-	if ok {
-		return ratio
-	}
-	ratio, _, _ = GetEffectiveGroupRatio(userGroup, group, time.Now())
-	return ratio
-}
-
 type GroupRatioStatus struct {
 	Ratio           float64 `json:"ratio"`
 	BaseRatio       float64 `json:"base_ratio"`

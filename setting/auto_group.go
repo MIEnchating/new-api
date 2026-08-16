@@ -23,15 +23,6 @@ func init() {
 	maxTokenAutoGroups.Store(DefaultMaxTokenAutoGroups)
 }
 
-func ContainsAutoGroup(group string) bool {
-	for _, autoGroup := range autoGroups {
-		if autoGroup == group {
-			return true
-		}
-	}
-	return false
-}
-
 func UpdateAutoGroupsByJsonString(jsonString string) error {
 	if strings.TrimSpace(jsonString) == "" {
 		jsonString = "[]"

@@ -115,11 +115,13 @@ jobs:
 
       - name: Image summary
         run: |
-          echo "### Docker Image Digest (${{ matrix.arch }})" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "mienvirtuoso/new-api:${TAG}-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### Docker Image Digest (${{ matrix.arch }})"
+            echo '```'
+            echo "mienvirtuoso/new-api:${TAG}-${{ matrix.arch }}"
+            echo "${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   create_manifests:
     name: Create multi-arch manifests
@@ -132,7 +134,7 @@ jobs:
 
     steps:
       - name: Set version
-        run: echo "TAG=${{ needs.build_single_arch.outputs.tag }}" >> $GITHUB_ENV
+        run: echo "TAG=${{ needs.build_single_arch.outputs.tag }}" >> "$GITHUB_ENV"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@c99871dec2022cc055c062a10cc1a1310835ceb4 # v4.3.0
@@ -143,9 +145,9 @@ jobs:
       - name: Create & push manifest (version)
         run: |
           docker buildx imagetools create \
-            -t mienvirtuoso/new-api:${TAG} \
-            mienvirtuoso/new-api:${TAG}-amd64 \
-            mienvirtuoso/new-api:${TAG}-arm64
+            -t "mienvirtuoso/new-api:${TAG}" \
+            "mienvirtuoso/new-api:${TAG}-amd64" \
+            "mienvirtuoso/new-api:${TAG}-arm64"
 
       - name: Create & push manifest (latest)
         run: |
@@ -160,12 +162,14 @@ jobs:
       - name: Sign manifests with cosign
         continue-on-error: true
         run: |
-          cosign sign --yes mienvirtuoso/new-api:${TAG}
+          cosign sign --yes "mienvirtuoso/new-api:${TAG}"
           cosign sign --yes mienvirtuoso/new-api:latest
 
       - name: Manifest summary
         run: |
-          echo "### Multi-arch Manifest" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          docker buildx imagetools inspect mienvirtuoso/new-api:${TAG} >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          {
+            echo "### Multi-arch Manifest"
+            echo '```'
+            docker buildx imagetools inspect "mienvirtuoso/new-api:${TAG}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -22,7 +22,7 @@ export type ChannelExecutionEvent = NonNullable<
   ChannelExecutionTraceInfo['events']
 >[number]
 
-export type ChannelExecutionAttempt = {
+type ChannelExecutionAttempt = {
   kind: 'attempt'
   channelId: number
   channelName?: string

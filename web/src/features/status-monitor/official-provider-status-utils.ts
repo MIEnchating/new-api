@@ -56,7 +56,7 @@ function normalizeStatus(value: string) {
     .replaceAll(/[-\s]+/g, '_')
 }
 
-export function isOfficialIncidentActive(incident: OfficialProviderIncident) {
+function isOfficialIncidentActive(incident: OfficialProviderIncident) {
   return !FINISHED_INCIDENT_STATUSES.has(normalizeStatus(incident.status))
 }
 

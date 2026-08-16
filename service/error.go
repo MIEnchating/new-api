@@ -32,58 +32,6 @@ func MidjourneyErrorWithStatusCodeWrapper(code int, desc string, statusCode int)
 	}
 }
 
-//// OpenAIErrorWrapper wraps an error into an OpenAIErrorWithStatusCode
-//func OpenAIErrorWrapper(err error, code string, statusCode int) *dto.OpenAIErrorWithStatusCode {
-//	text := err.Error()
-//	lowerText := strings.ToLower(text)
-//	if !strings.HasPrefix(lowerText, "get file base64 from url") && !strings.HasPrefix(lowerText, "mime type is not supported") {
-//		if strings.Contains(lowerText, "post") || strings.Contains(lowerText, "dial") || strings.Contains(lowerText, "http") {
-//			common.SysLog(fmt.Sprintf("error: %s", text))
-//			text = "请求上游地址失败"
-//		}
-//	}
-//	openAIError := dto.OpenAIError{
-//		Message: text,
-//		Type:    "new_api_error",
-//		Code:    code,
-//	}
-//	return &dto.OpenAIErrorWithStatusCode{
-//		Error:      openAIError,
-//		StatusCode: statusCode,
-//	}
-//}
-//
-//func OpenAIErrorWrapperLocal(err error, code string, statusCode int) *dto.OpenAIErrorWithStatusCode {
-//	openaiErr := OpenAIErrorWrapper(err, code, statusCode)
-//	openaiErr.LocalError = true
-//	return openaiErr
-//}
-
-func ClaudeErrorWrapper(err error, code string, statusCode int) *dto.ClaudeErrorWithStatusCode {
-	text := err.Error()
-	lowerText := strings.ToLower(text)
-	if !strings.HasPrefix(lowerText, "get file base64 from url") {
-		if strings.Contains(lowerText, "post") || strings.Contains(lowerText, "dial") || strings.Contains(lowerText, "http") {
-			common.SysLog(fmt.Sprintf("error: %s", text))
-			text = "请求上游地址失败"
-		}
-	}
-	claudeError := types.ClaudeError{
-		Message: text,
-		Type:    "new_api_error",
-	}
-	return &dto.ClaudeErrorWithStatusCode{
-		Error:      claudeError,
-		StatusCode: statusCode,
-	}
-}
-
-func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.ClaudeErrorWithStatusCode {
-	claudeErr := ClaudeErrorWrapper(err, code, statusCode)
-	claudeErr.LocalError = true
-	return claudeErr
-}
-
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 
@@ -202,7 +150,6 @@ func TaskErrorWrapper(err error, code string, statusCode int) *taskdto.TaskError
 	lowerText := strings.ToLower(text)
 	if strings.Contains(lowerText, "post") || strings.Contains(lowerText, "dial") || strings.Contains(lowerText, "http") {
 		common.SysLog(fmt.Sprintf("error: %s", text))
-		//text = "请求上游地址失败"
 		text = common.MaskSensitiveInfo(text)
 	}
 	//避免暴露内部错误

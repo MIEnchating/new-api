@@ -31,7 +31,59 @@ import type {
   DashboardFilters,
   ModelAnalyticsChartTab,
 } from '@/features/dashboard/types'
-import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
+import {
+  getEndOfDay,
+  getRollingDateRange,
+  getStartOfDay,
+  type TimeGranularity,
+} from '@/lib/time'
+
+export type DashboardQuickRange = 'today' | 'yesterday' | number
+
+export function getDashboardCalendarRange(
+  preset: 'today' | 'yesterday',
+  now: Date = new Date()
+): { start: Date; end: Date } {
+  if (preset === 'today') {
+    return { start: getStartOfDay(now), end: new Date(now) }
+  }
+
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  return {
+    start: getStartOfDay(yesterday),
+    end: getEndOfDay(yesterday),
+  }
+}
+
+export function detectDashboardQuickRange(
+  filters: DashboardFilters | undefined,
+  now: Date = new Date()
+): DashboardQuickRange | null {
+  const start = filters?.start_timestamp
+  const end = filters?.end_timestamp
+  if (!start || !end) return null
+
+  const today = getDashboardCalendarRange('today', now)
+  if (
+    start.getTime() === today.start.getTime() &&
+    end.getTime() >= today.start.getTime() &&
+    end.getTime() <= getEndOfDay(now).getTime()
+  ) {
+    return 'today'
+  }
+
+  const yesterday = getDashboardCalendarRange('yesterday', now)
+  if (
+    start.getTime() === yesterday.start.getTime() &&
+    end.getTime() === yesterday.end.getTime()
+  ) {
+    return 'yesterday'
+  }
+
+  const days = Math.round((end.getTime() - start.getTime()) / 86_400_000)
+  return TIME_RANGE_PRESETS.some((preset) => preset.days === days) ? days : null
+}
 
 function isTimeGranularity(value: unknown): value is TimeGranularity {
   return value === 'hour' || value === 'day' || value === 'week'
@@ -154,16 +206,22 @@ export function buildDefaultDashboardFilters(
 
 export function buildQueryParams(
   timeRange: { start_timestamp: number; end_timestamp: number },
-  filters?: { time_granularity?: TimeGranularity; username?: string }
+  filters?: {
+    time_granularity?: TimeGranularity
+    username?: string
+    token_name?: string
+  }
 ): {
   start_timestamp: number
   end_timestamp: number
   default_time: string
   username?: string
+  token_name?: string
 } {
   return {
     ...timeRange,
     default_time: getSavedGranularity(filters?.time_granularity),
     ...(filters?.username && { username: filters.username }),
+    ...(filters?.token_name && { token_name: filters.token_name }),
   }
 }

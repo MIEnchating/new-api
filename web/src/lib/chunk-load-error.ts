@@ -86,25 +86,6 @@ export function getChunkErrorSignature(error: unknown): string | null {
   return fallback?.trim() ?? 'unknown-chunk'
 }
 
-function getResourceLoadError(event: Event): Error | null {
-  const target = event.target
-  let url = ''
-
-  if (
-    typeof HTMLScriptElement !== 'undefined' &&
-    target instanceof HTMLScriptElement
-  ) {
-    url = target.src
-  } else if (
-    typeof HTMLLinkElement !== 'undefined' &&
-    target instanceof HTMLLinkElement
-  ) {
-    url = target.href
-  }
-
-  return isChunkAssetURL(url) ? new Error(`Loading chunk ${url} failed`) : null
-}
-
 export function shouldReloadAfterChunkError(
   error: unknown,
   previousAttempt: ChunkRecoveryAttempt | null,
@@ -184,47 +165,5 @@ export function recoverFromChunkLoadError(error: unknown): boolean {
     return true
   } catch {
     return false
-  }
-}
-
-export function installChunkLoadErrorRecovery(): () => void {
-  if (typeof window === 'undefined') return () => undefined
-
-  // The query parameter is only a cache buster for the recovery request. Do
-  // not leave it in the router's location or expose it in copied URLs.
-  try {
-    const url = new URL(window.location.href)
-    const isRecoveryLoad = url.searchParams.has(CHUNK_RECOVERY_QUERY)
-    if (!isRecoveryLoad) {
-      // A normal document load means the previous recovery completed. Start
-      // a fresh budget for a later, unrelated deployment issue.
-      window.sessionStorage.removeItem(CHUNK_RECOVERY_KEY)
-    } else {
-      url.searchParams.delete(CHUNK_RECOVERY_QUERY)
-      window.history.replaceState(window.history.state, '', url.href)
-    }
-  } catch {
-    // Ignore read-only history implementations and continue installing the
-    // event listeners.
-  }
-
-  const handleError = (event: Event) => {
-    const error =
-      event instanceof ErrorEvent
-        ? event.error || event.message
-        : getResourceLoadError(event)
-    recoverFromChunkLoadError(error)
-  }
-  const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-    recoverFromChunkLoadError(event.reason)
-  }
-
-  // Resource errors do not bubble, so capture failed async script/style loads.
-  window.addEventListener('error', handleError, true)
-  window.addEventListener('unhandledrejection', handleUnhandledRejection)
-
-  return () => {
-    window.removeEventListener('error', handleError, true)
-    window.removeEventListener('unhandledrejection', handleUnhandledRejection)
   }
 }

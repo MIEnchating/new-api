@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export type TopUpStatus = 'success' | 'pending' | 'failed' | 'expired'
+type TopUpStatus = 'success' | 'pending' | 'failed' | 'expired'
 export type InvoiceStatus = 0 | 1 | 2
 export type InvoiceAction = 'issue' | 'return'
 export type BillingRecordType =
@@ -59,7 +59,7 @@ export type TopUpInvoiceResponse = {
   data?: unknown
 }
 
-export type TopUpStatsData = {
+type TopUpStatsData = {
   type_counts: Record<BillingRecordType, number>
   type_quotas: Record<BillingRecordType, number>
   items: TopUpStatsItem[]

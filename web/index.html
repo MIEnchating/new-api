@@ -34,63 +34,165 @@
         background: #fafafa;
       }
 
+      #app-bootstrap-progress {
+        position: fixed;
+        z-index: 1;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 3px;
+        overflow: hidden;
+        background: rgba(37, 99, 235, 0.12);
+      }
+
+      #app-bootstrap-progress-bar {
+        width: 32%;
+        height: 100%;
+        background: #2563eb;
+        animation: app-bootstrap-progress 1.35s ease-in-out infinite;
+      }
+
       #app-bootstrap-mark {
-        display: flex;
-        width: 68px;
-        height: 36px;
-        align-items: center;
-        justify-content: center;
-        gap: 5px;
+        position: relative;
+        width: 116px;
+        height: 116px;
       }
 
-      #app-bootstrap-mark span {
-        width: 4px;
-        height: 30px;
-        border-radius: 999px;
-        background: #18181b;
-        opacity: 0.24;
-        transform: scaleY(0.38);
-        animation: app-bootstrap-wave 1.05s ease-in-out infinite;
+      .app-bootstrap-track,
+      .app-bootstrap-orbit {
+        position: absolute;
+        border-radius: 50%;
       }
 
-      #app-bootstrap-mark span:nth-child(1) {
-        animation-delay: -0.42s;
+      .app-bootstrap-track-outer {
+        inset: 7px;
+        border: 1px solid rgba(37, 99, 235, 0.16);
       }
 
-      #app-bootstrap-mark span:nth-child(2) {
-        animation-delay: -0.3s;
+      .app-bootstrap-track-inner {
+        inset: 25px;
+        border: 1px solid rgba(15, 118, 110, 0.15);
       }
 
-      #app-bootstrap-mark span:nth-child(3) {
-        animation-delay: -0.18s;
+      .app-bootstrap-orbit-outer {
+        inset: 7px;
+        border: 1px solid transparent;
+        border-top-color: rgba(37, 99, 235, 0.72);
+        border-right-color: rgba(37, 99, 235, 0.24);
+        animation: app-bootstrap-orbit 3.2s linear infinite;
       }
 
-      #app-bootstrap-mark span:nth-child(4) {
-        animation-delay: -0.06s;
+      .app-bootstrap-orbit-inner {
+        inset: 25px;
+        border: 1px solid transparent;
+        border-bottom-color: rgba(15, 118, 110, 0.72);
+        border-left-color: rgba(15, 118, 110, 0.24);
+        animation: app-bootstrap-orbit-reverse 2.4s linear infinite;
       }
 
-      #app-bootstrap-mark span:nth-child(5) {
-        animation-delay: 0.06s;
+      .app-bootstrap-orbit::before,
+      .app-bootstrap-orbit::after {
+        position: absolute;
+        border: 2px solid #fafafa;
+        border-radius: 50%;
+        content: '';
       }
 
-      #app-bootstrap-mark span:nth-child(6) {
-        animation-delay: 0.18s;
+      .app-bootstrap-orbit-outer::before {
+        top: 10px;
+        right: 7px;
+        width: 8px;
+        height: 8px;
+        background: #2563eb;
+        box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
       }
 
-      #app-bootstrap-mark span:nth-child(7) {
-        animation-delay: 0.3s;
+      .app-bootstrap-orbit-outer::after {
+        bottom: 8px;
+        left: 12px;
+        width: 6px;
+        height: 6px;
+        background: #d97706;
+        box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.1);
       }
 
-      @keyframes app-bootstrap-wave {
+      .app-bootstrap-orbit-inner::before {
+        top: 2px;
+        left: 12px;
+        width: 7px;
+        height: 7px;
+        background: #0f766e;
+        box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.1);
+      }
+
+      .app-bootstrap-orbit-inner::after {
+        right: 4px;
+        bottom: 9px;
+        width: 5px;
+        height: 5px;
+        background: #60a5fa;
+        box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
+      }
+
+      .app-bootstrap-core {
+        position: absolute;
+        top: 43px;
+        left: 43px;
+        width: 26px;
+        height: 26px;
+        border: 2px solid #2563eb;
+        border-radius: 8px;
+        background: #fafafa;
+        box-shadow:
+          0 0 0 7px rgba(37, 99, 235, 0.09),
+          0 0 22px rgba(37, 99, 235, 0.24);
+        animation: app-bootstrap-core-pulse 1.6s ease-in-out infinite;
+      }
+
+      .app-bootstrap-core::after {
+        position: absolute;
+        inset: 8px;
+        border-radius: 2px;
+        background: #2563eb;
+        content: '';
+      }
+
+      @keyframes app-bootstrap-orbit {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @keyframes app-bootstrap-orbit-reverse {
+        to {
+          transform: rotate(-360deg);
+        }
+      }
+
+      @keyframes app-bootstrap-core-pulse {
         0%,
         100% {
-          opacity: 0.24;
-          transform: scaleY(0.38);
+          opacity: 0.72;
+          transform: scale(0.86);
         }
 
         50% {
           opacity: 1;
-          transform: scaleY(1);
+          transform: scale(1);
+        }
+      }
+
+      @keyframes app-bootstrap-progress {
+        0% {
+          transform: translateX(-125%);
+        }
+
+        50% {
+          transform: translateX(185%);
+        }
+
+        100% {
+          transform: translateX(340%);
         }
       }
 
@@ -99,16 +201,42 @@
           background: #09090b;
         }
 
-        #app-bootstrap-mark span {
-          background: #fafafa;
+        #app-bootstrap-progress {
+          background: rgba(96, 165, 250, 0.18);
+        }
+
+        #app-bootstrap-progress-bar {
+          background: #60a5fa;
+        }
+
+        .app-bootstrap-track-outer {
+          border-color: rgba(96, 165, 250, 0.2);
+        }
+
+        .app-bootstrap-track-inner {
+          border-color: rgba(94, 234, 212, 0.17);
+        }
+
+        .app-bootstrap-orbit::before,
+        .app-bootstrap-orbit::after {
+          border-color: #09090b;
+        }
+
+        .app-bootstrap-core {
+          background: #09090b;
         }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        #app-bootstrap-mark span {
+        .app-bootstrap-orbit,
+        .app-bootstrap-core {
           animation: none;
-          opacity: 0.6;
-          transform: scaleY(0.62);
+        }
+
+        #app-bootstrap-progress-bar {
+          animation: none;
+          width: 55%;
+          transform: translateX(0);
         }
       }
     </style>
@@ -119,9 +247,19 @@
   <body>
     <div id="root" translate="no" class="notranslate">
       <div id="app-bootstrap" aria-hidden="true">
+        <div
+          id="app-bootstrap-progress"
+          role="progressbar"
+          aria-label="Loading"
+        >
+          <div id="app-bootstrap-progress-bar"></div>
+        </div>
         <div id="app-bootstrap-mark">
-          <span></span><span></span><span></span><span></span><span></span
-          ><span></span><span></span>
+          <span class="app-bootstrap-track app-bootstrap-track-outer"></span>
+          <span class="app-bootstrap-track app-bootstrap-track-inner"></span>
+          <span class="app-bootstrap-orbit app-bootstrap-orbit-outer"></span>
+          <span class="app-bootstrap-orbit app-bootstrap-orbit-inner"></span>
+          <span class="app-bootstrap-core"></span>
         </div>
       </div>
     </div>

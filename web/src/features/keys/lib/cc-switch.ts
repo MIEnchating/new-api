@@ -29,7 +29,7 @@ export const CC_SWITCH_USAGE_AUTO_INTERVAL = 5
 export const CC_SWITCH_LATEST_RELEASE_URL =
   'https://github.com/farion1231/cc-switch/releases/latest'
 
-export const CC_SWITCH_USAGE_SCRIPT = `({
+const CC_SWITCH_USAGE_SCRIPT = `({
   request: {
     url: "{{baseUrl}}/api/usage/token/",
     method: "GET",

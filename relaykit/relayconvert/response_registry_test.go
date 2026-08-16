@@ -1,6 +1,7 @@
 package relayconvert
 
 import (
+	"context"
 	"testing"
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -115,10 +116,10 @@ func TestLookupBuiltinResponseConverters(t *testing.T) {
 }
 
 func TestConvertResponseRejectsNilAndUnsupportedRoute(t *testing.T) {
-	_, err := ConvertResponse(nil, nil, types.RelayFormatOpenAI, (*dto.OpenAITextResponse)(nil))
+	_, err := ConvertResponse(context.Background(), nil, types.RelayFormatOpenAI, (*dto.OpenAITextResponse)(nil))
 	require.Error(t, err)
 
-	_, err = ConvertResponse(nil, nil, types.RelayFormatEmbedding, &dto.OpenAITextResponse{})
+	_, err = ConvertResponse(context.Background(), nil, types.RelayFormatEmbedding, &dto.OpenAITextResponse{})
 	require.Error(t, err)
 }
 
@@ -126,11 +127,11 @@ func TestConvertResponseDirectConverters(t *testing.T) {
 	chat := textRegistryChatResponse()
 	info := &convmeta.Values{ChannelMetaAttached: true, UpstreamModelName: "gemini-test"}
 
-	toResponses, err := ConvertResponse(nil, info, types.RelayFormatOpenAIResponses, chat)
+	toResponses, err := ConvertResponse(context.Background(), info, types.RelayFormatOpenAIResponses, chat)
 	require.NoError(t, err)
 	assert.Equal(t, ConverterOpenAIChatToOpenAIResponses, toResponses.Converter)
 	assert.Equal(t, ResponseConverterQualityGood, toResponses.Quality)
-	assert.Equal(t, types.RelayFormatOpenAI, toResponses.From)
+	assert.Equal(t, types.RelayFormat(types.RelayFormatOpenAI), toResponses.From)
 	assert.Equal(t, types.RelayFormat(types.RelayFormatOpenAIResponses), toResponses.To)
 	assert.Equal(t, []ResponseStep{{Converter: ConverterOpenAIChatToOpenAIResponses, From: types.RelayFormatOpenAI, To: types.RelayFormatOpenAIResponses}}, toResponses.Steps)
 	require.IsType(t, &dto.OpenAIResponsesResponse{}, toResponses.Value)
@@ -156,7 +157,7 @@ func TestConvertResponseDirectConverters(t *testing.T) {
 		},
 		Usage: &dto.Usage{InputTokens: 4, OutputTokens: 6, TotalTokens: 10},
 	}
-	toChat, err := ConvertResponse(nil, info, types.RelayFormatOpenAI, responses)
+	toChat, err := ConvertResponse(context.Background(), info, types.RelayFormatOpenAI, responses)
 	require.NoError(t, err)
 	assert.Equal(t, ConverterOpenAIResponsesToOpenAIChat, toChat.Converter)
 	assert.Equal(t, ResponseConverterQualityGood, toChat.Quality)
@@ -167,7 +168,7 @@ func TestConvertResponseDirectConverters(t *testing.T) {
 	assert.Equal(t, dto.BillingUsageSourceOAIResponses, toChat.Usage.BillingUsage.Source)
 	assert.Equal(t, 4, toChat.Usage.BillingUsage.OpenAIUsage.InputTokens)
 
-	toClaude, err := ConvertResponse(nil, info, types.RelayFormatClaude, chat)
+	toClaude, err := ConvertResponse(context.Background(), info, types.RelayFormatClaude, chat)
 	require.NoError(t, err)
 	assert.Equal(t, ConverterOpenAIChatToClaudeMessages, toClaude.Converter)
 	assert.Equal(t, ResponseConverterQualityFair, toClaude.Quality)
@@ -180,7 +181,7 @@ func TestConvertResponseDirectConverters(t *testing.T) {
 	require.NotNil(t, claudeValue.Usage.BillingUsage)
 	require.NotNil(t, claudeValue.Usage.BillingUsage.OpenAIUsage)
 
-	toGemini, err := ConvertResponse(nil, info, types.RelayFormatGemini, chat)
+	toGemini, err := ConvertResponse(context.Background(), info, types.RelayFormatGemini, chat)
 	require.NoError(t, err)
 	assert.Equal(t, ConverterOpenAIChatToGeminiContent, toGemini.Converter)
 	assert.Equal(t, ResponseConverterQualityFair, toGemini.Quality)
@@ -196,7 +197,7 @@ func TestConvertResponseDirectConverters(t *testing.T) {
 func TestConvertResponseMultiHopConverters(t *testing.T) {
 	responses := textRegistryResponsesResponse()
 
-	toClaude, err := ConvertResponse(nil, &convmeta.Values{}, types.RelayFormatClaude, responses)
+	toClaude, err := ConvertResponse(context.Background(), &convmeta.Values{}, types.RelayFormatClaude, responses)
 	require.NoError(t, err)
 	assert.Equal(t, requestConverterResponsesToClaude, toClaude.Converter)
 	assert.Equal(t, ResponseConverterQualityFair, toClaude.Quality)
@@ -213,7 +214,7 @@ func TestConvertResponseMultiHopConverters(t *testing.T) {
 	assert.Equal(t, map[string]interface{}{"q": "x"}, claudeValue.Content[1].Input)
 	assert.Equal(t, 11, toClaude.Usage.TotalTokens)
 
-	toGemini, err := ConvertResponse(nil, &convmeta.Values{ChannelMetaAttached: true, UpstreamModelName: "gemini-test"}, types.RelayFormatGemini, responses)
+	toGemini, err := ConvertResponse(context.Background(), &convmeta.Values{ChannelMetaAttached: true, UpstreamModelName: "gemini-test"}, types.RelayFormatGemini, responses)
 	require.NoError(t, err)
 	assert.Equal(t, ConverterOpenAIResponsesToGemini, toGemini.Converter)
 	assert.Equal(t, ResponseConverterQualityFair, toGemini.Quality)
@@ -235,7 +236,7 @@ func TestConvertResponseMultiHopConverters(t *testing.T) {
 func TestConvertResponseByIDExecutesMultiHopAndChecksSource(t *testing.T) {
 	responses := textRegistryResponsesResponse()
 
-	result, err := ConvertResponseByID(nil, nil, responseConverterResponsesToGemini, responses)
+	result, err := ConvertResponseByID(context.Background(), nil, responseConverterResponsesToGemini, responses)
 	require.NoError(t, err)
 	assert.Equal(t, ConverterOpenAIResponsesToGemini, result.Converter)
 	assert.Equal(t, []ResponseStep{
@@ -243,7 +244,7 @@ func TestConvertResponseByIDExecutesMultiHopAndChecksSource(t *testing.T) {
 		{Converter: ConverterOpenAIChatToGeminiContent, From: types.RelayFormatOpenAI, To: types.RelayFormatGemini},
 	}, result.Steps)
 
-	_, err = ConvertResponseByID(nil, nil, responseConverterResponsesToGemini, textRegistryChatResponse())
+	_, err = ConvertResponseByID(context.Background(), nil, responseConverterResponsesToGemini, textRegistryChatResponse())
 	require.Error(t, err)
 }
 
@@ -268,7 +269,7 @@ func TestConvertResponseProviderToOAIChatUsage(t *testing.T) {
 			},
 		},
 	}
-	toChat, err := ConvertResponse(nil, nil, types.RelayFormatOpenAI, claude)
+	toChat, err := ConvertResponse(context.Background(), nil, types.RelayFormatOpenAI, claude)
 	require.NoError(t, err)
 	assert.Equal(t, ConverterClaudeMessagesToOpenAIChat, toChat.Converter)
 	require.IsType(t, &dto.OpenAITextResponse{}, toChat.Value)
@@ -322,7 +323,7 @@ func TestConvertResponseProviderToOAIChatUsage(t *testing.T) {
 			},
 		},
 	}
-	toChat, err = ConvertResponse(nil, &convmeta.Values{ChannelMetaAttached: true, UpstreamModelName: "gemini-test"}, types.RelayFormatOpenAI, gemini)
+	toChat, err = ConvertResponse(context.Background(), &convmeta.Values{ChannelMetaAttached: true, UpstreamModelName: "gemini-test"}, types.RelayFormatOpenAI, gemini)
 	require.NoError(t, err)
 	assert.Equal(t, ConverterGeminiContentToOpenAIChat, toChat.Converter)
 	require.IsType(t, &dto.OpenAITextResponse{}, toChat.Value)
@@ -354,14 +355,14 @@ func TestConvertResponsePreservesBillingUsageAcrossChatResponsesBridge(t *testin
 		OutputTokens:             5,
 	})
 
-	toResponses, err := ConvertResponse(nil, nil, types.RelayFormatOpenAIResponses, chat)
+	toResponses, err := ConvertResponse(context.Background(), nil, types.RelayFormatOpenAIResponses, chat)
 	require.NoError(t, err)
 	require.NotNil(t, toResponses.Usage.BillingUsage)
 	require.NotNil(t, toResponses.Usage.BillingUsage.ClaudeUsage)
 	assert.Equal(t, 10, toResponses.Usage.BillingUsage.ClaudeUsage.InputTokens)
 
 	responsesValue := toResponses.Value.(*dto.OpenAIResponsesResponse)
-	toChat, err := ConvertResponse(nil, nil, types.RelayFormatOpenAI, responsesValue)
+	toChat, err := ConvertResponse(context.Background(), nil, types.RelayFormatOpenAI, responsesValue)
 	require.NoError(t, err)
 	require.NotNil(t, toChat.Usage.BillingUsage)
 	require.NotNil(t, toChat.Usage.BillingUsage.ClaudeUsage)
@@ -377,7 +378,7 @@ func TestConvertResponseUsesBillingUsageWhenRestoringNativeTargets(t *testing.T)
 		OutputTokens:             5,
 	})
 
-	toClaude, err := ConvertResponse(nil, nil, types.RelayFormatClaude, chat)
+	toClaude, err := ConvertResponse(context.Background(), nil, types.RelayFormatClaude, chat)
 	require.NoError(t, err)
 	claudeValue := toClaude.Value.(*dto.ClaudeResponse)
 	require.NotNil(t, claudeValue.Usage)
@@ -394,7 +395,7 @@ func TestConvertResponseUsesBillingUsageWhenRestoringNativeTargets(t *testing.T)
 		TotalTokenCount:         17,
 	})
 
-	toGemini, err := ConvertResponse(nil, nil, types.RelayFormatGemini, chat)
+	toGemini, err := ConvertResponse(context.Background(), nil, types.RelayFormatGemini, chat)
 	require.NoError(t, err)
 	geminiValue := toGemini.Value.(*dto.GeminiChatResponse)
 	assert.Equal(t, 7, geminiValue.UsageMetadata.PromptTokenCount)
@@ -412,7 +413,7 @@ func TestConvertStreamResponseDirectConverters(t *testing.T) {
 	}
 	info.SendResponseCount = 1
 	finishReason := "stop"
-	result, err := ConvertStreamResponse(nil, info, types.RelayFormatClaude, &dto.ChatCompletionsStreamResponse{
+	result, err := ConvertStreamResponse(context.Background(), info, types.RelayFormatClaude, &dto.ChatCompletionsStreamResponse{
 		Id:    "chatcmpl_1",
 		Model: "gpt-test",
 		Choices: []dto.ChatCompletionsStreamResponseChoice{
@@ -431,7 +432,7 @@ func TestConvertStreamResponseDirectConverters(t *testing.T) {
 	require.IsType(t, []*dto.ClaudeResponse{}, result.Value)
 	assert.Equal(t, 5, result.Usage.TotalTokens)
 
-	result, err = ConvertStreamResponse(nil, &convmeta.Values{ChannelMetaAttached: true, UpstreamModelName: "gemini-test"}, types.RelayFormatOpenAI, &dto.GeminiChatResponse{
+	result, err = ConvertStreamResponse(context.Background(), &convmeta.Values{ChannelMetaAttached: true, UpstreamModelName: "gemini-test"}, types.RelayFormatOpenAI, &dto.GeminiChatResponse{
 		Candidates: []dto.GeminiChatCandidate{{Content: dto.GeminiChatContent{Parts: []dto.GeminiPart{{Text: "hello"}}}}},
 		UsageMetadata: dto.GeminiUsageMetadata{
 			PromptTokenCount:     1,
@@ -452,7 +453,7 @@ func TestConvertStreamResponseStatefulDirectConverters(t *testing.T) {
 		Model: "gpt-test",
 	})
 	require.NoError(t, err)
-	chatResults, err := ConvertStreamResponseChunk(nil, nil, chatState, &dto.ChatCompletionsStreamResponse{
+	chatResults, err := ConvertStreamResponseChunk(context.Background(), nil, chatState, &dto.ChatCompletionsStreamResponse{
 		Id:    "chatcmpl_1",
 		Model: "gpt-test",
 		Choices: []dto.ChatCompletionsStreamResponseChoice{
@@ -466,7 +467,7 @@ func TestConvertStreamResponseStatefulDirectConverters(t *testing.T) {
 	assert.Equal(t, []ResponseStep{{Converter: ConverterOpenAIChatToOpenAIResponses, From: types.RelayFormatOpenAI, To: types.RelayFormatOpenAIResponses}}, chatResults[0].Steps)
 	assert.Equal(t, 5, chatState.Usage().TotalTokens)
 
-	finalResults, err := FinalizeStreamResponse(nil, nil, chatState)
+	finalResults, err := FinalizeStreamResponse(context.Background(), nil, chatState)
 	require.NoError(t, err)
 	require.NotEmpty(t, finalResults)
 	lastEvent, ok := finalResults[len(finalResults)-1].Value.(ChatToResponsesStreamEvent)
@@ -478,7 +479,7 @@ func TestConvertStreamResponseStatefulDirectConverters(t *testing.T) {
 		Model: "gpt-test",
 	})
 	require.NoError(t, err)
-	responsesResults, err := ConvertStreamResponseChunk(nil, nil, responsesState, &dto.ResponsesStreamResponse{
+	responsesResults, err := ConvertStreamResponseChunk(context.Background(), nil, responsesState, &dto.ResponsesStreamResponse{
 		Type:  "response.output_text.delta",
 		Delta: "hello",
 	})
@@ -501,7 +502,7 @@ func TestConvertStreamResponseStatefulMultiHopResponsesToClaude(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	results, err := ConvertStreamResponseChunk(nil, info, state, &dto.ResponsesStreamResponse{
+	results, err := ConvertStreamResponseChunk(context.Background(), info, state, &dto.ResponsesStreamResponse{
 		Type:  "response.output_text.delta",
 		Delta: "hello",
 	})
@@ -526,7 +527,7 @@ func TestConvertStreamResponseStatefulMultiHopResponsesToClaude(t *testing.T) {
 	assert.True(t, sawTextDelta)
 
 	state.SetUsage(&dto.Usage{PromptTokens: 2, CompletionTokens: 3, TotalTokens: 5})
-	_, err = FinalizeStreamResponse(nil, info, state)
+	_, err = FinalizeStreamResponse(context.Background(), info, state)
 	require.NoError(t, err)
 	assert.Equal(t, 5, state.Usage().TotalTokens)
 }
@@ -552,7 +553,7 @@ func TestResponseUsageMatrixChatAndResponsesDetails(t *testing.T) {
 			ImageTokens:     2,
 		},
 	}
-	result, err := ConvertResponse(nil, nil, types.RelayFormatOpenAIResponses, chat)
+	result, err := ConvertResponse(context.Background(), nil, types.RelayFormatOpenAIResponses, chat)
 	require.NoError(t, err)
 	assert.Equal(t, 10, result.Usage.InputTokens)
 	assert.Equal(t, 5, result.Usage.OutputTokens)
@@ -595,7 +596,7 @@ func TestResponseUsageMatrixChatAndResponsesDetails(t *testing.T) {
 			},
 		},
 	}
-	result, err = ConvertResponse(nil, nil, types.RelayFormatOpenAI, responses)
+	result, err = ConvertResponse(context.Background(), nil, types.RelayFormatOpenAI, responses)
 	require.NoError(t, err)
 	assert.Equal(t, 12, result.Usage.PromptTokens)
 	assert.Equal(t, 8, result.Usage.CompletionTokens)

@@ -188,15 +188,6 @@ func ApplyCustomErrorResponseWithResult(err *types.NewAPIError) (matched bool, m
 	return true, messageReplaced
 }
 
-func HasMatchingCustomErrorResponse(err *types.NewAPIError) bool {
-	setting := currentErrorResponseSetting()
-	if err == nil || !setting.Enabled {
-		return false
-	}
-	_, matched := matchingCustomErrorResponseRule(setting, err)
-	return matched
-}
-
 func matchingCustomErrorResponseRule(setting *ErrorResponseSetting, err *types.NewAPIError) (CustomErrorResponseRule, bool) {
 	rules := append([]CustomErrorResponseRule(nil), setting.Rules...)
 	sort.SliceStable(rules, func(i, j int) bool {

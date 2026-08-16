@@ -29,11 +29,6 @@ export const REDEMPTION_STATUS = {
   DISABLED: 2,
   USED: 3,
 } as const
-
-export const REDEMPTION_STATUS_VALUES = Object.values(REDEMPTION_STATUS).map(
-  (value) => String(value)
-) as `${number}`[]
-
 // labelKey values are i18n keys; use t(config.labelKey) in components
 export const REDEMPTION_STATUSES: Record<
   number,

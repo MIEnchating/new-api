@@ -1,6 +1,7 @@
 package relayconvert
 
 import (
+	"context"
 	"testing"
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -115,11 +116,11 @@ func TestConvertRequestToTargetRecordsConversionChain(t *testing.T) {
 		},
 	}
 
-	result, err := ConvertRequest(nil, info, types.RelayFormatOpenAIResponses, req)
+	result, err := ConvertRequest(context.Background(), info, types.RelayFormatOpenAIResponses, req)
 
 	require.NoError(t, err)
 	require.IsType(t, &dto.OpenAIResponsesRequest{}, result.Value)
-	assert.Equal(t, types.RelayFormatOpenAI, result.From)
+	assert.Equal(t, types.RelayFormat(types.RelayFormatOpenAI), result.From)
 	assert.Equal(t, types.RelayFormat(types.RelayFormatOpenAIResponses), result.To)
 	assert.Equal(t, ConverterOpenAIChatToOpenAIResponses, result.Converter)
 	assert.Equal(t, RequestConverterQualityGood, result.Quality)
@@ -144,7 +145,7 @@ func TestConvertRequestPlansMultiHopPath(t *testing.T) {
 		},
 	}
 
-	result, err := ConvertRequest(nil, info, types.RelayFormatOpenAIResponses, req)
+	result, err := ConvertRequest(context.Background(), info, types.RelayFormatOpenAIResponses, req)
 
 	require.NoError(t, err)
 	require.IsType(t, &dto.OpenAIResponsesRequest{}, result.Value)
@@ -178,7 +179,7 @@ func TestConvertRequestViaExecutesExplicitPath(t *testing.T) {
 		},
 	}
 
-	result, err := ConvertRequestVia(nil, info, req, types.RelayFormatOpenAI, types.RelayFormatOpenAIResponses)
+	result, err := ConvertRequestVia(context.Background(), info, req, types.RelayFormatOpenAI, types.RelayFormatOpenAIResponses)
 
 	require.NoError(t, err)
 	require.IsType(t, &dto.OpenAIResponsesRequest{}, result.Value)
@@ -227,7 +228,7 @@ func TestConvertRequestResponsesToGeminiAppliesResponsesPreprocess(t *testing.T)
 		}),
 	}
 
-	result, err := ConvertRequest(nil, info, types.RelayFormatGemini, req)
+	result, err := ConvertRequest(context.Background(), info, types.RelayFormatGemini, req)
 
 	require.NoError(t, err)
 	geminiReq, ok := result.Value.(*dto.GeminiChatRequest)
@@ -317,7 +318,7 @@ func TestConvertRequestResponsesToGeminiUsesDirectConverter(t *testing.T) {
 		}),
 	}
 
-	result, err := ConvertRequest(nil, info, types.RelayFormatGemini, req)
+	result, err := ConvertRequest(context.Background(), info, types.RelayFormatGemini, req)
 
 	require.NoError(t, err)
 	geminiReq, ok := result.Value.(*dto.GeminiChatRequest)
@@ -404,7 +405,7 @@ func TestConvertRequestResponsesToGeminiSkipsThoughtSignatureWhenDisabled(t *tes
 		}),
 	}
 
-	result, err := ConvertRequest(nil, info, types.RelayFormatGemini, req)
+	result, err := ConvertRequest(context.Background(), info, types.RelayFormatGemini, req)
 
 	require.NoError(t, err)
 	geminiReq, ok := result.Value.(*dto.GeminiChatRequest)
@@ -452,7 +453,7 @@ func TestConvertRequestOpenAIChatToGeminiAddsThoughtSignatureForAdvancedCustom(t
 		},
 	}
 
-	result, err := ConvertRequest(nil, info, types.RelayFormatGemini, req)
+	result, err := ConvertRequest(context.Background(), info, types.RelayFormatGemini, req)
 
 	require.NoError(t, err)
 	geminiReq, ok := result.Value.(*dto.GeminiChatRequest)
@@ -518,7 +519,7 @@ func TestConvertRequestResponsesToClaudeUsesDirectConverter(t *testing.T) {
 		}),
 	}
 
-	result, err := ConvertRequest(nil, info, types.RelayFormatClaude, req)
+	result, err := ConvertRequest(context.Background(), info, types.RelayFormatClaude, req)
 
 	require.NoError(t, err)
 	claudeReq, ok := result.Value.(*dto.ClaudeRequest)
@@ -591,7 +592,7 @@ func TestConvertRequestViaResponsesToGeminiStillUsesDirectSteps(t *testing.T) {
 		}),
 	}
 
-	result, err := ConvertRequestVia(nil, info, req, types.RelayFormatOpenAI, types.RelayFormatGemini)
+	result, err := ConvertRequestVia(context.Background(), info, req, types.RelayFormatOpenAI, types.RelayFormatGemini)
 
 	require.NoError(t, err)
 	require.IsType(t, &dto.GeminiChatRequest{}, result.Value)
@@ -621,7 +622,7 @@ func TestConvertRequestByIDDeduplicatesConversionChain(t *testing.T) {
 		},
 	}
 
-	result, err := ConvertRequestByID(nil, info, ConverterOpenAIChatToOpenAIResponses, req)
+	result, err := ConvertRequestByID(context.Background(), info, ConverterOpenAIChatToOpenAIResponses, req)
 
 	require.NoError(t, err)
 	require.IsType(t, &dto.OpenAIResponsesRequest{}, result.Value)
@@ -640,7 +641,7 @@ func TestConvertRequestByIDExecutesMultiHopConverter(t *testing.T) {
 		},
 	}
 
-	result, err := ConvertRequestByID(nil, info, requestConverterClaudeToResponses, req)
+	result, err := ConvertRequestByID(context.Background(), info, requestConverterClaudeToResponses, req)
 
 	require.NoError(t, err)
 	require.IsType(t, &dto.OpenAIResponsesRequest{}, result.Value)
@@ -662,18 +663,17 @@ func TestConvertRequestByIDExecutesMultiHopConverter(t *testing.T) {
 }
 
 func TestConvertRequestRejectsUnsupportedConverterAndNilRequest(t *testing.T) {
-	_, err := ConvertRequestByID(nil, &convmeta.Values{}, "missing_converter", &dto.GeneralOpenAIRequest{Model: "gpt-test"})
+	_, err := ConvertRequestByID(context.Background(), &convmeta.Values{}, "missing_converter", &dto.GeneralOpenAIRequest{Model: "gpt-test"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not registered")
 
-	_, err = ConvertRequest(nil, &convmeta.Values{}, types.RelayFormatOpenAIResponses, (*dto.GeneralOpenAIRequest)(nil))
+	_, err = ConvertRequest(context.Background(), &convmeta.Values{}, types.RelayFormatOpenAIResponses, (*dto.GeneralOpenAIRequest)(nil))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "request is nil")
 }
 
 func TestConvertRequestByIDRejectsWrongSourceFormat(t *testing.T) {
-	_, err := ConvertRequestByID(
-		nil,
+	_, err := ConvertRequestByID(context.Background(),
 		&convmeta.Values{},
 		ConverterOpenAIChatToOpenAIResponses,
 		&dto.ClaudeRequest{Model: "claude-test"},
@@ -684,8 +684,7 @@ func TestConvertRequestByIDRejectsWrongSourceFormat(t *testing.T) {
 }
 
 func TestConvertRequestRejectsUnregisteredExplicitPath(t *testing.T) {
-	_, err := ConvertRequest(
-		nil,
+	_, err := ConvertRequest(context.Background(),
 		&convmeta.Values{},
 		types.RelayFormatEmbedding,
 		&dto.ClaudeRequest{Model: "claude-test"},

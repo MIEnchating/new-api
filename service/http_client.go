@@ -177,12 +177,6 @@ func NormalizeProxyURL(rawProxyURL string) (string, error) {
 	return config.cacheKey, nil
 }
 
-// ValidateProxyURL validates a channel proxy URL without connecting to it.
-func ValidateProxyURL(rawProxyURL string) error {
-	_, err := common.ParseProxyURLStrict(rawProxyURL)
-	return err
-}
-
 func (cache *proxyHTTPClientCache) store(fullKey string, client *http.Client) {
 	cache.mutex.Lock()
 	defer cache.mutex.Unlock()
@@ -349,10 +343,6 @@ func newDirectHTTPClient(policy HTTPTransportPolicy, tlsConfig *tls.Config) *htt
 // stack with the given policy and TLS config (for httptest certificate trust).
 func newHTTPClientWithPolicyAndTLS(policy HTTPTransportPolicy, tlsConfig *tls.Config) *http.Client {
 	return newDirectHTTPClient(policy, tlsConfig)
-}
-
-func newProxyHTTPClient(proxyURL *url.URL) (*http.Client, error) {
-	return newHTTPClientFromPolicy(defaultHTTPTransportPolicy(), proxyURL, nil)
 }
 
 // GetHttpClientWithProxy returns the default client or a cached proxy-enabled client.

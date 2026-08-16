@@ -72,7 +72,7 @@ function resolveInterfaceLanguage(language: string): InterfaceLanguageCode {
   return isInterfaceLanguageCode(normalized) ? normalized : 'en'
 }
 
-export function loadInterfaceLocale(
+function loadInterfaceLocale(
   language: string
 ): Promise<LocaleLoadResult<LocaleResource>> {
   const normalized = resolveInterfaceLanguage(language)

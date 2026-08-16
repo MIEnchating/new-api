@@ -7,13 +7,6 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 )
 
-//type OpenAIError struct {
-//	Message string `json:"message"`
-//	Type    string `json:"type"`
-//	Param   string `json:"param"`
-//	Code    any    `json:"code"`
-//}
-
 type OpenAIErrorWithStatusCode struct {
 	Error      types.OpenAIError `json:"error"`
 	StatusCode int               `json:"status_code"`

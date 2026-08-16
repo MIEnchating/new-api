@@ -14,15 +14,6 @@ func (s *Set[T]) Add(item T) {
 	s.items[item] = struct{}{}
 }
 
-func (s *Set[T]) Remove(item T) {
-	delete(s.items, item)
-}
-
-func (s *Set[T]) Contains(item T) bool {
-	_, exists := s.items[item]
-	return exists
-}
-
 func (s *Set[T]) Len() int {
 	return len(s.items)
 }

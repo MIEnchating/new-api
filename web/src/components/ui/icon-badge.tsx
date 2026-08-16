@@ -58,9 +58,7 @@ export type IconBadgeTone = NonNullable<
   VariantProps<typeof iconBadgeVariants>['tone']
 >
 
-export type IconBadgeSize = NonNullable<
-  VariantProps<typeof iconBadgeVariants>['size']
->
+type IconBadgeSize = NonNullable<VariantProps<typeof iconBadgeVariants>['size']>
 
 interface IconBadgeProps {
   children?: ReactNode

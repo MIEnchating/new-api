@@ -63,15 +63,6 @@ func mokaEmbeddingHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *htt
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeBadResponseBody)
 	}
-	// if baiduResponse.ErrorMsg != "" {
-	// 	return &dto.OpenAIErrorWithStatusCode{
-	// 		Error: dto.OpenAIError{
-	// 			Type:    "baidu_error",
-	// 			Param:   "",
-	// 		},
-	// 		StatusCode: resp.StatusCode,
-	// 	}, nil
-	// }
 	fullTextResponse := embeddingResponseMoka2OpenAI(&baiduResponse)
 	jsonResponse, err := common.Marshal(fullTextResponse)
 	if err != nil {

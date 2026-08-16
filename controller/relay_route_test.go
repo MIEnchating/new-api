@@ -681,25 +681,6 @@ func TestChannelAndTokenGroupRoutesAdvanceTogether(t *testing.T) {
 	assert.Equal(t, fallbackGroup, group)
 }
 
-func TestIsStreamTimeoutFailure(t *testing.T) {
-	tests := []struct {
-		reason relaycommon.StreamEndReason
-		want   bool
-	}{
-		{relaycommon.StreamEndReasonTimeout, true},
-		{relaycommon.StreamEndReasonHandlerStop, false},
-		{relaycommon.StreamEndReasonClientGone, false},
-		{relaycommon.StreamEndReasonDone, false},
-	}
-	for _, test := range tests {
-		t.Run(string(test.reason), func(t *testing.T) {
-			status := relaycommon.NewStreamStatus()
-			status.SetEndReason(test.reason, nil)
-			assert.Equal(t, test.want, isStreamTimeoutFailure(status))
-		})
-	}
-}
-
 func TestIsSuccessfulStreamResult(t *testing.T) {
 	assert.True(t, isSuccessfulStreamResult(nil))
 

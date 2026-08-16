@@ -23,8 +23,8 @@ import type { SystemStatus } from '@/features/auth/types'
 import { getStatus } from './api'
 
 export const STATUS_QUERY_KEY = ['status'] as const
-export const STATUS_STALE_TIME = 5 * 60 * 1000
-export const STATUS_GC_TIME = 30 * 60 * 1000
+const STATUS_STALE_TIME = 5 * 60 * 1000
+const STATUS_GC_TIME = 30 * 60 * 1000
 
 let cachedStatusLoaded = false
 let cachedStatus: SystemStatus | undefined

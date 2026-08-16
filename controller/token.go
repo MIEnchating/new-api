@@ -497,27 +497,6 @@ func GetTokenKey(c *gin.Context) {
 	})
 }
 
-func GetTokenStatus(c *gin.Context) {
-	tokenId := c.GetInt("token_id")
-	userId := c.GetInt("id")
-	token, err := model.GetTokenByIds(tokenId, userId)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	expiredAt := token.ExpiredTime
-	if expiredAt == -1 {
-		expiredAt = 0
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"object":          "credit_summary",
-		"total_granted":   token.RemainQuota,
-		"total_used":      0, // not supported currently
-		"total_available": token.RemainQuota,
-		"expires_at":      expiredAt * 1000,
-	})
-}
-
 func GetTokenUsage(c *gin.Context) {
 	tokenID := c.GetInt("token_id")
 	if tokenID <= 0 {
@@ -812,27 +791,4 @@ func DeleteTokenBatch(c *gin.Context) {
 		"message": "",
 		"data":    count,
 	})
-}
-
-func GetTokenKeysBatch(c *gin.Context) {
-	tokenBatch := TokenBatch{}
-	if err := c.ShouldBindJSON(&tokenBatch); err != nil || len(tokenBatch.Ids) == 0 {
-		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
-		return
-	}
-	if len(tokenBatch.Ids) > 100 {
-		common.ApiErrorI18n(c, i18n.MsgBatchTooMany, map[string]any{"Max": 100})
-		return
-	}
-	userId := c.GetInt("id")
-	tokens, err := model.GetTokenKeysByIds(tokenBatch.Ids, userId)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	keysMap := make(map[int]string)
-	for _, t := range tokens {
-		keysMap[t.Id] = t.GetFullKey()
-	}
-	common.ApiSuccess(c, gin.H{"keys": keysMap})
 }

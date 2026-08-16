@@ -23,7 +23,7 @@ export const exclusionModes = [
 ] as const
 
 export type ExclusionMode = (typeof exclusionModes)[number]
-export type GroupExclusionRule = {
+type GroupExclusionRule = {
   mode: ExclusionMode
   enabled: boolean
 }

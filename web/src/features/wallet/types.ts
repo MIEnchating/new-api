@@ -68,7 +68,7 @@ export interface AffiliateRewardFilters {
   type: AffiliateRewardType | ''
 }
 
-export interface AffiliateRewardsData {
+interface AffiliateRewardsData {
   items: AffiliateRewardItem[]
   total: number
   page: number
@@ -77,7 +77,7 @@ export interface AffiliateRewardsData {
 
 export type AffiliateRewardsResponse = ApiResponse<AffiliateRewardsData>
 
-export interface AffiliateAdminRewardsData {
+interface AffiliateAdminRewardsData {
   items: AffiliateRewardAdminItem[]
   total: number
   page: number

@@ -45,17 +45,6 @@ func GetProvider(name string) Provider {
 	return providers[name]
 }
 
-// GetAllProviders returns all registered OAuth providers
-func GetAllProviders() map[string]Provider {
-	mu.RLock()
-	defer mu.RUnlock()
-	result := make(map[string]Provider, len(providers))
-	for k, v := range providers {
-		result[k] = v
-	}
-	return result
-}
-
 // GetEnabledCustomProviders returns all enabled custom OAuth providers
 func GetEnabledCustomProviders() []*GenericOAuthProvider {
 	mu.RLock()
@@ -112,11 +101,6 @@ func LoadCustomProviders() error {
 
 	common.SysLog(fmt.Sprintf("Loaded %d custom OAuth providers", len(customProviders)))
 	return nil
-}
-
-// ReloadCustomProviders reloads all custom OAuth providers from the database
-func ReloadCustomProviders() error {
-	return LoadCustomProviders()
 }
 
 // RegisterOrUpdateCustomProvider registers or updates a single custom provider

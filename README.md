@@ -63,10 +63,10 @@
 
 ```text
 Go backend:  http://127.0.0.1:3000
-Bun frontend: http://154.36.172.108:3002
+Bun frontend: http://127.0.0.1:3002
 ```
 
-前端开发服务器会把 `/api`、`/mj` 和 `/pg` 代理到 Go 后端。修改 `web/default/src` 后会自动热更新；只有修改 Go 代码才需要重启后端。
+前端开发服务器会把 `/api`、`/mj` 和 `/pg` 代理到 Go 后端。修改 `web/src` 后会自动热更新；只有修改 Go 代码才需要重启后端。
 
 ```bash
 scripts/dev-local.sh start
@@ -100,9 +100,9 @@ Redis:      127.0.0.1:6379
 
 ```bash
 go test ./...
-bun test --cwd web/default
-bun run --cwd web/default typecheck
-bun run --cwd web/default build
+bun test --cwd web
+bun run --cwd web typecheck
+bun run --cwd web build
 ```
 
 ## 生产架构

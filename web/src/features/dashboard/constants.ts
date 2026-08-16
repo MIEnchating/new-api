@@ -50,6 +50,11 @@ export const TIME_RANGE_PRESETS = [
   { label: '29 Days', days: 29 },
 ] as const
 
+export const CALENDAR_RANGE_PRESETS = [
+  { label: 'Today', value: 'today' },
+  { label: 'Yesterday', value: 'yesterday' },
+] as const
+
 export const CONSUMPTION_DISTRIBUTION_CHART_OPTIONS = [
   { value: 'bar', labelKey: 'Bar Chart' },
   { value: 'area', labelKey: 'Area Chart' },
@@ -66,4 +71,5 @@ export const EMPTY_DASHBOARD_FILTERS: DashboardFilters = {
   end_timestamp: undefined,
   time_granularity: 'hour',
   username: '',
+  token_name: '',
 }

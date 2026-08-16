@@ -56,10 +56,7 @@ function cloneHeaderNavDefaults(): HeaderNavModules {
   }
 }
 
-export function parseHeaderNavBoolean(
-  raw: unknown,
-  fallback: boolean
-): boolean {
+function parseHeaderNavBoolean(raw: unknown, fallback: boolean): boolean {
   if (typeof raw === 'boolean') return raw
   if (typeof raw === 'number') {
     if (raw === 1) return true
@@ -106,7 +103,7 @@ function parseHeaderNavRecord(raw: unknown): Record<string, unknown> | null {
   }
 }
 
-export function parseHeaderNavModules(raw: unknown): HeaderNavModules {
+function parseHeaderNavModules(raw: unknown): HeaderNavModules {
   const result = cloneHeaderNavDefaults()
   const parsed = parseHeaderNavRecord(raw)
   if (!parsed) return result
@@ -144,15 +141,11 @@ export function parseHeaderNavModulesFromStatus(
   return parseHeaderNavModules(status?.HeaderNavModules)
 }
 
-export function getModuleAccessFromStatus(
+function getModuleAccessFromStatus(
   status: Record<string, unknown> | null,
   module: HeaderNavModule
 ): ModuleAccess {
   return parseHeaderNavModulesFromStatus(status)[module] ?? DEFAULTS[module]
-}
-
-export function getModuleAccess(module: HeaderNavModule): ModuleAccess {
-  return getModuleAccessFromStatus(getCachedStatus() ?? null, module)
 }
 
 export async function getFreshModuleAccess(

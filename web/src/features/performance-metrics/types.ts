@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export type PerformanceSeriesPoint = {
+type PerformanceSeriesPoint = {
   ts: number
   avg_ttft_ms: number
   avg_latency_ms: number

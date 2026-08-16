@@ -49,7 +49,9 @@ export async function searchApiKeys(
 ): Promise<GetApiKeysResponse> {
   const { keyword = '', token = '', p, size } = params
   const queryParams = new URLSearchParams()
-  if (keyword) queryParams.set('keyword', keyword)
+  // The key management name field is an inclusive search. The API accepts
+  // SQL LIKE wildcards and still validates/escapes the user input server-side.
+  if (keyword.trim()) queryParams.set('keyword', `%${keyword.trim()}%`)
   if (token) queryParams.set('token', token)
   if (p != null) queryParams.set('p', String(p))
   if (size != null) queryParams.set('size', String(size))
@@ -150,15 +152,5 @@ export async function fetchTokenKey(
   id: number
 ): Promise<{ success: boolean; message?: string; data?: { key: string } }> {
   const res = await api.post(`/api/token/${id}/key`)
-  return res.data
-}
-
-// Batch fetch real (unmasked) keys for multiple tokens
-export async function fetchTokenKeysBatch(ids: number[]): Promise<{
-  success: boolean
-  message?: string
-  data?: { keys: Record<number, string> }
-}> {
-  const res = await api.post('/api/token/batch/keys', { ids })
   return res.data
 }

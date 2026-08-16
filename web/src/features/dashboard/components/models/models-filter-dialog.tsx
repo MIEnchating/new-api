@@ -35,12 +35,16 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
+  CALENDAR_RANGE_PRESETS,
   TIME_GRANULARITY_OPTIONS,
   TIME_RANGE_PRESETS,
 } from '@/features/dashboard/constants'
 import {
   buildDefaultDashboardFilters,
   cleanFilters,
+  detectDashboardQuickRange,
+  getDashboardCalendarRange,
+  type DashboardQuickRange,
 } from '@/features/dashboard/lib'
 import type {
   DashboardChartPreferences,
@@ -70,18 +74,6 @@ function granularityForRangeDays(days: number): TimeGranularity {
   return 'day'
 }
 
-// Highlights the matching quick-range button when the applied range spans an
-// exact preset; custom ranges leave every quick button unselected.
-function detectQuickRangeDays(
-  filters: DashboardFilters | undefined
-): number | null {
-  const start = filters?.start_timestamp
-  const end = filters?.end_timestamp
-  if (!start || !end) return null
-  const days = Math.round((end.getTime() - start.getTime()) / 86_400_000)
-  return TIME_RANGE_PRESETS.some((preset) => preset.days === days) ? days : null
-}
-
 /**
  * Section divider component for better visual organization
  */
@@ -107,9 +99,10 @@ export function ModelsFilter(props: ModelsFilterProps) {
     () =>
       props.currentFilters ?? buildDefaultDashboardFilters(props.preferences)
   )
-  const [selectedRange, setSelectedRange] = useState<number | null>(() =>
-    detectQuickRangeDays(props.currentFilters)
-  )
+  const [selectedRange, setSelectedRange] =
+    useState<DashboardQuickRange | null>(() =>
+      detectDashboardQuickRange(props.currentFilters)
+    )
 
   const handleOpenChange = (nextOpen: boolean) => {
     // Sync the editing state from the applied filters every time the dialog
@@ -118,7 +111,7 @@ export function ModelsFilter(props: ModelsFilterProps) {
       const applied =
         props.currentFilters ?? buildDefaultDashboardFilters(props.preferences)
       setFilters(applied)
-      setSelectedRange(detectQuickRangeDays(applied))
+      setSelectedRange(detectDashboardQuickRange(applied))
     }
     setOpen(nextOpen)
   }
@@ -167,6 +160,17 @@ export function ModelsFilter(props: ModelsFilterProps) {
     setSelectedRange(days)
   }
 
+  const handleCalendarRange = (preset: 'today' | 'yesterday') => {
+    const { start, end } = getDashboardCalendarRange(preset)
+    setFilters((prev) => ({
+      ...prev,
+      start_timestamp: start,
+      end_timestamp: end,
+      time_granularity: 'hour',
+    }))
+    setSelectedRange(preset)
+  }
+
   return (
     <Dialog
       open={open}
@@ -206,7 +210,25 @@ export function ModelsFilter(props: ModelsFilterProps) {
               <Calendar className='h-4 w-4' />
               {t('Quick Range')}
             </Label>
-            <div className='grid grid-cols-2 gap-2 sm:flex'>
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+              {CALENDAR_RANGE_PRESETS.map((range) => (
+                <Button
+                  key={range.value}
+                  type='button'
+                  size='sm'
+                  variant={
+                    selectedRange === range.value ? 'default' : 'outline'
+                  }
+                  onClick={() => handleCalendarRange(range.value)}
+                  className={cn(
+                    'min-w-0',
+                    selectedRange === range.value &&
+                      'ring-ring ring-2 ring-offset-2'
+                  )}
+                >
+                  {t(range.label)}
+                </Button>
+              ))}
               {TIME_RANGE_PRESETS.map((range) => (
                 <Button
                   key={range.days}
@@ -215,7 +237,7 @@ export function ModelsFilter(props: ModelsFilterProps) {
                   variant={selectedRange === range.days ? 'default' : 'outline'}
                   onClick={() => handleQuickRange(range.days)}
                   className={cn(
-                    'flex-1',
+                    'min-w-0',
                     selectedRange === range.days &&
                       'ring-ring ring-2 ring-offset-2'
                   )}
@@ -253,6 +275,32 @@ export function ModelsFilter(props: ModelsFilterProps) {
             </div>
           </div>
 
+          <SectionDivider label={t('Usage Filters')} />
+
+          <div className={cn('grid gap-2.5', isAdmin && 'sm:grid-cols-2')}>
+            <div className='grid gap-2'>
+              <Label htmlFor='token_name'>{t('Token Name')}</Label>
+              <Input
+                id='token_name'
+                placeholder={t('Filter by token name')}
+                value={filters.token_name ?? ''}
+                onChange={(e) => handleChange('token_name', e.target.value)}
+              />
+            </div>
+
+            {isAdmin && (
+              <div className='grid gap-2'>
+                <Label htmlFor='username'>{t('Username')}</Label>
+                <Input
+                  id='username'
+                  placeholder={t('Filter by username')}
+                  value={filters.username ?? ''}
+                  onChange={(e) => handleChange('username', e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+
           <SectionDivider label={t('Chart Settings')} />
 
           <div className='grid gap-2'>
@@ -281,23 +329,6 @@ export function ModelsFilter(props: ModelsFilterProps) {
               </SelectContent>
             </Select>
           </div>
-
-          {/* Admin-only fields */}
-          {isAdmin && (
-            <>
-              <SectionDivider label={t('Admin Only')} />
-
-              <div className='grid gap-2'>
-                <Label htmlFor='username'>{t('Username')}</Label>
-                <Input
-                  id='username'
-                  placeholder={t('Filter by username')}
-                  value={filters.username}
-                  onChange={(e) => handleChange('username', e.target.value)}
-                />
-              </div>
-            </>
-          )}
         </div>
       </ScrollArea>
     </Dialog>

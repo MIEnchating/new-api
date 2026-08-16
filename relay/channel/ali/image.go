@@ -126,10 +126,6 @@ func getImageBase64sFromForm(c *gin.Context, fieldName string) ([]string, error)
 		return nil, errors.New("image is required")
 	}
 
-	//if len(imageFiles) > 1 {
-	//	return nil, errors.New("only one image is supported for qwen edit")
-	//}
-
 	// 获取base64编码的图片
 	var imageBase64s []string
 	for _, file := range imageFiles {
@@ -213,6 +209,10 @@ func updateTask(info *relaycommon.RelayInfo, taskID string) (*AliResponse, error
 	defer resp.Body.Close()
 
 	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		common.SysLog("updateTask read response body err: " + err.Error())
+		return &aliResponse, err, nil
+	}
 
 	var response AliResponse
 	err = common.Unmarshal(responseBody, &response)

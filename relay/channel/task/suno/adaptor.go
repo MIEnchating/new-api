@@ -50,14 +50,6 @@ func (a *TaskAdaptor) ValidateRequestAndSetAction(c *gin.Context, info *relaycom
 		return
 	}
 
-	//if sunoRequest.ContinueClipId != "" {
-	//	if sunoRequest.TaskID == "" {
-	//		taskErr = service.TaskErrorWrapperLocal(fmt.Errorf("task id is empty"), "invalid_request", http.StatusBadRequest)
-	//		return
-	//	}
-	//	info.OriginTaskID = sunoRequest.TaskID
-	//}
-
 	info.Action = action
 	c.Set("task_request", sunoRequest)
 	return nil

@@ -117,7 +117,7 @@ function getChannelTestLabel(options?: {
 /**
  * Enable a channel
  */
-export async function handleEnableChannel(
+async function handleEnableChannel(
   id: number,
   queryClient?: QueryClient,
   onSuccess?: () => void
@@ -139,7 +139,7 @@ export async function handleEnableChannel(
 /**
  * Disable a channel
  */
-export async function handleDisableChannel(
+async function handleDisableChannel(
   id: number,
   queryClient?: QueryClient,
   onSuccess?: () => void

@@ -238,7 +238,6 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 		}
 
 		if imageRequest.Model == "" {
-			//imageRequest.Model = "dall-e-3"
 			return nil, errors.New("model is required")
 		}
 
@@ -273,11 +272,6 @@ func GetAndValidOpenAIImageRequest(c *gin.Context, relayMode int) (*dto.ImageReq
 				imageRequest.Quality = "auto"
 			}
 		}
-
-		//if imageRequest.Prompt == "" {
-		//	return nil, errors.New("prompt is required")
-		//}
-
 		if imageRequest.N == nil || *imageRequest.N == 0 {
 			imageRequest.N = common.GetPointer(uint(1))
 		}
@@ -301,11 +295,6 @@ func GetAndValidateClaudeRequest(c *gin.Context) (textRequest *dto.ClaudeRequest
 	if exceedsMaxTokensLimit(textRequest.MaxTokens, textRequest.MaxTokensToSample) {
 		return nil, errors.New("max_tokens is invalid")
 	}
-
-	//if textRequest.Stream {
-	//	relayInfo.IsStream = true
-	//}
-
 	return textRequest, nil
 }
 
@@ -379,11 +368,6 @@ func GetAndValidateGeminiRequest(c *gin.Context) (*dto.GeminiChatRequest, error)
 	if exceedsMaxTokensLimit(request.GenerationConfig.MaxOutputTokens) {
 		return nil, errors.New("maxOutputTokens is invalid")
 	}
-
-	//if c.Query("alt") == "sse" {
-	//	relayInfo.IsStream = true
-	//}
-
 	return request, nil
 }
 

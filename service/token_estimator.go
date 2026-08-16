@@ -214,7 +214,6 @@ func isURLDelim(r rune) bool {
 }
 
 func EstimateTokenByModel(model, text string) int {
-	// strings.Contains(model, "gpt-4o")
 	if text == "" {
 		return 0
 	}

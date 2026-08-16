@@ -51,7 +51,7 @@ type AutoGroupFrameProps = {
   shouldReduceMotion: boolean
 }
 
-export function AutoGroupFrame(props: AutoGroupFrameProps) {
+function AutoGroupFrame(props: AutoGroupFrameProps) {
   return (
     <span
       data-auto-group-frame='true'

@@ -18,8 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { parseHttpStatusCodeRules } from '@/lib/http-status-code-rules'
 
-export const requestErrorRoutingMatchModes = ['any', 'all'] as const
-export const requestErrorMessageMatchModes = ['contains', 'exact'] as const
+const requestErrorRoutingMatchModes = ['any', 'all'] as const
+const requestErrorMessageMatchModes = ['contains', 'exact'] as const
 
 export type RequestErrorRoutingMatchMode =
   (typeof requestErrorRoutingMatchModes)[number]
@@ -64,7 +64,7 @@ const contextLimitPatterns = [
   '提示词过长',
 ]
 
-export const DEFAULT_REQUEST_ERROR_ROUTING_RULES: RequestErrorRoutingRule[] = [
+const DEFAULT_REQUEST_ERROR_ROUTING_RULES: RequestErrorRoutingRule[] = [
   {
     id: 'context-window-exceeded',
     name: 'Context window exceeded',
@@ -242,25 +242,4 @@ export function validateRequestErrorRoutingRulesWithTranslator(
     }
   }
   return null
-}
-
-export function createRequestErrorRoutingRule(
-  index: number
-): RequestErrorRoutingRule {
-  return {
-    id: `request-error-rule-${Date.now()}-${index}`,
-    name: `Rule ${index + 1}`,
-    description: '',
-    priority: index,
-    enabled: true,
-    match_mode: 'any',
-    status_codes: '',
-    error_codes: '',
-    message_patterns: '',
-    message_match_mode: 'contains',
-    retry_same_channel: false,
-    switch_channel: true,
-    switch_group: true,
-    cooldown: false,
-  }
 }

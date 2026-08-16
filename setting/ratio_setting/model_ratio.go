@@ -245,8 +245,8 @@ var defaultModelRatio = map[string]float64{
 	// Perplexity online 模型对搜索额外收费，有需要应自行调整，此处不计入搜索费用
 	"llama-3-sonar-small-32k-chat":   0.2 / 1000 * USD,
 	"llama-3-sonar-small-32k-online": 0.2 / 1000 * USD,
-	"llama-3-sonar-large-32k-chat":   1 / 1000 * USD,
-	"llama-3-sonar-large-32k-online": 1 / 1000 * USD,
+	"llama-3-sonar-large-32k-chat":   1.0 / 1000 * USD,
+	"llama-3-sonar-large-32k-online": 1.0 / 1000 * USD,
 	// grok
 	"grok-3-beta":           1.5,
 	"grok-3-mini-beta":      0.15,
@@ -342,10 +342,6 @@ func InitRatioSettings() {
 	imageRatioMap.AddAll(defaultImageRatio)
 	audioRatioMap.AddAll(defaultAudioRatio)
 	audioCompletionRatioMap.AddAll(defaultAudioCompletionRatio)
-}
-
-func GetModelPriceMap() map[string]float64 {
-	return modelPriceMap.ReadAll()
 }
 
 func ModelPrice2JSONString() string {
@@ -716,17 +712,4 @@ func FormatMatchingModelName(name string) string {
 		name = "gpt-4o-gizmo-*"
 	}
 	return name
-}
-
-// result: 倍率or价格， usePrice， exist
-func GetModelRatioOrPrice(model string) (float64, bool, bool) { // price or ratio
-	price, usePrice := GetModelPrice(model, false)
-	if usePrice {
-		return price, true, true
-	}
-	modelRatio, success, _ := GetModelRatio(model)
-	if success {
-		return modelRatio, false, true
-	}
-	return 37.5, false, false
 }
