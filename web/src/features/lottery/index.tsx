@@ -164,7 +164,7 @@ function LotteryDrawAnimation() {
       <span className='absolute inset-2 motion-safe:animate-[spin_1.8s_linear_infinite_reverse]'>
         <i className='bg-primary absolute top-1/2 -right-0.5 size-1.5 -translate-y-1/2 rounded-full shadow-[0_0_8px_var(--primary)]' />
       </span>
-      <span className='bg-primary/10 shadow-primary/20 flex size-12 items-center justify-center rounded-full shadow-inner ring-1 ring-primary/20 motion-safe:animate-pulse'>
+      <span className='bg-primary/10 shadow-primary/20 ring-primary/20 flex size-12 items-center justify-center rounded-full shadow-inner ring-1 motion-safe:animate-pulse'>
         <Dices className='text-primary size-7 motion-safe:animate-bounce' />
       </span>
       <Sparkles className='text-warning absolute -top-0.5 right-0 size-4 motion-safe:animate-bounce' />
@@ -533,7 +533,7 @@ export function Lottery() {
                               {selected && drawing ? (
                                 <LotteryDrawAnimation />
                               ) : revealed ? (
-                                <span className='flex flex-col items-center gap-1 text-center motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75 motion-safe:duration-500'>
+                                <span className='motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75 flex flex-col items-center gap-1 text-center motion-safe:duration-500'>
                                   <span className='bg-success/10 flex size-10 items-center justify-center rounded-full'>
                                     <Sparkles
                                       className='text-success size-5'
