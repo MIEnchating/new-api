@@ -100,7 +100,10 @@ import type {
 const ADMIN_PAGE_SIZE = 20
 const USER_PAGE_SIZE = 10
 const MYSTERY_BOX_COUNT = 3
-const DRAW_REVEAL_DELAY_MS = 1100
+// Let the draw animation complete a few rotations before revealing the result.
+// The API response is already available, so this delay only affects the visual
+// presentation and is skipped when the request itself fails.
+const DRAW_REVEAL_DELAY_MS = 2400
 const EMPTY_DRAW_FILTERS: LotteryDrawFilters = { user: '', result: '' }
 
 function drawResultLabel(
@@ -143,6 +146,31 @@ function drawStatusConfig(
     return { label: t('Awarded'), variant: 'success' as const }
   }
   return { label: t('No prize'), variant: 'neutral' as const }
+}
+
+function LotteryDrawAnimation() {
+  return (
+    <span
+      className='relative flex size-20 items-center justify-center'
+      aria-hidden='true'
+    >
+      <span className='border-primary/20 absolute inset-0 rounded-full border motion-safe:animate-ping' />
+      <span className='border-primary/35 absolute inset-1 rounded-full border border-dashed motion-safe:animate-[spin_3.2s_linear_infinite_reverse]' />
+      <span className='border-warning/35 absolute inset-3 rounded-full border motion-safe:animate-[spin_2.1s_linear_infinite]' />
+      <span className='absolute inset-0 motion-safe:animate-[spin_2.8s_linear_infinite]'>
+        <i className='bg-warning absolute top-0 left-1/2 size-2 -translate-x-1/2 rounded-full shadow-[0_0_10px_var(--warning)]' />
+        <i className='bg-primary absolute bottom-1 left-1/2 size-1.5 -translate-x-1/2 rounded-full' />
+      </span>
+      <span className='absolute inset-2 motion-safe:animate-[spin_1.8s_linear_infinite_reverse]'>
+        <i className='bg-primary absolute top-1/2 -right-0.5 size-1.5 -translate-y-1/2 rounded-full shadow-[0_0_8px_var(--primary)]' />
+      </span>
+      <span className='bg-primary/10 shadow-primary/20 flex size-12 items-center justify-center rounded-full shadow-inner ring-1 ring-primary/20 motion-safe:animate-pulse'>
+        <Dices className='text-primary size-7 motion-safe:animate-bounce' />
+      </span>
+      <Sparkles className='text-warning absolute -top-0.5 right-0 size-4 motion-safe:animate-bounce' />
+      <Sparkles className='text-primary absolute bottom-0 left-0.5 size-3 [animation-delay:180ms] motion-safe:animate-bounce' />
+    </span>
+  )
 }
 
 export function Lottery() {
@@ -494,7 +522,8 @@ export function Lottery() {
                               'disabled:pointer-events-none disabled:cursor-not-allowed',
                               selected &&
                                 drawing &&
-                                'border-primary/60 bg-primary/[0.04] shadow-primary/10 motion-safe:animate-pulse shadow-md',
+                                'border-primary/60 bg-primary/[0.04] ring-primary/15 shadow-primary/10 shadow-md ring-1',
+                              drawing && !selected && 'opacity-45',
                               revealed &&
                                 'border-success/45 bg-success/[0.04] shadow-success/10 shadow-md',
                               subdued && 'opacity-30'
@@ -502,14 +531,9 @@ export function Lottery() {
                           >
                             <span className='relative z-10 flex min-h-16 items-center justify-center'>
                               {selected && drawing ? (
-                                <span className='bg-primary/8 flex size-14 items-center justify-center rounded-full'>
-                                  <Loader2
-                                    className='text-primary size-7 animate-spin'
-                                    aria-hidden='true'
-                                  />
-                                </span>
+                                <LotteryDrawAnimation />
                               ) : revealed ? (
-                                <span className='flex flex-col items-center gap-1 text-center'>
+                                <span className='flex flex-col items-center gap-1 text-center motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75 motion-safe:duration-500'>
                                   <span className='bg-success/10 flex size-10 items-center justify-center rounded-full'>
                                     <Sparkles
                                       className='text-success size-5'
@@ -536,10 +560,39 @@ export function Lottery() {
                       }
                     )}
                   </div>
-                  <div className='mt-5 min-h-6 text-center text-sm font-medium'>
-                    {latestDraw
-                      ? drawResultLabel(latestDraw, t)
-                      : t('One chance is consumed per draw')}
+                  <div className='mt-5 flex min-h-6 items-center justify-center text-center text-sm font-medium'>
+                    {drawing ? (
+                      <span
+                        className='text-primary inline-flex items-center gap-2'
+                        role='status'
+                        aria-live='polite'
+                        data-testid='lottery-draw-progress'
+                      >
+                        <span>{t('Drawing...')}</span>
+                        <span
+                          className='inline-flex items-end gap-1'
+                          aria-hidden='true'
+                        >
+                          <i className='bg-primary size-1.5 rounded-full motion-safe:animate-bounce' />
+                          <i className='bg-primary size-1.5 rounded-full [animation-delay:120ms] motion-safe:animate-bounce' />
+                          <i className='bg-primary size-1.5 rounded-full [animation-delay:240ms] motion-safe:animate-bounce' />
+                        </span>
+                        <span
+                          className='bg-primary/10 inline-flex h-1.5 w-14 items-stretch gap-0.5 overflow-hidden rounded-full p-0.5'
+                          aria-hidden='true'
+                        >
+                          <i className='bg-primary/70 flex-1 rounded-full motion-safe:animate-pulse' />
+                          <i className='bg-primary/45 flex-1 rounded-full [animation-delay:120ms] motion-safe:animate-pulse' />
+                          <i className='bg-primary/25 flex-1 rounded-full [animation-delay:240ms] motion-safe:animate-pulse' />
+                        </span>
+                      </span>
+                    ) : latestDraw ? (
+                      <span className='motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-300'>
+                        {drawResultLabel(latestDraw, t)}
+                      </span>
+                    ) : (
+                      t('One chance is consumed per draw')
+                    )}
                   </div>
                 </CardContent>
               </Card>

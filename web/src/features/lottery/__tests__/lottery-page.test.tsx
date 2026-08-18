@@ -260,12 +260,22 @@ describe('lottery center', () => {
     assert.equal(drawRequested, true)
     assert.equal(selectedBox.disabled, true)
     assert.equal(selectedBox.dataset.state, 'drawing')
+    const drawProgress = container.querySelector(
+      '[data-testid="lottery-draw-progress"]'
+    )
+    assert.ok(drawProgress)
+    assert.equal(drawProgress.getAttribute('role'), 'status')
+    assert.match(drawProgress.textContent || '', /Drawing/)
 
     await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 1150))
+      await new Promise((resolve) => setTimeout(resolve, 2450))
     })
 
     assert.equal(selectedBox.dataset.state, 'revealed')
+    assert.equal(
+      container.querySelector('[data-testid="lottery-draw-progress"]'),
+      null
+    )
     assert.match(container.textContent || '', /Won/)
     assert.match(container.textContent || '', /\$5/)
 
