@@ -44,3 +44,21 @@ func TestBuildCacheQueryResultAggregatesModelsByGroup(t *testing.T) {
 	assert.EqualValues(t, 0, result.Groups[1].HitCount)
 	assert.Equal(t, 0.0, result.Groups[1].CacheHitRate)
 }
+
+func TestCacheHitRateUsesTokenRatioWhenAvailable(t *testing.T) {
+	result := buildCacheQueryResult(map[string]map[int64]counters{
+		"default": {
+			100: {
+				requestCount:          100,
+				cacheRequests:         100,
+				cacheHits:             94,
+				cachedTokens:          79,
+				cacheTokenReadTokens:  79,
+				cacheTokenDenominator: 100,
+			},
+		},
+	})
+
+	require.Len(t, result.Groups, 1)
+	assert.Equal(t, 79.0, result.Groups[0].CacheHitRate)
+}

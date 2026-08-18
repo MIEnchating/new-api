@@ -16,13 +16,39 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-type LotteryPrizeType = 'quota_1' | 'quota_5' | 'quota_8' | 'none'
+type LotteryPrizeType = string
 type LotteryDrawStatus = 'awarded' | 'no_prize' | 'revoked' | ''
 
 export interface LotteryPrize {
   type: LotteryPrizeType
+  name: string
   amount: number
   probability: number
+}
+
+export interface LotteryStreakReward {
+  days: number
+  chances: number
+}
+
+export interface LotteryRules {
+  weekly_spend_amount: number
+  weekly_chance_limit: number
+  daily_active_amount: number
+  streak_rewards: LotteryStreakReward[]
+}
+
+export type LotteryChanceGrantRuleType = 'recharge' | 'event'
+
+export interface LotteryChanceGrantRule {
+  id: string
+  type: LotteryChanceGrantRuleType
+  name: string
+  enabled: boolean
+  threshold: number
+  chances: number
+  start_at: number
+  end_at: number
 }
 
 export interface LotteryDraw {
@@ -81,6 +107,8 @@ export interface LotteryStatus {
   prizes: LotteryPrize[]
   recent_draws: LotteryDraw[]
   recent_activity: LotteryActivity[]
+  rules: LotteryRules
+  active_grant_rules: LotteryChanceGrantRule[]
 }
 
 export interface LotteryDrawResult {
@@ -95,5 +123,7 @@ export interface LotteryApiResponse<T> {
 }
 
 export interface LotteryConfig {
+  rules: LotteryRules
   prizes: LotteryPrize[]
+  grant_rules: LotteryChanceGrantRule[]
 }

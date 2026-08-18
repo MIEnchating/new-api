@@ -334,7 +334,7 @@ export function Lottery() {
       setLatestDraw(pendingDraw)
       setPendingDraw(null)
       setDrawing(false)
-      if (pendingDraw.prize === 'none') {
+      if (pendingDraw.quota <= 0) {
         toast.info(t('No prize this time'))
         return
       }
@@ -420,7 +420,7 @@ export function Lottery() {
                   type='button'
                   variant='outline'
                   size='sm'
-                  disabled={loading || (status?.prizes.length || 0) !== 4}
+                  disabled={loading}
                   onClick={() => setSettingsOpen(true)}
                 >
                   <Settings aria-hidden='true' />
@@ -574,14 +574,18 @@ export function Lottery() {
                       <StatusBadge variant='info' size='lg'>
                         {t('{{earned}} / {{limit}} chances', {
                           earned: status?.weekly_earned_chances || 0,
-                          limit: status?.weekly_chance_limit || 5,
+                          limit: status?.weekly_chance_limit ?? 0,
                         })}
                       </StatusBadge>
                     </div>
                     <Progress value={weeklyProgress} />
                     <p className='text-muted-foreground text-xs leading-5'>
                       {t(
-                        'Earn 1 chance for every 50.00 Yuan spent each week, up to 5 chances.'
+                        'Earn 1 chance for every {{amount}} spent each week, up to {{limit}} chances.',
+                        {
+                          amount: `${(status?.rules?.weekly_spend_amount ?? 50).toFixed(2)} ${t('Yuan')}`,
+                          limit: status?.weekly_chance_limit ?? 0,
+                        }
                       )}
                     </p>
                   </CardContent>
@@ -622,7 +626,10 @@ export function Lottery() {
                     <Progress value={dailyProgress} />
                     <p className='text-muted-foreground text-xs'>
                       {t(
-                        'Spend 20.00 Yuan in a single day to mark that day as active.'
+                        'Spend {{amount}} in a single day to mark that day as active.',
+                        {
+                          amount: `${(status?.rules?.daily_active_amount ?? 20).toFixed(2)} ${t('Yuan')}`,
+                        }
                       )}
                     </p>
                   </CardContent>
@@ -684,29 +691,62 @@ export function Lottery() {
                         </div>
                       ))}
                     </div>
-                    <div className='mt-auto grid divide-y border-t sm:grid-cols-2 sm:divide-x sm:divide-y-0'>
-                      <div className='pt-3 sm:pr-4'>
-                        <span className='text-sm font-medium'>
-                          {t('3-day streak')}
-                        </span>
-                        <p className='text-muted-foreground mt-0.5 text-xs'>
-                          {t('Reward: 1 lottery chance')}
-                        </p>
-                      </div>
-                      <div className='pt-3 sm:pl-4'>
-                        <span className='text-sm font-medium'>
-                          {t('7-day streak')}
-                        </span>
-                        <p className='text-muted-foreground mt-0.5 text-xs'>
-                          {t('Reward: 3 lottery chances')}
-                        </p>
-                      </div>
+                    <div className='mt-auto grid gap-2 border-t pt-3 sm:grid-cols-2'>
+                      {(status?.rules?.streak_rewards || []).map((reward) => (
+                        <div
+                          key={reward.days}
+                          className='rounded-md border px-3 py-2'
+                        >
+                          <span className='text-sm font-medium'>
+                            {t('{{days}}-day streak', { days: reward.days })}
+                          </span>
+                          <p className='text-muted-foreground mt-0.5 text-xs'>
+                            {t('Reward: {{count}} lottery chances', {
+                              count: reward.chances,
+                            })}
+                          </p>
+                        </div>
+                      ))}
                     </div>
                   </CardContent>
                 </Card>
               </CardStaggerItem>
             </div>
           </div>
+
+          {(status?.active_grant_rules?.length || 0) > 0 ? (
+            <CardStaggerItem>
+              <Card data-card-hover='false' className='gap-0 py-0'>
+                <CardHeader className='border-b py-4'>
+                  <CardTitle className='flex items-center gap-2 text-base'>
+                    <Sparkles className='text-warning size-4' />
+                    {t('Chance bonus events')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className='grid gap-3 py-4 sm:grid-cols-2 lg:grid-cols-3'>
+                  {status?.active_grant_rules?.map((rule) => (
+                    <div key={rule.id} className='rounded-md border px-3 py-3'>
+                      <div className='flex items-center justify-between gap-3'>
+                        <span className='truncate text-sm font-medium'>
+                          {rule.name}
+                        </span>
+                        <StatusBadge variant='info'>
+                          {t('{{count}} chances', { count: rule.chances })}
+                        </StatusBadge>
+                      </div>
+                      <p className='text-muted-foreground mt-1 text-xs'>
+                        {rule.type === 'recharge'
+                          ? t('Single recharge of {{amount}} or more', {
+                              amount: `${rule.threshold.toFixed(2)} ${t('Yuan')}`,
+                            })
+                          : t('Receive once during the event')}
+                      </p>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </CardStaggerItem>
+          ) : null}
 
           <CardStaggerItem>
             <Card data-card-hover='false' className='gap-0 py-0'>
@@ -879,12 +919,10 @@ export function Lottery() {
                             <TableCell>
                               <StatusBadge
                                 variant={
-                                  draw.prize === 'none' ? 'neutral' : 'success'
+                                  draw.quota <= 0 ? 'neutral' : 'success'
                                 }
                               >
-                                {draw.prize === 'none'
-                                  ? t('No prize')
-                                  : t('Won')}
+                                {draw.quota <= 0 ? t('No prize') : t('Won')}
                               </StatusBadge>
                             </TableCell>
                             <TableCell className='font-medium tabular-nums'>
@@ -999,10 +1037,14 @@ export function Lottery() {
       <LotterySettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        prizes={status?.prizes || []}
-        onSaved={(prizes) =>
-          setStatus((current) => (current ? { ...current, prizes } : current))
-        }
+        onSaved={(config) => {
+          setStatus((current) =>
+            current
+              ? { ...current, prizes: config.prizes, rules: config.rules }
+              : current
+          )
+          void loadStatus()
+        }}
       />
       <ConfirmDialog
         open={revokeDraw !== null}

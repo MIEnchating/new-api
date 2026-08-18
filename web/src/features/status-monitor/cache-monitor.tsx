@@ -48,26 +48,10 @@ import {
 } from 'lucide-react'
 import { useEffect, useId, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Line,
-  LineChart,
-  ReferenceLine,
-  XAxis,
-  YAxis,
-} from 'recharts'
 import { toast } from 'sonner'
 
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import {
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from '@/components/ui/chart'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
@@ -106,20 +90,25 @@ function formatCount(value: number) {
   )
 }
 
+function cacheGroupDotClass(group: CacheMetricGroup, baseline: number) {
+  if (!group.has_data) return 'bg-muted-foreground/40'
+  return group.cache_hit_rate >= baseline ? 'bg-success' : 'bg-warning'
+}
+
+function cachePulseClass(hasData: boolean, rate: number, baseline: number) {
+  if (!hasData) return 'bg-muted-foreground/20'
+  if (rate >= Math.max(baseline + 8, 92)) return 'bg-success'
+  if (rate >= baseline) return 'bg-success/70'
+  if (rate >= Math.max(50, baseline - 20)) return 'bg-warning'
+  return 'bg-destructive/75'
+}
+
 function formatTime(timestamp: number) {
   return new Date(timestamp * 1000).toLocaleTimeString(undefined, {
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
   })
-}
-
-function estimateAxisLabelWidth(value: string) {
-  return [...value].reduce(
-    (width, character) =>
-      width + ((character.codePointAt(0) ?? 0) <= 0x7f ? 7 : 12),
-    0
-  )
 }
 
 function CacheMetric(props: {
@@ -141,167 +130,93 @@ function CacheMetric(props: {
   )
 }
 
-function CacheTrend(props: {
-  group: CacheMetricGroup
-  baseline: number
-  bucketSeconds: number
-  rangeStart?: number
-  rangeEnd?: number
-}) {
-  const { t } = useTranslation()
-  const data = useMemo(
-    () =>
-      buildCacheChartSeries(
-        props.group.series,
-        props.bucketSeconds,
-        props.rangeStart,
-        props.rangeEnd
-      ).map((point) => ({
-        ...point,
-        time: formatTime(point.ts),
-        fullTime: new Date(point.ts * 1000).toLocaleString(undefined, {
-          hourCycle: 'h23',
-        }),
-      })),
-    [props.bucketSeconds, props.group.series, props.rangeEnd, props.rangeStart]
-  )
-  const config = {
-    cache_hit_rate: {
-      label: t('Cache hit rate'),
-      color: 'var(--chart-2)',
-    },
-    avg_tps: {
-      label: t('Throughput'),
-      color: 'var(--chart-1)',
-    },
-  }
-
-  if (data.length === 0) {
-    return (
-      <div className='text-muted-foreground flex h-56 items-center justify-center text-sm sm:h-64'>
-        {t('No data')}
-      </div>
-    )
-  }
-
-  return (
-    <ChartContainer config={config} className='aspect-auto h-56 w-full sm:h-64'>
-      <LineChart data={data} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
-        <CartesianGrid vertical={false} strokeDasharray='3 3' />
-        <XAxis
-          dataKey='time'
-          tickLine={false}
-          axisLine={false}
-          minTickGap={32}
-        />
-        <YAxis
-          yAxisId='rate'
-          domain={[0, 100]}
-          tickLine={false}
-          axisLine={false}
-          width={42}
-          tickFormatter={(value) => `${Math.round(Number(value))}%`}
-        />
-        <YAxis
-          yAxisId='throughput'
-          orientation='right'
-          domain={[0, 'auto']}
-          tickLine={false}
-          axisLine={false}
-          width={48}
-          tickFormatter={(value) =>
-            new Intl.NumberFormat(undefined, {
-              notation: 'compact',
-              maximumFractionDigits: 1,
-            }).format(Number(value))
-          }
-        />
-        <ReferenceLine
-          yAxisId='rate'
-          y={props.baseline}
-          stroke='var(--muted-foreground)'
-          strokeDasharray='4 4'
-        />
-        <ChartTooltip
-          content={
-            <ChartTooltipContent
-              labelFormatter={(_, payload) =>
-                payload?.[0]?.payload?.fullTime ?? '--'
-              }
-              formatter={(value, name) => (
-                <div className='flex flex-1 items-center justify-between gap-4'>
-                  <span className='text-muted-foreground'>
-                    {name === 'avg_tps' ? t('Throughput') : t('Cache hit rate')}
-                  </span>
-                  <span className='font-mono font-medium tabular-nums'>
-                    {name === 'avg_tps'
-                      ? formatThroughput(Number(value))
-                      : formatPercent(Number(value))}
-                  </span>
-                </div>
-              )}
-            />
-          }
-        />
-        <Line
-          yAxisId='rate'
-          type='monotone'
-          dataKey='cache_hit_rate'
-          stroke='var(--color-cache_hit_rate)'
-          strokeWidth={2}
-          dot={false}
-          activeDot={{ r: 4 }}
-          connectNulls={false}
-          isAnimationActive={false}
-        />
-        <Line
-          yAxisId='throughput'
-          type='monotone'
-          dataKey='avg_tps'
-          stroke='var(--color-avg_tps)'
-          strokeWidth={2}
-          dot={false}
-          activeDot={{ r: 4 }}
-          connectNulls={false}
-          isAnimationActive={false}
-        />
-      </LineChart>
-    </ChartContainer>
-  )
-}
-
 function CacheGroupStats(props: {
   groups: CacheMetricGroup[]
   baseline: number
   countsVisible: boolean
+  bucketSeconds: number
+  rangeStart?: number
+  rangeEnd?: number
   onSelect: (group: string) => void
 }) {
   const { t } = useTranslation()
-  const data = useMemo(
-    () =>
-      props.groups.map((group) => ({
-        ...group,
-        cache_hit_rate: group.has_data ? group.cache_hit_rate : 0,
-      })),
-    [props.groups]
-  )
-  const config = {
-    cache_hit_rate: {
-      label: t('Hit Rate'),
-      color: 'var(--chart-2)',
-    },
-  }
-  const longestGroupLabelWidth = data.reduce(
-    (longest, group) => Math.max(longest, estimateAxisLabelWidth(group.group)),
-    0
-  )
-  const categoryAxisWidth = Math.min(
-    280,
-    Math.max(112, longestGroupLabelWidth + 20)
-  )
-  const chartHeight = Math.max(256, data.length * 36 + 48)
+  const timeline = useMemo(() => {
+    const timestamps = props.groups.flatMap((group) =>
+      group.series.map((point) => point.ts)
+    )
+    if (timestamps.length > 0) {
+      const start = Math.min(...timestamps)
+      const end = Math.max(...timestamps)
+      return buildCacheChartSeries(
+        [
+          {
+            ts: start,
+            cached_tokens: 0,
+            cache_hit_rate: 0,
+            avg_tps: 0,
+            has_data: false,
+          },
+        ],
+        props.bucketSeconds,
+        start,
+        end
+      ).map((point) => ({ ...point, has_data: false }))
+    }
+    const rangeStart = props.rangeStart
+    const rangeEnd = props.rangeEnd
+    if (
+      typeof rangeStart !== 'number' ||
+      typeof rangeEnd !== 'number' ||
+      !Number.isFinite(rangeStart) ||
+      !Number.isFinite(rangeEnd) ||
+      rangeStart >= rangeEnd
+    ) {
+      return []
+    }
+    const points = []
+    for (
+      let ts =
+        Math.floor(rangeStart / props.bucketSeconds) * props.bucketSeconds;
+      ts <= rangeEnd;
+      ts += props.bucketSeconds
+    ) {
+      points.push({
+        ts,
+        request_count: null,
+        hit_count: null,
+        cached_tokens: null,
+        cache_hit_rate: null,
+        avg_tps: null,
+        has_data: false,
+        missing: true,
+      })
+    }
+    return points
+  }, [props.bucketSeconds, props.groups, props.rangeEnd, props.rangeStart])
+  const rows = useMemo(() => {
+    return props.groups.map((group) => {
+      const first = timeline[0]?.ts
+      const last = timeline.at(-1)?.ts
+      const points =
+        first != null && last != null
+          ? buildCacheChartSeries(
+              group.series,
+              props.bucketSeconds,
+              first,
+              last
+            )
+          : []
+      const pointsByTime = new Map(points.map((point) => [point.ts, point]))
+      return {
+        group,
+        points: timeline.map(
+          (point) => pointsByTime.get(point.ts) ?? { ...point }
+        ),
+      }
+    })
+  }, [props.bucketSeconds, props.groups, timeline])
 
-  if (data.length === 0) {
+  if (rows.length === 0) {
     return (
       <div className='text-muted-foreground flex h-56 items-center justify-center text-sm sm:h-64'>
         {t('No data')}
@@ -310,107 +225,103 @@ function CacheGroupStats(props: {
   }
 
   return (
-    <ChartContainer
-      config={config}
-      className='aspect-auto w-full [&_.recharts-surface]:outline-none! [&_.recharts-wrapper]:outline-none!'
-      style={{ height: chartHeight }}
-      onMouseDown={(event) => event.preventDefault()}
-    >
-      <BarChart
-        accessibilityLayer={false}
-        data={data}
-        layout='vertical'
-        margin={{ top: 8, right: 28, bottom: 0, left: 0 }}
-      >
-        <CartesianGrid horizontal={false} strokeDasharray='3 3' />
-        <XAxis
-          type='number'
-          domain={[0, 100]}
-          tickLine={false}
-          axisLine={false}
-          tickFormatter={(value) => `${Math.round(Number(value))}%`}
-        />
-        <YAxis
-          type='category'
-          dataKey='group'
-          width={categoryAxisWidth}
-          tickLine={false}
-          axisLine={false}
-          tickMargin={8}
-          interval={0}
-        />
-        <ReferenceLine
-          x={props.baseline}
-          stroke='var(--muted-foreground)'
-          strokeDasharray='4 4'
-        />
-        <ChartTooltip
-          cursor={{ fill: 'var(--muted)', opacity: 0.45 }}
-          content={
-            <ChartTooltipContent
-              hideIndicator
-              labelFormatter={(_, payload) =>
-                String(payload?.[0]?.payload?.group ?? '')
-              }
-              formatter={(_, __, item) => {
-                const group = item.payload as CacheMetricGroup
-                const hasData = group.has_data
-                return (
-                  <div className='grid min-w-44 gap-1.5'>
-                    <div className='flex items-center justify-between gap-4'>
-                      <span className='text-muted-foreground'>
-                        {t('Hit Rate')}
-                      </span>
-                      <span className='font-mono font-medium tabular-nums'>
-                        {hasData ? formatPercent(group.cache_hit_rate) : '--'}
-                      </span>
-                    </div>
-                    {props.countsVisible ? (
-                      <div className='flex items-center justify-between gap-4'>
-                        <span className='text-muted-foreground'>
-                          {t('Hits / Requests')}
-                        </span>
-                        <span className='font-mono font-medium tabular-nums'>
-                          {formatCount(group.hit_count ?? 0)} /{' '}
-                          {formatCount(group.request_count ?? 0)}
-                        </span>
-                      </div>
-                    ) : null}
-                    <div className='flex items-center justify-between gap-4'>
-                      <span className='text-muted-foreground'>
-                        {t('Cached tokens')}
-                      </span>
-                      <span className='font-mono font-medium tabular-nums'>
-                        {formatCount(group.cached_tokens)}
-                      </span>
-                    </div>
-                  </div>
-                )
-              }}
-            />
-          }
-        />
-        <Bar dataKey='cache_hit_rate' maxBarSize={24} radius={[0, 4, 4, 0]}>
-          {data.map((group) => {
-            let fill = 'var(--muted-foreground)'
-            if (group.has_data) {
-              fill =
-                group.cache_hit_rate >= props.baseline
-                  ? 'var(--success)'
-                  : 'var(--warning)'
-            }
-            return (
-              <Cell
-                key={group.group}
-                fill={fill}
-                className='cursor-pointer transition-[filter] hover:brightness-105'
-                onClick={() => props.onSelect(group.group)}
-              />
-            )
-          })}
-        </Bar>
-      </BarChart>
-    </ChartContainer>
+    <>
+      <div className='bg-muted/10 overflow-x-auto rounded-xl border'>
+        <div className='min-w-[760px]'>
+          <div className='bg-muted/30 text-muted-foreground grid grid-cols-[minmax(160px,1.25fr)_80px_84px_100px_minmax(260px,3fr)] items-center gap-3 border-b px-3 py-2 text-[11px] font-medium'>
+            <span>{t('Group')}</span>
+            <span>{t('Hit Rate')}</span>
+            <span>t/s</span>
+            <span>{t('Cached tokens')}</span>
+            <span className='flex justify-between gap-3'>
+              <span>{timeline[0] ? formatTime(timeline[0].ts) : '--'}</span>
+              <span>
+                {timeline.at(-1)?.ts != null
+                  ? formatTime(timeline.at(-1)?.ts ?? 0)
+                  : '--'}
+              </span>
+            </span>
+          </div>
+          {rows.map(({ group, points }) => (
+            <div
+              key={group.group}
+              className={cn(
+                'grid grid-cols-[minmax(160px,1.25fr)_80px_84px_100px_minmax(260px,3fr)] items-center gap-3 border-b px-3 py-2 last:border-b-0',
+                'hover:bg-muted/20 cursor-pointer'
+              )}
+              onClick={() => props.onSelect(group.group)}
+            >
+              <div className='flex min-w-0 items-center gap-2'>
+                <span
+                  className={cn(
+                    'size-2 shrink-0 rounded-full',
+                    cacheGroupDotClass(group, props.baseline)
+                  )}
+                />
+                <button
+                  type='button'
+                  className='min-w-0 truncate text-left text-xs font-semibold hover:underline'
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    props.onSelect(group.group)
+                  }}
+                  title={group.group}
+                >
+                  {group.group}
+                </button>
+              </div>
+              <span className='text-xs tabular-nums'>
+                {group.has_data ? formatPercent(group.cache_hit_rate) : '--'}
+              </span>
+              <span className='text-xs tabular-nums'>
+                {group.has_data ? formatThroughput(group.avg_tps) : '--'}
+              </span>
+              <span className='text-xs tabular-nums'>
+                {group.has_data ? formatCount(group.cached_tokens) : '--'}
+              </span>
+              <div
+                className='grid min-w-0 items-stretch gap-1'
+                style={{
+                  gridTemplateColumns: `repeat(${Math.max(1, points.length)}, minmax(8px, 1fr))`,
+                }}
+              >
+                {points.map((point) => {
+                  const hasData = point.has_data && !point.missing
+                  const rate = point.cache_hit_rate ?? 0
+                  const tone = cachePulseClass(hasData, rate, props.baseline)
+                  const tooltip = hasData
+                    ? `${formatTime(point.ts)}\n${t('Hit Rate')}: ${formatPercent(rate)}\nt/s: ${formatThroughput(point.avg_tps ?? 0)}\n${t('Cached tokens')}: ${formatCount(point.cached_tokens ?? 0)}${props.countsVisible ? `\n${t('Hits / Requests')}: ${formatCount(point.hit_count ?? 0)} / ${formatCount(point.request_count ?? 0)}` : ''}`
+                    : `${formatTime(point.ts)}\n${t('No data')}`
+                  return (
+                    <span
+                      key={point.ts}
+                      className={cn('h-4 min-w-0 rounded-sm', tone)}
+                      title={tooltip}
+                      aria-label={tooltip}
+                    />
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className='text-muted-foreground mt-3 flex flex-wrap items-center gap-4 text-[11px]'>
+        <span className='shrink-0'>{t('Cache hit rate')}</span>
+        <span className='flex items-center gap-1.5'>
+          <i className='bg-success size-2 rounded-full' />
+          {t('Meets baseline')}
+        </span>
+        <span className='flex items-center gap-1.5'>
+          <i className='bg-warning size-2 rounded-full' />
+          {t('Below baseline')}
+        </span>
+        <span className='flex items-center gap-1.5'>
+          <i className='bg-muted-foreground/30 size-2 rounded-full' />
+          {t('No data')}
+        </span>
+      </div>
+    </>
   )
 }
 
@@ -607,17 +518,16 @@ export function CacheMonitor(props: {
         <div
           className={cn(
             'grid grid-cols-2 gap-x-4',
-            countsVisible && 'sm:grid-cols-4'
+            countsVisible ? 'sm:grid-cols-5' : 'sm:grid-cols-3'
           )}
         >
           {(countsVisible
-            ? ['rate', 'hits', 'tokens', 'requests']
-            : ['rate', 'tokens']
+            ? ['rate', 'hits', 'throughput', 'tokens', 'requests']
+            : ['rate', 'throughput', 'tokens']
           ).map((key) => (
             <Skeleton key={key} className='h-14 w-full' />
           ))}
         </div>
-        <Skeleton className='h-48 w-full sm:h-56' />
         <Skeleton className='h-64 w-full sm:h-72' />
       </div>
     )
@@ -633,7 +543,7 @@ export function CacheMonitor(props: {
         <div
           className={cn(
             'grid grid-cols-2 gap-x-4',
-            countsVisible && 'sm:grid-cols-4'
+            countsVisible ? 'sm:grid-cols-5' : 'sm:grid-cols-3'
           )}
         >
           <CacheMetric
@@ -650,53 +560,35 @@ export function CacheMonitor(props: {
           ) : null}
           <CacheMetric
             icon={Zap}
+            label={t('Throughput')}
+            value={formatThroughput(selectedGroup.avg_tps)}
+          />
+          <CacheMetric
+            icon={Database}
             label={t('Cached tokens')}
             value={formatCount(selectedGroup.cached_tokens)}
           />
           {countsVisible ? (
             <CacheMetric
-              icon={Database}
+              icon={Gauge}
               label={t('Cache requests')}
               value={formatCount(selectedGroup.request_count ?? 0)}
             />
           ) : null}
         </div>
-        <div className='mt-5 grid min-w-0 gap-7'>
-          <div className='min-w-0'>
-            <div className='mb-3 flex flex-wrap items-end justify-between gap-2'>
-              <h3 className='text-base font-semibold'>
-                {t('Cache and throughput trend (last 24h)')}
-              </h3>
-              <div className='text-muted-foreground flex items-center gap-3 text-xs'>
-                <span className='flex items-center gap-1.5'>
-                  <span className='bg-chart-2 size-2 rounded-full' />
-                  {t('Cache hit rate')}
-                </span>
-                <span className='flex items-center gap-1.5'>
-                  <span className='bg-chart-1 size-2 rounded-full' />
-                  t/s
-                </span>
-              </div>
-            </div>
-            <CacheTrend
-              group={selectedGroup}
-              baseline={baseline}
-              bucketSeconds={props.response?.data.bucket_seconds ?? 3600}
-              rangeStart={props.response?.data.start_ts}
-              rangeEnd={props.response?.data.end_ts}
-            />
-          </div>
-          <div className='min-w-0'>
-            <h3 className='mb-3 text-base font-semibold'>
-              {t('Displayed group cache statistics (last 24h)')}
-            </h3>
-            <CacheGroupStats
-              groups={groups}
-              baseline={baseline}
-              countsVisible={countsVisible}
-              onSelect={setActiveGroup}
-            />
-          </div>
+        <div className='mt-5 min-w-0'>
+          <h3 className='mb-3 text-base font-semibold'>
+            {t('Displayed group cache statistics (last 24h)')}
+          </h3>
+          <CacheGroupStats
+            groups={groups}
+            baseline={baseline}
+            countsVisible={countsVisible}
+            bucketSeconds={props.response?.data.bucket_seconds ?? 3600}
+            rangeStart={props.response?.data.start_ts}
+            rangeEnd={props.response?.data.end_ts}
+            onSelect={setActiveGroup}
+          />
         </div>
       </div>
     )

@@ -43,6 +43,7 @@ type textQuotaSummary struct {
 	CompletionTokens       int
 	TotalTokens            int
 	CacheTokens            int
+	CacheInputTokens       int
 	CacheCreationTokens    int
 	CacheCreationTokens5m  int
 	CacheCreationTokens1h  int
@@ -278,6 +279,13 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			}
 		}
 		summary.PromptTokens -= summary.CacheCreationTokens
+	}
+	summary.CacheInputTokens = summary.PromptTokens
+	if !summary.IsClaudeUsageSemantic && !legacyClaudeDerived {
+		summary.CacheInputTokens -= summary.CacheTokens
+	}
+	if summary.CacheInputTokens < 0 {
+		summary.CacheInputTokens = 0
 	}
 
 	dPromptTokens := decimal.NewFromInt(int64(summary.PromptTokens))
@@ -568,6 +576,12 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 			perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
 			return
 		}
-		perfmetrics.RecordRelayUsageSample(relayInfo, int64(summary.CompletionTokens), int64(summary.CacheTokens))
+		perfmetrics.RecordRelayUsageSample(
+			relayInfo,
+			int64(summary.CompletionTokens),
+			int64(summary.CacheTokens),
+			int64(summary.CacheInputTokens),
+			int64(cacheWriteTokensTotal(summary)),
+		)
 	})
 }

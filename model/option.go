@@ -225,6 +225,13 @@ func validateOptionValue(key string, value string) error {
 	if key == LotteryPrizePoolOptionKey {
 		return validateLotteryPrizePoolJSON(value)
 	}
+	if key == LotteryConfigOptionKey {
+		var config LotteryConfig
+		if err := common.UnmarshalJsonStr(value, &config); err != nil {
+			return err
+		}
+		return validateLotteryConfig(config)
+	}
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
 	}

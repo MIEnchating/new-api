@@ -7,20 +7,22 @@ import (
 
 // PerfMetric stores aggregated relay performance metrics for the model square.
 type PerfMetric struct {
-	Id             int    `json:"id" gorm:"primaryKey"`
-	ModelName      string `json:"model_name" gorm:"size:128;uniqueIndex:idx_perf_model_group_bucket,priority:1"`
-	Group          string `json:"group" gorm:"column:group;size:64;uniqueIndex:idx_perf_model_group_bucket,priority:2"`
-	BucketTs       int64  `json:"bucket_ts" gorm:"uniqueIndex:idx_perf_model_group_bucket,priority:3;index:idx_perf_bucket_ts"`
-	RequestCount   int64  `json:"-" gorm:"default:0"`
-	SuccessCount   int64  `json:"-" gorm:"default:0"`
-	TotalLatencyMs int64  `json:"-" gorm:"default:0"`
-	TtftSumMs      int64  `json:"-" gorm:"default:0"`
-	TtftCount      int64  `json:"-" gorm:"default:0"`
-	OutputTokens   int64  `json:"-" gorm:"default:0"`
-	GenerationMs   int64  `json:"-" gorm:"default:0"`
-	CacheRequests  int64  `json:"-" gorm:"default:0"`
-	CacheHits      int64  `json:"-" gorm:"default:0"`
-	CachedTokens   int64  `json:"-" gorm:"default:0"`
+	Id                    int    `json:"id" gorm:"primaryKey"`
+	ModelName             string `json:"model_name" gorm:"size:128;uniqueIndex:idx_perf_model_group_bucket,priority:1"`
+	Group                 string `json:"group" gorm:"column:group;size:64;uniqueIndex:idx_perf_model_group_bucket,priority:2"`
+	BucketTs              int64  `json:"bucket_ts" gorm:"uniqueIndex:idx_perf_model_group_bucket,priority:3;index:idx_perf_bucket_ts"`
+	RequestCount          int64  `json:"-" gorm:"default:0"`
+	SuccessCount          int64  `json:"-" gorm:"default:0"`
+	TotalLatencyMs        int64  `json:"-" gorm:"default:0"`
+	TtftSumMs             int64  `json:"-" gorm:"default:0"`
+	TtftCount             int64  `json:"-" gorm:"default:0"`
+	OutputTokens          int64  `json:"-" gorm:"default:0"`
+	GenerationMs          int64  `json:"-" gorm:"default:0"`
+	CacheRequests         int64  `json:"-" gorm:"default:0"`
+	CacheHits             int64  `json:"-" gorm:"default:0"`
+	CachedTokens          int64  `json:"-" gorm:"default:0"`
+	CacheTokenReadTokens  int64  `json:"-" gorm:"default:0"`
+	CacheTokenDenominator int64  `json:"-" gorm:"default:0"`
 }
 
 func (PerfMetric) TableName() string {
@@ -38,35 +40,39 @@ func UpsertPerfMetric(metric *PerfMetric) error {
 			{Name: "bucket_ts"},
 		},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"request_count":    gorm.Expr("perf_metrics.request_count + ?", metric.RequestCount),
-			"success_count":    gorm.Expr("perf_metrics.success_count + ?", metric.SuccessCount),
-			"total_latency_ms": gorm.Expr("perf_metrics.total_latency_ms + ?", metric.TotalLatencyMs),
-			"ttft_sum_ms":      gorm.Expr("perf_metrics.ttft_sum_ms + ?", metric.TtftSumMs),
-			"ttft_count":       gorm.Expr("perf_metrics.ttft_count + ?", metric.TtftCount),
-			"output_tokens":    gorm.Expr("perf_metrics.output_tokens + ?", metric.OutputTokens),
-			"generation_ms":    gorm.Expr("perf_metrics.generation_ms + ?", metric.GenerationMs),
-			"cache_requests":   gorm.Expr("perf_metrics.cache_requests + ?", metric.CacheRequests),
-			"cache_hits":       gorm.Expr("perf_metrics.cache_hits + ?", metric.CacheHits),
-			"cached_tokens":    gorm.Expr("perf_metrics.cached_tokens + ?", metric.CachedTokens),
+			"request_count":           gorm.Expr("perf_metrics.request_count + ?", metric.RequestCount),
+			"success_count":           gorm.Expr("perf_metrics.success_count + ?", metric.SuccessCount),
+			"total_latency_ms":        gorm.Expr("perf_metrics.total_latency_ms + ?", metric.TotalLatencyMs),
+			"ttft_sum_ms":             gorm.Expr("perf_metrics.ttft_sum_ms + ?", metric.TtftSumMs),
+			"ttft_count":              gorm.Expr("perf_metrics.ttft_count + ?", metric.TtftCount),
+			"output_tokens":           gorm.Expr("perf_metrics.output_tokens + ?", metric.OutputTokens),
+			"generation_ms":           gorm.Expr("perf_metrics.generation_ms + ?", metric.GenerationMs),
+			"cache_requests":          gorm.Expr("perf_metrics.cache_requests + ?", metric.CacheRequests),
+			"cache_hits":              gorm.Expr("perf_metrics.cache_hits + ?", metric.CacheHits),
+			"cached_tokens":           gorm.Expr("perf_metrics.cached_tokens + ?", metric.CachedTokens),
+			"cache_token_read_tokens": gorm.Expr("perf_metrics.cache_token_read_tokens + ?", metric.CacheTokenReadTokens),
+			"cache_token_denominator": gorm.Expr("perf_metrics.cache_token_denominator + ?", metric.CacheTokenDenominator),
 		}),
 	}).Create(metric).Error
 }
 
 type PerfMetricCacheBucket struct {
-	Group         string `json:"group" gorm:"column:group_name"`
-	BucketTs      int64  `json:"bucket_ts"`
-	RequestCount  int64  `json:"request_count"`
-	OutputTokens  int64  `json:"output_tokens"`
-	GenerationMs  int64  `json:"generation_ms"`
-	CacheRequests int64  `json:"cache_requests"`
-	CacheHits     int64  `json:"cache_hits"`
-	CachedTokens  int64  `json:"cached_tokens"`
+	Group                 string `json:"group" gorm:"column:group_name"`
+	BucketTs              int64  `json:"bucket_ts"`
+	RequestCount          int64  `json:"request_count"`
+	OutputTokens          int64  `json:"output_tokens"`
+	GenerationMs          int64  `json:"generation_ms"`
+	CacheRequests         int64  `json:"cache_requests"`
+	CacheHits             int64  `json:"cache_hits"`
+	CachedTokens          int64  `json:"cached_tokens"`
+	CacheTokenReadTokens  int64  `json:"cache_token_read_tokens"`
+	CacheTokenDenominator int64  `json:"cache_token_denominator"`
 }
 
 func GetPerfMetricCacheBucketsAll(startTs int64, endTs int64, groups []string) ([]PerfMetricCacheBucket, error) {
 	var buckets []PerfMetricCacheBucket
 	query := DB.Model(&PerfMetric{}).
-		Select(commonGroupCol+" as group_name, bucket_ts, SUM(request_count) as request_count, SUM(output_tokens) as output_tokens, SUM(generation_ms) as generation_ms, SUM(cache_requests) as cache_requests, SUM(cache_hits) as cache_hits, SUM(cached_tokens) as cached_tokens").
+		Select(commonGroupCol+" as group_name, bucket_ts, SUM(request_count) as request_count, SUM(output_tokens) as output_tokens, SUM(generation_ms) as generation_ms, SUM(cache_requests) as cache_requests, SUM(cache_hits) as cache_hits, SUM(cached_tokens) as cached_tokens, SUM(cache_token_read_tokens) as cache_token_read_tokens, SUM(cache_token_denominator) as cache_token_denominator").
 		Where("bucket_ts >= ? AND bucket_ts <= ?", startTs, endTs)
 	if groups != nil {
 		if len(groups) == 0 {

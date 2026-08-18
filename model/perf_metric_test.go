@@ -11,6 +11,8 @@ func TestPerfMetricCacheColumnsUpsertAndGroupAggregation(t *testing.T) {
 	require.True(t, DB.Migrator().HasColumn(&PerfMetric{}, "cache_requests"))
 	require.True(t, DB.Migrator().HasColumn(&PerfMetric{}, "cache_hits"))
 	require.True(t, DB.Migrator().HasColumn(&PerfMetric{}, "cached_tokens"))
+	require.True(t, DB.Migrator().HasColumn(&PerfMetric{}, "cache_token_read_tokens"))
+	require.True(t, DB.Migrator().HasColumn(&PerfMetric{}, "cache_token_denominator"))
 
 	require.NoError(t, DB.Where("model_name LIKE ?", "cache-test-%").Delete(&PerfMetric{}).Error)
 	t.Cleanup(func() {

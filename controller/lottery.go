@@ -10,8 +10,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type lotteryPrizePoolRequest struct {
-	Prizes []model.LotteryPrize `json:"prizes" binding:"required"`
+type lotteryConfigRequest struct {
+	Rules      *model.LotteryRules             `json:"rules"`
+	Prizes     *[]model.LotteryPrize           `json:"prizes"`
+	GrantRules *[]model.LotteryChanceGrantRule `json:"grant_rules"`
 }
 
 type lotteryRewardRevokeRequest struct {
@@ -55,20 +57,30 @@ func GetUserLotteryDraws(c *gin.Context) {
 }
 
 func GetLotteryConfig(c *gin.Context) {
-	common.ApiSuccess(c, gin.H{"prizes": model.GetLotteryPrizePool()})
+	common.ApiSuccess(c, model.GetLotteryConfig())
 }
 
 func UpdateLotteryConfig(c *gin.Context) {
-	var request lotteryPrizePoolRequest
+	var request lotteryConfigRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 		return
 	}
-	if err := model.UpdateLotteryPrizePool(request.Prizes); err != nil {
+	config := model.GetLotteryConfig()
+	if request.Rules != nil {
+		config.Rules = *request.Rules
+	}
+	if request.Prizes != nil {
+		config.Prizes = *request.Prizes
+	}
+	if request.GrantRules != nil {
+		config.GrantRules = *request.GrantRules
+	}
+	if err := model.UpdateLotteryConfig(config); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
 		return
 	}
-	common.ApiSuccess(c, gin.H{"prizes": model.GetLotteryPrizePool()})
+	common.ApiSuccess(c, model.GetLotteryConfig())
 }
 
 func GetAllLotteryDraws(c *gin.Context) {

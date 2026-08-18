@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -28,6 +29,28 @@ func setLotteryPrizePoolForTest(t *testing.T, prizes []LotteryPrize) {
 			common.OptionMap[LotteryPrizePoolOptionKey] = oldValue
 		} else {
 			delete(common.OptionMap, LotteryPrizePoolOptionKey)
+		}
+	})
+}
+
+func setLotteryConfigForTest(t *testing.T, config LotteryConfig) {
+	t.Helper()
+	data, err := common.Marshal(config)
+	require.NoError(t, err)
+	common.OptionMapRWMutex.Lock()
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	oldValue, existed := common.OptionMap[LotteryConfigOptionKey]
+	common.OptionMap[LotteryConfigOptionKey] = string(data)
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		defer common.OptionMapRWMutex.Unlock()
+		if existed {
+			common.OptionMap[LotteryConfigOptionKey] = oldValue
+		} else {
+			delete(common.OptionMap, LotteryConfigOptionKey)
 		}
 	})
 }
@@ -106,6 +129,81 @@ func TestLotteryWeeklySpendChancesAreCappedAtFive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 5, status.WeeklyEarnedChances)
 	assert.Equal(t, 5, status.AvailableChances)
+}
+
+func TestLotteryConfigurableBaseRules(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	config := defaultLotteryConfig()
+	config.Rules = LotteryRules{
+		WeeklySpendAmount: 100,
+		WeeklyChanceLimit: 1,
+		DailyActiveAmount: 30,
+		StreakRewards:     []LotteryStreakReward{{Days: 2, Chances: 2}},
+	}
+	setLotteryConfigForTest(t, config)
+	addLotteryConsumeLog(t, userId, now.AddDate(0, 0, -1), 50*100)
+	addLotteryConsumeLog(t, userId, now, 50*100)
+
+	status, err := getLotteryStatusAt(userId, now)
+	require.NoError(t, err)
+	assert.Equal(t, 3, status.AvailableChances)
+	assert.Equal(t, 100*100, status.WeeklyTargetQuota)
+	assert.Equal(t, 1, status.WeeklyEarnedChances)
+	assert.Equal(t, 2, status.CurrentStreak)
+	assert.Equal(t, config.Rules, status.Rules)
+}
+
+func TestLotteryRechargeGrantIsIdempotent(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	config := defaultLotteryConfig()
+	config.GrantRules = []LotteryChanceGrantRule{{
+		Id: "recharge-festival", Type: LotteryChanceGrantRuleRecharge,
+		Name: "Recharge festival", Enabled: true, Threshold: 50, Chances: 2,
+		StartAt: now.Add(-time.Hour).Unix(), EndAt: now.Add(72 * time.Hour).Unix(),
+	}}
+	setLotteryConfigForTest(t, config)
+	topUp := TopUp{
+		UserId: userId, Amount: 100, Money: 100,
+		TradeNo: "lottery-recharge", Status: common.TopUpStatusSuccess,
+		CreateTime: now.Add(-time.Minute).Unix(), CompleteTime: now.Unix(),
+	}
+	require.NoError(t, DB.Create(&topUp).Error)
+
+	status, err := getLotteryStatusAt(userId, now)
+	require.NoError(t, err)
+	assert.Equal(t, 2, status.AvailableChances)
+	repeated, err := getLotteryStatusAt(userId, now.Add(24*time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, 2, repeated.AvailableChances)
+	var count int64
+	require.NoError(t, DB.Model(&LotteryChanceGrant{}).
+		Where("event_key = ?", fmt.Sprintf("recharge:recharge-festival:topup:%d", topUp.Id)).
+		Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
+func TestLotteryEventGrantIsClaimedOncePerUser(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	config := defaultLotteryConfig()
+	config.GrantRules = []LotteryChanceGrantRule{{
+		Id: "spring-festival", Type: LotteryChanceGrantRuleEvent,
+		Name: "Spring festival", Enabled: true, Chances: 3,
+		StartAt: now.Add(-time.Hour).Unix(), EndAt: now.Add(72 * time.Hour).Unix(),
+	}}
+	setLotteryConfigForTest(t, config)
+
+	status, err := getLotteryStatusAt(userId, now)
+	require.NoError(t, err)
+	assert.Equal(t, 3, status.AvailableChances)
+	repeated, err := getLotteryStatusAt(userId, now.Add(24*time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, 3, repeated.AvailableChances)
+	require.Len(t, repeated.ActiveGrantRules, 1)
+	var count int64
+	require.NoError(t, DB.Model(&LotteryChanceGrant{}).
+		Where("event_key = ?", fmt.Sprintf("campaign:spring-festival:user:%d", userId)).
+		Count(&count).Error)
+	assert.EqualValues(t, 1, count)
 }
 
 func TestLotteryDrawConsumesChanceAndCreditsPrize(t *testing.T) {

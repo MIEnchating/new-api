@@ -34,6 +34,10 @@ const (
 	LotteryDrawStatusRevoked = "revoked"
 
 	LotteryPrizePoolOptionKey = "LotteryPrizePool"
+	LotteryConfigOptionKey    = "LotteryConfig"
+
+	LotteryChanceGrantRuleRecharge = "recharge"
+	LotteryChanceGrantRuleEvent    = "event"
 )
 
 var ErrNoLotteryChances = errors.New("no lottery chances available")
@@ -85,23 +89,55 @@ type LotteryDraw struct {
 
 type LotteryPrize struct {
 	Type        string `json:"type"`
+	Name        string `json:"name"`
 	Amount      int    `json:"amount"`
 	Probability int    `json:"probability"`
 }
 
+type LotteryStreakReward struct {
+	Days    int `json:"days"`
+	Chances int `json:"chances"`
+}
+
+type LotteryRules struct {
+	WeeklySpendAmount int                   `json:"weekly_spend_amount"`
+	WeeklyChanceLimit int                   `json:"weekly_chance_limit"`
+	DailyActiveAmount int                   `json:"daily_active_amount"`
+	StreakRewards     []LotteryStreakReward `json:"streak_rewards"`
+}
+
+type LotteryChanceGrantRule struct {
+	Id        string  `json:"id"`
+	Type      string  `json:"type"`
+	Name      string  `json:"name"`
+	Enabled   bool    `json:"enabled"`
+	Threshold float64 `json:"threshold,omitempty"`
+	Chances   int     `json:"chances"`
+	StartAt   int64   `json:"start_at,omitempty"`
+	EndAt     int64   `json:"end_at,omitempty"`
+}
+
+type LotteryConfig struct {
+	Rules      LotteryRules             `json:"rules"`
+	Prizes     []LotteryPrize           `json:"prizes"`
+	GrantRules []LotteryChanceGrantRule `json:"grant_rules"`
+}
+
 type LotteryStatus struct {
-	AvailableChances    int                    `json:"available_chances"`
-	WeeklySpendQuota    int                    `json:"weekly_spend_quota"`
-	WeeklyTargetQuota   int                    `json:"weekly_target_quota"`
-	WeeklyEarnedChances int                    `json:"weekly_earned_chances"`
-	WeeklyChanceLimit   int                    `json:"weekly_chance_limit"`
-	TodaySpendQuota     int                    `json:"today_spend_quota"`
-	DailyActiveQuota    int                    `json:"daily_active_quota"`
-	TodayActive         bool                   `json:"today_active"`
-	CurrentStreak       int                    `json:"current_streak"`
-	Prizes              []LotteryPrize         `json:"prizes"`
-	RecentDraws         []LotteryDraw          `json:"recent_draws"`
-	RecentActivity      []LotteryDailyActivity `json:"recent_activity"`
+	AvailableChances    int                      `json:"available_chances"`
+	WeeklySpendQuota    int                      `json:"weekly_spend_quota"`
+	WeeklyTargetQuota   int                      `json:"weekly_target_quota"`
+	WeeklyEarnedChances int                      `json:"weekly_earned_chances"`
+	WeeklyChanceLimit   int                      `json:"weekly_chance_limit"`
+	TodaySpendQuota     int                      `json:"today_spend_quota"`
+	DailyActiveQuota    int                      `json:"daily_active_quota"`
+	TodayActive         bool                     `json:"today_active"`
+	CurrentStreak       int                      `json:"current_streak"`
+	Prizes              []LotteryPrize           `json:"prizes"`
+	RecentDraws         []LotteryDraw            `json:"recent_draws"`
+	RecentActivity      []LotteryDailyActivity   `json:"recent_activity"`
+	Rules               LotteryRules             `json:"rules"`
+	ActiveGrantRules    []LotteryChanceGrantRule `json:"active_grant_rules"`
 }
 
 type LotteryDrawResult struct {
@@ -144,35 +180,73 @@ type LotteryDrawFilter struct {
 
 func lotteryPrizePool() []LotteryPrize {
 	return []LotteryPrize{
-		{Type: LotteryPrizeOne, Amount: 1, Probability: 50},
-		{Type: LotteryPrizeFive, Amount: 5, Probability: 20},
-		{Type: LotteryPrizeEight, Amount: 8, Probability: 5},
-		{Type: LotteryPrizeNone, Probability: 25},
+		{Type: LotteryPrizeOne, Name: "1 元额度", Amount: 1, Probability: 50},
+		{Type: LotteryPrizeFive, Name: "5 元额度", Amount: 5, Probability: 20},
+		{Type: LotteryPrizeEight, Name: "8 元额度", Amount: 8, Probability: 5},
+		{Type: LotteryPrizeNone, Name: "未中奖", Probability: 25},
 	}
 }
 
-func validateLotteryPrizePool(prizes []LotteryPrize) error {
-	if len(prizes) != 4 {
-		return errors.New("lottery prize pool must contain three prizes and one no-prize entry")
-	}
-	allowedTypes := map[string]bool{
-		LotteryPrizeOne: false, LotteryPrizeFive: false,
-		LotteryPrizeEight: false, LotteryPrizeNone: false,
-	}
-	totalProbability := 0
-	for _, prize := range prizes {
-		if _, ok := allowedTypes[prize.Type]; !ok || allowedTypes[prize.Type] {
-			return errors.New("lottery prize types must be unique and supported")
+func normalizeLotteryPrizeName(prize LotteryPrize) string {
+	name := strings.TrimSpace(prize.Name)
+	switch name {
+	case "1 quota":
+		return "1 元额度"
+	case "5 quota":
+		return "5 元额度"
+	case "8 quota":
+		return "8 元额度"
+	case "No prize":
+		return "未中奖"
+	case "":
+		if prize.Amount <= 0 {
+			return "未中奖"
 		}
-		allowedTypes[prize.Type] = true
+		return prize.Type
+	default:
+		return prize.Name
+	}
+}
+
+func defaultLotteryRules() LotteryRules {
+	return LotteryRules{
+		WeeklySpendAmount: LotteryWeeklySpendAmount,
+		WeeklyChanceLimit: LotteryWeeklyChanceLimit,
+		DailyActiveAmount: LotteryDailyActiveAmount,
+		StreakRewards: []LotteryStreakReward{
+			{Days: 3, Chances: 1},
+			{Days: 7, Chances: 3},
+		},
+	}
+}
+
+func defaultLotteryConfig() LotteryConfig {
+	return LotteryConfig{Rules: defaultLotteryRules(), Prizes: lotteryPrizePool(), GrantRules: []LotteryChanceGrantRule{}}
+}
+
+func validateLotteryPrizePool(prizes []LotteryPrize) error {
+	if len(prizes) < 2 || len(prizes) > 20 {
+		return errors.New("lottery prize pool must contain between 2 and 20 entries")
+	}
+	seenTypes := make(map[string]bool, len(prizes))
+	totalProbability := 0
+	noPrizeCount := 0
+	for _, prize := range prizes {
+		if strings.TrimSpace(prize.Type) == "" || len(prize.Type) > 32 || seenTypes[prize.Type] {
+			return errors.New("lottery prize identifiers must be unique and non-empty")
+		}
+		seenTypes[prize.Type] = true
+		if len([]rune(strings.TrimSpace(prize.Name))) > 80 {
+			return errors.New("lottery prize name is too long")
+		}
 		if prize.Probability < 0 || prize.Probability > 100 {
 			return errors.New("lottery prize probability must be between 0 and 100")
 		}
-		if prize.Type == LotteryPrizeNone {
-			if prize.Amount != 0 {
-				return errors.New("no-prize amount must be zero")
-			}
-		} else if prize.Amount <= 0 || prize.Amount > 10000 {
+		if prize.Amount < 0 {
+			return errors.New("lottery prize amount cannot be negative")
+		} else if prize.Amount == 0 {
+			noPrizeCount++
+		} else if prize.Amount > 10000 {
 			return errors.New("lottery prize amount must be between 1 and 10000")
 		}
 		totalProbability += prize.Probability
@@ -180,35 +254,119 @@ func validateLotteryPrizePool(prizes []LotteryPrize) error {
 	if totalProbability != 100 {
 		return errors.New("lottery prize probabilities must total 100")
 	}
+	if noPrizeCount == 0 {
+		return errors.New("lottery prize pool must contain a no-prize entry")
+	}
 	return nil
 }
 
-func GetLotteryPrizePool() []LotteryPrize {
-	common.OptionMapRWMutex.RLock()
-	raw := common.OptionMap[LotteryPrizePoolOptionKey]
-	common.OptionMapRWMutex.RUnlock()
-	if strings.TrimSpace(raw) == "" {
-		return lotteryPrizePool()
+func validateLotteryRules(rules LotteryRules) error {
+	if rules.WeeklySpendAmount < 0 || rules.WeeklySpendAmount > 1_000_000 ||
+		rules.WeeklyChanceLimit < 0 || rules.WeeklyChanceLimit > 100 ||
+		rules.DailyActiveAmount < 0 || rules.DailyActiveAmount > 1_000_000 {
+		return errors.New("lottery base rule values are out of range")
 	}
-	var prizes []LotteryPrize
-	if err := common.UnmarshalJsonStr(raw, &prizes); err != nil || validateLotteryPrizePool(prizes) != nil {
-		common.SysError("invalid lottery prize pool option; using defaults")
-		return lotteryPrizePool()
+	if len(rules.StreakRewards) > 20 {
+		return errors.New("too many lottery streak rewards")
 	}
-	return prizes
+	seen := map[int]bool{}
+	for _, reward := range rules.StreakRewards {
+		if reward.Days <= 0 || reward.Days > 365 || reward.Chances <= 0 || reward.Chances > 100 {
+			return errors.New("lottery streak reward is out of range")
+		}
+		if seen[reward.Days] {
+			return errors.New("lottery streak reward days must be unique")
+		}
+		seen[reward.Days] = true
+	}
+	return nil
 }
 
-func UpdateLotteryPrizePool(prizes []LotteryPrize) error {
-	if err := validateLotteryPrizePool(prizes); err != nil {
+func validateLotteryGrantRules(rules []LotteryChanceGrantRule) error {
+	if len(rules) > 100 {
+		return errors.New("too many lottery chance grant rules")
+	}
+	seen := make(map[string]bool, len(rules))
+	for _, rule := range rules {
+		if strings.TrimSpace(rule.Id) == "" || len(rule.Id) > 64 || seen[rule.Id] {
+			return errors.New("lottery chance grant rule identifiers must be unique")
+		}
+		seen[rule.Id] = true
+		if rule.Type != LotteryChanceGrantRuleRecharge && rule.Type != LotteryChanceGrantRuleEvent {
+			return errors.New("unsupported lottery chance grant rule type")
+		}
+		if strings.TrimSpace(rule.Name) == "" || len([]rune(rule.Name)) > 80 || rule.Chances <= 0 || rule.Chances > 100 {
+			return errors.New("invalid lottery chance grant rule")
+		}
+		if rule.Type == LotteryChanceGrantRuleRecharge && (rule.Threshold <= 0 || rule.Threshold > 1_000_000_000) {
+			return errors.New("invalid lottery recharge threshold")
+		}
+		if rule.StartAt < 0 || rule.EndAt < 0 || (rule.StartAt > 0 && rule.EndAt > 0 && rule.EndAt <= rule.StartAt) {
+			return errors.New("invalid lottery chance grant time range")
+		}
+	}
+	return nil
+}
+
+func validateLotteryConfig(config LotteryConfig) error {
+	if err := validateLotteryRules(config.Rules); err != nil {
 		return err
 	}
-	data, err := common.Marshal(prizes)
+	if err := validateLotteryPrizePool(config.Prizes); err != nil {
+		return err
+	}
+	return validateLotteryGrantRules(config.GrantRules)
+}
+
+func getLotteryConfigRaw() LotteryConfig {
+	common.OptionMapRWMutex.RLock()
+	raw := common.OptionMap[LotteryConfigOptionKey]
+	legacyRaw := common.OptionMap[LotteryPrizePoolOptionKey]
+	common.OptionMapRWMutex.RUnlock()
+	config := defaultLotteryConfig()
+	if strings.TrimSpace(raw) == "" {
+		if strings.TrimSpace(legacyRaw) != "" {
+			_ = common.UnmarshalJsonStr(legacyRaw, &config.Prizes)
+		}
+		return config
+	}
+	if err := common.UnmarshalJsonStr(raw, &config); err != nil || validateLotteryConfig(config) != nil {
+		common.SysError("invalid lottery config option; using defaults")
+		return defaultLotteryConfig()
+	}
+	return config
+}
+
+func GetLotteryConfig() LotteryConfig {
+	config := getLotteryConfigRaw()
+	for index := range config.Prizes {
+		config.Prizes[index].Name = normalizeLotteryPrizeName(config.Prizes[index])
+	}
+	if err := validateLotteryConfig(config); err != nil {
+		return defaultLotteryConfig()
+	}
+	return config
+}
+
+func UpdateLotteryConfig(config LotteryConfig) error {
+	if err := validateLotteryConfig(config); err != nil {
+		return err
+	}
+	data, err := common.Marshal(config)
 	if err != nil {
 		return err
 	}
-	return UpdateOptionsBulk(map[string]string{
-		LotteryPrizePoolOptionKey: string(data),
-	})
+	return UpdateOptionsBulk(map[string]string{LotteryConfigOptionKey: string(data)})
+}
+
+func GetLotteryPrizePool() []LotteryPrize {
+	return GetLotteryConfig().Prizes
+}
+
+func UpdateLotteryPrizePool(prizes []LotteryPrize) error {
+	config := GetLotteryConfig()
+	config.Prizes = prizes
+	return UpdateLotteryConfig(config)
 }
 
 func validateLotteryPrizePoolJSON(raw string) error {
@@ -308,6 +466,7 @@ func sumLotteryQuotaByDay(userId int, days []time.Time) ([]int, error) {
 }
 
 func syncLotteryActivity(userId int, now time.Time) error {
+	config := GetLotteryConfig()
 	campaign, err := ensureLotteryCampaign(now)
 	if err != nil {
 		return err
@@ -344,7 +503,7 @@ func syncLotteryActivity(userId int, now time.Time) error {
 		return err
 	}
 	activeQuota := common.QuotaRound(
-		LotteryDailyActiveAmount * common.QuotaPerUnit,
+		float64(config.Rules.DailyActiveAmount) * common.QuotaPerUnit,
 	)
 	nowUnix := now.Unix()
 	return DB.Transaction(func(tx *gorm.DB) error {
@@ -399,6 +558,7 @@ func createLotteryGrantIfAbsent(
 }
 
 func syncLotteryGrants(userId int, now time.Time) error {
+	config := GetLotteryConfig()
 	if err := syncLotteryActivity(userId, now); err != nil {
 		return err
 	}
@@ -425,20 +585,21 @@ func syncLotteryGrants(userId int, now time.Time) error {
 			weeklyQuota += activity.Quota
 		}
 	}
-	weeklyTarget := common.QuotaRound(
-		LotteryWeeklySpendAmount * common.QuotaPerUnit,
-	)
+	weeklyTarget := common.QuotaRound(float64(config.Rules.WeeklySpendAmount) * common.QuotaPerUnit)
 	weeklyEarned := 0
-	if weeklyTarget > 0 {
+	if weeklyTarget > 0 && config.Rules.WeeklyChanceLimit > 0 {
 		weeklyEarned = weeklyQuota / weeklyTarget
 	}
-	if weeklyEarned > LotteryWeeklyChanceLimit {
-		weeklyEarned = LotteryWeeklyChanceLimit
+	if weeklyEarned > config.Rules.WeeklyChanceLimit {
+		weeklyEarned = config.Rules.WeeklyChanceLimit
 	}
 	year, week := lotteryWeekStart(now).ISOWeek()
 	nowUnix := now.Unix()
 
 	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := syncLotteryRechargeGrants(tx, userId, config.GrantRules, nowUnix); err != nil {
+			return err
+		}
 		for index := 1; index <= weeklyEarned; index++ {
 			if err := createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
 				EventKey: fmt.Sprintf(
@@ -473,39 +634,80 @@ func syncLotteryGrants(userId int, now time.Time) error {
 				streak++
 			}
 			previous = day
-			switch streak {
-			case 3:
-				if err := createLotteryGrantIfAbsent(
-					tx,
-					LotteryChanceGrant{
-						EventKey: fmt.Sprintf(
-							"streak:3:%s:%d",
-							activity.ActivityDate, userId,
-						),
-						UserId: userId, Type: LotteryGrantTypeStreak3,
-						Chances: 1, CreatedAt: nowUnix,
-					},
-				); err != nil {
+			for _, reward := range config.Rules.StreakRewards {
+				if streak != reward.Days {
+					continue
+				}
+				if err := createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
+					EventKey: fmt.Sprintf("streak:%s:%s:%d", rewardKey(reward), activity.ActivityDate, userId),
+					UserId:   userId, Type: fmt.Sprintf("streak_%d", reward.Days),
+					Chances: reward.Chances, CreatedAt: nowUnix,
+				}); err != nil {
 					return err
 				}
-			case 7:
-				if err := createLotteryGrantIfAbsent(
-					tx,
-					LotteryChanceGrant{
-						EventKey: fmt.Sprintf(
-							"streak:7:%s:%d",
-							activity.ActivityDate, userId,
-						),
-						UserId: userId, Type: LotteryGrantTypeStreak7,
-						Chances: 3, CreatedAt: nowUnix,
-					},
-				); err != nil {
+			}
+		}
+		for _, rule := range config.GrantRules {
+			if !rule.Enabled || !lotteryRuleActive(rule, now) {
+				continue
+			}
+			switch rule.Type {
+			case LotteryChanceGrantRuleEvent:
+				if err := createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
+					EventKey: fmt.Sprintf("campaign:%s:user:%d", rule.Id, userId),
+					UserId:   userId, Type: "campaign_" + rule.Id,
+					Chances: rule.Chances, CreatedAt: nowUnix,
+				}); err != nil {
 					return err
 				}
 			}
 		}
 		return nil
 	})
+}
+
+func rewardKey(reward LotteryStreakReward) string {
+	return fmt.Sprintf("%d:%d", reward.Days, reward.Chances)
+}
+
+func lotteryRuleActive(rule LotteryChanceGrantRule, now time.Time) bool {
+	if !rule.Enabled {
+		return false
+	}
+	if rule.StartAt > 0 && now.Unix() < rule.StartAt {
+		return false
+	}
+	return rule.EndAt <= 0 || now.Unix() < rule.EndAt
+}
+
+func syncLotteryRechargeGrants(tx *gorm.DB, userId int, rules []LotteryChanceGrantRule, createdAt int64) error {
+	var topUps []TopUp
+	query := tx.Where("user_id = ? AND status = ? AND amount > 0", userId, common.TopUpStatusSuccess)
+	if err := query.Order("id ASC").Find(&topUps).Error; err != nil {
+		return err
+	}
+	for _, rule := range rules {
+		if !rule.Enabled || rule.Type != LotteryChanceGrantRuleRecharge || rule.Threshold <= 0 {
+			continue
+		}
+		for _, topUp := range topUps {
+			when := topUp.CompleteTime
+			if when <= 0 {
+				when = topUp.CreateTime
+			}
+			if topUp.Money < rule.Threshold || !lotteryRuleActive(rule, time.Unix(when, 0)) {
+				continue
+			}
+			if err := createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
+				EventKey: fmt.Sprintf("recharge:%s:topup:%d", rule.Id, topUp.Id),
+				UserId:   userId, Type: "recharge_" + rule.Id,
+				Chances: rule.Chances, CreatedAt: createdAt,
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func lotteryCurrentStreak(
@@ -551,6 +753,7 @@ func getLotteryStatusAt(
 	if userId <= 0 {
 		return LotteryStatus{}, errors.New("invalid user")
 	}
+	config := GetLotteryConfig()
 	if err := syncLotteryGrants(userId, now); err != nil {
 		return LotteryStatus{}, err
 	}
@@ -589,32 +792,36 @@ func getLotteryStatusAt(
 			todayQuota = activity.Quota
 		}
 	}
-	weeklyTarget := common.QuotaRound(
-		LotteryWeeklySpendAmount * common.QuotaPerUnit,
-	)
-	dailyTarget := common.QuotaRound(
-		LotteryDailyActiveAmount * common.QuotaPerUnit,
-	)
+	weeklyTarget := common.QuotaRound(float64(config.Rules.WeeklySpendAmount) * common.QuotaPerUnit)
+	dailyTarget := common.QuotaRound(float64(config.Rules.DailyActiveAmount) * common.QuotaPerUnit)
 	weeklyEarned := 0
-	if weeklyTarget > 0 {
+	if weeklyTarget > 0 && config.Rules.WeeklyChanceLimit > 0 {
 		weeklyEarned = weeklyQuota / weeklyTarget
 	}
-	if weeklyEarned > LotteryWeeklyChanceLimit {
-		weeklyEarned = LotteryWeeklyChanceLimit
+	if weeklyEarned > config.Rules.WeeklyChanceLimit {
+		weeklyEarned = config.Rules.WeeklyChanceLimit
+	}
+	activeRules := make([]LotteryChanceGrantRule, 0)
+	for _, rule := range config.GrantRules {
+		if rule.Enabled && lotteryRuleActive(rule, now) {
+			activeRules = append(activeRules, rule)
+		}
 	}
 	return LotteryStatus{
 		AvailableChances:    int(available),
 		WeeklySpendQuota:    weeklyQuota,
 		WeeklyTargetQuota:   weeklyTarget,
 		WeeklyEarnedChances: weeklyEarned,
-		WeeklyChanceLimit:   LotteryWeeklyChanceLimit,
+		WeeklyChanceLimit:   config.Rules.WeeklyChanceLimit,
 		TodaySpendQuota:     todayQuota,
 		DailyActiveQuota:    dailyTarget,
 		TodayActive:         todayQuota >= dailyTarget,
 		CurrentStreak:       lotteryCurrentStreak(recentActivity, now),
-		Prizes:              GetLotteryPrizePool(),
+		Prizes:              config.Prizes,
 		RecentDraws:         recentDraws,
 		RecentActivity:      recentActivity,
+		Rules:               config.Rules,
+		ActiveGrantRules:    activeRules,
 	}, nil
 }
 

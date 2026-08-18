@@ -28,11 +28,11 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 	recordRelaySample(info, success, outputTokens, false, 0)
 }
 
-func RecordRelayUsageSample(info *relaycommon.RelayInfo, outputTokens int64, cachedTokens int64) {
-	recordRelaySample(info, true, outputTokens, true, cachedTokens)
+func RecordRelayUsageSample(info *relaycommon.RelayInfo, outputTokens int64, cachedTokens int64, inputTokens int64, cacheCreationTokens int64) {
+	recordRelaySample(info, true, outputTokens, true, cachedTokens, inputTokens, cacheCreationTokens)
 }
 
-func recordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64, cacheEligible bool, cachedTokens int64) {
+func recordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens int64, cacheEligible bool, cachedTokens int64, cacheInputTokens ...int64) {
 	if info == nil {
 		return
 	}
@@ -50,17 +50,27 @@ func recordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 	if generationMs <= 0 {
 		generationMs = latencyMs
 	}
+	inputTokens := int64(0)
+	cacheCreationTokens := int64(0)
+	if len(cacheInputTokens) > 0 {
+		inputTokens = cacheInputTokens[0]
+	}
+	if len(cacheInputTokens) > 1 {
+		cacheCreationTokens = cacheInputTokens[1]
+	}
 	Record(Sample{
-		Model:         info.OriginModelName,
-		Group:         info.UsingGroup,
-		LatencyMs:     latencyMs,
-		TtftMs:        ttftMs,
-		HasTtft:       hasTtft,
-		Success:       success,
-		OutputTokens:  outputTokens,
-		GenerationMs:  generationMs,
-		CacheEligible: cacheEligible,
-		CachedTokens:  cachedTokens,
+		Model:               info.OriginModelName,
+		Group:               info.UsingGroup,
+		LatencyMs:           latencyMs,
+		TtftMs:              ttftMs,
+		HasTtft:             hasTtft,
+		Success:             success,
+		OutputTokens:        outputTokens,
+		GenerationMs:        generationMs,
+		CacheEligible:       cacheEligible,
+		CachedTokens:        cachedTokens,
+		CacheInputTokens:    inputTokens,
+		CacheCreationTokens: cacheCreationTokens,
 	})
 }
 
@@ -107,16 +117,18 @@ func Query(params QueryParams) (QueryResult, error) {
 			group:    row.Group,
 			bucketTs: row.BucketTs,
 		}, counters{
-			requestCount:   row.RequestCount,
-			successCount:   row.SuccessCount,
-			totalLatencyMs: row.TotalLatencyMs,
-			ttftSumMs:      row.TtftSumMs,
-			ttftCount:      row.TtftCount,
-			outputTokens:   row.OutputTokens,
-			generationMs:   row.GenerationMs,
-			cacheRequests:  row.CacheRequests,
-			cacheHits:      row.CacheHits,
-			cachedTokens:   row.CachedTokens,
+			requestCount:          row.RequestCount,
+			successCount:          row.SuccessCount,
+			totalLatencyMs:        row.TotalLatencyMs,
+			ttftSumMs:             row.TtftSumMs,
+			ttftCount:             row.TtftCount,
+			outputTokens:          row.OutputTokens,
+			generationMs:          row.GenerationMs,
+			cacheRequests:         row.CacheRequests,
+			cacheHits:             row.CacheHits,
+			cachedTokens:          row.CachedTokens,
+			cacheTokenReadTokens:  row.CacheTokenReadTokens,
+			cacheTokenDenominator: row.CacheTokenDenominator,
 		})
 	}
 
@@ -229,12 +241,14 @@ func QueryCache(hours int, groups []string) (CacheQueryResult, error) {
 	}
 	for _, row := range rows {
 		mergeCacheGroupBucket(groupBuckets, row.Group, row.BucketTs, counters{
-			requestCount:  row.RequestCount,
-			outputTokens:  row.OutputTokens,
-			generationMs:  row.GenerationMs,
-			cacheRequests: row.CacheRequests,
-			cacheHits:     row.CacheHits,
-			cachedTokens:  row.CachedTokens,
+			requestCount:          row.RequestCount,
+			outputTokens:          row.OutputTokens,
+			generationMs:          row.GenerationMs,
+			cacheRequests:         row.CacheRequests,
+			cacheHits:             row.CacheHits,
+			cachedTokens:          row.CachedTokens,
+			cacheTokenReadTokens:  row.CacheTokenReadTokens,
+			cacheTokenDenominator: row.CacheTokenDenominator,
 		})
 	}
 
@@ -315,6 +329,8 @@ func mergeCacheGroupBucket(groupBuckets map[string]map[int64]counters, group str
 	current.cacheRequests += value.cacheRequests
 	current.cacheHits += value.cacheHits
 	current.cachedTokens += value.cachedTokens
+	current.cacheTokenReadTokens += value.cacheTokenReadTokens
+	current.cacheTokenDenominator += value.cacheTokenDenominator
 	groupBuckets[group][bucketTs] = current
 }
 
@@ -373,6 +389,8 @@ func mergeCounters(merged map[bucketKey]counters, key bucketKey, value counters)
 	current.cacheRequests += value.cacheRequests
 	current.cacheHits += value.cacheHits
 	current.cachedTokens += value.cachedTokens
+	current.cacheTokenReadTokens += value.cacheTokenReadTokens
+	current.cacheTokenDenominator += value.cacheTokenDenominator
 	merged[key] = current
 }
 
@@ -411,6 +429,8 @@ func buildCacheGroupResult(group string, buckets map[int64]counters) CacheGroupR
 		total.cacheRequests += value.cacheRequests
 		total.cacheHits += value.cacheHits
 		total.cachedTokens += value.cachedTokens
+		total.cacheTokenReadTokens += value.cacheTokenReadTokens
+		total.cacheTokenDenominator += value.cacheTokenDenominator
 		series = append(series, CacheBucketPoint{
 			Ts:           ts,
 			RequestCount: value.cacheRequests,
@@ -570,6 +590,10 @@ func maxInt64(value int64, minimum int64) int64 {
 }
 
 func cacheHitRate(value counters) float64 {
+	if value.cacheTokenDenominator > 0 {
+		rate := float64(value.cacheTokenReadTokens) / float64(value.cacheTokenDenominator) * 100
+		return math.Round(rate*100) / 100
+	}
 	if value.cacheRequests <= 0 {
 		return 0
 	}

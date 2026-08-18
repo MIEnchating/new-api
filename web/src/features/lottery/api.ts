@@ -44,10 +44,17 @@ export async function drawLottery(): Promise<
   return response.data
 }
 
+export async function getLotteryConfig(): Promise<
+  LotteryApiResponse<LotteryConfig>
+> {
+  const response = await api.get('/api/user/lottery/config')
+  return response.data
+}
+
 export async function updateLotteryConfig(
-  prizes: LotteryConfig['prizes']
+  config: LotteryConfig
 ): Promise<LotteryApiResponse<LotteryConfig>> {
-  const response = await api.put('/api/user/lottery/config', { prizes })
+  const response = await api.put('/api/user/lottery/config', config)
   return response.data
 }
 
