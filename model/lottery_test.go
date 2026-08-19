@@ -182,6 +182,34 @@ func TestLotteryRechargeGrantIsIdempotent(t *testing.T) {
 	assert.EqualValues(t, 1, count)
 }
 
+func TestLotteryRechargeGrantDoesNotRewardSplitPaymentsTwice(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	config := defaultLotteryConfig()
+	config.GrantRules = []LotteryChanceGrantRule{{
+		Id: "recharge-split", Type: LotteryChanceGrantRuleRecharge,
+		Name: "Recharge split", Enabled: true, Threshold: 100, Chances: 1,
+		StartAt: now.Add(-time.Hour).Unix(), EndAt: now.Add(72 * time.Hour).Unix(),
+	}}
+	setLotteryConfigForTest(t, config)
+	for index := 0; index < 2; index++ {
+		topUp := TopUp{
+			UserId: userId, Amount: 50, Money: 50,
+			TradeNo: fmt.Sprintf("lottery-split-%d", index), Status: common.TopUpStatusSuccess,
+			CreateTime: now.Add(-time.Duration(index+1) * time.Minute).Unix(), CompleteTime: now.Unix(),
+		}
+		require.NoError(t, DB.Create(&topUp).Error)
+	}
+
+	status, err := getLotteryStatusAt(userId, now)
+	require.NoError(t, err)
+	assert.Equal(t, 1, status.AvailableChances)
+	var count int64
+	require.NoError(t, DB.Model(&LotteryChanceGrant{}).
+		Where("user_id = ? AND type = ?", userId, "recharge_recharge-split").
+		Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
 func TestLotteryEventGrantIsClaimedOncePerUser(t *testing.T) {
 	userId, now := setupLotteryTest(t)
 	config := defaultLotteryConfig()
@@ -204,6 +232,23 @@ func TestLotteryEventGrantIsClaimedOncePerUser(t *testing.T) {
 		Where("event_key = ?", fmt.Sprintf("campaign:spring-festival:user:%d", userId)).
 		Count(&count).Error)
 	assert.EqualValues(t, 1, count)
+}
+
+func TestLotteryEventGrantCanReclaimUnusedChances(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	config := defaultLotteryConfig()
+	config.GrantRules = []LotteryChanceGrantRule{{
+		Id: "reclaim-event", Type: LotteryChanceGrantRuleEvent,
+		Name: "Reclaim event", Enabled: true, Chances: 1, Reclaim: true,
+		StartAt: now.Add(-time.Hour).Unix(), EndAt: now.Add(time.Hour).Unix(),
+	}}
+	setLotteryConfigForTest(t, config)
+	status, err := getLotteryStatusAt(userId, now)
+	require.NoError(t, err)
+	assert.Equal(t, 1, status.AvailableChances)
+	expired, err := getLotteryStatusAt(userId, now.Add(2*time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, 0, expired.AvailableChances)
 }
 
 func TestLotteryDrawConsumesChanceAndCreditsPrize(t *testing.T) {

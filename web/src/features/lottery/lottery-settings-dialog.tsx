@@ -22,7 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { DateTimePicker } from '@/components/datetime-picker'
+import { CompactDateTimeRangePicker } from '@/components/compact-date-time-range-picker'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -49,6 +49,7 @@ import type {
   LotteryChanceGrantRuleType,
   LotteryConfig,
   LotteryPrize,
+  LotteryRechargeGrantLimit,
 } from './types'
 
 const EMPTY_CONFIG: LotteryConfig = {
@@ -89,7 +90,18 @@ function normalizeConfig(value: Partial<LotteryConfig>): LotteryConfig {
       ...prize,
       name: normalizeLotteryPrizeName(prize),
     })),
-    grant_rules: value.grant_rules || [],
+    grant_rules: (value.grant_rules || []).map((rule) => ({
+      ...rule,
+      limit:
+        rule.type === 'recharge'
+          ? rule.limit || 'cumulative'
+          : undefined,
+      reclaim:
+        rule.type === 'event' &&
+        (rule.reclaim === true ||
+          (rule.reclaim as unknown) === 1 ||
+          (rule.reclaim as unknown) === 'true'),
+    })),
   }
 }
 
@@ -105,9 +117,26 @@ function createGrantRule(
     name: '',
     enabled: true,
     threshold: type === 'recharge' ? 50 : 0,
+    limit: type === 'recharge' ? 'cumulative' : undefined,
+    reclaim: type === 'event',
     chances: 1,
     start_at: Math.floor(now.getTime() / 1000),
     end_at: Math.floor(end.getTime() / 1000),
+  }
+}
+
+function rechargeGrantLimitLabel(
+  limit: LotteryRechargeGrantLimit | undefined,
+  t: ReturnType<typeof useTranslation>['t']
+) {
+  switch (limit) {
+    case 'daily':
+      return t('Once per day')
+    case 'unlimited':
+      return t('Every qualifying recharge')
+    case 'cumulative':
+    default:
+      return t('Once per campaign')
   }
 }
 
@@ -226,6 +255,7 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
   }
 
   const submit = async () => {
+    const nextConfig = normalizeConfig(config)
     const validationMessage = validate()
     if (validationMessage) {
       toast.error(validationMessage)
@@ -233,13 +263,14 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
     }
     setSaving(true)
     try {
-      const response = await updateLotteryConfig(config)
+      const response = await updateLotteryConfig(nextConfig)
       if (!response.success || !response.data) {
         toast.error(t(response.message || 'Failed to save lottery settings'))
         return
       }
-      setConfig(response.data)
-      props.onSaved(response.data)
+      const savedConfig = normalizeConfig(response.data)
+      setConfig(savedConfig)
+      props.onSaved(savedConfig)
       props.onOpenChange(false)
       toast.success(t('Lottery settings saved'))
     } catch {
@@ -432,7 +463,7 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                 <div className='flex flex-wrap items-center justify-between gap-3'>
                   <p className='text-muted-foreground text-sm'>
                     {t(
-                      'Each recharge order or campaign is granted once using an idempotent record.'
+                      'Each recharge campaign grants once per user after cumulative successful recharges reach the threshold.'
                     )}
                   </p>
                   <div className='flex gap-2'>
@@ -478,7 +509,10 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                   </div>
                 ) : (
                   config.grant_rules.map((rule, index) => (
-                    <section key={rule.id} className='rounded-md border'>
+                    <section
+                      key={rule.id}
+                      className='relative isolate overflow-visible rounded-md border'
+                    >
                       <div className='flex items-center justify-between gap-3 border-b px-4 py-3'>
                         <div className='flex min-w-0 items-center gap-3'>
                           <Switch
@@ -511,7 +545,7 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                           <Trash2 />
                         </Button>
                       </div>
-                      <div className='grid gap-4 p-4 sm:grid-cols-2'>
+                      <div className='grid items-start gap-4 p-4 sm:grid-cols-2'>
                         <LabeledField label={t('Rule name')}>
                           <Input
                             value={rule.name}
@@ -536,6 +570,11 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                                   type === 'recharge'
                                     ? Math.max(rule.threshold, 1)
                                     : 0,
+                                limit:
+                                  type === 'recharge'
+                                    ? rule.limit || 'cumulative'
+                                    : undefined,
+                                reclaim: type === 'event' ? true : undefined,
                               })
                             }
                           >
@@ -557,8 +596,52 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                           </Select>
                         </LabeledField>
                         {rule.type === 'recharge' ? (
+                          <LabeledField label={t('Grant frequency')}>
+                            <Select
+                              value={rule.limit || 'cumulative'}
+                              onValueChange={(limit) =>
+                                patchGrant(index, {
+                                  limit: limit as LotteryRechargeGrantLimit,
+                                })
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue>
+                                  {rechargeGrantLimitLabel(rule.limit, t)}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent alignItemWithTrigger={false}>
+                                <SelectItem value='daily'>
+                                  {t('Once per day')}
+                                </SelectItem>
+                                <SelectItem value='cumulative'>
+                                  {t('Once per campaign')}
+                                </SelectItem>
+                                <SelectItem value='unlimited'>
+                                  {t('Every qualifying recharge')}
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </LabeledField>
+                        ) : null}
+                        {rule.type === 'event' ? (
+                          <LabeledField label={t('After the event ends')}>
+                            <div className='flex h-9 items-center justify-between rounded-md border px-3'>
+                              <span className='text-muted-foreground text-xs'>
+                                {t('Reclaim unused chances')}
+                              </span>
+                              <Switch
+                                checked={rule.reclaim === true}
+                                onCheckedChange={(reclaim) =>
+                                  patchGrant(index, { reclaim })
+                                }
+                              />
+                            </div>
+                          </LabeledField>
+                        ) : null}
+                        {rule.type === 'recharge' ? (
                           <NumberField
-                            label={t('Single recharge threshold')}
+                            label={t('Cumulative recharge threshold')}
                             value={rule.threshold}
                             min={0.01}
                             step={0.01}
@@ -575,28 +658,21 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                           suffix={t('times')}
                           onChange={(chances) => patchGrant(index, { chances })}
                         />
-                        <LabeledField label={t('Start time')}>
-                          <DateTimePicker
-                            value={timestampToDate(rule.start_at)}
-                            onChange={(value) =>
-                              patchGrant(index, {
-                                start_at: dateToTimestamp(value),
-                              })
-                            }
-                            placeholder={t('Effective immediately')}
-                          />
-                        </LabeledField>
-                        <LabeledField label={t('End time')}>
-                          <DateTimePicker
-                            value={timestampToDate(rule.end_at)}
-                            onChange={(value) =>
-                              patchGrant(index, {
-                                end_at: dateToTimestamp(value),
-                              })
-                            }
-                            placeholder={t('Never expires')}
-                          />
-                        </LabeledField>
+                        <div className='h-[3.75rem] min-h-0 sm:col-span-2'>
+                          <LabeledField label={t('Validity Period')}>
+                            <CompactDateTimeRangePicker
+                              start={timestampToDate(rule.start_at)}
+                              end={timestampToDate(rule.end_at)}
+                              onChange={({ start, end }) =>
+                                patchGrant(index, {
+                                  start_at: dateToTimestamp(start),
+                                  end_at: dateToTimestamp(end),
+                                })
+                              }
+                              className='w-full'
+                            />
+                          </LabeledField>
+                        </div>
                       </div>
                     </section>
                   ))

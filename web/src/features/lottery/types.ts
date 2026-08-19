@@ -39,6 +39,7 @@ export interface LotteryRules {
 }
 
 export type LotteryChanceGrantRuleType = 'recharge' | 'event'
+export type LotteryRechargeGrantLimit = 'daily' | 'cumulative' | 'unlimited'
 
 export interface LotteryChanceGrantRule {
   id: string
@@ -46,6 +47,8 @@ export interface LotteryChanceGrantRule {
   name: string
   enabled: boolean
   threshold: number
+  limit?: LotteryRechargeGrantLimit
+  reclaim: boolean
   chances: number
   start_at: number
   end_at: number
@@ -108,6 +111,7 @@ export interface LotteryStatus {
   recent_draws: LotteryDraw[]
   recent_activity: LotteryActivity[]
   rules: LotteryRules
+  grant_rules?: LotteryChanceGrantRule[]
   active_grant_rules: LotteryChanceGrantRule[]
 }
 

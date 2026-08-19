@@ -99,7 +99,9 @@ import type {
 
 const ADMIN_PAGE_SIZE = 20
 const USER_PAGE_SIZE = 10
-const MYSTERY_BOX_COUNT = 3
+const LOTTERY_GRID_SIZE = 9
+const LOTTERY_GRID_CENTER = 4
+const LOTTERY_GRID_ROUTE = [0, 1, 2, 5, 8, 7, 6, 3] as const
 // Let the draw animation complete a few rotations before revealing the result.
 // The API response is already available, so this delay only affects the visual
 // presentation and is skipped when the request itself fails.
@@ -129,6 +131,35 @@ function resultFilterLabel(
   return t('All results')
 }
 
+function campaignStatus(
+  rule: { start_at: number; end_at: number },
+  now: number,
+  t: ReturnType<typeof useTranslation>['t']
+) {
+  if (rule.start_at > 0 && now < rule.start_at) {
+    return { label: t('Not Started'), variant: 'info' as const }
+  }
+  if (rule.end_at > 0 && now >= rule.end_at) {
+    return { label: t('Expired'), variant: 'neutral' as const }
+  }
+  return { label: t('In progress'), variant: 'success' as const }
+}
+
+function rechargeGrantLimitLabel(
+  limit: string | undefined,
+  t: ReturnType<typeof useTranslation>['t']
+) {
+  switch (limit) {
+    case 'daily':
+      return t('Once per day')
+    case 'unlimited':
+      return t('Every qualifying recharge')
+    case 'cumulative':
+    default:
+      return t('Once per campaign')
+  }
+}
+
 function normalizedDrawStatus(draw: LotteryDraw) {
   if (draw.status === 'revoked' || draw.revoked_at > 0) return 'revoked'
   if (draw.quota > 0) return 'awarded'
@@ -146,31 +177,6 @@ function drawStatusConfig(
     return { label: t('Awarded'), variant: 'success' as const }
   }
   return { label: t('No prize'), variant: 'neutral' as const }
-}
-
-function LotteryDrawAnimation() {
-  return (
-    <span
-      className='relative flex size-20 items-center justify-center'
-      aria-hidden='true'
-    >
-      <span className='border-primary/20 absolute inset-0 rounded-full border motion-safe:animate-ping' />
-      <span className='border-primary/35 absolute inset-1 rounded-full border border-dashed motion-safe:animate-[spin_3.2s_linear_infinite_reverse]' />
-      <span className='border-warning/35 absolute inset-3 rounded-full border motion-safe:animate-[spin_2.1s_linear_infinite]' />
-      <span className='absolute inset-0 motion-safe:animate-[spin_2.8s_linear_infinite]'>
-        <i className='bg-warning absolute top-0 left-1/2 size-2 -translate-x-1/2 rounded-full shadow-[0_0_10px_var(--warning)]' />
-        <i className='bg-primary absolute bottom-1 left-1/2 size-1.5 -translate-x-1/2 rounded-full' />
-      </span>
-      <span className='absolute inset-2 motion-safe:animate-[spin_1.8s_linear_infinite_reverse]'>
-        <i className='bg-primary absolute top-1/2 -right-0.5 size-1.5 -translate-y-1/2 rounded-full shadow-[0_0_8px_var(--primary)]' />
-      </span>
-      <span className='bg-primary/10 shadow-primary/20 ring-primary/20 flex size-12 items-center justify-center rounded-full shadow-inner ring-1 motion-safe:animate-pulse'>
-        <Dices className='text-primary size-7 motion-safe:animate-bounce' />
-      </span>
-      <Sparkles className='text-warning absolute -top-0.5 right-0 size-4 motion-safe:animate-bounce' />
-      <Sparkles className='text-primary absolute bottom-0 left-0.5 size-3 [animation-delay:180ms] motion-safe:animate-bounce' />
-    </span>
-  )
 }
 
 export function Lottery() {
@@ -205,6 +211,7 @@ export function Lottery() {
     useState<LotteryDrawFilters>(EMPTY_DRAW_FILTERS)
   const adminDrawRequestId = useRef(0)
   const userDrawRequestId = useRef(0)
+  const drawStartedAt = useRef(0)
   const [revokeDraw, setRevokeDraw] = useState<LotteryAdminDraw | null>(null)
   const [revokeReason, setRevokeReason] = useState('')
   const [revoking, setRevoking] = useState(false)
@@ -326,10 +333,11 @@ export function Lottery() {
     })
   }, [status?.recent_activity])
 
-  const handleDraw = async (boxIndex: number) => {
+  const handleDraw = async () => {
     if (!status || status.available_chances <= 0 || drawing) return
+    drawStartedAt.current = Date.now()
     setDrawing(true)
-    setSelectedBox(boxIndex)
+    setSelectedBox(LOTTERY_GRID_ROUTE[0])
     setLatestDraw(null)
     setPendingDraw(null)
     try {
@@ -357,8 +365,28 @@ export function Lottery() {
   }
 
   useEffect(() => {
+    if (!drawing) return
+    const timer = window.setInterval(() => {
+      setSelectedBox((current) => {
+        const routeIndex = LOTTERY_GRID_ROUTE.indexOf(
+          current as (typeof LOTTERY_GRID_ROUTE)[number]
+        )
+        return LOTTERY_GRID_ROUTE[(routeIndex + 1) % LOTTERY_GRID_ROUTE.length]
+      })
+    }, 110)
+    return () => window.clearInterval(timer)
+  }, [drawing])
+
+  useEffect(() => {
     if (!pendingDraw) return
+    const remainingDelay = Math.max(
+      0,
+      DRAW_REVEAL_DELAY_MS - (Date.now() - drawStartedAt.current)
+    )
     const timer = window.setTimeout(() => {
+      setSelectedBox(
+        LOTTERY_GRID_ROUTE[Math.abs(pendingDraw.id) % LOTTERY_GRID_ROUTE.length]
+      )
       setLatestDraw(pendingDraw)
       setPendingDraw(null)
       setDrawing(false)
@@ -371,7 +399,7 @@ export function Lottery() {
           prize: formatQuota(pendingDraw.quota),
         })
       )
-    }, DRAW_REVEAL_DELAY_MS)
+    }, remainingDelay)
     return () => window.clearTimeout(timer)
   }, [pendingDraw, t])
 
@@ -422,6 +450,8 @@ export function Lottery() {
   const recordsRefreshing = showingAllRecords
     ? adminDrawsLoading
     : userDrawsLoading
+  const campaignRules = status?.grant_rules ?? status?.active_grant_rules ?? []
+  const campaignNow = Math.floor(Date.now() / 1000)
   const adminTotalPages = Math.max(1, Math.ceil(adminTotal / ADMIN_PAGE_SIZE))
   const userTotalPages = Math.max(1, Math.ceil(userDrawTotal / USER_PAGE_SIZE))
   const recordColumnCount = showingAllRecords ? 7 : 4
@@ -429,7 +459,7 @@ export function Lottery() {
   return (
     <Main>
       <div className='min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-4 sm:py-6'>
-        <CardStaggerContainer className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-6'>
+        <CardStaggerContainer className='mx-auto flex w-full max-w-6xl flex-col gap-4 sm:gap-6'>
           <CardStaggerItem>
             <div className='flex items-start justify-between gap-3'>
               <div className='flex min-w-0 flex-col gap-1'>
@@ -458,11 +488,11 @@ export function Lottery() {
             </div>
           </CardStaggerItem>
 
-          <div className='grid min-w-0 items-stretch gap-4 lg:grid-cols-[minmax(360px,0.82fr)_minmax(0,1.18fr)]'>
-            <CardStaggerItem className='h-full'>
+          <div className='grid min-w-0 gap-4 lg:items-start lg:grid-cols-[minmax(340px,0.94fr)_minmax(0,1.06fr)]'>
+            <CardStaggerItem className='h-fit'>
               <Card
                 data-card-hover='false'
-                className='h-full gap-0 overflow-hidden py-0'
+                className='gap-0 overflow-hidden py-0'
                 data-testid='lottery-mystery-card'
               >
                 <CardHeader className='flex-row items-center justify-between space-y-0 border-b py-4'>
@@ -487,56 +517,69 @@ export function Lottery() {
                     )}
                   </div>
                 </CardHeader>
-                <CardContent className='flex flex-1 flex-col items-center justify-center px-4 py-7 sm:px-7'>
-                  <div className='grid w-full max-w-md grid-cols-3 gap-3 sm:gap-4'>
+                <CardContent className='flex flex-col items-center px-4 py-5 sm:px-6'>
+                  <div className='grid w-full max-w-xs grid-cols-3 gap-2 sm:gap-2.5'>
                     {Array.from(
-                      { length: MYSTERY_BOX_COUNT },
+                      { length: LOTTERY_GRID_SIZE },
                       (_, boxIndex) => {
                         const selected = selectedBox === boxIndex
                         const revealed = selected && latestDraw !== null
                         const subdued = latestDraw !== null && !selected
+                        const isCenter = boxIndex === LOTTERY_GRID_CENTER
                         return (
                           <button
                             key={boxIndex}
                             type='button'
-                            data-testid='lottery-mystery-box'
+                            data-lottery-grid-cell='true'
+                            data-testid={
+                              isCenter
+                                ? 'lottery-draw-button'
+                                : boxIndex < 3
+                                  ? 'lottery-mystery-box'
+                                  : undefined
+                            }
                             data-state={
-                              selected && drawing
+                              isCenter && drawing
                                 ? 'drawing'
                                 : revealed
                                   ? 'revealed'
                                   : 'idle'
                             }
-                            aria-label={t('Mystery box {{index}}', {
-                              index: boxIndex + 1,
-                            })}
+                            aria-label={
+                              isCenter
+                                ? t('Draw now')
+                                : t('Mystery box {{index}}', {
+                                    index: boxIndex + 1,
+                                  })
+                            }
                             disabled={
+                              !isCenter ||
                               loading ||
                               drawing ||
                               (status?.available_chances || 0) <= 0
                             }
-                            onClick={() => void handleDraw(boxIndex)}
+                            onClick={() => void handleDraw()}
                             className={cn(
-                              'group bg-background relative isolate flex aspect-square min-w-0 items-center justify-center overflow-hidden rounded-md border p-3 transition-[border-color,background-color,box-shadow,opacity] duration-300 outline-none',
+                              'group bg-background relative isolate flex aspect-square min-w-0 items-center justify-center overflow-hidden rounded-md border p-1.5 transition-[border-color,background-color,box-shadow,opacity] duration-300 outline-none sm:p-2',
                               'hover:border-primary/45 hover:bg-primary/[0.03] hover:shadow-sm focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
                               'disabled:pointer-events-none disabled:cursor-not-allowed',
+                              isCenter &&
+                                'border-primary/30 bg-primary/[0.04] shadow-primary/5 shadow-sm',
                               selected &&
                                 drawing &&
-                                'border-primary/60 bg-primary/[0.04] ring-primary/15 shadow-primary/10 shadow-md ring-1',
-                              drawing && !selected && 'opacity-45',
+                                'border-primary bg-primary/10 ring-primary/25 shadow-primary/15 shadow-md ring-2',
+                              drawing && !selected && !isCenter && 'opacity-55',
                               revealed &&
                                 'border-success/45 bg-success/[0.04] shadow-success/10 shadow-md',
-                              subdued && 'opacity-30'
+                              subdued && !isCenter && 'opacity-35'
                             )}
                           >
                             <span className='relative z-10 flex min-h-16 items-center justify-center'>
-                              {selected && drawing ? (
-                                <LotteryDrawAnimation />
-                              ) : revealed ? (
+                              {revealed ? (
                                 <span className='motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75 flex flex-col items-center gap-1 text-center motion-safe:duration-500'>
-                                  <span className='bg-success/10 flex size-10 items-center justify-center rounded-full'>
+                                  <span className='bg-success/10 flex size-8 items-center justify-center rounded-full'>
                                     <Sparkles
-                                      className='text-success size-5'
+                                      className='text-success size-4'
                                       aria-hidden='true'
                                     />
                                   </span>
@@ -547,11 +590,41 @@ export function Lottery() {
                                   </strong>
                                 </span>
                               ) : (
-                                <span className='bg-muted group-hover:bg-primary/8 flex size-14 items-center justify-center rounded-full transition-colors duration-300'>
-                                  <Gift
-                                    className='text-muted-foreground group-hover:text-primary size-7 transition-colors duration-300'
-                                    aria-hidden='true'
-                                  />
+                                <span
+                                  className={cn(
+                                    'flex items-center justify-center rounded-full transition-colors duration-300',
+                                    isCenter
+                                      ? 'bg-primary/10 size-12'
+                                      : 'bg-muted group-hover:bg-primary/8 size-10 sm:size-11'
+                                  )}
+                                >
+                                  {isCenter ? (
+                                    <span className='flex flex-col items-center gap-1'>
+                                      <Dices
+                                        className={cn(
+                                          'text-primary size-6',
+                                          drawing &&
+                                            'motion-safe:animate-bounce'
+                                        )}
+                                        aria-hidden='true'
+                                      />
+                                      <span className='text-primary text-[11px] font-medium'>
+                                        {drawing
+                                          ? t('Drawing...')
+                                          : t('Draw now')}
+                                      </span>
+                                    </span>
+                                  ) : (
+                                    <Gift
+                                      className={cn(
+                                        'size-5 transition-colors duration-150 sm:size-6',
+                                        selected && drawing
+                                          ? 'text-primary'
+                                          : 'text-muted-foreground group-hover:text-primary'
+                                      )}
+                                      aria-hidden='true'
+                                    />
+                                  )}
                                 </span>
                               )}
                             </span>
@@ -560,7 +633,7 @@ export function Lottery() {
                       }
                     )}
                   </div>
-                  <div className='mt-5 flex min-h-6 items-center justify-center text-center text-sm font-medium'>
+                  <div className='mt-4 flex min-h-5 items-center justify-center text-center text-sm font-medium'>
                     {drawing ? (
                       <span
                         className='text-primary inline-flex items-center gap-2'
@@ -602,7 +675,7 @@ export function Lottery() {
               className='grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2'
               data-testid='lottery-rules-grid'
             >
-              <CardStaggerItem className='h-full'>
+              <CardStaggerItem className='h-full min-h-44'>
                 <Card data-card-hover='false' className='h-full gap-0 py-0'>
                   <CardHeader className='border-b py-4'>
                     <CardTitle className='flex items-center gap-2 text-base'>
@@ -645,7 +718,7 @@ export function Lottery() {
                 </Card>
               </CardStaggerItem>
 
-              <CardStaggerItem className='h-full'>
+              <CardStaggerItem className='h-full min-h-44'>
                 <Card data-card-hover='false' className='h-full gap-0 py-0'>
                   <CardHeader className='border-b py-4'>
                     <CardTitle className='flex items-center gap-2 text-base'>
@@ -689,7 +762,7 @@ export function Lottery() {
                 </Card>
               </CardStaggerItem>
 
-              <CardStaggerItem className='h-full xl:col-span-2'>
+              <CardStaggerItem className='h-full min-h-44 xl:col-span-2'>
                 <Card data-card-hover='false' className='h-full gap-0 py-0'>
                   <CardHeader className='flex-row items-center justify-between space-y-0 border-b py-4'>
                     <CardTitle className='flex items-center gap-2 text-base'>
@@ -767,39 +840,93 @@ export function Lottery() {
             </div>
           </div>
 
-          {(status?.active_grant_rules?.length || 0) > 0 ? (
-            <CardStaggerItem>
-              <Card data-card-hover='false' className='gap-0 py-0'>
-                <CardHeader className='border-b py-4'>
-                  <CardTitle className='flex items-center gap-2 text-base'>
-                    <Sparkles className='text-warning size-4' />
-                    {t('Chance bonus events')}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className='grid gap-3 py-4 sm:grid-cols-2 lg:grid-cols-3'>
-                  {status?.active_grant_rules?.map((rule) => (
-                    <div key={rule.id} className='rounded-md border px-3 py-3'>
-                      <div className='flex items-center justify-between gap-3'>
-                        <span className='truncate text-sm font-medium'>
-                          {rule.name}
-                        </span>
-                        <StatusBadge variant='info'>
-                          {t('{{count}} chances', { count: rule.chances })}
-                        </StatusBadge>
+          <CardStaggerItem>
+            <Card data-card-hover='false' className='gap-0 py-0'>
+              <CardHeader className='border-b py-4'>
+                <CardTitle className='flex items-center gap-2 text-base'>
+                  <Sparkles className='text-warning size-4' />
+                  {t('Campaign')}
+                </CardTitle>
+              </CardHeader>
+              {campaignRules.length > 0 ? (
+                <CardContent className='grid items-stretch gap-3 py-4 sm:grid-cols-2 lg:grid-cols-3'>
+                  {campaignRules.map((rule) => {
+                    const state = campaignStatus(rule, campaignNow, t)
+                    return (
+                      <div
+                        key={rule.id}
+                        className='flex h-full min-w-0 flex-col gap-2 rounded-md border px-3 py-3'
+                      >
+                        <div className='flex min-h-7 items-center justify-between gap-3'>
+                          <span className='min-w-0 truncate text-sm font-medium'>
+                            {rule.name || t('Campaign')}
+                          </span>
+                          <div className='flex shrink-0 items-center gap-1.5'>
+                            <StatusBadge variant='info'>
+                              {t('{{count}} chances', { count: rule.chances })}
+                            </StatusBadge>
+                            <StatusBadge variant={state.variant}>
+                              {state.label}
+                            </StatusBadge>
+                          </div>
+                        </div>
+                        <div className='text-muted-foreground space-y-1 text-xs leading-5'>
+                          {rule.type === 'recharge' ? (
+                            <>
+                              <p>
+                                {t('Recharge threshold')}:{' '}
+                                <span className='text-foreground font-medium'>
+                                  {`${rule.threshold.toFixed(2)} ${t('Yuan')}`}
+                                </span>
+                              </p>
+                              <p>
+                                {t('Grant frequency')}:{' '}
+                                <span className='text-foreground font-medium'>
+                                  {rechargeGrantLimitLabel(rule.limit, t)}
+                                </span>
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              <p>{t('Receive once during the event')}</p>
+                              {rule.reclaim ? (
+                                <p>
+                                  {t('After the event ends')}:{' '}
+                                  <span className='text-foreground font-medium'>
+                                    {t('Reclaim unused chances')}
+                                  </span>
+                                </p>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                        <div className='text-muted-foreground flex min-w-0 items-start gap-1.5 border-t pt-2 text-xs leading-5'>
+                          <CalendarDays
+                            className='text-primary mt-0.5 size-3.5 shrink-0'
+                            aria-hidden='true'
+                          />
+                          <span className='min-w-0 break-words'>
+                            {t('Validity Period')}:{' '}
+                            {rule.start_at > 0
+                              ? formatTimestampToDate(rule.start_at)
+                              : t('Effective immediately')}
+                            {' - '}
+                            {rule.end_at > 0
+                              ? formatTimestampToDate(rule.end_at)
+                              : t('Never expires')}
+                          </span>
+                        </div>
                       </div>
-                      <p className='text-muted-foreground mt-1 text-xs'>
-                        {rule.type === 'recharge'
-                          ? t('Single recharge of {{amount}} or more', {
-                              amount: `${rule.threshold.toFixed(2)} ${t('Yuan')}`,
-                            })
-                          : t('Receive once during the event')}
-                      </p>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </CardContent>
-              </Card>
-            </CardStaggerItem>
-          ) : null}
+              ) : (
+                <CardContent className='text-muted-foreground flex min-h-28 items-center justify-center py-6 text-sm'>
+                  {t('No campaigns currently')}
+                </CardContent>
+              )}
+            </Card>
+          </CardStaggerItem>
 
           <CardStaggerItem>
             <Card data-card-hover='false' className='gap-0 py-0'>

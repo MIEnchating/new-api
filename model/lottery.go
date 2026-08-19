@@ -38,6 +38,10 @@ const (
 
 	LotteryChanceGrantRuleRecharge = "recharge"
 	LotteryChanceGrantRuleEvent    = "event"
+
+	LotteryRechargeGrantDaily      = "daily"
+	LotteryRechargeGrantCumulative = "cumulative"
+	LotteryRechargeGrantUnlimited  = "unlimited"
 )
 
 var ErrNoLotteryChances = errors.New("no lottery chances available")
@@ -71,6 +75,7 @@ type LotteryChanceGrant struct {
 	Type      string `json:"type" gorm:"type:varchar(32);index"`
 	Chances   int    `json:"chances"`
 	Consumed  int    `json:"consumed"`
+	ExpiresAt int64  `json:"expires_at,omitempty" gorm:"bigint;index"`
 	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_lottery_grant_user_time,priority:2"`
 }
 
@@ -112,6 +117,8 @@ type LotteryChanceGrantRule struct {
 	Name      string  `json:"name"`
 	Enabled   bool    `json:"enabled"`
 	Threshold float64 `json:"threshold,omitempty"`
+	Limit     string  `json:"limit,omitempty"`
+	Reclaim   bool    `json:"reclaim"`
 	Chances   int     `json:"chances"`
 	StartAt   int64   `json:"start_at,omitempty"`
 	EndAt     int64   `json:"end_at,omitempty"`
@@ -137,6 +144,7 @@ type LotteryStatus struct {
 	RecentDraws         []LotteryDraw            `json:"recent_draws"`
 	RecentActivity      []LotteryDailyActivity   `json:"recent_activity"`
 	Rules               LotteryRules             `json:"rules"`
+	GrantRules          []LotteryChanceGrantRule `json:"grant_rules"`
 	ActiveGrantRules    []LotteryChanceGrantRule `json:"active_grant_rules"`
 }
 
@@ -300,6 +308,12 @@ func validateLotteryGrantRules(rules []LotteryChanceGrantRule) error {
 		}
 		if rule.Type == LotteryChanceGrantRuleRecharge && (rule.Threshold <= 0 || rule.Threshold > 1_000_000_000) {
 			return errors.New("invalid lottery recharge threshold")
+		}
+		if rule.Type == LotteryChanceGrantRuleRecharge && rule.Limit != "" &&
+			rule.Limit != LotteryRechargeGrantDaily &&
+			rule.Limit != LotteryRechargeGrantCumulative &&
+			rule.Limit != LotteryRechargeGrantUnlimited {
+			return errors.New("invalid lottery recharge grant limit")
 		}
 		if rule.StartAt < 0 || rule.EndAt < 0 || (rule.StartAt > 0 && rule.EndAt > 0 && rule.EndAt <= rule.StartAt) {
 			return errors.New("invalid lottery chance grant time range")
@@ -552,9 +566,20 @@ func createLotteryGrantIfAbsent(
 		grant.CreatedAt = common.GetTimestamp()
 	}
 	return tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "event_key"}},
-		DoNothing: true,
+		Columns: []clause.Column{{Name: "event_key"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"expires_at",
+		}),
 	}).Create(&grant).Error
+}
+
+// expireLotteryGrants invalidates any remaining chances whose campaign has
+// ended. Keeping the grant row preserves the audit trail while making the
+// expired chances unavailable to both the status and draw paths.
+func expireLotteryGrants(tx *gorm.DB, userId int, nowUnix int64) error {
+	return tx.Model(&LotteryChanceGrant{}).
+		Where("user_id = ? AND expires_at > 0 AND expires_at <= ? AND consumed < chances", userId, nowUnix).
+		UpdateColumn("consumed", gorm.Expr("chances")).Error
 }
 
 func syncLotteryGrants(userId int, now time.Time) error {
@@ -597,6 +622,9 @@ func syncLotteryGrants(userId int, now time.Time) error {
 	nowUnix := now.Unix()
 
 	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := expireLotteryGrants(tx, userId, nowUnix); err != nil {
+			return err
+		}
 		if err := syncLotteryRechargeGrants(tx, userId, config.GrantRules, nowUnix); err != nil {
 			return err
 		}
@@ -656,7 +684,7 @@ func syncLotteryGrants(userId int, now time.Time) error {
 				if err := createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
 					EventKey: fmt.Sprintf("campaign:%s:user:%d", rule.Id, userId),
 					UserId:   userId, Type: "campaign_" + rule.Id,
-					Chances: rule.Chances, CreatedAt: nowUnix,
+					Chances: rule.Chances, ExpiresAt: lotteryGrantExpiry(rule), CreatedAt: nowUnix,
 				}); err != nil {
 					return err
 				}
@@ -664,6 +692,13 @@ func syncLotteryGrants(userId int, now time.Time) error {
 		}
 		return nil
 	})
+}
+
+func lotteryGrantExpiry(rule LotteryChanceGrantRule) int64 {
+	if rule.Type == LotteryChanceGrantRuleEvent && !rule.Reclaim {
+		return 0
+	}
+	return rule.EndAt
 }
 
 func rewardKey(reward LotteryStreakReward) string {
@@ -690,6 +725,22 @@ func syncLotteryRechargeGrants(tx *gorm.DB, userId int, rules []LotteryChanceGra
 		if !rule.Enabled || rule.Type != LotteryChanceGrantRuleRecharge || rule.Threshold <= 0 {
 			continue
 		}
+		limit := rule.Limit
+		if limit == "" {
+			limit = LotteryRechargeGrantCumulative
+		}
+		if limit == LotteryRechargeGrantCumulative {
+			if err := syncCumulativeRechargeGrant(tx, userId, rule, topUps, createdAt); err != nil {
+				return err
+			}
+			continue
+		}
+		if limit == LotteryRechargeGrantDaily {
+			if err := syncDailyRechargeGrants(tx, userId, rule, topUps, createdAt); err != nil {
+				return err
+			}
+			continue
+		}
 		for _, topUp := range topUps {
 			when := topUp.CompleteTime
 			if when <= 0 {
@@ -698,13 +749,70 @@ func syncLotteryRechargeGrants(tx *gorm.DB, userId int, rules []LotteryChanceGra
 			if topUp.Money < rule.Threshold || !lotteryRuleActive(rule, time.Unix(when, 0)) {
 				continue
 			}
-			if err := createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
-				EventKey: fmt.Sprintf("recharge:%s:topup:%d", rule.Id, topUp.Id),
-				UserId:   userId, Type: "recharge_" + rule.Id,
-				Chances: rule.Chances, CreatedAt: createdAt,
-			}); err != nil {
+			if err := createLotteryRechargeGrant(tx, userId, rule, fmt.Sprintf("recharge:%s:topup:%d", rule.Id, topUp.Id), createdAt); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func createLotteryRechargeGrant(tx *gorm.DB, userId int, rule LotteryChanceGrantRule, eventKey string, createdAt int64) error {
+	return createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
+		EventKey: eventKey, UserId: userId, Type: "recharge_" + rule.Id,
+		Chances: rule.Chances, ExpiresAt: rule.EndAt, CreatedAt: createdAt,
+	})
+}
+
+func syncCumulativeRechargeGrant(tx *gorm.DB, userId int, rule LotteryChanceGrantRule, topUps []TopUp, createdAt int64) error {
+	var existing int64
+	if err := tx.Model(&LotteryChanceGrant{}).
+		Where("user_id = ? AND type = ?", userId, "recharge_"+rule.Id).
+		Count(&existing).Error; err != nil {
+		return err
+	}
+	if existing > 0 {
+		return nil
+	}
+	var accumulated float64
+	for _, topUp := range topUps {
+		when := topUp.CompleteTime
+		if when <= 0 {
+			when = topUp.CreateTime
+		}
+		if !lotteryRuleActive(rule, time.Unix(when, 0)) {
+			continue
+		}
+		accumulated += topUp.Money
+		if accumulated >= rule.Threshold {
+			return createLotteryRechargeGrant(tx, userId, rule,
+				fmt.Sprintf("recharge:%s:topup:%d", rule.Id, topUp.Id), createdAt)
+		}
+	}
+	return nil
+}
+
+func syncDailyRechargeGrants(tx *gorm.DB, userId int, rule LotteryChanceGrantRule, topUps []TopUp, createdAt int64) error {
+	totals := make(map[string]float64)
+	for _, topUp := range topUps {
+		when := topUp.CompleteTime
+		if when <= 0 {
+			when = topUp.CreateTime
+		}
+		moment := time.Unix(when, 0)
+		if !lotteryRuleActive(rule, moment) {
+			continue
+		}
+		day := moment.In(time.Local).Format("2006-01-02")
+		totals[day] += topUp.Money
+	}
+	for day, total := range totals {
+		if total < rule.Threshold {
+			continue
+		}
+		if err := createLotteryRechargeGrant(tx, userId, rule,
+			fmt.Sprintf("recharge:%s:day:%s", rule.Id, day), createdAt); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -759,7 +867,7 @@ func getLotteryStatusAt(
 	}
 	var available int64
 	if err := DB.Model(&LotteryChanceGrant{}).
-		Where("user_id = ?", userId).
+		Where("user_id = ? AND (expires_at = 0 OR expires_at > ?)", userId, now.Unix()).
 		Select("COALESCE(SUM(chances - consumed), 0)").
 		Scan(&available).Error; err != nil {
 		return LotteryStatus{}, err
@@ -802,7 +910,11 @@ func getLotteryStatusAt(
 		weeklyEarned = config.Rules.WeeklyChanceLimit
 	}
 	activeRules := make([]LotteryChanceGrantRule, 0)
+	grantRules := make([]LotteryChanceGrantRule, 0)
 	for _, rule := range config.GrantRules {
+		if rule.Enabled {
+			grantRules = append(grantRules, rule)
+		}
 		if rule.Enabled && lotteryRuleActive(rule, now) {
 			activeRules = append(activeRules, rule)
 		}
@@ -821,6 +933,7 @@ func getLotteryStatusAt(
 		RecentDraws:         recentDraws,
 		RecentActivity:      recentActivity,
 		Rules:               config.Rules,
+		GrantRules:          grantRules,
 		ActiveGrantRules:    activeRules,
 	}, nil
 }
@@ -858,7 +971,7 @@ func drawLotteryAt(
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		var grant LotteryChanceGrant
 		if err := lockForUpdate(tx).
-			Where("user_id = ? AND consumed < chances", userId).
+			Where("user_id = ? AND consumed < chances AND (expires_at = 0 OR expires_at > ?)", userId, now.Unix()).
 			Order("created_at ASC, id ASC").
 			First(&grant).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -868,8 +981,8 @@ func drawLotteryAt(
 		}
 		result := tx.Model(&LotteryChanceGrant{}).
 			Where(
-				"id = ? AND consumed = ? AND consumed < chances",
-				grant.Id, grant.Consumed,
+				"id = ? AND consumed = ? AND consumed < chances AND (expires_at = 0 OR expires_at > ?)",
+				grant.Id, grant.Consumed, now.Unix(),
 			).
 			Update("consumed", gorm.Expr("consumed + 1"))
 		if result.Error != nil {

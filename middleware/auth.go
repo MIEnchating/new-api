@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -20,6 +21,67 @@ import (
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
+
+// LotteryFeatureEnabled enforces the same visibility rules used by the
+// sidebar: the administrator configuration is authoritative, while a user's
+// personal sidebar configuration may further narrow access. This check lives
+// on the API boundary so hiding the menu cannot be bypassed by calling the
+// lottery endpoints directly.
+func LotteryFeatureEnabled() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		if !lotteryFeatureEnabledForUser(c.GetInt("id")) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"code":    "FEATURE_DISABLED",
+				"message": "Lottery feature is disabled",
+			})
+			return
+		}
+		c.Next()
+	}
+}
+
+func lotteryFeatureEnabledForUser(userID int) bool {
+	common.OptionMapRWMutex.RLock()
+	adminRaw := common.OptionMap["SidebarModulesAdmin"]
+	common.OptionMapRWMutex.RUnlock()
+	if !sidebarLotteryEnabled(adminRaw) {
+		return false
+	}
+
+	// Empty user settings are legacy/default settings and therefore do not
+	// narrow the administrator configuration.
+	if userID <= 0 {
+		return true
+	}
+	userSetting, err := model.GetUserSetting(userID, false)
+	if err != nil || strings.TrimSpace(userSetting.SidebarModules) == "" {
+		return true
+	}
+	return sidebarLotteryEnabled(userSetting.SidebarModules)
+}
+
+func sidebarLotteryEnabled(raw string) bool {
+	if strings.TrimSpace(raw) == "" {
+		return true
+	}
+	var config map[string]map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+		// Match the frontend's fail-open behavior for malformed/legacy values.
+		return true
+	}
+	personal, ok := config["personal"]
+	if !ok {
+		return true
+	}
+	if enabled, ok := personal["enabled"].(bool); ok && !enabled {
+		return false
+	}
+	if lottery, ok := personal["lottery"].(bool); ok {
+		return lottery
+	}
+	return true
+}
 
 const authIdentityContextKey = "auth_identity"
 

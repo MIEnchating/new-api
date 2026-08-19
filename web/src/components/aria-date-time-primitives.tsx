@@ -34,6 +34,7 @@ import {
   Dialog,
   Popover,
 } from 'react-aria-components'
+import { useTranslation } from 'react-i18next'
 
 import {
   Select,
@@ -80,10 +81,17 @@ export function SegmentedDateInput({ className }: { className?: string }) {
 export function AriaCalendarPopover({
   portalContainer,
   placement = 'bottom start',
+  includeTime = false,
+  timeValue,
+  onTimeChange,
 }: {
   portalContainer?: Element
   placement?: 'top start' | 'bottom start'
+  includeTime?: boolean
+  timeValue?: string
+  onTimeChange?: (value: string) => void
 }) {
+  const { t } = useTranslation()
   const [openPicker, setOpenPicker] = useState<'year' | 'month' | null>(null)
 
   return (
@@ -161,6 +169,19 @@ export function AriaCalendarPopover({
               )}
             </CalendarGridBody>
           </CalendarGrid>
+          {includeTime && (
+            <div className='border-border mt-2 flex items-center justify-between gap-3 border-t px-1 pt-3'>
+              <span className='text-muted-foreground text-sm'>{t('Time')}</span>
+              <input
+                aria-label={t('Time')}
+                type='time'
+                step={60}
+                value={timeValue ?? ''}
+                onChange={(event) => onTimeChange?.(event.target.value)}
+                className='border-input bg-background text-foreground focus-visible:ring-ring h-9 rounded-md border px-2 text-sm tabular-nums outline-none focus-visible:ring-2'
+              />
+            </div>
+          )}
         </Calendar>
       </Dialog>
     </Popover>

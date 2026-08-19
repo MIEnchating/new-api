@@ -144,7 +144,17 @@ describe('lottery center', () => {
     )
     assert.equal(mysteryBoxes.length, 3)
     assert.equal(
+      container.querySelectorAll('[data-lottery-grid-cell="true"]').length,
+      9
+    )
+    assert.equal(
       [...mysteryBoxes].every((box) => box.disabled),
+      true
+    )
+    assert.equal(
+      container.querySelector<HTMLButtonElement>(
+        '[data-testid="lottery-draw-button"]'
+      )?.disabled,
       true
     )
     assert.match(container.textContent || '', /50\.00 Yuan/)
@@ -241,15 +251,14 @@ describe('lottery center', () => {
       )
       await flushRequests()
     })
-    const mysteryBoxes = container.querySelectorAll<HTMLButtonElement>(
-      '[data-testid="lottery-mystery-box"]'
+    const drawButton = container.querySelector<HTMLButtonElement>(
+      '[data-testid="lottery-draw-button"]'
     )
-    assert.equal(mysteryBoxes.length, 3)
-    const selectedBox = mysteryBoxes[1]
-    assert.equal(selectedBox.disabled, false)
+    assert.ok(drawButton)
+    assert.equal(drawButton.disabled, false)
 
     await act(async () => {
-      selectedBox.dispatchEvent(
+      drawButton.dispatchEvent(
         new domWindow.MouseEvent('click', {
           bubbles: true,
         }) as unknown as MouseEvent
@@ -258,8 +267,8 @@ describe('lottery center', () => {
     })
 
     assert.equal(drawRequested, true)
-    assert.equal(selectedBox.disabled, true)
-    assert.equal(selectedBox.dataset.state, 'drawing')
+    assert.equal(drawButton.disabled, true)
+    assert.equal(drawButton.dataset.state, 'drawing')
     const drawProgress = container.querySelector(
       '[data-testid="lottery-draw-progress"]'
     )
@@ -271,7 +280,11 @@ describe('lottery center', () => {
       await new Promise((resolve) => setTimeout(resolve, 2450))
     })
 
-    assert.equal(selectedBox.dataset.state, 'revealed')
+    assert.ok(
+      container.querySelector(
+        '[data-lottery-grid-cell="true"][data-state="revealed"]'
+      )
+    )
     assert.equal(
       container.querySelector('[data-testid="lottery-draw-progress"]'),
       null

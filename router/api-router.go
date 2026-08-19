@@ -103,9 +103,13 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.DELETE("/passkey", middleware.DisableCache(), controller.PasskeyDelete)
 				selfRoute.GET("/aff", controller.GetAffCode)
 				selfRoute.GET("/aff/rewards", controller.GetAffiliateRewards)
-				selfRoute.GET("/lottery", controller.GetLotteryStatus)
-				selfRoute.GET("/lottery/draws/self", controller.GetUserLotteryDraws)
-				selfRoute.POST("/lottery/draw", middleware.UserCriticalRateLimit("lottery-draw"), controller.DrawLottery)
+				lotteryRoute := selfRoute.Group("/lottery")
+				lotteryRoute.Use(middleware.LotteryFeatureEnabled())
+				{
+					lotteryRoute.GET("", controller.GetLotteryStatus)
+					lotteryRoute.GET("/draws/self", controller.GetUserLotteryDraws)
+					lotteryRoute.POST("/draw", middleware.UserCriticalRateLimit("lottery-draw"), controller.DrawLottery)
+				}
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)
 				selfRoute.GET("/billing/self", controller.GetUserBillingHistory)

@@ -89,7 +89,8 @@ export function DateTimePicker({
         granularity='minute'
         hourCycle={24}
         isDisabled={disabled}
-        shouldCloseOnSelect
+        // Keep the calendar open so a date and its time can be selected in one pass.
+        shouldCloseOnSelect={false}
         onChange={(nextValue) => {
           const nextDate = nextValue?.toDate(timeZone)
           nextDate?.setSeconds(0, 0)
@@ -127,6 +128,26 @@ export function DateTimePicker({
         <AriaCalendarPopover
           portalContainer={portalContainer}
           placement={calendarPlacement}
+          includeTime
+          timeValue={
+            ariaValue
+              ? `${String(ariaValue.hour).padStart(2, '0')}:${String(ariaValue.minute).padStart(2, '0')}`
+              : ''
+          }
+          onTimeChange={(nextTime) => {
+            if (!ariaValue) return
+            const [hour, minute] = nextTime.split(':').map(Number)
+            if (!Number.isInteger(hour) || !Number.isInteger(minute)) return
+            const nextValue = ariaValue.set({
+              hour,
+              minute,
+              second: 0,
+              millisecond: 0,
+            })
+            const nextDate = nextValue.toDate(timeZone)
+            nextDate.setSeconds(0, 0)
+            onChange?.(nextDate)
+          }}
         />
       </ReactAriaDatePicker>
     </I18nProvider>
