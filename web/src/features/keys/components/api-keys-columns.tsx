@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef } from '@tanstack/react-table'
-import { CalendarClock } from 'lucide-react'
+import { CalendarClock, Layers3 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { GroupBadge } from '@/components/group-badge'
@@ -227,6 +227,8 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
           const activeRoutes = routes.filter((route) => route.enabled !== false)
           const displayedRoutes =
             activeRoutes.length > 0 ? activeRoutes : routes
+          const primaryRoute = displayedRoutes[0]
+          const primaryRatioInfo = groupRatioInfo[primaryRoute.group]
           return (
             <Tooltip>
               <TooltipTrigger
@@ -243,40 +245,37 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
                   />
                 }
               >
-                <span className='flex max-w-full min-w-0 items-center gap-1.5 overflow-hidden text-xs'>
-                  {displayedRoutes.slice(0, 2).map((route) => {
-                    const ratioInfo = groupRatioInfo[route.group]
-                    return (
-                      <span
-                        key={route.group}
-                        className='flex items-center gap-1'
-                      >
-                        <GroupBadge
-                          group={route.group}
-                          ratio={
-                            typeof ratioInfo?.ratio === 'number'
-                              ? ratioInfo.ratio
-                              : undefined
-                          }
-                        />
-                        {ratioInfo?.schedule_enabled && (
-                          <CalendarClock
-                            className={cn(
-                              'size-3.5 shrink-0',
-                              ratioInfo.schedule_active
-                                ? 'text-emerald-600'
-                                : 'text-muted-foreground'
-                            )}
-                            aria-label={
-                              ratioInfo.schedule_active
-                                ? t('Scheduled ratio active')
-                                : t('Time-based ratio enabled')
-                            }
-                          />
+                <span className='flex w-full max-w-full min-w-0 items-center gap-2 overflow-hidden text-xs'>
+                  <span className='flex min-w-0 items-center gap-1 overflow-hidden'>
+                    <GroupBadge
+                      group={primaryRoute.group}
+                      className='min-w-0'
+                      ratio={
+                        typeof primaryRatioInfo?.ratio === 'number'
+                          ? primaryRatioInfo.ratio
+                          : undefined
+                      }
+                    />
+                    {primaryRatioInfo?.schedule_enabled && (
+                      <CalendarClock
+                        className={cn(
+                          'size-3.5 shrink-0',
+                          primaryRatioInfo.schedule_active
+                            ? 'text-emerald-600'
+                            : 'text-muted-foreground'
                         )}
-                      </span>
-                    )
-                  })}
+                        aria-label={
+                          primaryRatioInfo.schedule_active
+                            ? t('Scheduled ratio active')
+                            : t('Time-based ratio enabled')
+                        }
+                      />
+                    )}
+                  </span>
+                  <span className='text-muted-foreground inline-flex shrink-0 items-center gap-1 whitespace-nowrap'>
+                    <Layers3 className='size-3.5' aria-hidden='true' />
+                    {t('{{count}} groups', { count: displayedRoutes.length })}
+                  </span>
                 </span>
               </TooltipTrigger>
               <TooltipContent>

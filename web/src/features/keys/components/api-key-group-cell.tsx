@@ -55,7 +55,7 @@ export function ApiKeyGroupCell(props: ApiKeyGroupCellProps) {
       >
         <TruncatedCell
           className='-ml-1.5 flex-1'
-          contentClassName='flex min-w-0'
+          contentClassName='flex w-full min-w-0 [&>span]:min-w-0 [&>span]:w-full'
           tooltipContent={props.group || '-'}
           tooltipClassName='break-all'
         >

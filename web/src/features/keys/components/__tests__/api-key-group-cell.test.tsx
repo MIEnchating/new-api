@@ -160,6 +160,11 @@ describe('API key group table cell', () => {
     )
     expect(cell).not.toBeNull()
     expect(cell?.firstElementChild).toHaveClass('flex-1')
+    expect(cell?.firstElementChild?.firstElementChild).toHaveClass(
+      'w-full',
+      '[&>span]:min-w-0',
+      '[&>span]:w-full'
+    )
     expect(container).toHaveTextContent('codex-特价')
     expect(container).toHaveTextContent('0.12x')
   })

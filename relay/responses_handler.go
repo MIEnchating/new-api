@@ -108,11 +108,6 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			}
 		}
 
-		jsonData, _, err = normalizeSub2APIResponsesReasoningIDs(jsonData, info)
-		if err != nil {
-			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-		}
-
 		logger.LogDebug(c, "requestBody: %s", jsonData)
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
