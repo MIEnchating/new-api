@@ -234,7 +234,7 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
                   <Button
                     type='button'
                     variant='ghost'
-                    className='-ml-2 h-auto justify-start px-2 py-1'
+                    className='-ml-2 h-auto w-full justify-start px-2 py-1'
                     aria-label={t('Group routing rules')}
                     onClick={() => {
                       setCurrentRow(apiKey)
@@ -298,7 +298,7 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
           <Button
             type='button'
             variant='ghost'
-            className='-ml-2 h-auto max-w-full justify-start px-2 py-1'
+            className='-ml-2 h-auto w-full max-w-full justify-start px-2 py-1'
             aria-label={`${t('Edit')}: ${group || '-'}`}
             onClick={() => {
               setCurrentRow(apiKey)

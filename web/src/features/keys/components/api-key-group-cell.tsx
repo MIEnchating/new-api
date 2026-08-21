@@ -49,13 +49,17 @@ export function ApiKeyGroupCell(props: ApiKeyGroupCellProps) {
   if (props.group !== 'auto') {
     const ratio = typeof props.ratio === 'number' ? props.ratio : undefined
     return (
-      <div className='flex min-w-0 items-center gap-1'>
+      <div
+        className='flex w-full min-w-0 items-center gap-1'
+        data-api-key-group-cell='normal'
+      >
         <TruncatedCell
-          className='-ml-1.5'
+          className='-ml-1.5 flex-1'
+          contentClassName='flex min-w-0'
           tooltipContent={props.group || '-'}
           tooltipClassName='break-all'
         >
-          <GroupBadge group={props.group} ratio={ratio} />
+          <GroupBadge className='flex-1' group={props.group} ratio={ratio} />
         </TruncatedCell>
         {props.scheduleEnabled && (
           <Tooltip>
@@ -72,8 +76,8 @@ export function ApiKeyGroupCell(props: ApiKeyGroupCellProps) {
               <CalendarClock
                 className={
                   props.scheduleActive
-                    ? 'size-3.5 text-emerald-600'
-                    : 'text-muted-foreground size-3.5'
+                    ? 'size-3.5 shrink-0 text-emerald-600'
+                    : 'text-muted-foreground size-3.5 shrink-0'
                 }
               />
             </TooltipTrigger>

@@ -28,6 +28,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 )
 
 // ============================
@@ -267,6 +268,25 @@ func (a *TaskAdaptor) GetModelList() []string {
 
 func (a *TaskAdaptor) GetChannelName() string {
 	return "jimeng"
+}
+
+// EstimateBilling uses the requested five- or ten-second video duration.
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	if billing_setting.GetBillingMode(info.OriginModelName) != billing_setting.BillingModePerSecond {
+		return nil
+	}
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	seconds := req.Duration
+	if seconds != 10 {
+		seconds = 5
+	}
+	if seconds > relaycommon.MaxTaskDurationSeconds {
+		seconds = relaycommon.MaxTaskDurationSeconds
+	}
+	return map[string]float64{"seconds": float64(seconds)}
 }
 
 func (a *TaskAdaptor) signRequest(req *http.Request, accessKey, secretKey string) error {

@@ -7,7 +7,9 @@ import (
 
 const (
 	BillingModeRatio      = "ratio"
+	BillingModePerRequest = "per-request"
 	BillingModeTieredExpr = "tiered_expr"
+	BillingModePerSecond  = "per_second"
 	BillingModeField      = "billing_mode"
 	BillingExprField      = "billing_expr"
 )

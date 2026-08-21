@@ -149,4 +149,18 @@ describe('API key group table cell', () => {
     expect(container).toHaveTextContent('3x')
     expect(container.querySelector('[data-auto-group-frame]')).toBe(null)
   })
+
+  test('keeps the normal group label area flexible when a ratio is present', () => {
+    const { container } = render(
+      <CellHarness group='codex-特价' ratio={0.12} shouldReduceMotion />
+    )
+
+    const cell = container.querySelector<HTMLElement>(
+      '[data-api-key-group-cell="normal"]'
+    )
+    expect(cell).not.toBeNull()
+    expect(cell?.firstElementChild).toHaveClass('flex-1')
+    expect(container).toHaveTextContent('codex-特价')
+    expect(container).toHaveTextContent('0.12x')
+  })
 })

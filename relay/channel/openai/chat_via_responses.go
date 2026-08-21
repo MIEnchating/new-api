@@ -60,10 +60,6 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		chatResp.Usage = *usage
 	}
-	if info.ChannelSetting.StripThinkingTags {
-		StripThinkingTagsFromChatResponse(chatResp)
-	}
-
 	responseValue := any(chatResp)
 	if info.RelayFormat != types.RelayFormatOpenAI {
 		targetResult, err := relayconvert.ConvertResponse(c, info, info.RelayFormat, chatResp)
@@ -166,10 +162,6 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		chatResp.Usage = *usage
 	}
-	if info.ChannelSetting.StripThinkingTags {
-		StripThinkingTagsFromChatResponse(chatResp)
-	}
-
 	responseValue := any(chatResp)
 	if info.RelayFormat != types.RelayFormatOpenAI {
 		targetResult, err := relayconvert.ConvertResponse(c, info, info.RelayFormat, chatResp)
@@ -206,10 +198,6 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	}
 	streamErr := (*types.NewAPIError)(nil)
 	pendingPreamble := make([]dto.ResponsesStreamResponse, 0, 2)
-	thinkingTagFilters := make(map[int]*ThinkingTagFilter)
-	visibleThinkingTagText := make(map[int]*strings.Builder)
-	var rawResponseText strings.Builder
-
 	if info.RelayFormat == types.RelayFormatClaude && info.ClaudeConvertInfo == nil {
 		info.ClaudeConvertInfo = &relaycommon.ClaudeConvertInfo{LastMessagesType: relaycommon.LastMessageTypeNone}
 	}
@@ -286,23 +274,6 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			sr.Error(err)
 			return
 		}
-		if streamResp.Type == "response.output_text.delta" {
-			rawResponseText.WriteString(streamResp.Delta)
-		}
-		if info.ChannelSetting.StripThinkingTags {
-			_, err := stripThinkingTagsFromResponsesStreamData(
-				&streamResp,
-				data,
-				thinkingTagFilters,
-				visibleThinkingTagText,
-			)
-			if err != nil {
-				streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
-				sr.Stop(streamErr)
-				return
-			}
-		}
-
 		if streamResp.Type == "response.error" || streamResp.Type == "response.failed" || streamResp.Type == "error" {
 			streamErr = newResponsesStreamError(streamResp)
 			sr.Stop(streamErr)
@@ -357,9 +328,6 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	usage := state.Usage()
 	if usage == nil || usage.TotalTokens == 0 {
 		usageText := state.UsageText()
-		if info.ChannelSetting.StripThinkingTags {
-			usageText = rawResponseText.String()
-		}
 		usage = service.ResponseText2Usage(c, usageText, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		state.SetUsage(usage)
 	}

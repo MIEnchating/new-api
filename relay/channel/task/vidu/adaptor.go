@@ -19,6 +19,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 
 	"github.com/pkg/errors"
 )
@@ -219,6 +220,29 @@ func (a *TaskAdaptor) GetModelList() []string {
 
 func (a *TaskAdaptor) GetChannelName() string {
 	return "vidu"
+}
+
+// EstimateBilling applies the common per-second mode to Vidu's duration field.
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	if billing_setting.GetBillingMode(info.OriginModelName) != billing_setting.BillingModePerSecond {
+		return nil
+	}
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	payload, err := a.convertToRequestPayload(&req, info)
+	if err != nil {
+		return nil
+	}
+	seconds := payload.Duration
+	if seconds <= 0 {
+		seconds = 5
+	}
+	if seconds > relaycommon.MaxTaskDurationSeconds {
+		seconds = relaycommon.MaxTaskDurationSeconds
+	}
+	return map[string]float64{"seconds": float64(seconds)}
 }
 
 // ============================

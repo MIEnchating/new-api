@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"net/http"
@@ -83,23 +82,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 		}
-		if !shouldNormalizeSub2APIResponsesReasoningIDs(info) {
-			requestBody = common.NewReplayableBodyReader(storage)
-		} else {
-			originalBody, err := storage.Bytes()
-			if err != nil {
-				return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
-			}
-			normalizedBody, removed, err := normalizeSub2APIResponsesReasoningIDs(originalBody, info)
-			if err != nil {
-				return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
-			}
-			if removed > 0 {
-				requestBody = bytes.NewReader(normalizedBody)
-			} else {
-				requestBody = common.NewReplayableBodyReader(storage)
-			}
-		}
+		requestBody = common.NewReplayableBodyReader(storage)
 	} else {
 		convertedRequest, err := adaptor.ConvertOpenAIResponsesRequest(c, info, *request)
 		if err != nil {

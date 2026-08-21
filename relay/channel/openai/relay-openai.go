@@ -11,7 +11,6 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/channel/openrouter"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
@@ -122,23 +121,12 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 	var secondLastStreamData string // 存储倒数第二个stream data，用于音频模型
 	seenStreamToolCalls := make(map[string]struct{})
 	var streamFunctionCallNames []string
-	thinkingTagFilters := make(map[int]*ThinkingTagFilter)
-
 	// 检查是否为音频模型
 	isAudioModel := strings.Contains(strings.ToLower(model), "audio")
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		info.ObserveActualResponseModel(common.StringToByteSlice(data))
 		rawData := data
-		if info.ChannelSetting.StripThinkingTags && info.RelayMode == relayconstant.RelayModeChatCompletions {
-			filteredData, err := stripThinkingTagsFromChatStreamData(data, thinkingTagFilters)
-			if err != nil {
-				logger.LogError(c, "failed to filter thinking tags: "+err.Error())
-				sr.Error(err)
-				return
-			}
-			data = filteredData
-		}
 		if lastStreamData != "" {
 			if err := HandleStreamFormat(c, info, lastStreamData, info.ChannelSetting.ForceFormat, info.ChannelSetting.ThinkingToContent); err != nil {
 				common.SysLog("error handling stream format: " + err.Error())
@@ -302,10 +290,6 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 	}
 
 	applyUsagePostProcessing(info, &simpleResponse.Usage, responseBody)
-	if info.ChannelSetting.StripThinkingTags {
-		StripThinkingTagsFromChatResponse(&simpleResponse)
-	}
-
 	switch info.RelayFormat {
 	case types.RelayFormatOpenAI:
 		if usageModified {
@@ -317,7 +301,7 @@ func OpenaiHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Respo
 			bodyMap["usage"] = simpleResponse.Usage
 			responseBody, _ = common.Marshal(bodyMap)
 		}
-		if forceFormat || info.ChannelSetting.StripThinkingTags {
+		if forceFormat {
 			responseBody, err = common.Marshal(simpleResponse)
 			if err != nil {
 				return nil, types.NewError(err, types.ErrorCodeBadResponseBody)

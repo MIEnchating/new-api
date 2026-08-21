@@ -9,7 +9,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
-	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -58,10 +57,6 @@ func GeminiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	}
 	usage := buildUsageFromGeminiResponse(c, info, &geminiResponse)
 	chatResp.Usage = usage
-	if info.ChannelSetting.StripThinkingTags {
-		openai.StripThinkingTagsFromChatResponse(chatResp)
-	}
-
 	convertResult, err := relayconvert.ConvertResponse(c, info, types.RelayFormatOpenAIResponses, chatResp)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
@@ -98,8 +93,6 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 	toolCallIndexByChoice := make(map[int]map[string]int)
 	nextToolCallIndexByChoice := make(map[int]int)
 	var streamErr *types.NewAPIError
-	thinkingTagFilters := make(map[int]*openai.ThinkingTagFilter)
-
 	sendEvent := func(event relayconvert.ChatToResponsesStreamEvent) bool {
 		data, err := common.Marshal(event.Payload)
 		if err != nil {
@@ -133,10 +126,6 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 		response.Id = responseID
 		response.Created = created
 		response.Model = info.UpstreamModelName
-		if info.ChannelSetting.StripThinkingTags {
-			openai.StripThinkingTagsFromChatStreamResponse(response, thinkingTagFilters)
-		}
-
 		if response.IsToolCall() {
 			finishReason = constant.FinishReasonToolCalls
 		}

@@ -20,7 +20,6 @@ import { describe, expect, test } from 'vitest'
 
 import {
   CHANNEL_TYPE_NEW_API,
-  CHANNEL_TYPE_SUB2_API,
   CHANNEL_TYPE_OPTIONS,
   MODEL_FETCHABLE_TYPES,
 } from '../../constants'
@@ -102,21 +101,5 @@ describe('New API channel', () => {
     const settings = JSON.parse(payload.channel.settings || '{}')
 
     expect('claude_code_client_spoofing' in settings).toBe(false)
-  })
-  test('stores invalid Responses reasoning ID repair only for Sub2API', () => {
-    const sub2apiPayload = transformFormDataToCreatePayload({
-      ...newAPIForm('https://sub2api.example'),
-      type: CHANNEL_TYPE_SUB2_API,
-      normalize_responses_reasoning_ids: true,
-    })
-    const sub2apiSettings = JSON.parse(sub2apiPayload.channel.settings || '{}')
-    expect(sub2apiSettings.normalize_responses_reasoning_ids).toBe(true)
-
-    const newAPIPayload = transformFormDataToCreatePayload({
-      ...newAPIForm('https://new-api.example'),
-      normalize_responses_reasoning_ids: true,
-    })
-    const newAPISettings = JSON.parse(newAPIPayload.channel.settings || '{}')
-    expect('normalize_responses_reasoning_ids' in newAPISettings).toBe(false)
   })
 })

@@ -13,7 +13,6 @@ import (
 type ChannelSettings struct {
 	ForceFormat            bool   `json:"force_format,omitempty"`
 	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
-	StripThinkingTags      bool   `json:"strip_thinking_tags,omitempty"`
 	Proxy                  string `json:"proxy"`
 	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
 	SystemPrompt           string `json:"system_prompt,omitempty"`
@@ -77,7 +76,6 @@ type ChannelOtherSettings struct {
 	AllowSafetyIdentifier                 bool                  `json:"allow_safety_identifier,omitempty"`           // 是否允许 safety_identifier 透传（默认过滤以保护用户隐私）
 	DisableStore                          bool                  `json:"disable_store,omitempty"`                     // 是否禁用 store 透传（默认允许透传，禁用后可能导致 Codex 无法使用）
 	AllowIncludeObfuscation               bool                  `json:"allow_include_obfuscation,omitempty"`         // 是否允许 stream_options.include_obfuscation 透传（默认过滤以避免关闭流混淆保护）
-	NormalizeResponsesReasoningIDs        bool                  `json:"normalize_responses_reasoning_ids,omitempty"` // 是否移除 Responses reasoning 条目中不兼容的 ID（仅 Sub2API）
 	DisableTaskPollingSleep               bool                  `json:"disable_task_polling_sleep,omitempty"`        // 是否跳过异步任务轮询间隔
 	AwsKeyType                            AwsKeyType            `json:"aws_key_type,omitempty"`
 	UpstreamModelUpdateCheckEnabled       bool                  `json:"upstream_model_update_check_enabled,omitempty"`        // 是否检测上游模型更新

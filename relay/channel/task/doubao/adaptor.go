@@ -18,6 +18,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
@@ -144,10 +145,30 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	hasVideo := hasVideoInMetadata(req.Metadata)
 	resolution, _ := req.Metadata["resolution"].(string)
 	ratio, ok := GetVideoInputRatio(info.OriginModelName, resolution, hasVideo)
-	if !ok || ratio == 1.0 {
+	result := make(map[string]float64)
+	if ok && ratio != 1.0 {
+		result["video_input"] = ratio
+	}
+	if billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModePerSecond {
+		payload, err := a.convertToRequestPayload(&req)
+		if err == nil {
+			seconds := 5
+			if payload.Duration != nil {
+				seconds = int(*payload.Duration)
+			}
+			if seconds <= 0 {
+				seconds = 5
+			}
+			if seconds > relaycommon.MaxTaskDurationSeconds {
+				seconds = relaycommon.MaxTaskDurationSeconds
+			}
+			result["seconds"] = float64(seconds)
+		}
+	}
+	if len(result) == 0 {
 		return nil
 	}
-	return map[string]float64{"video_input": ratio}
+	return result
 }
 
 // hasVideoInMetadata 直接检查 metadata 的 content 数组是否包含 video_url 条目，
@@ -293,8 +314,21 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq) (*
 	if err := taskcommon.UnmarshalMetadata(metadata, &r); err != nil {
 		return nil, errors.Wrap(err, "unmarshal metadata failed")
 	}
+	if r.Duration != nil {
+		seconds := int(*r.Duration)
+		if seconds <= 0 {
+			seconds = 5
+		}
+		if seconds > relaycommon.MaxTaskDurationSeconds {
+			seconds = relaycommon.MaxTaskDurationSeconds
+		}
+		r.Duration = lo.ToPtr(dto.IntValue(seconds))
+	}
 
 	if sec, _ := strconv.Atoi(req.Seconds); sec > 0 {
+		if sec > relaycommon.MaxTaskDurationSeconds {
+			sec = relaycommon.MaxTaskDurationSeconds
+		}
 		r.Duration = lo.ToPtr(dto.IntValue(sec))
 	}
 

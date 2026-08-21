@@ -81,6 +81,7 @@ const ratioToPrice = (ratio?: string, denominator?: string) => {
 
 export const getModeLabel = (mode?: string) => {
   if (mode === 'per-request') return 'Per-request'
+  if (mode === 'per-second') return 'Per-second'
   if (mode === 'tiered_expr') return 'Expression'
   return 'Per-token'
 }
@@ -89,6 +90,7 @@ export const getModeVariant = (
   mode?: string
 ): 'warning' | 'info' | 'success' => {
   if (mode === 'per-request') return 'warning'
+  if (mode === 'per-second') return 'warning'
   if (mode === 'tiered_expr') return 'info'
   return 'success'
 }
@@ -113,6 +115,9 @@ export const getPriceSummary = (
   }
   if (row.billingMode === 'per-request') {
     return row.price ? `$${row.price} / ${t('request')}` : t('Unset price')
+  }
+  if (row.billingMode === 'per-second') {
+    return row.price ? `$${row.price} / ${t('second')}` : t('Unset price')
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -143,6 +148,9 @@ export const getPriceDetail = (
   }
   if (row.billingMode === 'per-request') {
     return t('Fixed request price')
+  }
+  if (row.billingMode === 'per-second') {
+    return t('Fixed price per second')
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -256,6 +264,22 @@ export const buildModelSnapshots = ({
         imageRatio: image,
         audioRatio: audio,
         audioCompletionRatio: audioCompletion,
+        hasConflict: false,
+      }
+    }
+
+    if (modeForModel === 'per_second') {
+      return {
+        name,
+        price,
+        ratio,
+        cacheRatio: cache,
+        createCacheRatio: createCache,
+        completionRatio: completion,
+        imageRatio: image,
+        audioRatio: audio,
+        audioCompletionRatio: audioCompletion,
+        billingMode: 'per-second',
         hasConflict: false,
       }
     }

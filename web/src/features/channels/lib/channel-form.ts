@@ -21,7 +21,6 @@ import { z } from 'zod'
 import {
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
   CHANNEL_TYPE_NEW_API,
-  CHANNEL_TYPE_SUB2_API,
   CHANNEL_STATUS,
   ERROR_MESSAGES,
   FIELD_PASSTHROUGH_TYPES,
@@ -256,7 +255,6 @@ export const channelFormSchema = z
     // Channel extra settings (stored in setting JSON, not sent directly)
     force_format: z.boolean().optional(),
     thinking_to_content: z.boolean().optional(),
-    strip_thinking_tags: z.boolean().optional(),
     proxy: z
       .string()
       .optional()
@@ -276,7 +274,6 @@ export const channelFormSchema = z
     disable_store: z.boolean().optional(), // OpenAI only
     allow_safety_identifier: z.boolean().optional(), // OpenAI only
     allow_include_obfuscation: z.boolean().optional(), // OpenAI: include usage obfuscation
-    normalize_responses_reasoning_ids: z.boolean().optional(), // Sub2API Responses compatibility
     allow_inference_geo: z.boolean().optional(), // OpenAI/Anthropic: inference geography
     allow_speed: z.boolean().optional(), // Anthropic: speed mode control
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
@@ -433,7 +430,6 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   // Channel extra settings
   force_format: false,
   thinking_to_content: false,
-  strip_thinking_tags: false,
   proxy: '',
   http_protocol: HTTP_PROTOCOL_AUTO,
   http2_connection_shards: 1,
@@ -450,7 +446,6 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   disable_store: false,
   allow_safety_identifier: false,
   allow_include_obfuscation: false,
-  normalize_responses_reasoning_ids: false,
   allow_inference_geo: false,
   allow_speed: false,
   claude_beta_query: false,
@@ -475,7 +470,6 @@ export function transformChannelToFormDefaults(
   let extraSettings = {
     force_format: false,
     thinking_to_content: false,
-    strip_thinking_tags: false,
     proxy: '',
     http_protocol: HTTP_PROTOCOL_AUTO as 'auto' | 'http1',
     http2_connection_shards: 1,
@@ -494,7 +488,6 @@ export function transformChannelToFormDefaults(
       extraSettings = {
         force_format: parsed.force_format || false,
         thinking_to_content: parsed.thinking_to_content || false,
-        strip_thinking_tags: parsed.strip_thinking_tags || false,
         proxy: parsed.proxy || '',
         http_protocol: protocol,
         http2_connection_shards: protocol === HTTP_PROTOCOL_HTTP1 ? 1 : shards,
@@ -517,7 +510,6 @@ export function transformChannelToFormDefaults(
   let disableStore = false
   let allowSafetyIdentifier = false
   let allowIncludeObfuscation = false
-  let normalizeResponsesReasoningIDs = false
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
@@ -538,8 +530,6 @@ export function transformChannelToFormDefaults(
       disableStore = parsed.disable_store === true
       allowSafetyIdentifier = parsed.allow_safety_identifier === true
       allowIncludeObfuscation = parsed.allow_include_obfuscation === true
-      normalizeResponsesReasoningIDs =
-        parsed.normalize_responses_reasoning_ids === true
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
@@ -598,7 +588,6 @@ export function transformChannelToFormDefaults(
     allow_service_tier: allowServiceTier,
     disable_store: disableStore,
     allow_include_obfuscation: allowIncludeObfuscation,
-    normalize_responses_reasoning_ids: normalizeResponsesReasoningIDs,
     allow_inference_geo: allowInferenceGeo,
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
@@ -618,7 +607,6 @@ function buildSettingJSON(formData: ChannelFormValues): string {
   const settingObj: Record<string, unknown> = {
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,
-    strip_thinking_tags: formData.strip_thinking_tags || false,
     proxy: formData.proxy?.trim() || '',
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
     system_prompt: formData.system_prompt || '',
@@ -737,13 +725,6 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
 
   if ('claude_code_client_spoofing' in settingsObj) {
     delete settingsObj.claude_code_client_spoofing
-  }
-
-  if (formData.type === CHANNEL_TYPE_SUB2_API) {
-    settingsObj.normalize_responses_reasoning_ids =
-      formData.normalize_responses_reasoning_ids === true
-  } else if ('normalize_responses_reasoning_ids' in settingsObj) {
-    delete settingsObj.normalize_responses_reasoning_ids
   }
 
   settingsObj.disable_task_polling_sleep =

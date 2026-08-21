@@ -21,6 +21,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 )
 
 // https://platform.minimaxi.com/docs/api-reference/video-generation-intro
@@ -143,6 +144,30 @@ func (a *TaskAdaptor) GetChannelName() string {
 	return ChannelName
 }
 
+// EstimateBilling charges configured per-second models using the duration sent
+// to MiniMax/Hailuo, including supported metadata overrides.
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	if billing_setting.GetBillingMode(info.OriginModelName) != billing_setting.BillingModePerSecond {
+		return nil
+	}
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	payload, err := a.convertToRequestPayload(&req, info)
+	if err != nil || payload.Duration == nil {
+		return nil
+	}
+	seconds := *payload.Duration
+	if seconds <= 0 {
+		seconds = DefaultDuration
+	}
+	if seconds > relaycommon.MaxTaskDurationSeconds {
+		seconds = relaycommon.MaxTaskDurationSeconds
+	}
+	return map[string]float64{"seconds": float64(seconds)}
+}
+
 func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq, info *relaycommon.RelayInfo) (*VideoRequest, error) {
 	modelConfig := GetModelConfig(info.UpstreamModelName)
 	duration := DefaultDuration
@@ -162,6 +187,14 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq, in
 	}
 	if err := req.UnmarshalMetadata(&videoRequest); err != nil {
 		return nil, errors.Wrap(err, "unmarshal metadata to video request failed")
+	}
+	if videoRequest.Duration != nil {
+		if *videoRequest.Duration <= 0 {
+			*videoRequest.Duration = DefaultDuration
+		}
+		if *videoRequest.Duration > relaycommon.MaxTaskDurationSeconds {
+			*videoRequest.Duration = relaycommon.MaxTaskDurationSeconds
+		}
 	}
 
 	return videoRequest, nil

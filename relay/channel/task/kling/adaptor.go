@@ -26,6 +26,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 )
 
 // ============================
@@ -260,6 +261,30 @@ func (a *TaskAdaptor) GetChannelName() string {
 	return "kling"
 }
 
+// EstimateBilling charges configured per-second models using the duration sent
+// to Kling, including supported metadata overrides.
+func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInfo) map[string]float64 {
+	if billing_setting.GetBillingMode(info.OriginModelName) != billing_setting.BillingModePerSecond {
+		return nil
+	}
+	req, err := relaycommon.GetTaskRequest(c)
+	if err != nil {
+		return nil
+	}
+	payload, err := a.convertToRequestPayload(&req, info)
+	if err != nil {
+		return nil
+	}
+	seconds, err := strconv.Atoi(payload.Duration)
+	if err != nil || seconds <= 0 {
+		seconds = 5
+	}
+	if seconds > relaycommon.MaxTaskDurationSeconds {
+		seconds = relaycommon.MaxTaskDurationSeconds
+	}
+	return map[string]float64{"seconds": float64(seconds)}
+}
+
 // ============================
 // helpers
 // ============================
@@ -286,6 +311,15 @@ func (a *TaskAdaptor) convertToRequestPayload(req *relaycommon.TaskSubmitReq, in
 	}
 	if err := taskcommon.UnmarshalMetadata(req.Metadata, &r); err != nil {
 		return nil, errors.Wrap(err, "unmarshal metadata failed")
+	}
+	if seconds, err := strconv.Atoi(r.Duration); err == nil {
+		if seconds <= 0 {
+			seconds = 5
+		}
+		if seconds > relaycommon.MaxTaskDurationSeconds {
+			seconds = relaycommon.MaxTaskDurationSeconds
+		}
+		r.Duration = strconv.Itoa(seconds)
 	}
 	return &r, nil
 }
