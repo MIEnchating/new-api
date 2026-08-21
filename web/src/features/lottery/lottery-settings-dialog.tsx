@@ -92,10 +92,7 @@ function normalizeConfig(value: Partial<LotteryConfig>): LotteryConfig {
     })),
     grant_rules: (value.grant_rules || []).map((rule) => ({
       ...rule,
-      limit:
-        rule.type === 'recharge'
-          ? rule.limit || 'cumulative'
-          : undefined,
+      limit: rule.type === 'recharge' ? rule.limit || 'cumulative' : undefined,
       reclaim:
         rule.type === 'event' &&
         (rule.reclaim === true ||

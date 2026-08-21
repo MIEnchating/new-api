@@ -325,7 +325,9 @@ export function CommonLogsFilterBar<TData>(
     filters.requestId,
     filters.upstreamRequestId,
   ].filter(Boolean).length
-  const sensitiveType = sensitiveVisible ? 'text' : 'password'
+  const sensitiveInputClass = sensitiveVisible
+    ? undefined
+    : '[-webkit-text-security:disc]'
   const logTypeItems = useMemo(
     () =>
       LOG_TYPE_FILTERS.filter((type) => type.value !== LOG_TYPE_ALL_VALUE).map(
@@ -439,7 +441,7 @@ export function CommonLogsFilterBar<TData>(
     <LogsFilterField className='w-full'>
       <LogsFilterInput
         placeholder={t('Username')}
-        type={sensitiveType}
+        className={sensitiveInputClass}
         value={filters.username || ''}
         onChange={(e) => handleChange('username', e.target.value)}
         onKeyDown={handleKeyDown}
@@ -461,7 +463,7 @@ export function CommonLogsFilterBar<TData>(
       <LogsFilterField className='w-full sm:min-w-[170px] sm:flex-1'>
         <LogsFilterInput
           placeholder={t('Token Name')}
-          type={sensitiveType}
+          className={sensitiveInputClass}
           value={filters.token || ''}
           onChange={(e) => handleChange('token', e.target.value)}
           onKeyDown={handleKeyDown}

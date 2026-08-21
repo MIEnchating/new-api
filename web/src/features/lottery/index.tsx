@@ -488,7 +488,7 @@ export function Lottery() {
             </div>
           </CardStaggerItem>
 
-          <div className='grid min-w-0 gap-4 lg:items-start lg:grid-cols-[minmax(340px,0.94fr)_minmax(0,1.06fr)]'>
+          <div className='grid min-w-0 gap-4 lg:grid-cols-[minmax(340px,0.94fr)_minmax(0,1.06fr)] lg:items-start'>
             <CardStaggerItem className='h-fit'>
               <Card
                 data-card-hover='false'
