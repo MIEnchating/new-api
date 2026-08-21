@@ -171,7 +171,7 @@ export function ModelMappingEditor(props: ModelMappingEditorProps) {
       from: '',
       to: '',
     }
-    syncRows([...rows, newRow])
+    setRows((previousRows) => [...previousRows, newRow])
   }
 
   const handleDeleteRow = (id: string) => {
