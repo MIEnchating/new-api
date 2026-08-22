@@ -47,7 +47,8 @@ export function getReactAriaLocale(language: string) {
 export type CalendarPopoverPlacement = 'top start' | 'bottom start'
 
 export function getCalendarPopoverPlacement(
-  trigger: HTMLElement | null
+  trigger: HTMLElement | null,
+  estimatedHeight = 320
 ): CalendarPopoverPlacement {
   if (!trigger) return 'bottom start'
 
@@ -62,8 +63,6 @@ export function getCalendarPopoverPlacement(
     (typeof window === 'undefined' ? triggerRect.bottom : window.innerHeight)
   const spaceAbove = triggerRect.top - boundaryTop
   const spaceBelow = boundaryBottom - triggerRect.bottom
-  const calendarHeight = 320
-
-  if (spaceBelow >= calendarHeight) return 'bottom start'
+  if (spaceBelow >= estimatedHeight) return 'bottom start'
   return spaceAbove > spaceBelow ? 'top start' : 'bottom start'
 }

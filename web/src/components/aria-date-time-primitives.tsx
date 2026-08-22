@@ -101,7 +101,7 @@ export function AriaCalendarPopover({
       placement={placement}
       shouldFlip={false}
       offset={4}
-      className='bg-popover text-popover-foreground ring-foreground/10 data-[entering]:animate-in data-[entering]:fade-in-0 data-[entering]:zoom-in-95 data-[exiting]:animate-out data-[exiting]:fade-out-0 data-[exiting]:zoom-out-95 z-50 w-[20rem] rounded-lg shadow-md ring-1 outline-none'
+      className='bg-popover text-popover-foreground ring-foreground/10 data-[entering]:animate-in data-[entering]:fade-in-0 data-[entering]:zoom-in-95 data-[exiting]:animate-out data-[exiting]:fade-out-0 data-[exiting]:zoom-out-95 z-50 max-h-[calc(100dvh-1rem)] w-[20rem] max-w-[calc(100vw-1rem)] overflow-y-auto overscroll-contain rounded-lg shadow-md ring-1 outline-none'
     >
       <Dialog className='outline-none'>
         <Calendar className='w-full p-3'>

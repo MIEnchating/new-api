@@ -52,9 +52,13 @@ for (const key of [
 
 const { act, useState } = await import('react')
 const { createRoot } = await import('react-dom/client')
+const { fireEvent } = await import('@testing-library/react')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { DatePicker } = await import('../date-picker')
+const { DateTimePicker } = await import('../datetime-picker')
+const { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } =
+  await import('../ui/select')
 const { getCalendarPopoverPlacement } =
   await import('../date-time-picker-utils')
 const { Dialog, DialogContent } = await import('../ui/dialog')
@@ -149,5 +153,83 @@ describe('date picker year and month dropdowns', () => {
     trigger.getBoundingClientRect = () => ({ top: 620, bottom: 656 }) as DOMRect
 
     assert.equal(getCalendarPopoverPlacement(trigger), 'top start')
+  })
+
+  test('accepts a time before a date has been selected', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    let selectedDate: Date | undefined
+
+    await act(async () =>
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <DateTimePicker
+            placeholder='Never expires'
+            onChange={(nextDate) => {
+              selectedDate = nextDate
+            }}
+          />
+        </I18nextProvider>
+      )
+    )
+
+    const calendarButton = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Never expires"]'
+    )
+    assert.ok(calendarButton)
+    await act(async () => calendarButton.click())
+
+    const timeInput =
+      document.querySelector<HTMLInputElement>('input[type="time"]')
+    assert.ok(timeInput)
+    await act(async () => {
+      fireEvent.change(timeInput, { target: { value: '14:30' } })
+    })
+
+    assert.ok(selectedDate)
+    assert.equal(selectedDate?.getHours(), 14)
+    assert.equal(selectedDate?.getMinutes(), 30)
+
+    await act(async () => root.unmount())
+    container.remove()
+  })
+
+  test('keeps select content outside clipped sheet containers', async () => {
+    const sheetContent = document.createElement('div')
+    sheetContent.setAttribute('data-slot', 'sheet-content')
+    sheetContent.style.overflow = 'hidden'
+    document.body.append(sheetContent)
+    const root = createRoot(sheetContent)
+
+    await act(async () =>
+      root.render(
+        <Select defaultValue='one'>
+          <SelectTrigger aria-label='Option'>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value='one'>One</SelectItem>
+            <SelectItem value='two'>Two</SelectItem>
+          </SelectContent>
+        </Select>
+      )
+    )
+
+    const trigger = sheetContent.querySelector<HTMLButtonElement>(
+      '[data-slot="select-trigger"]'
+    )
+    assert.ok(trigger)
+    await act(async () => trigger.click())
+    await act(async () => undefined)
+
+    const content = document.querySelector<HTMLElement>(
+      '[data-slot="select-content"]'
+    )
+    assert.ok(content)
+    assert.equal(sheetContent.contains(content), false)
+
+    await act(async () => root.unmount())
+    sheetContent.remove()
   })
 })

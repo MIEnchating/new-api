@@ -28,7 +28,6 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react'
 import * as React from 'react'
 
-import { useMediaQuery } from '@/hooks'
 import { cn } from '@/lib/utils'
 
 const Select = SelectPrimitive.Root
@@ -102,8 +101,6 @@ function SelectContent({
   > & {
     portalContainer?: SelectPrimitive.Portal.Props['container']
   }) {
-  const isMobile = useMediaQuery('(max-width: 640px)')
-
   const content = (
     <SelectPrimitive.Positioner
       side={side}
@@ -130,10 +127,6 @@ function SelectContent({
       </SelectPrimitive.Popup>
     </SelectPrimitive.Positioner>
   )
-
-  if (isMobile) {
-    return content
-  }
 
   return (
     <SelectPrimitive.Portal container={portalContainer}>

@@ -67,11 +67,9 @@ export function DateTimePicker({
   const groupElementRef = useRef<HTMLDivElement | null>(null)
   const setGroupRef = useCallback((element: HTMLDivElement | null) => {
     groupElementRef.current = element
-    setPortalContainer(
-      element?.closest(
-        '[data-slot="dialog-content"], [data-slot="sheet-content"]'
-      ) ?? undefined
-    )
+    // Keep the popover outside clipped dialog/sheet containers. The sheet
+    // itself uses overflow-hidden, which otherwise cuts off the time control.
+    setPortalContainer(document.body)
   }, [])
 
   return (
@@ -117,7 +115,7 @@ export function DateTimePicker({
             aria-label={label}
             onPress={() =>
               setCalendarPlacement(
-                getCalendarPopoverPlacement(groupElementRef.current)
+                getCalendarPopoverPlacement(groupElementRef.current, 380)
               )
             }
             className='text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:ring-ring mr-1 flex size-8 shrink-0 items-center justify-center rounded-md outline-none focus-visible:ring-2'
@@ -135,10 +133,11 @@ export function DateTimePicker({
               : ''
           }
           onTimeChange={(nextTime) => {
-            if (!ariaValue) return
             const [hour, minute] = nextTime.split(':').map(Number)
             if (!Number.isInteger(hour) || !Number.isInteger(minute)) return
-            const nextValue = ariaValue.set({
+            const baseValue =
+              ariaValue ?? toCalendarDateTime(fromDate(new Date(), timeZone))
+            const nextValue = baseValue.set({
               hour,
               minute,
               second: 0,
