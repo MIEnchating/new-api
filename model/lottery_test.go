@@ -182,6 +182,38 @@ func TestLotteryRechargeGrantIsIdempotent(t *testing.T) {
 	assert.EqualValues(t, 1, count)
 }
 
+func TestRechargeCreatesLotteryGrantImmediately(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	ruleNow := time.Now()
+	config := defaultLotteryConfig()
+	config.GrantRules = []LotteryChanceGrantRule{{
+		Id: "recharge-immediate", Type: LotteryChanceGrantRuleRecharge,
+		Name: "Immediate recharge grant", Enabled: true, Threshold: 50, Chances: 2,
+		StartAt: ruleNow.Add(-time.Hour).Unix(), EndAt: ruleNow.Add(time.Hour).Unix(),
+	}}
+	setLotteryConfigForTest(t, config)
+	topUp := TopUp{
+		UserId: userId, Amount: 50, Money: 50,
+		TradeNo: "lottery-recharge-immediate", PaymentMethod: "alipay",
+		PaymentProvider: PaymentProviderEpay, Status: common.TopUpStatusPending,
+		CreateTime: now.Add(-time.Minute).Unix(),
+	}
+	require.NoError(t, DB.Create(&topUp).Error)
+
+	oldQuotaPerUnit := common.QuotaPerUnit
+	common.QuotaPerUnit = 100
+	t.Cleanup(func() { common.QuotaPerUnit = oldQuotaPerUnit })
+	_, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	require.NoError(t, err)
+
+	var grant LotteryChanceGrant
+	require.NoError(t, DB.Where(
+		"event_key = ?",
+		fmt.Sprintf("recharge:recharge-immediate:topup:%d", topUp.Id),
+	).First(&grant).Error)
+	assert.Equal(t, 2, grant.Chances)
+}
+
 func TestLotteryRechargeGrantDoesNotRewardSplitPaymentsTwice(t *testing.T) {
 	userId, now := setupLotteryTest(t)
 	config := defaultLotteryConfig()

@@ -127,6 +127,21 @@ func completePendingTopUpTx(tx *gorm.DB, topUp *TopUp, quotaToAdd int, userUpdat
 		return nil, err
 	}
 
+	// Generate recharge lottery grants as part of the successful top-up flow.
+	// The status endpoint still performs a full idempotent sync for recovery,
+	// but eligible users should see the grant without opening the lottery page.
+	lotteryConfig := GetLotteryConfig()
+	if len(lotteryConfig.GrantRules) > 0 {
+		if err := syncLotteryRechargeGrants(
+			tx,
+			topUp.UserId,
+			lotteryConfig.GrantRules,
+			topUp.CompleteTime,
+		); err != nil {
+			return nil, err
+		}
+	}
+
 	rebateQuota := calculateInviteRechargeRebateQuota(quotaToAdd)
 	if !isFirstTopUp || user.InviterId <= 0 || rebateQuota <= 0 || !operation_setting.IsPaymentComplianceConfirmed() {
 		return nil, nil
