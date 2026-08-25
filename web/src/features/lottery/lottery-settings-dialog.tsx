@@ -543,20 +543,22 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                         </Button>
                       </div>
                       <div className='grid items-start gap-4 p-4 sm:grid-cols-2'>
-                        <LabeledField label={t('Rule name')}>
-                          <Input
-                            value={rule.name}
-                            maxLength={80}
-                            placeholder={
-                              rule.type === 'recharge'
-                                ? t('Example: Recharge bonus')
-                                : t('Example: Spring Festival gift')
-                            }
-                            onChange={(event) =>
-                              patchGrant(index, { name: event.target.value })
-                            }
-                          />
-                        </LabeledField>
+                        <div className='sm:col-span-2'>
+                          <LabeledField label={t('Rule name')}>
+                            <Input
+                              value={rule.name}
+                              maxLength={80}
+                              placeholder={
+                                rule.type === 'recharge'
+                                  ? t('Example: Recharge bonus')
+                                  : t('Example: Spring Festival gift')
+                              }
+                              onChange={(event) =>
+                                patchGrant(index, { name: event.target.value })
+                              }
+                            />
+                          </LabeledField>
+                        </div>
                         <LabeledField label={t('Grant type')}>
                           <Select
                             value={rule.type}
@@ -832,7 +834,14 @@ function LabeledField(props: {
   hideOnDesktop?: boolean
 }) {
   return (
-    <label className='min-w-0 space-y-1.5'>
+    <label
+      className='min-w-0 space-y-1.5'
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          event.preventDefault()
+        }
+      }}
+    >
       <span
         className={
           props.hideOnDesktop
