@@ -164,7 +164,14 @@ export function AriaCalendarPopover({
               {(date) => (
                 <CalendarCell
                   date={date}
-                  className='hover:bg-accent focus-visible:ring-ring data-[selected]:bg-primary data-[selected]:text-primary-foreground data-[today]:bg-muted flex size-9 items-center justify-center rounded-md text-sm outline-none focus-visible:ring-2 data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[outside-visible-range]:invisible data-[today]:font-semibold'
+                  className={({ isHovered, isSelected, isToday }) =>
+                    cn(
+                      'focus-visible:ring-ring flex size-9 items-center justify-center rounded-md text-sm outline-none focus-visible:ring-2 data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[outside-visible-range]:invisible data-[today]:font-semibold',
+                      isHovered && !isSelected && 'bg-accent',
+                      isToday && !isSelected && 'bg-muted',
+                      isSelected && 'bg-primary text-primary-foreground'
+                    )
+                  }
                 />
               )}
             </CalendarGridBody>

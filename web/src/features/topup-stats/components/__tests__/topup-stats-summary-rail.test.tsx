@@ -103,6 +103,18 @@ describe('order management mobile summary rail', () => {
     assert.equal(rail.textContent?.includes('Successful orders'), false)
     assert.equal(rail.textContent?.includes('Paying users'), false)
     assert.equal(rail.textContent?.includes('Invoiced orders'), false)
+    const valueTones = [
+      ...rail.querySelectorAll<HTMLElement>('[data-summary-value]'),
+    ].map((value) =>
+      [...value.classList].find((className) => className.startsWith('text-'))
+    )
+    assert.deepEqual(valueTones, [
+      'text-success',
+      'text-chart-2',
+      'text-warning',
+      'text-chart-5',
+      'text-primary',
+    ])
 
     await act(async () => root.unmount())
     container.remove()
@@ -150,6 +162,15 @@ describe('order management mobile summary rail', () => {
 
     assert.ok(document.querySelector('[data-statistics-chart]'))
     assert.ok(document.querySelector('[data-slot="chart"]'))
+    const chartStyles = document.querySelector('[data-slot="chart"] style')
+    assert.match(
+      chartStyles?.textContent ?? '',
+      /--color-total: var\(--primary\)/
+    )
+    assert.doesNotMatch(
+      chartStyles?.textContent ?? '',
+      /--color-total: var\(--foreground\)/
+    )
     assert.equal(document.querySelectorAll('[data-statistics-item]').length, 0)
     assert.match(document.body.textContent || '', /Quota trend/)
     assert.match(document.body.textContent || '', /Daily quota changes/)

@@ -61,31 +61,36 @@ export function TopUpStatsSummaryRail(props: TopUpStatsSummaryRailProps) {
       <TypeQuotaBadge
         label={t('Online payment')}
         value={props.typeQuotas.online_topup}
-        accent='bg-emerald-500/70'
+        accent='bg-success'
+        tone='text-success'
         loading={props.loading}
       />
       <TypeQuotaBadge
         label={t('Redemption Code')}
         value={props.typeQuotas.redemption}
-        accent='bg-sky-500/70'
+        accent='bg-chart-2'
+        tone='text-chart-2'
         loading={props.loading}
       />
       <TypeQuotaBadge
         label={t('Admin Adjustment')}
         value={props.typeQuotas.admin_adjustment}
-        accent='bg-amber-500/70'
+        accent='bg-warning'
+        tone='text-warning'
         loading={props.loading}
       />
       <TypeQuotaBadge
         label={t('Lottery amount')}
         value={props.lotteryQuota}
-        accent='bg-pink-500/70'
+        accent='bg-chart-5'
+        tone='text-chart-5'
         loading={props.loading}
       />
       <TypeQuotaBadge
         label={t('Total Quota')}
         value={props.totalQuota}
-        accent='bg-foreground/60'
+        accent='bg-primary'
+        tone='text-primary'
         loading={props.loading}
       />
     </div>
@@ -123,7 +128,7 @@ export function TopUpStatsSummaryDialog(props: TopUpStatsSummaryDialogProps) {
       },
       total: {
         label: t('Total Quota'),
-        color: 'var(--foreground)',
+        color: 'var(--primary)',
       },
     }),
     [t]
@@ -264,6 +269,7 @@ function TypeQuotaBadge(props: {
   label: string
   value: number
   accent: string
+  tone: string
   loading: boolean
 }) {
   return (
@@ -278,7 +284,10 @@ function TypeQuotaBadge(props: {
       {props.loading ? (
         <Skeleton className='h-3.5 w-7' />
       ) : (
-        <span className='text-foreground/85 font-mono font-semibold tabular-nums'>
+        <span
+          data-summary-value
+          className={`font-mono font-semibold tabular-nums ${props.tone}`}
+        >
           {formatQuota(props.value)}
         </span>
       )}

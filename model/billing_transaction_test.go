@@ -80,6 +80,9 @@ func TestGetBillingHistoryMergesSourcesAndFilters(t *testing.T) {
 		if item.ExcludedFromStats {
 			campaignItems = append(campaignItems, item)
 		}
+		if item.Type == BillingTypeRedemption {
+			require.Equal(t, 1, item.OperatorUserId)
+		}
 	}
 	require.Len(t, campaignItems, 1)
 	require.False(t, campaignItems[0].InvoiceEligible)

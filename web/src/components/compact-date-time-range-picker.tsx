@@ -162,7 +162,7 @@ export function CompactDateTimeRangePicker({
             type='button'
             variant='outline'
             className={cn(
-              'h-9 w-full justify-start gap-2 px-2.5 text-sm leading-5 font-normal tabular-nums',
+              'h-8 w-full justify-start gap-2 px-2.5 text-sm leading-5 font-normal tabular-nums',
               !start && !end && 'text-muted-foreground',
               className
             )}

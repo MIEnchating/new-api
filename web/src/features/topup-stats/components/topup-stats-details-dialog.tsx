@@ -58,7 +58,10 @@ function DetailItem({
   className?: string
 }) {
   return (
-    <div className={cn('min-w-0 space-y-1', className)}>
+    <div
+      data-detail-label={label}
+      className={cn('min-w-0 space-y-1', className)}
+    >
       <div className='text-muted-foreground text-xs'>{label}</div>
       <div className='min-h-5 min-w-0 text-sm'>{value}</div>
     </div>
@@ -90,6 +93,7 @@ export function TopUpStatsDetailsDialog({
     item.invoice_status === 2 ? item.invoice_returned_at : item.invoiced_at
   const invoiceOperator =
     item.invoice_status === 2 ? item.invoice_returned_by : item.invoiced_by
+  const detail = item.detail?.trim()
 
   return (
     <Dialog
@@ -257,16 +261,12 @@ export function TopUpStatsDetailsDialog({
             </span>
           }
         />
-        <DetailItem
-          label={t('Operator Admin')}
-          value={
-            item.operator_user_id ? (
-              <span className='font-mono'>#{item.operator_user_id}</span>
-            ) : (
-              <span className='text-muted-foreground'>-</span>
-            )
-          }
-        />
+        {item.operator_user_id ? (
+          <DetailItem
+            label={t('Operator Admin')}
+            value={<span className='font-mono'>#{item.operator_user_id}</span>}
+          />
+        ) : null}
         {(invoiceTime > 0 || invoiceOperator > 0) && (
           <DetailItem
             label={invoiceConfig.label}
@@ -286,19 +286,17 @@ export function TopUpStatsDetailsDialog({
             }
           />
         )}
-        <DetailItem
-          label={t('Details')}
-          className='sm:col-span-2'
-          value={
-            item.detail ? (
+        {detail ? (
+          <DetailItem
+            label={t('Details')}
+            className='sm:col-span-2'
+            value={
               <div className='bg-muted/40 rounded-md border px-3 py-2 break-words whitespace-pre-wrap'>
-                {item.detail}
+                {detail}
               </div>
-            ) : (
-              <span className='text-muted-foreground'>-</span>
-            )
-          }
-        />
+            }
+          />
+        ) : null}
       </div>
     </Dialog>
   )

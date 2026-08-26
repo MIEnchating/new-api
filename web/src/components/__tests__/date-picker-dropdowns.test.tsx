@@ -195,6 +195,42 @@ describe('date picker year and month dropdowns', () => {
     container.remove()
   })
 
+  test('keeps the selected current date legible', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+
+    await act(async () =>
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <DateTimePicker value={new Date()} />
+        </I18nextProvider>
+      )
+    )
+
+    const calendarButton = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Select date"]'
+    )
+    assert.ok(calendarButton)
+    await act(async () => calendarButton.click())
+
+    const selectedToday = document.querySelector<HTMLElement>(
+      '[data-today][data-selected]'
+    )
+    assert.ok(selectedToday)
+    await act(async () => fireEvent.pointerEnter(selectedToday))
+    assert.equal(selectedToday.classList.contains('bg-primary'), true)
+    assert.equal(
+      selectedToday.classList.contains('text-primary-foreground'),
+      true
+    )
+    assert.equal(selectedToday.classList.contains('bg-accent'), false)
+    assert.equal(selectedToday.classList.contains('bg-muted'), false)
+
+    await act(async () => root.unmount())
+    container.remove()
+  })
+
   test('keeps select content outside clipped sheet containers', async () => {
     const sheetContent = document.createElement('div')
     sheetContent.setAttribute('data-slot', 'sheet-content')

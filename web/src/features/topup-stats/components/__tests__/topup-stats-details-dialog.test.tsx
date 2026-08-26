@@ -21,6 +21,8 @@ import assert from 'node:assert/strict'
 import { Window } from 'happy-dom'
 import { afterAll, describe, test } from 'vitest'
 
+import type { TopUpStatsItem } from '../../types'
+
 const domWindow = new Window()
 for (const key of [
   'window',
@@ -50,8 +52,8 @@ const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
-const { CompactDateTimeRangePicker } =
-  await import('../compact-date-time-range-picker')
+const { TopUpStatsDetailsDialog } =
+  await import('../topup-stats-details-dialog')
 
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
@@ -64,52 +66,69 @@ const reactTestGlobals = globalThis as typeof globalThis & {
 }
 reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 
-describe('compact date-time range picker mobile layout', () => {
+const baseItem: TopUpStatsItem = {
+  id: 'topup:1',
+  type: 'online_topup',
+  reference: 'order-1',
+  user_id: 1,
+  username: 'user',
+  display_name: 'User',
+  payment_method: 'stripe',
+  payment_provider: 'stripe',
+  quota: 100,
+  money: 1,
+  status: 'success',
+  created_at: 1,
+  invoice_status: 0,
+  invoiced_at: 0,
+  invoiced_by: 0,
+  invoice_returned_at: 0,
+  invoice_returned_by: 0,
+  invoice_eligible: true,
+  excluded_from_stats: false,
+}
+
+describe('order management details', () => {
   afterAll(() => domWindow.close())
 
-  test('places quick ranges inside the responsive time panel', async () => {
+  test('hides empty operational metadata and shows populated values', async () => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
 
-    await act(async () =>
-      root.render(
-        <I18nextProvider i18n={i18n}>
-          <CompactDateTimeRangePicker
-            start={new Date(2026, 7, 6, 0, 0)}
-            end={new Date(2026, 7, 6, 23, 59)}
-            onChange={() => {}}
-          />
-        </I18nextProvider>
+    const renderItem = async (item: TopUpStatsItem) =>
+      act(async () =>
+        root.render(
+          <I18nextProvider i18n={i18n}>
+            <TopUpStatsDetailsDialog item={item} onOpenChange={() => {}} />
+          </I18nextProvider>
+        )
       )
-    )
 
-    const trigger = container.querySelector<HTMLButtonElement>('button')
-    assert.ok(trigger)
-    assert.equal(trigger.classList.contains('h-8'), true)
-    assert.equal(trigger.classList.contains('h-9'), false)
-    await act(async () => trigger.click())
-    await act(async () => {
-      await Promise.resolve()
+    await renderItem(baseItem)
+    assert.equal(
+      document.querySelector('[data-detail-label="Operator Admin"]'),
+      null
+    )
+    assert.equal(document.querySelector('[data-detail-label="Details"]'), null)
+
+    await renderItem({
+      ...baseItem,
+      id: 'billing:1',
+      type: 'admin_adjustment',
+      operator_user_id: 42,
+      detail: ' add ',
     })
-
-    const timeGrid = document.querySelector<HTMLElement>(
-      '[data-mobile-time-grid]'
+    assert.match(
+      document.querySelector('[data-detail-label="Operator Admin"]')
+        ?.textContent ?? '',
+      /#42/
     )
-    const presetGrid = document.querySelector<HTMLElement>(
-      '[data-mobile-preset-grid]'
+    assert.match(
+      document.querySelector('[data-detail-label="Details"]')?.textContent ??
+        '',
+      /add/
     )
-    const timePanel = document.querySelector<HTMLElement>(
-      '[data-slot="date-time-range-time-panel"]'
-    )
-    assert.ok(timeGrid)
-    assert.ok(presetGrid)
-    assert.ok(timePanel)
-    assert.equal(timePanel.contains(presetGrid), true)
-    assert.equal(timeGrid.classList.contains('grid-cols-2'), true)
-    assert.equal(timeGrid.classList.contains('sm:block'), true)
-    assert.equal(presetGrid.classList.contains('grid-cols-3'), true)
-    assert.equal(presetGrid.classList.contains('sm:grid-cols-2'), true)
 
     await act(async () => root.unmount())
     container.remove()

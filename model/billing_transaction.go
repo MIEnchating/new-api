@@ -468,6 +468,7 @@ func queryRedemptions(filter BillingHistoryFilter, limit int) ([]BillingHistoryI
 	}
 	type row struct {
 		Id                int
+		CreatorUserId     int
 		UsedUserId        int
 		Username          string
 		DisplayName       string
@@ -483,7 +484,7 @@ func queryRedemptions(filter BillingHistoryFilter, limit int) ([]BillingHistoryI
 	}
 	rows := make([]row, 0)
 	if err := query.Session(&gorm.Session{}).
-		Select("r.id, r.used_user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, r.name, r.quota, r.redeemed_time, r.limit_one_per_user, COALESCE(r.invoice_status, 0) AS invoice_status, COALESCE(r.invoiced_at, 0) AS invoiced_at, COALESCE(r.invoiced_by, 0) AS invoiced_by, COALESCE(r.invoice_returned_at, 0) AS invoice_returned_at, COALESCE(r.invoice_returned_by, 0) AS invoice_returned_by").
+		Select("r.id, r.user_id AS creator_user_id, r.used_user_id, COALESCE(u.username, '') AS username, COALESCE(u.display_name, '') AS display_name, r.name, r.quota, r.redeemed_time, r.limit_one_per_user, COALESCE(r.invoice_status, 0) AS invoice_status, COALESCE(r.invoiced_at, 0) AS invoiced_at, COALESCE(r.invoiced_by, 0) AS invoiced_by, COALESCE(r.invoice_returned_at, 0) AS invoice_returned_at, COALESCE(r.invoice_returned_by, 0) AS invoice_returned_by").
 		Order("r.redeemed_time DESC, r.id DESC").Limit(limit).Scan(&rows).Error; err != nil {
 		return nil, 0, 0, 0, err
 	}
@@ -496,7 +497,8 @@ func queryRedemptions(filter BillingHistoryFilter, limit int) ([]BillingHistoryI
 			Username: redemption.Username, DisplayName: redemption.DisplayName,
 			Type: BillingTypeRedemption, Quota: redemption.Quota,
 			Reference: redemption.Name, PaymentMethod: BillingTypeRedemption,
-			Status: "success", CreatedAt: redemption.RedeemedTime,
+			Status: "success", OperatorUserId: redemption.CreatorUserId,
+			CreatedAt:         redemption.RedeemedTime,
 			InvoiceEligible:   !redemption.LimitOnePerUser,
 			ExcludedFromStats: redemption.LimitOnePerUser,
 			InvoiceStatus:     &invoiceStatus,
