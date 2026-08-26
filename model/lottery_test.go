@@ -308,6 +308,26 @@ func TestLotteryDrawConsumesChanceAndCreditsPrize(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNoLotteryChances)
 }
 
+func TestLotteryDrawRejectsWalletOverflowWithoutConsumingChance(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	addLotteryConsumeLog(t, userId, now, 50*100)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userId).
+		Update("quota", common.MaxWalletQuota).Error)
+
+	_, err := drawLotteryAt(userId, now, 50)
+	require.ErrorIs(t, err, ErrTopUpQuotaLimitExceeded)
+
+	var user User
+	require.NoError(t, DB.First(&user, userId).Error)
+	assert.Equal(t, common.MaxWalletQuota, user.Quota)
+	var drawCount int64
+	require.NoError(t, DB.Model(&LotteryDraw{}).Where("user_id = ?", userId).Count(&drawCount).Error)
+	assert.Zero(t, drawCount)
+	status, err := getLotteryStatusAt(userId, now)
+	require.NoError(t, err)
+	assert.Equal(t, 1, status.AvailableChances)
+}
+
 func TestLotteryNoPrizeStillConsumesExactlyOneChance(t *testing.T) {
 	userId, now := setupLotteryTest(t)
 	addLotteryConsumeLog(t, userId, now, 100*100)

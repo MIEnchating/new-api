@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -221,6 +222,7 @@ func TestCalculateTopUpCreditedQuotaByProvider(t *testing.T) {
 	}{
 		{name: "stripe uses charged money", provider: PaymentProviderStripe, amount: 5, money: 2.75, want: 2750},
 		{name: "creem amount is already quota", provider: PaymentProviderCreem, amount: 2750, money: 2.75, want: 2750},
+		{name: "creem preserves quota above legacy int32 range", provider: PaymentProviderCreem, amount: int64(common.MaxQuota) + 1, want: common.MaxQuota + 1},
 		{name: "epay converts amount to quota", provider: PaymentProviderEpay, amount: 5, money: 2.75, want: 5000},
 	}
 	for _, tt := range tests {
@@ -439,4 +441,27 @@ func TestTransferAffQuotaToQuotaRejectsEventKeyCollision(t *testing.T) {
 	var updated User
 	require.NoError(t, DB.First(&updated, userTwoID).Error)
 	require.Equal(t, 2000, updated.Quota)
+}
+
+func TestTransferAffQuotaToQuotaRejectsWalletOverflow(t *testing.T) {
+	userOneID, _ := setupBillingHistoryTest(t)
+	transferQuota := int(common.QuotaPerUnit)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", userOneID).Updates(map[string]interface{}{
+		"quota":     common.MaxWalletQuota,
+		"aff_quota": transferQuota,
+	}).Error)
+	user, err := GetUserById(userOneID, true)
+	require.NoError(t, err)
+
+	err = user.TransferAffQuotaToQuota(transferQuota, "affiliate-transfer:test-overflow")
+	require.ErrorIs(t, err, ErrWalletQuotaLimitExceeded)
+
+	var updated User
+	require.NoError(t, DB.First(&updated, userOneID).Error)
+	assert.Equal(t, common.MaxWalletQuota, updated.Quota)
+	assert.Equal(t, transferQuota, updated.AffQuota)
+	var count int64
+	require.NoError(t, DB.Model(&BillingTransaction{}).
+		Where("event_key = ?", "affiliate-transfer:test-overflow").Count(&count).Error)
+	assert.Zero(t, count)
 }

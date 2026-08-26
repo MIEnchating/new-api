@@ -205,6 +205,9 @@ func AdjustUserQuotaWithBilling(userId int, value int, mode string, operatorUser
 	if userId <= 0 || value < 0 {
 		return 0, 0, 0, fmt.Errorf("invalid quota adjustment")
 	}
+	if err := common.ValidateWalletQuota(value); err != nil {
+		return 0, 0, 0, err
+	}
 	if reference == "" || strings.HasSuffix(reference, ":") {
 		// A timestamp in seconds is not unique enough for two legitimate
 		// adjustments made in the same second. Keep the fallback idempotency
@@ -220,6 +223,9 @@ func AdjustUserQuotaWithBilling(userId int, value int, mode string, operatorUser
 		oldQuota = user.Quota
 		switch mode {
 		case "add":
+			if oldQuota > common.MaxWalletQuota-value {
+				return ErrWalletQuotaLimitExceeded
+			}
 			newQuota = oldQuota + value
 		case "subtract":
 			newQuota = oldQuota - value

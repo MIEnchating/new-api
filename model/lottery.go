@@ -997,8 +997,7 @@ func drawLotteryAt(
 		if prizeQuota <= 0 {
 			return nil
 		}
-		if err := tx.Model(&User{}).Where("id = ?", userId).
-			Update("quota", gorm.Expr("quota + ?", prizeQuota)).Error; err != nil {
+		if err := creditTopUpQuota(tx, userId, prizeQuota, nil); err != nil {
 			return err
 		}
 		if err := CreateBillingTransaction(tx, &BillingTransaction{
