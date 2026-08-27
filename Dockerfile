@@ -21,7 +21,15 @@ ADD go.mod go.sum ./
 # relaykit is a local submodule referenced via replace; its go.mod must be
 # present for go mod download to resolve the main module graph.
 ADD relaykit/go.mod ./relaykit/go.mod
-RUN go mod download
+# Registry and module proxies can transiently fail during a release. Retry the
+# dependency download so a single network blip cannot publish an incomplete
+# architecture image or leave the release workflow in a partial state.
+RUN for attempt in 1 2 3; do \
+      if go mod download; then exit 0; fi; \
+      echo "go mod download failed (attempt ${attempt}/3)" >&2; \
+      if [ "${attempt}" -lt 3 ]; then sleep $((attempt * 10)); fi; \
+    done; \
+    exit 1
 
 COPY . .
 COPY --from=builder /build/web/dist ./web/dist

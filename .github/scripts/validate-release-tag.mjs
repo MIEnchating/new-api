@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 const RELEASE_TAG_PATTERN =
@@ -24,6 +25,33 @@ function requirePreviousTag(baseTag, revision) {
     throw new Error(
       `Release tag ${baseTag}-${revision} requires previous tag ${previousTag}`,
     );
+  }
+}
+
+const requiredReleaseSections = [
+  "版本概览",
+  "新增功能",
+  "功能改进",
+  "问题修复",
+  "移除与调整",
+  "安全与兼容性",
+  "部署说明",
+];
+
+function requireReleaseNotes(tag) {
+  const sourcePath = `.github/release-notes/${tag}.md`;
+  if (!existsSync(sourcePath)) {
+    throw new Error(`Missing ${sourcePath}. Complete the release notes before creating the tag.`);
+  }
+  const content = readFileSync(sourcePath, "utf8");
+  const missing = requiredReleaseSections.filter(
+    (section) => !new RegExp(`^##\\s+${section}\\s*$`, "m").test(content),
+  );
+  if (missing.length > 0) {
+    throw new Error(`${sourcePath} is missing required sections: ${missing.join(", ")}`);
+  }
+  if (/<!--\s*请填写|TODO|待补充/i.test(content)) {
+    throw new Error(`${sourcePath} still contains unfinished placeholders`);
   }
 }
 
@@ -56,5 +84,6 @@ if (import.meta.url === entryPath) {
     throw new Error("Release tag is required");
   }
   validateReleaseTag(tag);
+  requireReleaseNotes(tag);
   console.log(`Validated release tag: ${tag}`);
 }
