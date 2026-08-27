@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { UnfoldMoreIcon } from '@hugeicons/core-free-icons'
+import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import * as React from 'react'
 
@@ -34,7 +34,7 @@ function NativeSelect({
   return (
     <div
       className={cn(
-        'group/native-select relative w-fit has-[select:disabled]:opacity-50',
+        'group/native-select relative w-full min-w-0 has-[select:disabled]:opacity-50',
         className
       )}
       data-slot='native-select-wrapper'
@@ -47,9 +47,9 @@ function NativeSelect({
         {...props}
       />
       <HugeiconsIcon
-        icon={UnfoldMoreIcon}
+        icon={ArrowDown01Icon}
         strokeWidth={2}
-        className='text-muted-foreground pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 select-none'
+        className='text-muted-foreground pointer-events-none absolute top-1/2 right-2.5 size-4 -translate-y-1/2 transition-transform duration-200 select-none group-has-[select:open]/native-select:rotate-180'
         aria-hidden='true'
         data-slot='native-select-icon'
       />
