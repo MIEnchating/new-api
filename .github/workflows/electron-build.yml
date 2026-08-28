@@ -14,6 +14,7 @@ jobs:
         os: [windows-latest]
 
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     defaults:
       run:
         shell: bash
@@ -62,7 +63,12 @@ jobs:
       - name: Build Go binary (Windows)
         if: runner.os == 'Windows'
         run: |
-          go mod download
+          for attempt in 1 2 3; do
+            if go mod download; then break; fi
+            echo "go mod download failed (attempt ${attempt}/3)" >&2
+            if [[ "$attempt" == 3 ]]; then exit 1; fi
+            sleep $((attempt * 10))
+          done
           go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(git describe --tags)'" -o new-api.exe
 
       - name: Update Electron version
