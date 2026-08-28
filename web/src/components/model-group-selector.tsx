@@ -16,7 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ChevronsUpDown, Check, CpuIcon, LayersIcon } from 'lucide-react'
+import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { Check, CpuIcon, LayersIcon } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -119,7 +121,7 @@ const ModelTriggerButton = React.forwardRef<
       'bg-background text-foreground',
       'hover:bg-accent transition-colors',
       'focus:!ring-0 focus:!outline-none',
-      'shadow-none',
+      'group/model-trigger shadow-none',
       triggerClassName
     )}
     {...props}
@@ -128,7 +130,12 @@ const ModelTriggerButton = React.forwardRef<
     <span className='text-muted-foreground sm:text-foreground hidden truncate text-xs sm:block'>
       {currentLabel}
     </span>
-    <ChevronsUpDown className='text-muted-foreground hidden h-4 w-4 opacity-50 sm:block' />
+    <HugeiconsIcon
+      icon={ArrowDown01Icon}
+      strokeWidth={2}
+      aria-hidden='true'
+      className='text-muted-foreground hidden size-4 opacity-50 transition-transform duration-200 group-aria-expanded/model-trigger:rotate-180 sm:block'
+    />
   </Button>
 ))
 
@@ -155,7 +162,7 @@ const GroupTriggerButton = React.forwardRef<
       'bg-background text-foreground',
       'hover:bg-accent transition-colors',
       'focus:!ring-0 focus:!outline-none',
-      'shadow-none',
+      'group/group-trigger shadow-none',
       triggerClassName
     )}
     {...props}
@@ -164,7 +171,12 @@ const GroupTriggerButton = React.forwardRef<
     <span className='text-muted-foreground sm:text-foreground hidden truncate text-xs sm:block'>
       {currentLabel}
     </span>
-    <ChevronsUpDown className='text-muted-foreground hidden h-4 w-4 opacity-50 sm:block' />
+    <HugeiconsIcon
+      icon={ArrowDown01Icon}
+      strokeWidth={2}
+      aria-hidden='true'
+      className='text-muted-foreground hidden size-4 opacity-50 transition-transform duration-200 group-aria-expanded/group-trigger:rotate-180 sm:block'
+    />
   </Button>
 ))
 
@@ -662,7 +674,7 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
     <Button
       aria-expanded={open}
       className={cn(
-        'h-8 max-w-[15rem] justify-start gap-2 border px-2.5 font-medium shadow-none',
+        'group/model-group-trigger h-8 max-w-[15rem] justify-start gap-2 border px-2.5 font-medium shadow-none',
         'bg-background/80 hover:bg-accent/70 text-foreground',
         'focus:!ring-0 focus:!outline-none',
         className
@@ -679,7 +691,12 @@ export const ModelGroupSelector: React.FC<ModelGroupSelectorProps> = ({
       <span className='bg-muted text-muted-foreground hidden max-w-20 shrink-0 rounded px-1.5 py-0.5 text-[10px] sm:inline-flex'>
         {currentGroup?.label || t('Group')}
       </span>
-      <ChevronsUpDown className='text-muted-foreground ml-auto size-3.5 shrink-0 opacity-60' />
+      <HugeiconsIcon
+        icon={ArrowDown01Icon}
+        strokeWidth={2}
+        aria-hidden='true'
+        className='text-muted-foreground ml-auto size-3.5 shrink-0 opacity-60 transition-transform duration-200 group-aria-expanded/model-group-trigger:rotate-180'
+      />
     </Button>
   )
 

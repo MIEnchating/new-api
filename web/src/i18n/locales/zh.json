@@ -3586,6 +3586,7 @@
     "Once per day": "每天一次",
     "One address per line. OAuth and payment returns may use the current address only when it is listed here.": "每行填写一个地址。只有列在这里的地址才能作为 OAuth 和支付完成后的当前返回地址。",
     "One API": "One API",
+    "One-click import": "一键导入",
     "One chance is consumed per draw": "每次抽奖消耗 1 次机会",
     "One code per user": "每位用户限兑一个",
     "One domain per line": "每行一个域名",

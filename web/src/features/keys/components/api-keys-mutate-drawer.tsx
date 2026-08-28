@@ -17,9 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
+import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  ChevronDown,
   KeyRound,
   Layers3,
   Network,
@@ -1170,9 +1171,12 @@ export function ApiKeysMutateDrawer({
                     description={t('Set API key access restrictions')}
                     icon={<Settings2 className='size-4' />}
                   />
-                  <ChevronDown
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    strokeWidth={2}
+                    aria-hidden='true'
                     className={cn(
-                      'text-muted-foreground size-4 shrink-0 transition-transform',
+                      'text-muted-foreground size-4 shrink-0 transition-transform duration-200',
                       advancedOpen && 'rotate-180'
                     )}
                   />

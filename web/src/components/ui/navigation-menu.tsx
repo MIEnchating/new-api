@@ -88,12 +88,13 @@ function NavigationMenuTrigger({
       data-slot='navigation-menu-trigger'
       className={cn(navigationMenuTriggerStyle(), 'group', className)}
       {...props}
+      data-press-animation='none'
     >
       {children}{' '}
       <HugeiconsIcon
         icon={ArrowDown01Icon}
         strokeWidth={2}
-        className='relative top-px ml-1 size-3 transition duration-300 group-data-open/navigation-menu-trigger:rotate-180 group-data-popup-open/navigation-menu-trigger:rotate-180'
+        className='relative top-px ml-1 size-3 transition-transform duration-200 group-data-open/navigation-menu-trigger:rotate-180 group-data-popup-open/navigation-menu-trigger:rotate-180'
         aria-hidden='true'
       />
     </NavigationMenuPrimitive.Trigger>

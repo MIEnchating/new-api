@@ -28,7 +28,7 @@ describe('Sonner close button styles', () => {
   test('excludes the close control from the global button press transform', () => {
     assert.match(
       styles,
-      /button:not\(:disabled\)[\s\S]*?:not\(\s*\[data-close-button\]\s*\):active/
+      /button:not\(:disabled\)[\s\S]*?:not\(\s*\[data-close-button\]\s*\)[\s\S]*?:active/
     )
   })
 

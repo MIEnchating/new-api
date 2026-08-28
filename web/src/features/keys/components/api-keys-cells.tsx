@@ -35,7 +35,9 @@ import {
 } from '@/components/ui/tooltip'
 import { copyToClipboard } from '@/lib/copy-to-clipboard'
 
+import { API_KEY_STATUS } from '../constants'
 import type { ApiKey } from '../types'
+import { ApiKeyImportButton } from './api-key-import-button'
 import { useApiKeys } from './api-keys-provider'
 
 export function ApiKeyCell({ apiKey }: { apiKey: ApiKey }) {
@@ -46,6 +48,9 @@ export function ApiKeyCell({ apiKey }: { apiKey: ApiKey }) {
     loadingKeys,
     copiedKeyId,
     markKeyCopied,
+    setCurrentRow,
+    setOpen,
+    setResolvedKey,
   } = useApiKeys()
   const [popoverOpen, setPopoverOpen] = useState(false)
 
@@ -72,6 +77,22 @@ export function ApiKeyCell({ apiKey }: { apiKey: ApiKey }) {
     if (ok) markKeyCopied(apiKey.id)
   }, [resolvedFullKey, resolveRealKey, apiKey.id, markKeyCopied])
 
+  const handleImport = useCallback(async () => {
+    const realKey = resolvedFullKey || (await resolveRealKey(apiKey.id))
+    if (!realKey) return
+
+    setResolvedKey(realKey)
+    setCurrentRow(apiKey)
+    setOpen('cc-switch')
+  }, [
+    apiKey,
+    resolvedFullKey,
+    resolveRealKey,
+    setCurrentRow,
+    setOpen,
+    setResolvedKey,
+  ])
+
   let copyIcon = <Copy className='size-3.5' />
   let copyTooltip = t('Copy API key')
   if (isLoading) {
@@ -83,60 +104,70 @@ export function ApiKeyCell({ apiKey }: { apiKey: ApiKey }) {
   }
 
   return (
-    <div className='flex max-w-full min-w-0 items-center'>
-      <Popover open={popoverOpen} onOpenChange={handlePopoverOpen}>
-        <PopoverTrigger
-          render={
-            <Button
-              variant='ghost'
-              size='sm'
-              className='text-muted-foreground h-7 max-w-full min-w-0 justify-start truncate px-0 font-mono text-xs hover:bg-transparent aria-expanded:bg-transparent'
-            />
-          }
-        >
-          <span className='truncate'>{maskedKey}</span>
-        </PopoverTrigger>
-        <PopoverContent
-          className='w-auto max-w-[min(90vw,28rem)]'
-          align='start'
-        >
-          <div className='space-y-2'>
-            <p className='text-muted-foreground text-xs'>{t('Full API Key')}</p>
-            {isLoading ? (
-              <div className='flex items-center gap-2 py-2'>
-                <Loader2 className='size-3.5 animate-spin' />
-                <span className='text-muted-foreground text-xs'>
-                  {t('Loading...')}
-                </span>
-              </div>
-            ) : (
-              <input
-                readOnly
-                value={resolvedFullKey || maskedKey}
-                autoFocus
-                onFocus={(e) => e.target.select()}
-                className='bg-muted/50 w-full min-w-[280px] rounded-md border px-3 py-2 font-mono text-xs outline-none'
+    <div className='flex max-w-full min-w-0 flex-wrap items-center gap-1.5'>
+      <div className='flex max-w-52 min-w-0 items-center'>
+        <Popover open={popoverOpen} onOpenChange={handlePopoverOpen}>
+          <PopoverTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='sm'
+                className='text-muted-foreground h-7 max-w-full min-w-0 justify-start truncate px-0 font-mono text-xs hover:bg-transparent aria-expanded:bg-transparent'
               />
-            )}
-          </div>
-        </PopoverContent>
-      </Popover>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant='ghost'
-              size='icon'
-              className='size-7 shrink-0'
-              onClick={handleCopy}
-              disabled={isLoading}
-            />
-          }
-        >
-          {copyIcon}
-        </TooltipTrigger>
-        <TooltipContent>{copyTooltip}</TooltipContent>
-      </Tooltip>
+            }
+          >
+            <span className='truncate'>{maskedKey}</span>
+          </PopoverTrigger>
+          <PopoverContent
+            className='w-auto max-w-[min(90vw,28rem)]'
+            align='start'
+          >
+            <div className='space-y-2'>
+              <p className='text-muted-foreground text-xs'>
+                {t('Full API Key')}
+              </p>
+              {isLoading ? (
+                <div className='flex items-center gap-2 py-2'>
+                  <Loader2 className='size-3.5 animate-spin' />
+                  <span className='text-muted-foreground text-xs'>
+                    {t('Loading...')}
+                  </span>
+                </div>
+              ) : (
+                <input
+                  readOnly
+                  value={resolvedFullKey || maskedKey}
+                  autoFocus
+                  onFocus={(e) => e.target.select()}
+                  className='bg-muted/50 w-full min-w-[280px] rounded-md border px-3 py-2 font-mono text-xs outline-none'
+                />
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon'
+                className='size-7 shrink-0'
+                onClick={handleCopy}
+                disabled={isLoading}
+              />
+            }
+          >
+            {copyIcon}
+          </TooltipTrigger>
+          <TooltipContent>{copyTooltip}</TooltipContent>
+        </Tooltip>
+      </div>
+      <ApiKeyImportButton
+        loading={isLoading}
+        disabled={apiKey.status !== API_KEY_STATUS.ENABLED}
+        onClick={handleImport}
+        aria-label={t('Import to CC Switch')}
+      />
     </div>
   )
 }

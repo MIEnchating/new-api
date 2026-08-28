@@ -91,14 +91,18 @@ function ComboboxTrigger({
   return (
     <ComboboxPrimitive.Trigger
       data-slot='combobox-trigger'
-      className={cn("[&_svg:not([class*='size-'])]:size-4", className)}
+      className={cn(
+        "group/combobox-trigger [&_svg:not([class*='size-'])]:size-4",
+        className
+      )}
       {...props}
+      data-press-animation='none'
     >
       {children}
       <HugeiconsIcon
         icon={ArrowDown01Icon}
         strokeWidth={2}
-        className='text-muted-foreground pointer-events-none size-4'
+        className='text-muted-foreground pointer-events-none size-4 transition-transform duration-200 group-aria-expanded/combobox-trigger:rotate-180'
       />
     </ComboboxPrimitive.Trigger>
   )
@@ -133,7 +137,7 @@ function ComboboxInput({
   showClear?: boolean
 }) {
   return (
-    <InputGroup className={cn('w-auto', className)}>
+    <InputGroup className={cn('w-full min-w-0', className)}>
       <ComboboxPrimitive.Input
         render={<InputGroupInput disabled={disabled} />}
         {...props}

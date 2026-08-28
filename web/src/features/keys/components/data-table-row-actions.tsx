@@ -23,7 +23,6 @@ import {
   Power,
   PowerOff,
   ExternalLink,
-  ArrowRightLeft,
   Copy,
   Link,
   Loader2,
@@ -80,18 +79,11 @@ export function DataTableRowActions<TData>({
 }: DataTableRowActionsProps<TData>) {
   const { t } = useTranslation()
   const apiKey = apiKeySchema.parse(row.original)
-  const {
-    setOpen,
-    setCurrentRow,
-    triggerRefresh,
-    setResolvedKey,
-    resolveRealKey,
-    loadingKeys,
-  } = useApiKeys()
+  const { setOpen, setCurrentRow, triggerRefresh, resolveRealKey } =
+    useApiKeys()
   const isEnabled = apiKey.status === API_KEY_STATUS.ENABLED
   const { chatPresets, serverAddress } = useChatPresets()
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
-  const isRealKeyLoading = Boolean(loadingKeys[apiKey.id])
 
   const hasChatPresets = chatPresets.length > 0
   const toggleLabel = isEnabled ? t('Disable') : t('Enable')
@@ -164,18 +156,6 @@ export function DataTableRowActions<TData>({
     }
   }
 
-  const handleOpenCCSwitch = async (
-    event?: React.MouseEvent<HTMLButtonElement>
-  ) => {
-    event?.stopPropagation()
-    const realKey = await resolveRealKey(apiKey.id)
-    if (!realKey) return
-
-    setResolvedKey(realKey)
-    setCurrentRow(apiKey)
-    setOpen('cc-switch')
-  }
-
   let statusIcon = <Power className='size-4' />
   if (isTogglingStatus) {
     statusIcon = <Loader2 className='size-4 animate-spin' />
@@ -224,29 +204,6 @@ export function DataTableRowActions<TData>({
           <Edit />
         </TooltipTrigger>
         <TooltipContent>{t('Edit')}</TooltipContent>
-      </Tooltip>
-
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant='outline'
-              size='sm'
-              className='border-info/30 text-info hover:border-info/50 hover:bg-info/5 h-7 gap-1 px-2'
-              onClick={handleOpenCCSwitch}
-              disabled={isRealKeyLoading}
-              aria-label={t('Import to CC Switch')}
-            />
-          }
-        >
-          {isRealKeyLoading ? (
-            <Loader2 className='size-3.5 animate-spin' />
-          ) : (
-            <ArrowRightLeft className='size-3.5' />
-          )}
-          <span className='hidden lg:inline'>CC Switch</span>
-        </TooltipTrigger>
-        <TooltipContent>{t('Import to CC Switch')}</TooltipContent>
       </Tooltip>
 
       <DataTableRowActionMenu

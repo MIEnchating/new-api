@@ -577,8 +577,10 @@ For commercial licensing, please contact support@quantumnous.com
 
   button:not(:disabled):not([data-press-animation='none']):not(
     [data-close-button]
-  ):active,
-  [role='button']:not(:disabled):not([data-press-animation='none']):active {
+  ):not([aria-expanded]):not([aria-haspopup]):active,
+  [role='button']:not(:disabled):not([data-press-animation='none']):not(
+    [aria-expanded]
+  ):not([aria-haspopup]):active {
     transform: scale(0.98);
   }
 

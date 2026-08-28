@@ -16,7 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { CalendarClock, Check, ChevronsUpDown } from 'lucide-react'
+import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { CalendarClock, Check } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -157,9 +159,15 @@ export function ApiKeyGroupCombobox({
             </span>
           </span>
         </span>
-        <ChevronsUpDown
+        <HugeiconsIcon
+          icon={ArrowDown01Icon}
+          strokeWidth={2}
           aria-hidden='true'
-          className='size-4 shrink-0 opacity-50'
+          data-slot='combobox-icon'
+          className={cn(
+            'size-4 shrink-0 opacity-50 transition-transform duration-200',
+            open && 'rotate-180'
+          )}
         />
       </PopoverTrigger>
       <PopoverContent

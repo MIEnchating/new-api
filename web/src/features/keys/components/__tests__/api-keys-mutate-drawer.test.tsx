@@ -280,6 +280,19 @@ describe('API keys mutate drawer Auto group integration', () => {
 })
 
 describe('API keys mutate drawer routing mode', () => {
+  test('disables press scaling on the advanced settings trigger', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads)
+    await renderCreateDrawer()
+
+    const advancedTrigger = findButton('Advanced Settings', true)
+    expect(advancedTrigger).toHaveAttribute('data-press-animation', 'none')
+    expect(advancedTrigger).toHaveAttribute('aria-expanded', 'false')
+
+    fireEvent.click(advancedTrigger)
+    expect(advancedTrigger).toHaveAttribute('aria-expanded', 'true')
+  })
+
   test('switches between single-group and group-routing cards', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
     installApiFixtures(createdPayloads)

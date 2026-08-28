@@ -16,7 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Check, ChevronsUpDown } from 'lucide-react'
+import { ArrowDown01Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
+import { Check } from 'lucide-react'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -161,7 +163,11 @@ export function ComboboxInput({
     (filteredOptions.length > 0 || (allowCustomValue && searchValue.trim()))
 
   return (
-    <div ref={containerRef} className='relative'>
+    <div
+      ref={containerRef}
+      data-slot='combobox-input-root'
+      className='relative w-full min-w-0'
+    >
       <Input
         ref={inputRef}
         id={id}
@@ -197,7 +203,16 @@ export function ComboboxInput({
         onKeyDown={handleKeyDown}
         className={cn('pr-9', className)}
       />
-      <ChevronsUpDown className='pointer-events-none absolute top-1/2 right-3 size-4 shrink-0 -translate-y-1/2 opacity-50' />
+      <HugeiconsIcon
+        icon={ArrowDown01Icon}
+        strokeWidth={2}
+        aria-hidden='true'
+        data-slot='combobox-input-icon'
+        className={cn(
+          'pointer-events-none absolute top-1/2 right-3 size-4 shrink-0 -translate-y-1/2 opacity-50 transition-transform duration-200',
+          open && 'rotate-180'
+        )}
+      />
 
       {showDropdown && (
         <div className='bg-popover text-popover-foreground absolute top-full z-100 mt-1 w-full rounded-md border shadow-md'>

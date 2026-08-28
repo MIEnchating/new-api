@@ -112,6 +112,9 @@ describe('API key group combobox Auto effect', () => {
 
     const trigger = getTrigger()
     expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    expect(trigger).toHaveAttribute('data-press-animation', 'none')
+    const triggerIcon = trigger.querySelector('[data-slot="combobox-icon"]')
+    expect(triggerIcon).not.toHaveClass('rotate-180')
     expect(trigger).toHaveAttribute('data-auto-group-effect', 'trigger')
     expect(trigger).not.toHaveClass('bg-linear-to-r', 'overflow-hidden')
     expect(trigger).toHaveClass('overflow-visible')
@@ -142,6 +145,7 @@ describe('API key group combobox Auto effect', () => {
 
     fireEvent.click(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(triggerIcon).toHaveClass('rotate-180')
 
     const autoOption = getCommandItem('Global automatic routing')
     expect(autoOption).toHaveAttribute('data-auto-group-effect', 'option')
