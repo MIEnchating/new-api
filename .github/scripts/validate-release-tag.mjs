@@ -2,8 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-const RELEASE_TAG_PATTERN =
-  /^v(\d{4})\.(\d{2})\.(\d{2})(?:-([2-9]|[1-9]\d+))?$/;
+const RELEASE_TAG_PATTERN = /^v(\d{4})\.(\d{2})\.(\d{2})(?:-([2-9]|[1-9]\d+))?$/;
 
 function requireValidCalendarDate(year, month, day, tag) {
   const parsed = new Date(Date.UTC(year, month - 1, day));
@@ -22,21 +21,66 @@ function requirePreviousTag(baseTag, revision) {
   try {
     execFileSync("git", ["show-ref", "--verify", "--quiet", `refs/tags/${previousTag}`]);
   } catch {
-    throw new Error(
-      `Release tag ${baseTag}-${revision} requires previous tag ${previousTag}`,
-    );
+    throw new Error(`Release tag ${baseTag}-${revision} requires previous tag ${previousTag}`);
   }
 }
 
-const requiredReleaseSections = [
-  "版本概览",
-  "新增功能",
-  "功能改进",
-  "问题修复",
-  "移除与调整",
-  "安全与兼容性",
-  "部署说明",
+const requiredReleaseSections = ["版本概览", "新增功能", "功能改进", "问题修复", "移除与调整"];
+
+const forbiddenReleaseContent = [
+  { pattern: /^#{1,6}\s+安全与兼容性\s*$/m, label: "安全与兼容性" },
+  { pattern: /^#{1,6}\s+部署说明\s*$/m, label: "部署说明" },
+  { pattern: /^#{1,6}\s+发布产物\s*$/m, label: "发布产物" },
+  { pattern: /^#{1,6}\s+代码变更统计\s*$/m, label: "代码变更统计" },
+  { pattern: /查看完整文件变更列表/, label: "完整文件变更列表" },
+  { pattern: /完整变更对比/, label: "完整变更对比" },
+  {
+    pattern: /(?:https:\/\/github\.com\/[^\s)]+)?\/compare\/[^\s)]+/i,
+    label: "GitHub compare 链接",
+  },
 ];
+
+export function validateReleaseNotesContent(content, sourcePath = "release notes") {
+  const headingMatches = [...content.matchAll(/^##\s+(.+?)\s*$/gm)];
+  const headings = headingMatches.map((match) => match[1]);
+  const missing = requiredReleaseSections.filter((section) => !headings.includes(section));
+  if (missing.length > 0) {
+    throw new Error(`${sourcePath} is missing required sections: ${missing.join(", ")}`);
+  }
+  const forbidden = forbiddenReleaseContent
+    .filter(({ pattern }) => pattern.test(content))
+    .map(({ label }) => label);
+  if (forbidden.length > 0) {
+    throw new Error(`${sourcePath} contains forbidden release content: ${forbidden.join(", ")}`);
+  }
+  if (
+    headings.length !== requiredReleaseSections.length ||
+    headings.some((heading, index) => heading !== requiredReleaseSections[index])
+  ) {
+    throw new Error(
+      `${sourcePath} must contain exactly these sections in order: ${requiredReleaseSections.join(", ")}`,
+    );
+  }
+  if (/<!--\s*请填写|TODO|待补充/i.test(content)) {
+    throw new Error(`${sourcePath} still contains unfinished placeholders`);
+  }
+  const empty = headingMatches
+    .filter((match, index) => {
+      const bodyStart = match.index + match[0].length;
+      const bodyEnd = headingMatches[index + 1]?.index ?? content.length;
+      const body = content
+        .slice(bodyStart, bodyEnd)
+        .replace(/<!--[\s\S]*?-->/g, "")
+        .trim();
+      return body.length === 0;
+    })
+    .map((match) => match[1]);
+  if (empty.length > 0) {
+    throw new Error(
+      `${sourcePath} has empty required sections: ${empty.join(", ")}. Use - 无 when a section has no entries.`,
+    );
+  }
+}
 
 function requireReleaseNotes(tag) {
   const sourcePath = `.github/release-notes/${tag}.md`;
@@ -44,15 +88,7 @@ function requireReleaseNotes(tag) {
     throw new Error(`Missing ${sourcePath}. Complete the release notes before creating the tag.`);
   }
   const content = readFileSync(sourcePath, "utf8");
-  const missing = requiredReleaseSections.filter(
-    (section) => !new RegExp(`^##\\s+${section}\\s*$`, "m").test(content),
-  );
-  if (missing.length > 0) {
-    throw new Error(`${sourcePath} is missing required sections: ${missing.join(", ")}`);
-  }
-  if (/<!--\s*请填写|TODO|待补充/i.test(content)) {
-    throw new Error(`${sourcePath} still contains unfinished placeholders`);
-  }
+  validateReleaseNotesContent(content, sourcePath);
 }
 
 export function validateReleaseTag(tag, options = {}) {

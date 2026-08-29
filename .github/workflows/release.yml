@@ -40,10 +40,10 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.ref }}
-      - name: Validate release notes and generated report
+      - name: Validate release notes and generated output
         run: |
           node .github/scripts/validate-release-tag.mjs "$GITHUB_REF_NAME"
-          node .github/scripts/generate-release-notes.mjs "$GITHUB_REF_NAME" "$RUNNER_TEMP/release-notes.md" --require-source
+          node .github/scripts/generate-release-notes.mjs "$GITHUB_REF_NAME" "$RUNNER_TEMP/release-notes.md"
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: '1.4.0'
@@ -276,7 +276,7 @@ jobs:
             fi
           done
       - name: Generate standardized release notes
-        run: node .github/scripts/generate-release-notes.mjs "$GITHUB_REF_NAME" release-notes.md --require-source
+        run: node .github/scripts/generate-release-notes.mjs "$GITHUB_REF_NAME" release-notes.md
       - name: Publish release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
