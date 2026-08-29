@@ -57,7 +57,8 @@ export function useSidebarData(): SidebarData {
   const customPages = allCustomPages.filter((page) => page.enabled !== false)
   const toNavItem = (page: (typeof customPages)[number]) => ({
     title: page.name,
-    url: `/pages/${page.id}`,
+    url: page.openMode === 'external' ? page.url : `/pages/${page.id}`,
+    external: page.openMode === 'external',
     icon: page.icon ? undefined : PanelsTopLeft,
     iconSrc: page.icon,
   })

@@ -18,12 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 export type CustomMenuPageVisibility = 'public' | 'admin'
 export type CustomMenuPageSection = 'chat' | 'general' | 'personal'
+export type CustomMenuPageOpenMode = 'iframe' | 'external'
 
 export type CustomMenuPage = {
   id: string
   name: string
   url: string
   visibility: CustomMenuPageVisibility
+  openMode: CustomMenuPageOpenMode
   section?: CustomMenuPageSection
   icon?: string
   enabled?: boolean
@@ -56,6 +58,9 @@ export function parseCustomMenuPages(value: unknown): CustomMenuPage[] {
         page.name.trim().length > 0 &&
         isValidPageURL(page.url) &&
         (page.visibility === 'public' || page.visibility === 'admin') &&
+        (page.openMode === undefined ||
+          page.openMode === 'iframe' ||
+          page.openMode === 'external') &&
         (page.section === undefined ||
           page.section === 'chat' ||
           page.section === 'general' ||
@@ -69,6 +74,7 @@ export function parseCustomMenuPages(value: unknown): CustomMenuPage[] {
       return [
         {
           ...(page as CustomMenuPage),
+          openMode: page.openMode === 'external' ? 'external' : 'iframe',
           enabled: page.enabled !== false,
         },
       ]

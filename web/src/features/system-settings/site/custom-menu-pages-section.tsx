@@ -38,8 +38,8 @@ import {
   createCustomMenuPageId,
   parseCustomMenuPages,
   type CustomMenuPage,
+  type CustomMenuPageOpenMode,
   type CustomMenuPageSection,
-  type CustomMenuPageVisibility,
 } from '@/lib/custom-menu-pages'
 
 import { SettingsPageFormActions } from '../components/settings-page-context'
@@ -124,6 +124,7 @@ export function CustomMenuPagesSection(props: CustomMenuPagesSectionProps) {
         name: '',
         url: '',
         visibility: 'public',
+        openMode: 'iframe',
         section: 'general',
         enabled: true,
       },
@@ -160,7 +161,7 @@ export function CustomMenuPagesSection(props: CustomMenuPagesSectionProps) {
       <div className='space-y-4'>
         <p className='text-muted-foreground text-sm'>
           {t(
-            'Add iframe pages to the sidebar. Choose who can see each page and where it appears in the sidebar.'
+            'Add embedded pages or external links to the sidebar. Choose who can see each item and where it appears.'
           )}
         </p>
         <div className='grid gap-4 xl:grid-cols-2'>
@@ -193,7 +194,7 @@ export function CustomMenuPagesSection(props: CustomMenuPagesSectionProps) {
   )
 }
 
-function MenuPageEditor(props: {
+export function MenuPageEditor(props: {
   page: CustomMenuPage
   index: number
   onChange: (patch: Partial<CustomMenuPage>) => void
@@ -263,58 +264,85 @@ function MenuPageEditor(props: {
           />
         </div>
         <div className='space-y-2'>
-          <Label>{t('Visible role')}</Label>
-          <Select
-            value={props.page.visibility}
-            onValueChange={(value) =>
-              props.onChange({
-                visibility: value as CustomMenuPageVisibility,
-              })
-            }
-          >
-            <SelectTrigger className='w-full'>
-              <SelectValue>
-                {props.page.visibility === 'admin'
-                  ? t('Administrators')
-                  : t('Users')}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent align='start' alignItemWithTrigger={false}>
-              <SelectItem value='public'>{t('Users')}</SelectItem>
-              <SelectItem value='admin'>{t('Administrators')}</SelectItem>
-            </SelectContent>
-          </Select>
+          <Label htmlFor={`${props.page.id}-visible-to-users`}>
+            {t('Visible to users')}
+          </Label>
+          <div className='border-input flex h-9 items-center justify-end rounded-md border px-3'>
+            <Switch
+              id={`${props.page.id}-visible-to-users`}
+              checked={props.page.visibility === 'public'}
+              onCheckedChange={(visibleToUsers) =>
+                props.onChange({
+                  visibility: visibleToUsers ? 'public' : 'admin',
+                })
+              }
+              aria-label={t('Visible to users')}
+            />
+          </div>
         </div>
       </div>
 
-      {props.page.visibility === 'public' ? (
-        <div className='space-y-2'>
-          <Label>{t('Menu location')}</Label>
+      <div className='grid gap-4 sm:grid-cols-2'>
+        {props.page.visibility === 'public' ? (
+          <div className='space-y-2'>
+            <Label>{t('Menu location')}</Label>
+            <Select
+              value={props.page.section ?? 'general'}
+              onValueChange={(value) =>
+                props.onChange({ section: value as CustomMenuPageSection })
+              }
+            >
+              <SelectTrigger className='w-full'>
+                <SelectValue>
+                  {t(
+                    props.page.section === 'chat'
+                      ? 'Chat'
+                      : props.page.section === 'personal'
+                        ? 'Personal'
+                        : 'General'
+                  )}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent align='start' alignItemWithTrigger={false}>
+                <SelectItem value='chat'>{t('Chat')}</SelectItem>
+                <SelectItem value='general'>{t('General')}</SelectItem>
+                <SelectItem value='personal'>{t('Personal')}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        ) : null}
+        <div
+          className={
+            props.page.visibility === 'public'
+              ? 'space-y-2'
+              : 'space-y-2 sm:col-span-2'
+          }
+        >
+          <Label>{t('Opening method')}</Label>
           <Select
-            value={props.page.section ?? 'general'}
+            value={props.page.openMode}
             onValueChange={(value) =>
-              props.onChange({ section: value as CustomMenuPageSection })
+              props.onChange({ openMode: value as CustomMenuPageOpenMode })
             }
           >
             <SelectTrigger className='w-full'>
               <SelectValue>
                 {t(
-                  props.page.section === 'chat'
-                    ? 'Chat'
-                    : props.page.section === 'personal'
-                      ? 'Personal'
-                      : 'General'
+                  props.page.openMode === 'external'
+                    ? 'Open external link'
+                    : 'Embed with iframe'
                 )}
               </SelectValue>
             </SelectTrigger>
             <SelectContent align='start' alignItemWithTrigger={false}>
-              <SelectItem value='chat'>{t('Chat')}</SelectItem>
-              <SelectItem value='general'>{t('General')}</SelectItem>
-              <SelectItem value='personal'>{t('Personal')}</SelectItem>
+              <SelectItem value='iframe'>{t('Embed with iframe')}</SelectItem>
+              <SelectItem value='external'>
+                {t('Open external link')}
+              </SelectItem>
             </SelectContent>
           </Select>
         </div>
-      ) : null}
+      </div>
 
       <div className='space-y-2'>
         <Label htmlFor={`${props.page.id}-url`}>{t('Page URL')}</Label>

@@ -57,6 +57,24 @@ describe('custom menu pages', () => {
       pages.map((page) => page.enabled),
       [true, true]
     )
+    assert.deepEqual(
+      pages.map((page) => page.openMode),
+      ['iframe', 'iframe']
+    )
+  })
+
+  test('preserves the external link opening method', () => {
+    const pages = parseCustomMenuPages([
+      {
+        id: 'page_external',
+        name: 'Documentation',
+        url: 'https://example.com/docs',
+        visibility: 'public',
+        openMode: 'external',
+      },
+    ])
+
+    assert.equal(pages[0]?.openMode, 'external')
   })
 
   test('preserves an explicitly disabled menu page', () => {

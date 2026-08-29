@@ -32,7 +32,11 @@ export const Route = createFileRoute('/_authenticated/pages/$pageId')({
     const pages = await context.queryClient.ensureQueryData(
       customMenuPagesQueryOptions(role)
     )
-    if (!pages.some((page) => page.id === params.pageId)) {
+    if (
+      !pages.some(
+        (page) => page.id === params.pageId && page.openMode === 'iframe'
+      )
+    ) {
       throw redirect({ to: '/404' })
     }
   },

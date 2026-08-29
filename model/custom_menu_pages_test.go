@@ -11,6 +11,27 @@ func TestParseCustomMenuPages(t *testing.T) {
 	if len(pages) != 1 || pages[0].Name != "帮助中心" {
 		t.Fatalf("unexpected pages: %#v", pages)
 	}
+	if pages[0].OpenMode != CustomMenuOpenModeIframe {
+		t.Fatalf("legacy page should default to iframe: %#v", pages[0])
+	}
+}
+
+func TestParseCustomMenuPagesPreservesExternalOpenMode(t *testing.T) {
+	raw := `[{"id":"page_external","name":"外部文档","url":"https://example.com/docs","visibility":"public","openMode":"external"}]`
+	pages, err := ParseCustomMenuPages(raw)
+	if err != nil {
+		t.Fatalf("ParseCustomMenuPages() error = %v", err)
+	}
+	if len(pages) != 1 || pages[0].OpenMode != CustomMenuOpenModeExternal {
+		t.Fatalf("external open mode should be preserved: %#v", pages)
+	}
+}
+
+func TestParseCustomMenuPagesRejectsUnknownOpenMode(t *testing.T) {
+	raw := `[{"id":"page_external","name":"外部文档","url":"https://example.com/docs","visibility":"public","openMode":"popup"}]`
+	if _, err := ParseCustomMenuPages(raw); err == nil {
+		t.Fatal("expected unknown open mode to be rejected")
+	}
 }
 
 func TestParseCustomMenuPagesTreatsMissingEnabledAsEnabled(t *testing.T) {

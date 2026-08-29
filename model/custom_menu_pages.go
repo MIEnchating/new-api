@@ -14,6 +14,8 @@ const CustomMenuPagesOptionKey = "CustomMenuPages"
 const (
 	CustomMenuVisibilityPublic = "public"
 	CustomMenuVisibilityAdmin  = "admin"
+	CustomMenuOpenModeIframe   = "iframe"
+	CustomMenuOpenModeExternal = "external"
 	CustomMenuSectionChat      = "chat"
 	CustomMenuSectionGeneral   = "general"
 	CustomMenuSectionPersonal  = "personal"
@@ -29,6 +31,7 @@ type CustomMenuPage struct {
 	Name       string `json:"name"`
 	URL        string `json:"url"`
 	Visibility string `json:"visibility"`
+	OpenMode   string `json:"openMode"`
 	Section    string `json:"section,omitempty"`
 	Icon       string `json:"icon,omitempty"`
 	Enabled    *bool  `json:"enabled,omitempty"`
@@ -58,6 +61,7 @@ func ParseCustomMenuPages(raw string) ([]CustomMenuPage, error) {
 		page.Name = strings.TrimSpace(page.Name)
 		page.URL = strings.TrimSpace(page.URL)
 		page.Visibility = strings.TrimSpace(page.Visibility)
+		page.OpenMode = strings.TrimSpace(page.OpenMode)
 		page.Section = strings.TrimSpace(page.Section)
 		page.Icon = strings.TrimSpace(page.Icon)
 
@@ -78,6 +82,12 @@ func ParseCustomMenuPages(raw string) ([]CustomMenuPage, error) {
 		}
 		if page.Visibility != CustomMenuVisibilityPublic && page.Visibility != CustomMenuVisibilityAdmin {
 			return nil, fmt.Errorf("第 %d 个菜单项可见区域无效", i+1)
+		}
+		if page.OpenMode == "" {
+			page.OpenMode = CustomMenuOpenModeIframe
+		}
+		if page.OpenMode != CustomMenuOpenModeIframe && page.OpenMode != CustomMenuOpenModeExternal {
+			return nil, fmt.Errorf("第 %d 个菜单项打开方式无效", i+1)
 		}
 		if page.Visibility == CustomMenuVisibilityPublic {
 			if page.Section == "" {
