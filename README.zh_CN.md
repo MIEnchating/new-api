@@ -56,7 +56,7 @@
 ## 📝 项目说明
 
 > [!NOTE]
-> 本仓库是基于 [QuantumNous/new-api](https://github.com/QuantumNous/new-api) 的二次开发版本。生产环境使用当前源码构建，构建过程由 Bun 生成前端静态文件、Go 编译后端，最终产物标记为 `xiao99116/new-api:latest`。不要使用上游镜像启动本仓库的生产服务。
+> 本仓库是基于 [QuantumNous/new-api](https://github.com/QuantumNous/new-api) 的二次开发版本。生产环境使用当前源码构建，构建过程由 Bun 生成前端静态文件、Go 编译后端，最终产物标记为 `mienvirtuoso/new-api:latest`。不要使用上游镜像启动本仓库的生产服务。
 >
 > 本仓库的生产部署入口是 `docker-compose.current.yml`：
 >
@@ -76,7 +76,7 @@ scripts/dev-local.sh start
 ```
 
 - Go 后端：`http://127.0.0.1:3000`
-- Bun 前端：`http://154.36.172.108:3002`
+- Bun 前端：`http://127.0.0.1:3002`
 - 状态：`scripts/dev-local.sh status`
 - 重启后端：`scripts/dev-local.sh restart`
 - 停止：`scripts/dev-local.sh stop`

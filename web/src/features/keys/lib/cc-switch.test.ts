@@ -67,7 +67,7 @@ describe('CC Switch provider import', () => {
     assert.equal(
       resolveCCSwitchServerAddress(
         JSON.stringify({ server_address: 'https://www.yunmian.tech/' }),
-        'http://154.36.172.108:3002'
+        'http://dev.example.com:3002'
       ),
       'https://www.yunmian.tech'
     )
