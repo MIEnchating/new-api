@@ -77,14 +77,9 @@ func (a *TaskAdaptor) BuildRequestBody(c *gin.Context, info *relaycommon.RelayIn
 		return nil, fmt.Errorf("unexpected task_request type")
 	}
 
-	instance := VeoInstance{Prompt: req.Prompt}
-	if img := ExtractMultipartImage(c, info); img != nil {
-		instance.Image = img
-	} else if len(req.Images) > 0 {
-		if parsed := ParseImageInput(req.Images[0]); parsed != nil {
-			instance.Image = parsed
-			info.Action = constant.TaskActionGenerate
-		}
+	instance, err := BuildVeoInstance(c, info, req)
+	if err != nil {
+		return nil, err
 	}
 
 	params := &VeoParameters{}

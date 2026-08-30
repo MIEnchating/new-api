@@ -2,11 +2,13 @@ package gemini
 
 import (
 	"encoding/base64"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
 	"github.com/QuantumNous/new-api/constant"
+	taskcommon "github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 )
@@ -49,6 +51,70 @@ func ExtractMultipartImage(c *gin.Context, info *relaycommon.RelayInfo) *VeoImag
 		BytesBase64Encoded: base64.StdEncoding.EncodeToString(fileBytes),
 		MimeType:           mimeType,
 	}
+}
+
+func BuildVeoInstance(c *gin.Context, info *relaycommon.RelayInfo, req relaycommon.TaskSubmitReq) (VeoInstance, error) {
+	instance := VeoInstance{Prompt: req.Prompt}
+	if info.ChannelMeta == nil {
+		info.ChannelMeta = &relaycommon.ChannelMeta{}
+	}
+	if info.TaskRelayInfo == nil {
+		info.TaskRelayInfo = &relaycommon.TaskRelayInfo{}
+	}
+	inputs := VeoInputMetadata{}
+	if err := taskcommon.UnmarshalMetadata(req.Metadata, &inputs); err != nil {
+		return instance, fmt.Errorf("unmarshal Veo input metadata failed: %w", err)
+	}
+	if inputs.LastFrame != "" && inputs.FirstFrame == "" {
+		return instance, fmt.Errorf("Veo lastFrame requires firstFrame")
+	}
+	if len(inputs.ReferenceImages) > 3 {
+		return instance, fmt.Errorf("Veo referenceImages supports at most 3 images")
+	}
+	if (inputs.FirstFrame != "" || inputs.LastFrame != "") && len(inputs.ReferenceImages) > 0 {
+		return instance, fmt.Errorf("Veo frame inputs cannot be combined with referenceImages")
+	}
+	parseRequired := func(value, field string) (*VeoImageInput, error) {
+		parsed := ParseImageInput(value)
+		if parsed == nil {
+			return nil, fmt.Errorf("invalid Veo %s image", field)
+		}
+		return parsed, nil
+	}
+	if inputs.FirstFrame != "" {
+		parsed, err := parseRequired(inputs.FirstFrame, "firstFrame")
+		if err != nil {
+			return instance, err
+		}
+		instance.Image = parsed
+	}
+	if inputs.LastFrame != "" {
+		parsed, err := parseRequired(inputs.LastFrame, "lastFrame")
+		if err != nil {
+			return instance, err
+		}
+		instance.LastFrame = parsed
+	}
+	for _, value := range inputs.ReferenceImages {
+		parsed, err := parseRequired(value, "referenceImages")
+		if err != nil {
+			return instance, err
+		}
+		instance.ReferenceImages = append(instance.ReferenceImages, VeoReferenceImage{Image: *parsed, ReferenceType: "asset"})
+	}
+	if instance.Image != nil || instance.LastFrame != nil || len(instance.ReferenceImages) > 0 {
+		info.Action = constant.TaskActionGenerate
+		return instance, nil
+	}
+	if img := ExtractMultipartImage(c, info); img != nil {
+		instance.Image = img
+	} else if len(req.Images) > 0 {
+		if parsed := ParseImageInput(req.Images[0]); parsed != nil {
+			instance.Image = parsed
+			info.Action = constant.TaskActionGenerate
+		}
+	}
+	return instance, nil
 }
 
 // ParseImageInput parses an image string (data URI or raw base64) into a

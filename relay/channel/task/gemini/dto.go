@@ -7,12 +7,23 @@ type VeoImageInput struct {
 	MimeType           string `json:"mimeType"`
 }
 
+type VeoReferenceImage struct {
+	Image         VeoImageInput `json:"image"`
+	ReferenceType string        `json:"referenceType"`
+}
+
 // VeoInstance represents a single instance in the Veo predictLongRunning request.
 type VeoInstance struct {
-	Prompt string         `json:"prompt"`
-	Image  *VeoImageInput `json:"image,omitempty"`
-	// TODO: support referenceImages (style/asset references, up to 3 images)
-	// TODO: support lastFrame (first+last frame interpolation, Veo 3.1)
+	Prompt          string              `json:"prompt"`
+	Image           *VeoImageInput      `json:"image,omitempty"`
+	LastFrame       *VeoImageInput      `json:"lastFrame,omitempty"`
+	ReferenceImages []VeoReferenceImage `json:"referenceImages,omitempty"`
+}
+
+type VeoInputMetadata struct {
+	FirstFrame      string   `json:"firstFrame,omitempty"`
+	LastFrame       string   `json:"lastFrame,omitempty"`
+	ReferenceImages []string `json:"referenceImages,omitempty"`
 }
 
 // VeoParameters represents the parameters block for Veo predictLongRunning.
