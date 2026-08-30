@@ -44,6 +44,7 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { isValidTaskPublicAddress } from './task-public-address'
 
 const trustedSiteOriginsSchema = z.string().superRefine((value, ctx) => {
   const origins = value.split(/[\n,]/).map((origin) => origin.trim())
@@ -77,6 +78,7 @@ const _systemInfoSchema = z.object({
     docs_link: z.string().optional(),
   }),
   TrustedSiteOrigins: trustedSiteOriginsSchema.optional(),
+  TaskPublicAddress: z.string().refine(isValidTaskPublicAddress),
   Logo: z.string().url().optional().or(z.literal('')),
   Footer: z.string().optional(),
   About: z.string().optional(),
@@ -109,6 +111,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
       docs_link: normalizeValue(defaultValues.general_setting?.docs_link),
     },
     TrustedSiteOrigins: normalizeValue(defaultValues.TrustedSiteOrigins),
+    TaskPublicAddress: normalizeValue(defaultValues.TaskPublicAddress),
     Logo: normalizeValue(defaultValues.Logo),
     Footer: normalizeValue(defaultValues.Footer),
     About: normalizeValue(defaultValues.About),
@@ -128,6 +131,12 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
       docs_link: z.string().optional(),
     }),
     TrustedSiteOrigins: trustedSiteOriginsSchema.optional(),
+    TaskPublicAddress: z.string().refine(isValidTaskPublicAddress, {
+      error: () =>
+        t(
+          'Enter an absolute HTTP(S) URL without credentials, query parameters, or fragments'
+        ),
+    }),
     Logo: z.string().url().optional().or(z.literal('')),
     Footer: z.string().optional(),
     About: z.string().optional(),
@@ -149,7 +158,7 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
       onSubmit: async (_data, changedFields) => {
         for (const [key, value] of Object.entries(changedFields)) {
           let v = normalizeValue(value)
-          if (key === 'ServerAddress') {
+          if (key === 'ServerAddress' || key === 'TaskPublicAddress') {
             v = v.replace(/\/+$/, '')
           }
           if (key === 'TrustedSiteOrigins') {
@@ -232,6 +241,28 @@ export function SystemInfoSection({ defaultValues }: SystemInfoSectionProps) {
                     </FormControl>
                     <FormDescription>
                       {t('Link to your documentation site')}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name='TaskPublicAddress'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Async Task Public Address')}</FormLabel>
+                    <FormControl>
+                      <Input
+                        placeholder='https://media.example.com/tasks'
+                        {...field}
+                      />
+                    </FormControl>
+                    <FormDescription>
+                      {t(
+                        'Public base URL for async task media. Supports a dedicated media domain, port, or Nginx path prefix; falls back to Server Address when empty.'
+                      )}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>

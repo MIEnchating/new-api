@@ -47,6 +47,7 @@ const SITE_SECTIONS = [
             docs_link: settings['general_setting.docs_link'],
           },
           TrustedSiteOrigins: settings.TrustedSiteOrigins,
+          TaskPublicAddress: settings.TaskPublicAddress,
           legal: {
             user_agreement: settings['legal.user_agreement'],
             privacy_policy: settings['legal.privacy_policy'],

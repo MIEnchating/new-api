@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -333,16 +334,14 @@ func getSatisfiedChannelAffinityCandidate(
 	group string,
 	channelID int,
 ) (*model.Channel, error) {
-	channel, err := model.GetRandomSatisfiedChannelWithFilter(
-		group,
-		param.ModelName,
-		0,
-		param.RequestPath,
-		func(candidate *model.Channel) bool {
-			return candidate.Id == channelID &&
-				candidate.Status == common.ChannelStatusEnabled
-		},
-	)
+	filters := append([]dto.ChannelFilter(nil), GetChannelConstraints(param.Ctx).Filters...)
+	snapshot, err := model.LoadSatisfiedChannelSelectionSnapshotWithFilters(group, param.ModelName, filters)
+	if err != nil {
+		return nil, err
+	}
+	channel, err := snapshot.Select(0, func(candidate *model.Channel) bool {
+		return candidate.Id == channelID && candidate.Status == common.ChannelStatusEnabled
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +391,7 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 	affinityChannelID, selectAffinity := resolvePostGroupChannelAffinity(param, group)
 	if !IsChannelRouteEnabled() {
 		if common.MemoryCacheEnabled {
-			snapshot, err := model.LoadSatisfiedChannelSelectionSnapshot(group, param.ModelName, param.RequestPath)
+			snapshot, err := model.LoadSatisfiedChannelSelectionSnapshotWithFilters(group, param.ModelName, GetChannelConstraints(param.Ctx).Filters)
 			if err != nil {
 				return nil, err
 			}
@@ -428,7 +427,7 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 				return channel, nil
 			}
 		}
-		channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, retry, param.RequestPath)
+		channel, err := model.GetRandomSatisfiedChannelWithConstraints(group, param.ModelName, retry, GetChannelConstraints(param.Ctx).Filters)
 		if err == nil && channel != nil {
 			TrackChannelExecutionSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry)
 			markPostGroupChannelSelected(param, channel)
@@ -437,7 +436,7 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 	}
 
 	now := common.GetTimestamp()
-	snapshot, snapshotErr := model.LoadSatisfiedChannelSelectionSnapshot(group, param.ModelName, param.RequestPath)
+	snapshot, snapshotErr := model.LoadSatisfiedChannelSelectionSnapshotWithFilters(group, param.ModelName, GetChannelConstraints(param.Ctx).Filters)
 	if snapshotErr != nil {
 		return nil, snapshotErr
 	}

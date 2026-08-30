@@ -116,6 +116,7 @@ export type SiteSettings = {
   HomePageContent: string
   ServerAddress: string
   TrustedSiteOrigins: string
+  TaskPublicAddress: string
   'legal.user_agreement': string
   'legal.privacy_policy': string
   HeaderNavModules: string

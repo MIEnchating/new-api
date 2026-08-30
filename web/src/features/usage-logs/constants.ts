@@ -188,6 +188,17 @@ export const TASK_STATUS = {
   QUEUED: 'QUEUED', // 排队中
   UNKNOWN: 'UNKNOWN', // 未知
 } as const
+/**
+ * Task platforms
+ */
+export const TASK_PLATFORMS = {
+  SUNO: 'suno',
+  SUNOAPI: 'sunoapi',
+  KLING: 'kling',
+  RUNWAY: 'runway',
+  LUMA: 'luma',
+  VIGGLE: 'viggle',
+} as const
 // ============================================================================
 // Status Mappings
 // ============================================================================
@@ -290,6 +301,17 @@ export const TASK_STATUS_MAPPINGS: Record<string, StatusMapping> = {
   [TASK_STATUS.FAILURE]: { label: 'Failed', variant: 'red' },
   [TASK_STATUS.QUEUED]: { label: 'Queued', variant: 'orange' },
   [TASK_STATUS.UNKNOWN]: { label: 'Unknown', variant: 'neutral' },
+}
+/**
+ * Task platform mappings
+ */
+export const TASK_PLATFORM_MAPPINGS: Record<string, StatusMapping> = {
+  [TASK_PLATFORMS.SUNO]: { label: 'suno', variant: 'green' },
+  [TASK_PLATFORMS.SUNOAPI]: { label: 'sunoapi', variant: 'green' },
+  [TASK_PLATFORMS.KLING]: { label: 'kling', variant: 'blue' },
+  [TASK_PLATFORMS.RUNWAY]: { label: 'runway', variant: 'violet' },
+  [TASK_PLATFORMS.LUMA]: { label: 'luma', variant: 'orange' },
+  [TASK_PLATFORMS.VIGGLE]: { label: 'viggle', variant: 'pink' },
 }
 // ============================================================================
 // Log Category Labels

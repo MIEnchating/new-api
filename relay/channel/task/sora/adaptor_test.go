@@ -692,13 +692,15 @@ func TestSoraAdaptorUsesAgnesTaskContract(t *testing.T) {
 }
 
 func TestSoraAdaptorAcceptsAgnesVideoIDOnSubmit(t *testing.T) {
-	response := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(response)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{PublicTaskID: "task_public"}}
 	resp := &http.Response{Body: io.NopCloser(bytes.NewBufferString(`{"video_id":"video_upstream","status":"queued"}`))}
 
-	taskID, _, taskErr := (&TaskAdaptor{}).DoResponse(c, resp, info)
+	parsed, taskErr := (&TaskAdaptor{}).ParseResponse(c, resp, info)
 	require.Nil(t, taskErr)
-	assert.Equal(t, "video_upstream", taskID)
-	assert.Contains(t, response.Body.String(), `"video_id":"task_public"`)
+	require.NotNil(t, parsed)
+	assert.Equal(t, "video_upstream", parsed.UpstreamTaskID)
+	clientResponse, ok := parsed.ClientResponse.(responseTask)
+	require.True(t, ok)
+	assert.Equal(t, "task_public", clientResponse.VideoID)
 }

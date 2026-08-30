@@ -26,6 +26,7 @@ export const defaultSiteSettings: SiteSettings = {
   About: '',
   HomePageContent: '',
   ServerAddress: '',
+  TaskPublicAddress: '',
   TrustedSiteOrigins: '',
   'legal.user_agreement': '',
   'legal.privacy_policy': '',

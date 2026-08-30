@@ -12,8 +12,9 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
-	"github.com/QuantumNous/new-api/relaykit/dto"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 )
 
@@ -21,16 +22,17 @@ var group2model2channels map[string]map[string][]int // enabled channel
 var channelsIDM map[int]*Channel                     // all channels include disabled
 // channel2advancedCustomConfig caches parsed Advanced Custom (type 58) configs so
 // path-aware selection avoids re-parsing JSON per request. Refreshed on full sync.
-var channel2advancedCustomConfig map[int]*dto.AdvancedCustomConfig
+var channel2advancedCustomConfig map[int]*kitdto.AdvancedCustomConfig
 var channelSyncLock sync.RWMutex
 
 func InitChannelCache() {
 	if !common.MemoryCacheEnabled {
 		InvalidatePricingCache()
+		rebuildTaskAliasView()
 		return
 	}
 	newChannelId2channel := make(map[int]*Channel)
-	newChannel2advancedCustomConfig := make(map[int]*dto.AdvancedCustomConfig)
+	newChannel2advancedCustomConfig := make(map[int]*kitdto.AdvancedCustomConfig)
 	var channels []*Channel
 	DB.Find(&channels)
 	for _, channel := range channels {
@@ -100,6 +102,7 @@ func InitChannelCache() {
 	// loadPricingAdvancedCustomConfigs. channelSyncLock MUST be released before
 	// invalidating the pricing cache, otherwise the reversed order deadlocks.
 	InvalidatePricingCache()
+	rebuildTaskAliasView()
 	common.SysLog("channels synced from database")
 }
 
@@ -180,17 +183,23 @@ func (snapshot *ChannelSelectionSnapshot) Select(retry int, filter ChannelCandid
 // existing exact-model behavior; the cache path retains its normalized-model
 // fallback.
 func LoadSatisfiedChannelSelectionSnapshot(group string, modelName string, requestPath string) (*ChannelSelectionSnapshot, error) {
+	return LoadSatisfiedChannelSelectionSnapshotWithFilters(group, modelName, []dto.ChannelFilter{{
+		Kind: dto.FilterRequestPath, RequestPath: requestPath,
+	}})
+}
+
+func LoadSatisfiedChannelSelectionSnapshotWithFilters(group string, modelName string, filters []dto.ChannelFilter) (*ChannelSelectionSnapshot, error) {
 	if !common.MemoryCacheEnabled {
-		return loadSatisfiedChannelSelectionSnapshotFromDB(group, modelName, requestPath)
+		return loadSatisfiedChannelSelectionSnapshotFromDB(group, modelName, filters)
 	}
 
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
 
-	channelIDs := filterChannelsByRequestPathAndModel(group2model2channels[group][modelName], requestPath, modelName)
+	channelIDs, _ := filterCandidateIDs(group2model2channels[group][modelName], modelName, filters)
 	if len(channelIDs) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
-		channelIDs = filterChannelsByRequestPathAndModel(group2model2channels[group][normalizedModel], requestPath, modelName)
+		channelIDs, _ = filterCandidateIDs(group2model2channels[group][normalizedModel], modelName, filters)
 	}
 
 	channels := make([]*Channel, 0, len(channelIDs))
@@ -214,10 +223,11 @@ func ListSatisfiedChannelCandidates(group string, modelName string, requestPath 
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
 
-	channelIDs := filterChannelsByRequestPathAndModel(group2model2channels[group][modelName], requestPath, modelName)
+	filters := []dto.ChannelFilter{{Kind: dto.FilterRequestPath, RequestPath: requestPath}}
+	channelIDs, _ := filterCandidateIDs(group2model2channels[group][modelName], modelName, filters)
 	if len(channelIDs) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
-		channelIDs = filterChannelsByRequestPathAndModel(group2model2channels[group][normalizedModel], requestPath, modelName)
+		channelIDs, _ = filterCandidateIDs(group2model2channels[group][normalizedModel], modelName, filters)
 	}
 
 	candidates := make([]ChannelSelectionCandidate, 0, len(channelIDs))
@@ -314,6 +324,17 @@ func GetRandomSatisfiedChannelWithFilter(group string, model string, retry int, 
 	return snapshot.Select(retry, filter)
 }
 
+func GetRandomSatisfiedChannelWithConstraints(group string, model string, retry int, filters []dto.ChannelFilter) (*Channel, error) {
+	if !common.MemoryCacheEnabled {
+		return GetChannelWithConstraints(group, model, retry, filters)
+	}
+	snapshot, err := LoadSatisfiedChannelSelectionSnapshotWithFilters(group, model, filters)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot.Select(retry, nil)
+}
+
 func selectRandomChannelByPriority(channels []*Channel, retry int) (*Channel, error) {
 	if len(channels) == 0 {
 		return nil, nil
@@ -379,34 +400,6 @@ func selectRandomChannelByPriority(channels []*Channel, retry int) (*Channel, er
 	}
 	// return null if no channel is not found
 	return nil, errors.New("channel not found")
-}
-
-// filterChannelsByRequestPathAndModel restricts candidates by request path and
-// model. Only Advanced Custom (type 58) channels are path-checked: they are kept
-// only when one of their configured routes matches requestPath and model. All
-// other channel types always pass. When requestPath is empty, filtering is skipped.
-// Caller must hold channelSyncLock (read lock). The cached slice is never mutated.
-func filterChannelsByRequestPathAndModel(channels []int, requestPath string, model string) []int {
-	if requestPath == "" || len(channels) == 0 {
-		return channels
-	}
-	filtered := make([]int, 0, len(channels))
-	for _, channelId := range channels {
-		channel, ok := channelsIDM[channelId]
-		if !ok {
-			// keep it so the downstream consistency error is raised as before
-			filtered = append(filtered, channelId)
-			continue
-		}
-		if channel.Type != constant.ChannelTypeAdvancedCustom {
-			filtered = append(filtered, channelId)
-			continue
-		}
-		if config := channel2advancedCustomConfig[channelId]; config != nil && config.SupportsPathForModel(requestPath, model) {
-			filtered = append(filtered, channelId)
-		}
-	}
-	return filtered
 }
 
 func CacheGetChannel(id int) (*Channel, error) {
@@ -484,7 +477,7 @@ func CacheUpdateChannel(channel *Channel) {
 	}
 	channelsIDM[channel.Id] = channel
 	if channel2advancedCustomConfig == nil {
-		channel2advancedCustomConfig = make(map[int]*dto.AdvancedCustomConfig)
+		channel2advancedCustomConfig = make(map[int]*kitdto.AdvancedCustomConfig)
 	}
 	delete(channel2advancedCustomConfig, channel.Id)
 	if channel.Type == constant.ChannelTypeAdvancedCustom {

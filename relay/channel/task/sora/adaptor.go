@@ -22,7 +22,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/pkg/errors"
-	"github.com/tidwall/sjson"
 )
 
 // ============================
@@ -422,11 +421,10 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 }
 
 // DoResponse handles upstream response, returns taskID etc.
-func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *dto.TaskError) {
+func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*channel.TaskSubmitResponse, *dto.TaskError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		taskErr = service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
-		return
+		return nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
 	}
 	_ = resp.Body.Close()
 
@@ -434,27 +432,30 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	if strings.HasPrefix(action, "kie-video:") {
 		upstreamID, status, err := parseKIEVideoSubmitResponse(responseBody)
 		if err != nil {
-			taskErr = service.TaskErrorWrapper(err, "invalid_kie_video_response", resp.StatusCode)
-			return
+			return nil, service.TaskErrorWrapper(err, "invalid_kie_video_response", resp.StatusCode)
 		}
-		c.JSON(http.StatusOK, map[string]any{"id": info.PublicTaskID, "task_id": info.PublicTaskID, "object": "video", "status": status})
-		return upstreamID, responseBody, nil
+		return &channel.TaskSubmitResponse{
+			UpstreamTaskID: upstreamID,
+			TaskData:       responseBody,
+			ClientResponse: map[string]any{"id": info.PublicTaskID, "task_id": info.PublicTaskID, "object": "video", "status": status},
+		}, nil
 	}
 	if strings.HasPrefix(action, "apimart-video:") {
 		upstreamID, status, err := parseAPIMartVideoSubmitResponse(responseBody)
 		if err != nil {
-			taskErr = service.TaskErrorWrapper(err, "invalid_apimart_video_response", resp.StatusCode)
-			return
+			return nil, service.TaskErrorWrapper(err, "invalid_apimart_video_response", resp.StatusCode)
 		}
-		c.JSON(http.StatusOK, map[string]any{"id": info.PublicTaskID, "task_id": info.PublicTaskID, "object": "video", "status": status})
-		return upstreamID, responseBody, nil
+		return &channel.TaskSubmitResponse{
+			UpstreamTaskID: upstreamID,
+			TaskData:       responseBody,
+			ClientResponse: map[string]any{"id": info.PublicTaskID, "task_id": info.PublicTaskID, "object": "video", "status": status},
+		}, nil
 	}
 
 	// Parse Sora-compatible response.
 	var dResp responseTask
 	if err := common.Unmarshal(responseBody, &dResp); err != nil {
-		taskErr = service.TaskErrorWrapper(errors.Wrapf(err, "body: %s", responseBody), "unmarshal_response_body_failed", http.StatusInternalServerError)
-		return
+		return nil, service.TaskErrorWrapper(errors.Wrapf(err, "body: %s", responseBody), "unmarshal_response_body_failed", http.StatusInternalServerError)
 	}
 
 	upstreamID := dResp.ID
@@ -465,8 +466,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 		upstreamID = dResp.VideoID
 	}
 	if upstreamID == "" {
-		taskErr = service.TaskErrorWrapper(fmt.Errorf("task_id is empty"), "invalid_response", http.StatusInternalServerError)
-		return
+		return nil, service.TaskErrorWrapper(fmt.Errorf("task_id is empty"), "invalid_response", http.StatusInternalServerError)
 	}
 
 	// 使用公开 task_xxxx ID 返回给客户端
@@ -475,8 +475,11 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	if dResp.VideoID != "" {
 		dResp.VideoID = info.PublicTaskID
 	}
-	c.JSON(http.StatusOK, dResp)
-	return upstreamID, responseBody, nil
+	return &channel.TaskSubmitResponse{
+		UpstreamTaskID: upstreamID,
+		TaskData:       responseBody,
+		ClientResponse: dResp,
+	}, nil
 }
 
 // FetchTask fetch task status
@@ -582,6 +585,13 @@ func taskRelayAction(info *relaycommon.RelayInfo) string {
 func isAPIMartVideoUpstream(baseURL string) bool {
 	base := strings.ToLower(strings.TrimSpace(baseURL))
 	return strings.Contains(base, "apimart")
+}
+
+// UsesProviderCompatibility reports whether a legacy Sora task request needs
+// the multi-provider KIE/APIMart/Agnes contract instead of the standard plugin.
+func UsesProviderCompatibility(baseURL, modelName string) bool {
+	model := strings.ToLower(strings.TrimSpace(modelName))
+	return isKIEVideoUpstream(baseURL, modelName) || isAPIMartVideoUpstream(baseURL) || strings.Contains(model, "agnes-video")
 }
 
 // The public compatibility envelope exposes resolution for providers such as
@@ -899,10 +909,5 @@ func firstNonEmptyVideoURL(values ...string) string {
 }
 
 func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
-	data := task.Data
-	var err error
-	if data, err = sjson.SetBytes(data, "id", task.TaskID); err != nil {
-		return nil, errors.Wrap(err, "set id failed")
-	}
-	return data, nil
+	return common.Marshal(task.ToOpenAIVideo())
 }

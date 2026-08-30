@@ -5,4 +5,4 @@ var ModelList = []string{
 	"sora-2-pro",
 }
 
-var ChannelName = "sora"
+var ChannelName = "sora-compat"

@@ -76,7 +76,10 @@ func LogInfo(ctx context.Context, msg string) {
 	logHelper(ctx, loggerINFO, msg)
 }
 
-func LogWarn(ctx context.Context, msg string) {
+func LogWarn(ctx context.Context, msg string, args ...any) {
+	if len(args) > 0 {
+		msg = fmt.Sprintf(msg, args...)
+	}
 	logHelper(ctx, loggerWarn, msg)
 }
 
@@ -97,6 +100,8 @@ func logHelper(ctx context.Context, level string, msg string) {
 	var id any = "SYSTEM"
 	if ctx != nil {
 		if requestID := ctx.Value(constant.ContextKeyRequestId); requestID != nil {
+			id = requestID
+		} else if requestID := ctx.Value(common.RequestIdKey); requestID != nil {
 			id = requestID
 		}
 	}
