@@ -8,9 +8,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -38,6 +40,8 @@ const (
 
 	LotteryChanceGrantRuleRecharge = "recharge"
 	LotteryChanceGrantRuleEvent    = "event"
+	LotteryGrantTypeManual         = "manual"
+	LotteryGrantSourceManual       = "Manual grant"
 
 	LotteryRechargeGrantDaily      = "daily"
 	LotteryRechargeGrantCumulative = "cumulative"
@@ -47,6 +51,9 @@ const (
 var ErrNoLotteryChances = errors.New("no lottery chances available")
 var ErrLotteryDrawNotReversible = errors.New("lottery draw cannot be reversed")
 var ErrLotteryDrawAlreadyRevoked = errors.New("lottery reward already revoked")
+var ErrInvalidLotteryManualGrant = errors.New("invalid manual lottery grant")
+var ErrLotteryGrantTargetNotFound = errors.New("lottery grant target user not found")
+var ErrLotteryManualGrantConflict = errors.New("manual lottery grant request conflicts with existing grant")
 
 type LotteryCampaign struct {
 	Id        int   `json:"id" gorm:"primaryKey"`
@@ -69,14 +76,17 @@ type LotteryDailyActivity struct {
 }
 
 type LotteryChanceGrant struct {
-	Id        int64  `json:"id"`
-	EventKey  string `json:"-" gorm:"type:varchar(128);uniqueIndex"`
-	UserId    int    `json:"-" gorm:"index:idx_lottery_grant_user_time,priority:1"`
-	Type      string `json:"type" gorm:"type:varchar(32);index"`
-	Chances   int    `json:"chances"`
-	Consumed  int    `json:"consumed"`
-	ExpiresAt int64  `json:"expires_at,omitempty" gorm:"bigint;index"`
-	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_lottery_grant_user_time,priority:2"`
+	Id             int64  `json:"id"`
+	EventKey       string `json:"-" gorm:"type:varchar(128);uniqueIndex"`
+	UserId         int    `json:"-" gorm:"index:idx_lottery_grant_user_time,priority:1"`
+	Type           string `json:"type" gorm:"type:varchar(32);index"`
+	SourceName     string `json:"source_name,omitempty" gorm:"type:varchar(80)"`
+	Chances        int    `json:"chances"`
+	Consumed       int    `json:"consumed"`
+	ExpiresAt      int64  `json:"expires_at,omitempty" gorm:"bigint;index"`
+	CreatedAt      int64  `json:"created_at" gorm:"bigint;index:idx_lottery_grant_user_time,priority:2"`
+	OperatorUserId int    `json:"-" gorm:"index"`
+	Detail         string `json:"-" gorm:"type:varchar(255)"`
 }
 
 type LotteryDraw struct {
@@ -184,6 +194,34 @@ type LotteryUserDrawPage struct {
 type LotteryDrawFilter struct {
 	UserKeyword string
 	Result      string
+}
+
+type LotteryGrantAdminItem struct {
+	Id             int64  `json:"id"`
+	UserId         int    `json:"user_id"`
+	Username       string `json:"username"`
+	Type           string `json:"type"`
+	SourceName     string `json:"source_name"`
+	EventReference string `json:"event_reference"`
+	Chances        int    `json:"chances"`
+	Consumed       int    `json:"consumed"`
+	ExpiresAt      int64  `json:"expires_at"`
+	CreatedAt      int64  `json:"created_at"`
+	OperatorUserId int    `json:"operator_user_id"`
+	Detail         string `json:"detail"`
+}
+
+type LotteryGrantPage struct {
+	Items    []LotteryGrantAdminItem `json:"items"`
+	Total    int64                   `json:"total"`
+	Page     int                     `json:"page"`
+	PageSize int                     `json:"page_size"`
+}
+
+type LotteryGrantFilter struct {
+	UserKeyword string
+	Source      string
+	Status      string
 }
 
 func lotteryPrizePool() []LotteryPrize {
@@ -684,7 +722,8 @@ func syncLotteryGrants(userId int, now time.Time) error {
 				if err := createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
 					EventKey: fmt.Sprintf("campaign:%s:user:%d", rule.Id, userId),
 					UserId:   userId, Type: "campaign_" + rule.Id,
-					Chances: rule.Chances, ExpiresAt: lotteryGrantExpiry(rule), CreatedAt: nowUnix,
+					SourceName: rule.Name, Chances: rule.Chances,
+					ExpiresAt: lotteryGrantExpiry(rule), CreatedAt: nowUnix,
 				}); err != nil {
 					return err
 				}
@@ -746,7 +785,8 @@ func syncLotteryRechargeGrants(tx *gorm.DB, userId int, rules []LotteryChanceGra
 			if when <= 0 {
 				when = topUp.CreateTime
 			}
-			if topUp.Money < rule.Threshold || !lotteryRuleActive(rule, time.Unix(when, 0)) {
+			if lotteryTopUpRechargeAmount(topUp).LessThan(decimal.NewFromFloat(rule.Threshold)) ||
+				!lotteryRuleActive(rule, time.Unix(when, 0)) {
 				continue
 			}
 			if err := createLotteryRechargeGrant(tx, userId, rule, fmt.Sprintf("recharge:%s:topup:%d", rule.Id, topUp.Id), createdAt); err != nil {
@@ -757,10 +797,23 @@ func syncLotteryRechargeGrants(tx *gorm.DB, userId int, rules []LotteryChanceGra
 	return nil
 }
 
+func lotteryTopUpRechargeAmount(topUp TopUp) decimal.Decimal {
+	switch topUp.PaymentProvider {
+	case PaymentProviderCreem:
+		return decimal.NewFromInt(topUp.Amount).
+			Div(decimal.NewFromFloat(common.QuotaPerUnit))
+	case PaymentProviderStripe:
+		return decimal.NewFromFloat(topUp.Money)
+	default:
+		return decimal.NewFromInt(topUp.Amount)
+	}
+}
+
 func createLotteryRechargeGrant(tx *gorm.DB, userId int, rule LotteryChanceGrantRule, eventKey string, createdAt int64) error {
 	return createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
 		EventKey: eventKey, UserId: userId, Type: "recharge_" + rule.Id,
-		Chances: rule.Chances, ExpiresAt: rule.EndAt, CreatedAt: createdAt,
+		SourceName: rule.Name, Chances: rule.Chances,
+		ExpiresAt: rule.EndAt, CreatedAt: createdAt,
 	})
 }
 
@@ -774,7 +827,8 @@ func syncCumulativeRechargeGrant(tx *gorm.DB, userId int, rule LotteryChanceGran
 	if existing > 0 {
 		return nil
 	}
-	var accumulated float64
+	accumulated := decimal.Zero
+	threshold := decimal.NewFromFloat(rule.Threshold)
 	for _, topUp := range topUps {
 		when := topUp.CompleteTime
 		if when <= 0 {
@@ -783,8 +837,8 @@ func syncCumulativeRechargeGrant(tx *gorm.DB, userId int, rule LotteryChanceGran
 		if !lotteryRuleActive(rule, time.Unix(when, 0)) {
 			continue
 		}
-		accumulated += topUp.Money
-		if accumulated >= rule.Threshold {
+		accumulated = accumulated.Add(lotteryTopUpRechargeAmount(topUp))
+		if accumulated.GreaterThanOrEqual(threshold) {
 			return createLotteryRechargeGrant(tx, userId, rule,
 				fmt.Sprintf("recharge:%s:topup:%d", rule.Id, topUp.Id), createdAt)
 		}
@@ -793,7 +847,7 @@ func syncCumulativeRechargeGrant(tx *gorm.DB, userId int, rule LotteryChanceGran
 }
 
 func syncDailyRechargeGrants(tx *gorm.DB, userId int, rule LotteryChanceGrantRule, topUps []TopUp, createdAt int64) error {
-	totals := make(map[string]float64)
+	totals := make(map[string]decimal.Decimal)
 	for _, topUp := range topUps {
 		when := topUp.CompleteTime
 		if when <= 0 {
@@ -804,10 +858,11 @@ func syncDailyRechargeGrants(tx *gorm.DB, userId int, rule LotteryChanceGrantRul
 			continue
 		}
 		day := moment.In(time.Local).Format("2006-01-02")
-		totals[day] += topUp.Money
+		totals[day] = totals[day].Add(lotteryTopUpRechargeAmount(topUp))
 	}
+	threshold := decimal.NewFromFloat(rule.Threshold)
 	for day, total := range totals {
-		if total < rule.Threshold {
+		if total.LessThan(threshold) {
 			continue
 		}
 		if err := createLotteryRechargeGrant(tx, userId, rule,
@@ -1192,6 +1247,171 @@ func GetAllLotteryDraws(page int, pageSize int, filter LotteryDrawFilter) (Lotte
 		return LotteryDrawPage{}, err
 	}
 	return LotteryDrawPage{
+		Items: items, Total: total, Page: page, PageSize: pageSize,
+	}, nil
+}
+
+func CreateManualLotteryGrant(userKeyword string, chances int, reason string, expiresAt int64, operatorUserId int, requestId string) (LotteryGrantAdminItem, error) {
+	userKeyword = strings.TrimSpace(userKeyword)
+	reason = strings.TrimSpace(reason)
+	requestId = strings.TrimSpace(requestId)
+	reasonLength := utf8.RuneCountInString(reason)
+	if userKeyword == "" || chances < 1 || chances > 1000 || reasonLength < 2 || reasonLength > 200 || operatorUserId <= 0 || len(requestId) < 8 || len(requestId) > 64 {
+		return LotteryGrantAdminItem{}, ErrInvalidLotteryManualGrant
+	}
+	for _, character := range requestId {
+		if (character < 'a' || character > 'z') && (character < 'A' || character > 'Z') && (character < '0' || character > '9') && character != '-' && character != '_' {
+			return LotteryGrantAdminItem{}, ErrInvalidLotteryManualGrant
+		}
+	}
+	if expiresAt > 0 && expiresAt <= common.GetTimestamp() {
+		return LotteryGrantAdminItem{}, ErrInvalidLotteryManualGrant
+	}
+
+	var target User
+	if userId, err := strconv.Atoi(userKeyword); err == nil && userId > 0 {
+		if err := DB.Select("id", "username").First(&target, "id = ?", userId).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return LotteryGrantAdminItem{}, err
+			}
+			if err := DB.Select("id", "username").Where("LOWER(username) = ?", strings.ToLower(userKeyword)).First(&target).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return LotteryGrantAdminItem{}, ErrLotteryGrantTargetNotFound
+				}
+				return LotteryGrantAdminItem{}, err
+			}
+		}
+	} else {
+		if err := DB.Select("id", "username").Where("LOWER(username) = ?", strings.ToLower(userKeyword)).First(&target).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return LotteryGrantAdminItem{}, ErrLotteryGrantTargetNotFound
+			}
+			return LotteryGrantAdminItem{}, err
+		}
+	}
+
+	eventKey := fmt.Sprintf("manual:%d:%s", operatorUserId, requestId)
+	created := false
+	var grant LotteryChanceGrant
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		candidate := LotteryChanceGrant{
+			EventKey: eventKey, UserId: target.Id, Type: LotteryGrantTypeManual,
+			SourceName: LotteryGrantSourceManual, Chances: chances, ExpiresAt: expiresAt,
+			CreatedAt: common.GetTimestamp(), OperatorUserId: operatorUserId, Detail: reason,
+		}
+		result := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "event_key"}},
+			DoNothing: true,
+		}).Create(&candidate)
+		if result.Error != nil {
+			return result.Error
+		}
+		created = result.RowsAffected == 1
+		if err := tx.Where("event_key = ?", eventKey).First(&grant).Error; err != nil {
+			return err
+		}
+		if grant.UserId != target.Id || grant.Chances != chances || grant.ExpiresAt != expiresAt || grant.Detail != reason || grant.OperatorUserId != operatorUserId {
+			return ErrLotteryManualGrantConflict
+		}
+		return nil
+	})
+	if err != nil {
+		return LotteryGrantAdminItem{}, err
+	}
+	if created {
+		RecordLogWithAdminInfo(target.Id, LogTypeSystem, fmt.Sprintf("管理员手动赠送 %d 次抽奖机会，原因：%s", chances, reason), map[string]interface{}{
+			"operator_user_id": operatorUserId,
+			"lottery_grant_id": grant.Id,
+		})
+	}
+	return LotteryGrantAdminItem{
+		Id: grant.Id, UserId: target.Id, Username: target.Username,
+		Type: grant.Type, SourceName: grant.SourceName, EventReference: grant.EventKey,
+		Chances: grant.Chances, Consumed: grant.Consumed, ExpiresAt: grant.ExpiresAt,
+		CreatedAt: grant.CreatedAt, OperatorUserId: grant.OperatorUserId, Detail: grant.Detail,
+	}, nil
+}
+
+func GetAllLotteryGrants(page int, pageSize int, filter LotteryGrantFilter) (LotteryGrantPage, error) {
+	page, pageSize = normalizeLotteryDrawPage(page, pageSize)
+	validSource := map[string]bool{"": true, "recharge": true, "event": true, "weekly": true, "streak": true, "manual": true}
+	validStatus := map[string]bool{"": true, "available": true, "used": true, "expired": true}
+	if !validSource[filter.Source] || !validStatus[filter.Status] {
+		return LotteryGrantPage{}, errors.New("invalid lottery grant filter")
+	}
+
+	query := DB.Table("lottery_chance_grants AS grants").
+		Joins("LEFT JOIN users ON users.id = grants.user_id")
+	keyword := strings.TrimSpace(filter.UserKeyword)
+	if keyword != "" {
+		if userId, err := strconv.Atoi(keyword); err == nil && userId > 0 {
+			query = query.Where("grants.user_id = ?", userId)
+		} else {
+			pattern, err := sanitizeLikePattern("%" + strings.ToLower(keyword) + "%")
+			if err != nil {
+				return LotteryGrantPage{}, err
+			}
+			query = query.Where(
+				"(LOWER(COALESCE(users.username, '')) LIKE ? ESCAPE '!' OR LOWER(COALESCE(users.display_name, '')) LIKE ? ESCAPE '!')",
+				pattern,
+				pattern,
+			)
+		}
+	}
+	switch filter.Source {
+	case "recharge":
+		query = query.Where("grants.type LIKE ?", "recharge_%")
+	case "event":
+		query = query.Where("grants.type LIKE ?", "campaign_%")
+	case "weekly":
+		query = query.Where("grants.type = ?", LotteryGrantTypeWeeklySpend)
+	case "streak":
+		query = query.Where("grants.type LIKE ?", "streak_%")
+	case "manual":
+		query = query.Where("grants.type = ?", LotteryGrantTypeManual)
+	}
+	now := common.GetTimestamp()
+	switch filter.Status {
+	case "available":
+		query = query.Where("grants.consumed < grants.chances AND (grants.expires_at = 0 OR grants.expires_at > ?)", now)
+	case "used":
+		query = query.Where("grants.consumed >= grants.chances AND (grants.expires_at = 0 OR grants.expires_at > ?)", now)
+	case "expired":
+		query = query.Where("grants.expires_at > 0 AND grants.expires_at <= ?", now)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return LotteryGrantPage{}, err
+	}
+	items := make([]LotteryGrantAdminItem, 0, pageSize)
+	if err := query.
+		Select("grants.id, grants.user_id, COALESCE(users.username, '') AS username, grants.type, grants.source_name, grants.event_key AS event_reference, grants.chances, grants.consumed, grants.expires_at, grants.created_at, grants.operator_user_id, grants.detail").
+		Order("grants.created_at DESC, grants.id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Scan(&items).Error; err != nil {
+		return LotteryGrantPage{}, err
+	}
+
+	ruleNames := make(map[string]string)
+	for _, rule := range GetLotteryConfig().GrantRules {
+		ruleNames[rule.Id] = rule.Name
+	}
+	for index := range items {
+		grantType := items[index].Type
+		switch {
+		case strings.HasPrefix(grantType, "recharge_"):
+			if items[index].SourceName == "" {
+				items[index].SourceName = ruleNames[strings.TrimPrefix(grantType, "recharge_")]
+			}
+		case strings.HasPrefix(grantType, "campaign_"):
+			if items[index].SourceName == "" {
+				items[index].SourceName = ruleNames[strings.TrimPrefix(grantType, "campaign_")]
+			}
+		}
+	}
+	return LotteryGrantPage{
 		Items: items, Total: total, Page: page, PageSize: pageSize,
 	}, nil
 }

@@ -20,6 +20,14 @@ type lotteryRewardRevokeRequest struct {
 	Reason string `json:"reason" binding:"required"`
 }
 
+type lotteryManualGrantRequest struct {
+	User      string `json:"user" binding:"required"`
+	Chances   int    `json:"chances" binding:"required"`
+	Reason    string `json:"reason" binding:"required"`
+	ExpiresAt int64  `json:"expires_at"`
+	RequestId string `json:"request_id" binding:"required"`
+}
+
 func GetLotteryStatus(c *gin.Context) {
 	status, err := model.GetLotteryStatus(c.GetInt("id"))
 	if err != nil {
@@ -95,6 +103,44 @@ func GetAllLotteryDraws(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, result)
+}
+
+func GetAllLotteryGrants(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("p", "1"))
+	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "20"))
+	result, err := model.GetAllLotteryGrants(page, pageSize, model.LotteryGrantFilter{
+		UserKeyword: c.Query("user"),
+		Source:      c.Query("source"),
+		Status:      c.Query("status"),
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, result)
+}
+
+func CreateManualLotteryGrant(c *gin.Context) {
+	var request lotteryManualGrantRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid manual lottery grant"})
+		return
+	}
+	grant, err := model.CreateManualLotteryGrant(request.User, request.Chances, request.Reason, request.ExpiresAt, c.GetInt("id"), request.RequestId)
+	if err != nil {
+		switch {
+		case errors.Is(err, model.ErrInvalidLotteryManualGrant):
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid manual lottery grant"})
+		case errors.Is(err, model.ErrLotteryGrantTargetNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Lottery grant target user not found"})
+		case errors.Is(err, model.ErrLotteryManualGrantConflict):
+			c.JSON(http.StatusConflict, gin.H{"success": false, "message": "Manual lottery grant request conflicts with existing grant"})
+		default:
+			common.ApiError(c, err)
+		}
+		return
+	}
+	common.ApiSuccess(c, grant)
 }
 
 func RevokeLotteryReward(c *gin.Context) {

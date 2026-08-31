@@ -212,6 +212,152 @@ func TestRechargeCreatesLotteryGrantImmediately(t *testing.T) {
 		fmt.Sprintf("recharge:recharge-immediate:topup:%d", topUp.Id),
 	).First(&grant).Error)
 	assert.Equal(t, 2, grant.Chances)
+	assert.Equal(t, "Immediate recharge grant", grant.SourceName)
+}
+
+func TestRechargeGrantUsesCreditedRechargeAmountBeforeDiscount(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	ruleNow := time.Now()
+	config := defaultLotteryConfig()
+	config.GrantRules = []LotteryChanceGrantRule{{
+		Id: "discounted-recharge", Type: LotteryChanceGrantRuleRecharge,
+		Name: "Discounted recharge", Enabled: true, Threshold: 50, Chances: 2,
+		StartAt: ruleNow.Add(-time.Hour).Unix(), EndAt: ruleNow.Add(time.Hour).Unix(),
+	}}
+	setLotteryConfigForTest(t, config)
+	topUp := TopUp{
+		UserId: userId, Amount: 50, Money: 45,
+		TradeNo: "lottery-recharge-discounted", PaymentMethod: "alipay",
+		PaymentProvider: PaymentProviderEpay, Status: common.TopUpStatusPending,
+		CreateTime: now.Add(-time.Minute).Unix(),
+	}
+	require.NoError(t, DB.Create(&topUp).Error)
+
+	_, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	var grant LotteryChanceGrant
+	require.NoError(t, DB.Where("type = ?", "recharge_discounted-recharge").First(&grant).Error)
+	assert.Equal(t, 2, grant.Chances)
+}
+
+func TestCompletedRechargeCallbackRepairsMissingGrant(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	ruleNow := time.Now()
+	config := defaultLotteryConfig()
+	config.GrantRules = []LotteryChanceGrantRule{{
+		Id: "callback-recovery", Type: LotteryChanceGrantRuleRecharge,
+		Name: "Callback recovery", Enabled: true, Threshold: 50, Chances: 1,
+		StartAt: ruleNow.Add(-time.Hour).Unix(), EndAt: ruleNow.Add(time.Hour).Unix(),
+	}}
+	setLotteryConfigForTest(t, config)
+	topUp := TopUp{
+		UserId: userId, Amount: 50, Money: 45,
+		TradeNo: "lottery-recharge-recovery", PaymentMethod: "alipay",
+		PaymentProvider: PaymentProviderEpay, Status: common.TopUpStatusSuccess,
+		CreateTime: now.Add(-time.Minute).Unix(), CompleteTime: ruleNow.Unix(),
+	}
+	require.NoError(t, DB.Create(&topUp).Error)
+
+	alreadyDone, err := RechargeEpay(topUp.TradeNo, "alipay", "127.0.0.1")
+	require.NoError(t, err)
+	assert.True(t, alreadyDone)
+	var count int64
+	require.NoError(t, DB.Model(&LotteryChanceGrant{}).
+		Where("type = ?", "recharge_callback-recovery").Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+}
+
+func TestGetAllLotteryGrantsSupportsAdminFilters(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	config := defaultLotteryConfig()
+	config.GrantRules = []LotteryChanceGrantRule{{
+		Id: "admin-recharge", Type: LotteryChanceGrantRuleRecharge,
+		Name: "Admin recharge campaign", Enabled: true, Threshold: 50, Chances: 2,
+	}}
+	setLotteryConfigForTest(t, config)
+	require.NoError(t, DB.Create(&[]LotteryChanceGrant{
+		{EventKey: "grant-admin-recharge", UserId: userId, Type: "recharge_admin-recharge", Chances: 2, CreatedAt: now.Unix()},
+		{EventKey: "grant-admin-used", UserId: userId, Type: LotteryGrantTypeWeeklySpend, Chances: 1, Consumed: 1, CreatedAt: now.Add(-time.Minute).Unix()},
+		{EventKey: "grant-admin-expired", UserId: userId, Type: "campaign_old", Chances: 3, ExpiresAt: now.Add(-time.Hour).Unix(), CreatedAt: now.Add(-2 * time.Minute).Unix()},
+	}).Error)
+
+	page, err := GetAllLotteryGrants(1, 20, LotteryGrantFilter{
+		UserKeyword: "lottery-user", Source: "recharge", Status: "available",
+	})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	assert.EqualValues(t, 1, page.Total)
+	assert.Equal(t, "Admin recharge campaign", page.Items[0].SourceName)
+	assert.Equal(t, "grant-admin-recharge", page.Items[0].EventReference)
+
+	expired, err := GetAllLotteryGrants(1, 20, LotteryGrantFilter{Status: "expired"})
+	require.NoError(t, err)
+	require.Len(t, expired.Items, 1)
+	assert.Equal(t, "campaign_old", expired.Items[0].Type)
+}
+
+func TestCreateManualLotteryGrantIsAuditedAndIdempotent(t *testing.T) {
+	userId, _ := setupLotteryTest(t)
+	operator := User{
+		Id: 62, Username: "lottery-admin", AffCode: "lottery_admin_aff",
+		Status: common.UserStatusEnabled, Role: common.RoleAdminUser,
+	}
+	require.NoError(t, DB.Create(&operator).Error)
+	expiresAt := time.Now().Add(24 * time.Hour).Unix()
+
+	grant, err := CreateManualLotteryGrant("lottery-user", 3, "repair missed recharge grant", expiresAt, operator.Id, "manual-request-001")
+	require.NoError(t, err)
+	assert.Equal(t, userId, grant.UserId)
+	assert.Equal(t, LotteryGrantTypeManual, grant.Type)
+	assert.Equal(t, LotteryGrantSourceManual, grant.SourceName)
+	assert.Equal(t, operator.Id, grant.OperatorUserId)
+	assert.Equal(t, "repair missed recharge grant", grant.Detail)
+
+	repeated, err := CreateManualLotteryGrant(strconv.Itoa(userId), 3, "repair missed recharge grant", expiresAt, operator.Id, "manual-request-001")
+	require.NoError(t, err)
+	assert.Equal(t, grant.Id, repeated.Id)
+	var count int64
+	require.NoError(t, DB.Model(&LotteryChanceGrant{}).Where("type = ?", LotteryGrantTypeManual).Count(&count).Error)
+	assert.EqualValues(t, 1, count)
+
+	page, err := GetAllLotteryGrants(1, 20, LotteryGrantFilter{Source: "manual"})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	assert.Equal(t, operator.Id, page.Items[0].OperatorUserId)
+	assert.Equal(t, "repair missed recharge grant", page.Items[0].Detail)
+
+	numericUsername := User{
+		Id: 63, Username: "123456", AffCode: "numeric_username_aff",
+		Status: common.UserStatusEnabled,
+	}
+	require.NoError(t, DB.Create(&numericUsername).Error)
+	numericGrant, err := CreateManualLotteryGrant("123456", 1, "补发遗漏机会", 0, operator.Id, "manual-request-006")
+	require.NoError(t, err)
+	assert.Equal(t, numericUsername.Id, numericGrant.UserId)
+}
+
+func TestCreateManualLotteryGrantRejectsInvalidOrUnknownTargets(t *testing.T) {
+	_, _ = setupLotteryTest(t)
+	testCases := []struct {
+		name      string
+		user      string
+		chances   int
+		reason    string
+		expiresAt int64
+		requestId string
+		expected  error
+	}{
+		{name: "unknown user", user: "missing-user", chances: 1, reason: "manual repair", requestId: "manual-request-002", expected: ErrLotteryGrantTargetNotFound},
+		{name: "zero chances", user: "lottery-user", chances: 0, reason: "manual repair", requestId: "manual-request-003", expected: ErrInvalidLotteryManualGrant},
+		{name: "missing reason", user: "lottery-user", chances: 1, reason: " ", requestId: "manual-request-004", expected: ErrInvalidLotteryManualGrant},
+		{name: "expired grant", user: "lottery-user", chances: 1, reason: "manual repair", expiresAt: time.Now().Add(-time.Hour).Unix(), requestId: "manual-request-005", expected: ErrInvalidLotteryManualGrant},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := CreateManualLotteryGrant(testCase.user, testCase.chances, testCase.reason, testCase.expiresAt, 99, testCase.requestId)
+			assert.ErrorIs(t, err, testCase.expected)
+		})
+	}
 }
 
 func TestLotteryRechargeGrantDoesNotRewardSplitPaymentsTwice(t *testing.T) {

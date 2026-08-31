@@ -295,7 +295,7 @@ describe('lottery center', () => {
     await act(async () => root.unmount())
   })
 
-  test('lets administrators configure prizes and view all draw records', async () => {
+  test('lets administrators manage draws and inspect chance grants', async () => {
     useAuthStore.getState().auth.setUser({
       id: 1,
       username: 'admin',
@@ -304,6 +304,9 @@ describe('lottery center', () => {
     let resolveAllRecords: (() => void) | null = null
     let delayAllRecords = true
     let latestAdminUrl = ''
+    let latestGrantUrl = ''
+    let grantLoadCount = 0
+    const manualGrantBodies: Record<string, unknown>[] = []
     let revokeRequested = false
     api.defaults.adapter = async (config) => {
       let data: unknown = { success: true, data: baseStatus }
@@ -314,6 +317,54 @@ describe('lottery center', () => {
         data = {
           success: true,
           data: { items: [], total: 0, page: 1, page_size: 10 },
+        }
+      } else if (config.url === '/api/user/lottery/grants/manual') {
+        manualGrantBodies.push(
+          typeof config.data === 'string'
+            ? JSON.parse(config.data)
+            : config.data
+        )
+        data = {
+          success: true,
+          data: {
+            id: 32,
+            user_id: 27,
+            username: 'draw-user',
+            type: 'manual',
+            source_name: 'Manual grant',
+            event_reference: 'manual:1:test-request',
+            chances: 2,
+            consumed: 0,
+            expires_at: 0,
+            created_at: 1_786_363_300,
+            operator_user_id: 1,
+            detail: 'repair missed recharge grant',
+          },
+        }
+      } else if (config.url?.startsWith('/api/user/lottery/grants?')) {
+        grantLoadCount += 1
+        latestGrantUrl = config.url
+        data = {
+          success: true,
+          data: {
+            items: [
+              {
+                id: 31,
+                user_id: 27,
+                username: 'draw-user',
+                type: 'recharge_summer',
+                source_name: 'Summer recharge',
+                event_reference: 'recharge:summer:topup:88',
+                chances: 3,
+                consumed: 1,
+                expires_at: 0,
+                created_at: 1_786_363_200,
+              },
+            ],
+            total: 1,
+            page: 1,
+            page_size: 20,
+          },
         }
       } else if (config.url?.startsWith('/api/user/lottery/draws?')) {
         latestAdminUrl = config.url
@@ -493,6 +544,134 @@ describe('lottery center', () => {
       await flushRequests()
     })
     assert.equal(revokeRequested, true)
+
+    const grantRecordsButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.includes('Chance grant records')
+    )
+    assert.ok(grantRecordsButton)
+    await act(async () => {
+      grantRecordsButton.dispatchEvent(
+        new domWindow.MouseEvent('click', {
+          bubbles: true,
+        }) as unknown as MouseEvent
+      )
+      await flushRequests()
+    })
+    assert.match(container.textContent || '', /Summer recharge/)
+    assert.match(container.textContent || '', /1\s*\/\s*2/)
+    assert.match(container.textContent || '', /Never expires/)
+    assert.equal(
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Source"]')
+        ?.textContent?.trim(),
+      'All sources'
+    )
+    assert.equal(
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Status"]')
+        ?.textContent?.trim(),
+      'All statuses'
+    )
+
+    const manualGrantButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.includes('Manual grant')
+    )
+    assert.ok(manualGrantButton)
+    await act(async () => {
+      manualGrantButton.dispatchEvent(
+        new domWindow.MouseEvent('click', {
+          bubbles: true,
+        }) as unknown as MouseEvent
+      )
+    })
+    const manualUserInput = document.querySelector<HTMLInputElement>(
+      '#lottery-manual-grant-user'
+    )
+    const manualChancesInput = document.querySelector<HTMLInputElement>(
+      '#lottery-manual-grant-chances'
+    )
+    const manualReasonInput = document.querySelector<HTMLTextAreaElement>(
+      '#lottery-manual-grant-reason'
+    )
+    assert.ok(manualUserInput)
+    assert.ok(manualChancesInput)
+    assert.ok(manualReasonInput)
+    await act(async () => {
+      const inputValueSetter = Object.getOwnPropertyDescriptor(
+        domWindow.HTMLInputElement.prototype,
+        'value'
+      )?.set
+      const textareaValueSetter = Object.getOwnPropertyDescriptor(
+        domWindow.HTMLTextAreaElement.prototype,
+        'value'
+      )?.set
+      assert.ok(inputValueSetter)
+      assert.ok(textareaValueSetter)
+      inputValueSetter.call(manualUserInput, 'draw-user')
+      manualUserInput.dispatchEvent(
+        new domWindow.Event('input', { bubbles: true }) as unknown as Event
+      )
+      inputValueSetter.call(manualChancesInput, '2')
+      manualChancesInput.dispatchEvent(
+        new domWindow.Event('input', { bubbles: true }) as unknown as Event
+      )
+      textareaValueSetter.call(
+        manualReasonInput,
+        'repair missed recharge grant'
+      )
+      manualReasonInput.dispatchEvent(
+        new domWindow.Event('input', { bubbles: true }) as unknown as Event
+      )
+    })
+    const grantButton = [...document.querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Grant'
+    )
+    assert.ok(grantButton)
+    await act(async () => {
+      grantButton.dispatchEvent(
+        new domWindow.MouseEvent('click', {
+          bubbles: true,
+        }) as unknown as MouseEvent
+      )
+      await flushRequests()
+    })
+    const manualGrantBody = manualGrantBodies.at(-1)
+    assert.ok(manualGrantBody)
+    assert.equal(manualGrantBody.user, 'draw-user')
+    assert.equal(manualGrantBody.chances, 2)
+    assert.equal(manualGrantBody.reason, 'repair missed recharge grant')
+    assert.equal(manualGrantBody.expires_at, 0)
+    assert.equal(typeof manualGrantBody.request_id, 'string')
+    assert.ok(grantLoadCount >= 2)
+
+    const grantUserInput = container.querySelector<HTMLInputElement>(
+      '[data-testid="lottery-grant-user-search"]'
+    )
+    assert.ok(grantUserInput)
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        domWindow.HTMLInputElement.prototype,
+        'value'
+      )?.set
+      assert.ok(valueSetter)
+      valueSetter.call(grantUserInput, 'draw-user')
+      grantUserInput.dispatchEvent(
+        new domWindow.Event('input', { bubbles: true }) as unknown as Event
+      )
+    })
+    const grantSearchButton = [...container.querySelectorAll('button')].find(
+      (button) => button.textContent?.includes('Search')
+    )
+    assert.ok(grantSearchButton)
+    await act(async () => {
+      grantSearchButton.dispatchEvent(
+        new domWindow.MouseEvent('click', {
+          bubbles: true,
+        }) as unknown as MouseEvent
+      )
+      await flushRequests()
+    })
+    assert.match(latestGrantUrl, /user=draw-user/)
 
     await act(async () => root.unmount())
   })

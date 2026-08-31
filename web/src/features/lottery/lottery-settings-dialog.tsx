@@ -460,7 +460,7 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                 <div className='flex flex-wrap items-center justify-between gap-3'>
                   <p className='text-muted-foreground text-sm'>
                     {t(
-                      'Each recharge campaign grants once per user after cumulative successful recharges reach the threshold.'
+                      'Recharge thresholds use the credited recharge amount before payment discounts.'
                     )}
                   </p>
                   <div className='flex gap-2'>

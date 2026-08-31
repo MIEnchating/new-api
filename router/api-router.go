@@ -155,6 +155,8 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/lottery/config", controller.GetLotteryConfig)
 				adminRoute.PUT("/lottery/config", controller.UpdateLotteryConfig)
 				adminRoute.GET("/lottery/draws", controller.GetAllLotteryDraws)
+				adminRoute.GET("/lottery/grants", controller.GetAllLotteryGrants)
+				adminRoute.POST("/lottery/grants/manual", middleware.CriticalRateLimit(), controller.CreateManualLotteryGrant)
 				adminRoute.POST("/lottery/draws/:id/revoke", middleware.CriticalRateLimit(), controller.RevokeLotteryReward)
 				adminRoute.GET("/topup/stats", controller.GetTopUpStats)
 				adminRoute.PUT("/topup/invoice/batch", controller.UpdateTopUpInvoices)

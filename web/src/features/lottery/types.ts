@@ -90,6 +90,51 @@ export interface LotteryDrawFilters {
   result: 'won' | 'none' | ''
 }
 
+export type LotteryGrantSource =
+  | 'recharge'
+  | 'event'
+  | 'weekly'
+  | 'streak'
+  | 'manual'
+  | ''
+export type LotteryGrantStatus = 'available' | 'used' | 'expired' | ''
+
+export interface LotteryAdminGrant {
+  id: number
+  user_id: number
+  username: string
+  type: string
+  source_name: string
+  event_reference: string
+  chances: number
+  consumed: number
+  expires_at: number
+  created_at: number
+  operator_user_id: number
+  detail: string
+}
+
+export interface LotteryManualGrantRequest {
+  user: string
+  chances: number
+  reason: string
+  expires_at: number
+  request_id: string
+}
+
+export interface LotteryGrantPage {
+  items: LotteryAdminGrant[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface LotteryGrantFilters {
+  user: string
+  source: LotteryGrantSource
+  status: LotteryGrantStatus
+}
+
 interface LotteryActivity {
   id: number
   date: string

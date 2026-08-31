@@ -21,6 +21,10 @@ import { api } from '@/lib/api'
 import type {
   LotteryApiResponse,
   LotteryConfig,
+  LotteryGrantFilters,
+  LotteryGrantPage,
+  LotteryAdminGrant,
+  LotteryManualGrantRequest,
   LotteryDrawPage,
   LotteryDrawFilters,
   LotteryDrawResult,
@@ -70,6 +74,31 @@ export async function getAllLotteryDraws(
   if (filters.user) params.set('user', filters.user)
   if (filters.result) params.set('result', filters.result)
   const response = await api.get(`/api/user/lottery/draws?${params}`)
+  return response.data
+}
+
+export async function getAllLotteryGrants(
+  page: number,
+  pageSize: number,
+  filters: LotteryGrantFilters
+): Promise<LotteryApiResponse<LotteryGrantPage>> {
+  const params = new URLSearchParams({
+    p: String(page),
+    page_size: String(pageSize),
+  })
+  if (filters.user) params.set('user', filters.user)
+  if (filters.source) params.set('source', filters.source)
+  if (filters.status) params.set('status', filters.status)
+  const response = await api.get(`/api/user/lottery/grants?${params}`)
+  return response.data
+}
+
+export async function createManualLotteryGrant(
+  request: LotteryManualGrantRequest
+): Promise<LotteryApiResponse<LotteryAdminGrant>> {
+  const response = await api.post('/api/user/lottery/grants/manual', request, {
+    skipBusinessError: true,
+  } as Record<string, unknown>)
   return response.data
 }
 

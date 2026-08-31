@@ -85,15 +85,21 @@ import { cn } from '@/lib/utils'
 import {
   drawLottery,
   getAllLotteryDraws,
+  getAllLotteryGrants,
   getLotteryStatus,
   getUserLotteryDraws,
   revokeLotteryReward,
 } from './api'
 import { LotterySettingsDialog } from './lottery-settings-dialog'
+import { ManualLotteryGrantDialog } from './manual-lottery-grant-dialog'
 import type {
+  LotteryAdminGrant,
   LotteryAdminDraw,
   LotteryDraw,
   LotteryDrawFilters,
+  LotteryGrantFilters,
+  LotteryGrantSource,
+  LotteryGrantStatus,
   LotteryStatus,
 } from './types'
 
@@ -107,6 +113,11 @@ const LOTTERY_GRID_ROUTE = [0, 1, 2, 5, 8, 7, 6, 3] as const
 // presentation and is skipped when the request itself fails.
 const DRAW_REVEAL_DELAY_MS = 2400
 const EMPTY_DRAW_FILTERS: LotteryDrawFilters = { user: '', result: '' }
+const EMPTY_GRANT_FILTERS: LotteryGrantFilters = {
+  user: '',
+  source: '',
+  status: '',
+}
 
 function drawResultLabel(
   draw: LotteryDraw,
@@ -129,6 +140,28 @@ function resultFilterLabel(
   if (value === 'won') return t('Won')
   if (value === 'none') return t('No prize')
   return t('All results')
+}
+
+function grantSourceFilterLabel(
+  value: LotteryGrantSource,
+  t: ReturnType<typeof useTranslation>['t']
+) {
+  if (value === 'recharge') return t('Recharge grant')
+  if (value === 'event') return t('Event grant')
+  if (value === 'weekly') return t('Weekly usage reward')
+  if (value === 'streak') return t('Activity streak reward')
+  if (value === 'manual') return t('Manual grant')
+  return t('All sources')
+}
+
+function grantStatusFilterLabel(
+  value: LotteryGrantStatus,
+  t: ReturnType<typeof useTranslation>['t']
+) {
+  if (value === 'available') return t('Available')
+  if (value === 'used') return t('Used')
+  if (value === 'expired') return t('Expired')
+  return t('All statuses')
 }
 
 function campaignStatus(
@@ -179,6 +212,33 @@ function drawStatusConfig(
   return { label: t('No prize'), variant: 'neutral' as const }
 }
 
+function grantSourceLabel(
+  grant: Pick<LotteryAdminGrant, 'type' | 'source_name'>,
+  t: ReturnType<typeof useTranslation>['t']
+) {
+  if (grant.type === 'manual') return t('Manual grant')
+  if (grant.source_name) return grant.source_name
+  if (grant.type === 'weekly_spend') return t('Weekly usage reward')
+  if (grant.type.startsWith('streak_')) return t('Activity streak reward')
+  if (grant.type.startsWith('recharge_')) return t('Recharge grant')
+  if (grant.type.startsWith('campaign_')) return t('Event grant')
+  return grant.type || '-'
+}
+
+function grantStatusConfig(
+  grant: LotteryAdminGrant,
+  now: number,
+  t: ReturnType<typeof useTranslation>['t']
+) {
+  if (grant.expires_at > 0 && grant.expires_at <= now) {
+    return { label: t('Expired'), variant: 'neutral' as const }
+  }
+  if (grant.consumed >= grant.chances) {
+    return { label: t('Used'), variant: 'info' as const }
+  }
+  return { label: t('Available'), variant: 'success' as const }
+}
+
 export function Lottery() {
   const { t } = useTranslation()
   const isAdmin = useIsAdmin()
@@ -189,6 +249,8 @@ export function Lottery() {
   const [latestDraw, setLatestDraw] = useState<LotteryDraw | null>(null)
   const [pendingDraw, setPendingDraw] = useState<LotteryDraw | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [manualGrantOpen, setManualGrantOpen] = useState(false)
+  const [recordView, setRecordView] = useState<'draws' | 'grants'>('draws')
   const [recordScope, setRecordScope] = useState<'mine' | 'all'>('mine')
   const [displayedRecordScope, setDisplayedRecordScope] = useState<
     'mine' | 'all'
@@ -209,7 +271,20 @@ export function Lottery() {
   >('all')
   const [appliedDrawFilters, setAppliedDrawFilters] =
     useState<LotteryDrawFilters>(EMPTY_DRAW_FILTERS)
+  const [adminGrants, setAdminGrants] = useState<LotteryAdminGrant[]>([])
+  const [adminGrantsLoading, setAdminGrantsLoading] = useState(false)
+  const [hasLoadedAdminGrants, setHasLoadedAdminGrants] = useState(false)
+  const [grantPage, setGrantPage] = useState(1)
+  const [grantTotal, setGrantTotal] = useState(0)
+  const [grantUserKeyword, setGrantUserKeyword] = useState('')
+  const [grantSourceFilter, setGrantSourceFilter] =
+    useState<LotteryGrantSource>('')
+  const [grantStatusFilter, setGrantStatusFilter] =
+    useState<LotteryGrantStatus>('')
+  const [appliedGrantFilters, setAppliedGrantFilters] =
+    useState<LotteryGrantFilters>(EMPTY_GRANT_FILTERS)
   const adminDrawRequestId = useRef(0)
+  const adminGrantRequestId = useRef(0)
   const userDrawRequestId = useRef(0)
   const drawStartedAt = useRef(0)
   const [revokeDraw, setRevokeDraw] = useState<LotteryAdminDraw | null>(null)
@@ -298,6 +373,44 @@ export function Lottery() {
     void loadAdminDraws()
   }, [loadAdminDraws])
 
+  const loadAdminGrants = useCallback(
+    async (requestedPage = grantPage) => {
+      if (!isAdmin || recordView !== 'grants') return
+      const requestId = ++adminGrantRequestId.current
+      setAdminGrantsLoading(true)
+      try {
+        const response = await getAllLotteryGrants(
+          requestedPage,
+          ADMIN_PAGE_SIZE,
+          appliedGrantFilters
+        )
+        if (requestId !== adminGrantRequestId.current) return
+        if (!response.success || !response.data) {
+          toast.error(
+            t(response.message || 'Failed to load chance grant records')
+          )
+          return
+        }
+        setAdminGrants(response.data.items || [])
+        setGrantTotal(response.data.total || 0)
+        setHasLoadedAdminGrants(true)
+      } catch {
+        if (requestId === adminGrantRequestId.current) {
+          toast.error(t('Failed to load chance grant records'))
+        }
+      } finally {
+        if (requestId === adminGrantRequestId.current) {
+          setAdminGrantsLoading(false)
+        }
+      }
+    },
+    [appliedGrantFilters, grantPage, isAdmin, recordView, t]
+  )
+
+  useEffect(() => {
+    void loadAdminGrants()
+  }, [loadAdminGrants])
+
   const handleDrawSearch = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setAdminPage(1)
@@ -312,6 +425,24 @@ export function Lottery() {
     setDrawResultFilter('all')
     setAdminPage(1)
     setAppliedDrawFilters({ ...EMPTY_DRAW_FILTERS })
+  }
+
+  const handleGrantSearch = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setGrantPage(1)
+    setAppliedGrantFilters({
+      user: grantUserKeyword.trim(),
+      source: grantSourceFilter,
+      status: grantStatusFilter,
+    })
+  }
+
+  const handleResetGrantSearch = () => {
+    setGrantUserKeyword('')
+    setGrantSourceFilter('')
+    setGrantStatusFilter('')
+    setGrantPage(1)
+    setAppliedGrantFilters({ ...EMPTY_GRANT_FILTERS })
   }
 
   const activity = useMemo(() => {
@@ -450,11 +581,17 @@ export function Lottery() {
   const recordsRefreshing = showingAllRecords
     ? adminDrawsLoading
     : userDrawsLoading
+  const showingGrantRecords = isAdmin && recordView === 'grants'
+  const displayedRecordTotal = showingGrantRecords ? grantTotal : recordTotal
+  const displayedRecordsRefreshing = showingGrantRecords
+    ? adminGrantsLoading
+    : recordsRefreshing
   const campaignRules = status?.grant_rules ?? status?.active_grant_rules ?? []
   const campaignNow = Math.floor(Date.now() / 1000)
   const adminTotalPages = Math.max(1, Math.ceil(adminTotal / ADMIN_PAGE_SIZE))
+  const grantTotalPages = Math.max(1, Math.ceil(grantTotal / ADMIN_PAGE_SIZE))
   const userTotalPages = Math.max(1, Math.ceil(userDrawTotal / USER_PAGE_SIZE))
-  const recordColumnCount = showingAllRecords ? 7 : 4
+  const recordColumnCount = showingGrantRecords ? 7 : showingAllRecords ? 7 : 4
 
   return (
     <Main>
@@ -932,12 +1069,34 @@ export function Lottery() {
             <Card data-card-hover='false' className='gap-0 py-0'>
               <CardHeader className='flex-row flex-wrap items-center justify-between gap-3 border-b py-4'>
                 <CardTitle className='text-base'>
-                  {t('Lottery records')}
+                  {showingGrantRecords
+                    ? t('Chance grant records')
+                    : t('Lottery records')}
                 </CardTitle>
-                <div className='flex items-center gap-3'>
+                <div className='flex flex-wrap items-center justify-end gap-2'>
+                  {isAdmin ? (
+                    <Tabs
+                      value={recordView}
+                      onValueChange={(value) => {
+                        const nextView = value as 'draws' | 'grants'
+                        setRecordView(nextView)
+                        if (nextView === 'grants') setGrantPage(1)
+                      }}
+                    >
+                      <TabsList>
+                        <TabsTrigger value='draws'>
+                          {t('Draw records')}
+                        </TabsTrigger>
+                        <TabsTrigger value='grants'>
+                          {t('Chance grant records')}
+                        </TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  ) : null}
                   {isAdmin ? (
                     <Tabs
                       value={recordScope}
+                      className={showingGrantRecords ? 'hidden' : undefined}
                       onValueChange={(value) => {
                         const nextScope = value as 'mine' | 'all'
                         setRecordScope(nextScope)
@@ -964,19 +1123,118 @@ export function Lottery() {
                       </TabsList>
                     </Tabs>
                   ) : null}
+                  {showingGrantRecords ? (
+                    <Button
+                      type='button'
+                      size='sm'
+                      onClick={() => setManualGrantOpen(true)}
+                    >
+                      <Gift aria-hidden='true' />
+                      {t('Manual grant')}
+                    </Button>
+                  ) : null}
                   <span className='text-muted-foreground text-xs tabular-nums'>
-                    {recordsRefreshing ? (
+                    {displayedRecordsRefreshing ? (
                       <Loader2
                         className='mr-1 inline size-3.5 animate-spin'
                         aria-label={t('Loading')}
                       />
                     ) : null}
-                    {t('{{count}} records', { count: recordTotal })}
+                    {t('{{count}} records', { count: displayedRecordTotal })}
                   </span>
                 </div>
               </CardHeader>
               <CardContent className='p-0'>
-                {isAdmin && recordScope === 'all' ? (
+                {showingGrantRecords ? (
+                  <form
+                    className='grid gap-2 border-b p-3 md:grid-cols-[minmax(200px,1fr)_170px_150px_auto]'
+                    onSubmit={handleGrantSearch}
+                  >
+                    <Input
+                      value={grantUserKeyword}
+                      onChange={(event) =>
+                        setGrantUserKeyword(event.target.value)
+                      }
+                      placeholder={t('Search user by username or ID')}
+                      aria-label={t('Search user by username or ID')}
+                      data-testid='lottery-grant-user-search'
+                    />
+                    <Select
+                      value={grantSourceFilter || 'all'}
+                      onValueChange={(value) =>
+                        setGrantSourceFilter(
+                          value === 'all' ? '' : (value as LotteryGrantSource)
+                        )
+                      }
+                    >
+                      <SelectTrigger aria-label={t('Source')}>
+                        <SelectValue>
+                          {grantSourceFilterLabel(grantSourceFilter, t)}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectItem value='all'>{t('All sources')}</SelectItem>
+                        <SelectItem value='recharge'>
+                          {t('Recharge grant')}
+                        </SelectItem>
+                        <SelectItem value='event'>
+                          {t('Event grant')}
+                        </SelectItem>
+                        <SelectItem value='weekly'>
+                          {t('Weekly usage reward')}
+                        </SelectItem>
+                        <SelectItem value='streak'>
+                          {t('Activity streak reward')}
+                        </SelectItem>
+                        <SelectItem value='manual'>
+                          {t('Manual grant')}
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={grantStatusFilter || 'all'}
+                      onValueChange={(value) =>
+                        setGrantStatusFilter(
+                          value === 'all' ? '' : (value as LotteryGrantStatus)
+                        )
+                      }
+                    >
+                      <SelectTrigger aria-label={t('Status')}>
+                        <SelectValue>
+                          {grantStatusFilterLabel(grantStatusFilter, t)}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectItem value='all'>{t('All statuses')}</SelectItem>
+                        <SelectItem value='available'>
+                          {t('Available')}
+                        </SelectItem>
+                        <SelectItem value='used'>{t('Used')}</SelectItem>
+                        <SelectItem value='expired'>{t('Expired')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <div className='flex gap-2'>
+                      <Button
+                        type='submit'
+                        size='sm'
+                        disabled={adminGrantsLoading}
+                      >
+                        <Search aria-hidden='true' />
+                        {t('Search')}
+                      </Button>
+                      <Button
+                        type='button'
+                        size='sm'
+                        variant='outline'
+                        disabled={adminGrantsLoading}
+                        onClick={handleResetGrantSearch}
+                      >
+                        <RotateCcw aria-hidden='true' />
+                        {t('Reset')}
+                      </Button>
+                    </div>
+                  </form>
+                ) : isAdmin && recordScope === 'all' ? (
                   <form
                     className='grid gap-2 border-b p-3 sm:grid-cols-[minmax(220px,1fr)_180px_auto]'
                     onSubmit={handleDrawSearch}
@@ -1031,26 +1289,140 @@ export function Lottery() {
                 ) : null}
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      {showingAllRecords ? (
+                    {showingGrantRecords ? (
+                      <TableRow>
                         <TableHead>{t('User')}</TableHead>
-                      ) : null}
-                      <TableHead>{t('Result')}</TableHead>
-                      <TableHead>{t('Reward')}</TableHead>
-                      <TableHead>{t('Status')}</TableHead>
-                      {showingAllRecords ? (
-                        <TableHead>{t('Reference')}</TableHead>
-                      ) : null}
-                      <TableHead>{t('Time')}</TableHead>
-                      {showingAllRecords ? (
-                        <TableHead className='text-right'>
-                          {t('Actions')}
-                        </TableHead>
-                      ) : null}
-                    </TableRow>
+                        <TableHead>{t('Source')}</TableHead>
+                        <TableHead>{t('Granted')}</TableHead>
+                        <TableHead>{t('Used / Remaining')}</TableHead>
+                        <TableHead>{t('Status')}</TableHead>
+                        <TableHead>{t('Grant time')}</TableHead>
+                        <TableHead>{t('Expires at')}</TableHead>
+                      </TableRow>
+                    ) : (
+                      <TableRow>
+                        {showingAllRecords ? (
+                          <TableHead>{t('User')}</TableHead>
+                        ) : null}
+                        <TableHead>{t('Result')}</TableHead>
+                        <TableHead>{t('Reward')}</TableHead>
+                        <TableHead>{t('Status')}</TableHead>
+                        {showingAllRecords ? (
+                          <TableHead>{t('Reference')}</TableHead>
+                        ) : null}
+                        <TableHead>{t('Time')}</TableHead>
+                        {showingAllRecords ? (
+                          <TableHead className='text-right'>
+                            {t('Actions')}
+                          </TableHead>
+                        ) : null}
+                      </TableRow>
+                    )}
                   </TableHeader>
                   <TableBody>
-                    {recordsLoading ? (
+                    {showingGrantRecords ? (
+                      adminGrantsLoading && !hasLoadedAdminGrants ? (
+                        <TableRow>
+                          <TableCell colSpan={recordColumnCount}>
+                            <Skeleton
+                              className='h-8 w-full'
+                              data-testid='lottery-grants-skeleton'
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ) : adminGrants.length === 0 ? (
+                        <TableRow>
+                          <TableCell
+                            colSpan={recordColumnCount}
+                            className='p-0'
+                          >
+                            <Empty className='min-h-44 rounded-none py-8'>
+                              <EmptyHeader>
+                                <EmptyMedia variant='icon'>
+                                  <Gift className='size-4' aria-hidden='true' />
+                                </EmptyMedia>
+                                <EmptyTitle className='tracking-normal'>
+                                  {t('No chance grant records')}
+                                </EmptyTitle>
+                                <EmptyDescription>
+                                  {t(
+                                    'Issued lottery chances will appear here.'
+                                  )}
+                                </EmptyDescription>
+                              </EmptyHeader>
+                            </Empty>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        adminGrants.map((grant) => {
+                          const statusConfig = grantStatusConfig(
+                            grant,
+                            Math.floor(Date.now() / 1000),
+                            t
+                          )
+                          const remaining = Math.max(
+                            0,
+                            grant.chances - grant.consumed
+                          )
+                          return (
+                            <TableRow key={grant.id}>
+                              <TableCell>
+                                <div className='font-medium'>
+                                  {grant.username || '-'}
+                                </div>
+                                <div className='text-muted-foreground text-xs tabular-nums'>
+                                  ID: {grant.user_id}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className='font-medium'>
+                                  {grantSourceLabel(grant, t)}
+                                </div>
+                                {grant.detail ? (
+                                  <div
+                                    className='text-muted-foreground mt-0.5 max-w-52 truncate text-xs'
+                                    title={grant.detail}
+                                  >
+                                    {t('Reason')}: {grant.detail}
+                                  </div>
+                                ) : null}
+                                {grant.operator_user_id > 0 ? (
+                                  <div className='text-muted-foreground text-xs tabular-nums'>
+                                    {t('Operator Admin')} #
+                                    {grant.operator_user_id}
+                                  </div>
+                                ) : null}
+                                <code
+                                  className='text-muted-foreground block max-w-52 truncate text-xs'
+                                  title={grant.event_reference}
+                                >
+                                  {grant.event_reference}
+                                </code>
+                              </TableCell>
+                              <TableCell className='font-medium tabular-nums'>
+                                {grant.chances}
+                              </TableCell>
+                              <TableCell className='tabular-nums'>
+                                {grant.consumed} / {remaining}
+                              </TableCell>
+                              <TableCell>
+                                <StatusBadge variant={statusConfig.variant}>
+                                  {statusConfig.label}
+                                </StatusBadge>
+                              </TableCell>
+                              <TableCell className='text-muted-foreground'>
+                                {formatTimestampToDate(grant.created_at)}
+                              </TableCell>
+                              <TableCell className='text-muted-foreground'>
+                                {grant.expires_at > 0
+                                  ? formatTimestampToDate(grant.expires_at)
+                                  : t('Never expires')}
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })
+                      )
+                    ) : recordsLoading ? (
                       <TableRow>
                         <TableCell colSpan={recordColumnCount}>
                           <Skeleton
@@ -1162,14 +1534,27 @@ export function Lottery() {
                     )}
                   </TableBody>
                 </Table>
-                {!recordsLoading ? (
+                {(
+                  showingGrantRecords
+                    ? !(adminGrantsLoading && !hasLoadedAdminGrants)
+                    : !recordsLoading
+                ) ? (
                   <div
                     className='flex items-center justify-between border-t px-4 py-3 text-sm'
                     data-testid='lottery-records-pagination'
                   >
                     <span className='text-muted-foreground tabular-nums'>
-                      {showingAllRecords ? adminPage : userDrawPage} /{' '}
-                      {showingAllRecords ? adminTotalPages : userTotalPages}
+                      {showingGrantRecords
+                        ? grantPage
+                        : showingAllRecords
+                          ? adminPage
+                          : userDrawPage}{' '}
+                      /{' '}
+                      {showingGrantRecords
+                        ? grantTotalPages
+                        : showingAllRecords
+                          ? adminTotalPages
+                          : userTotalPages}
                     </span>
                     <div className='flex gap-2'>
                       <Button
@@ -1177,14 +1562,18 @@ export function Lottery() {
                         variant='outline'
                         size='sm'
                         disabled={
-                          showingAllRecords
-                            ? adminPage <= 1 || adminDrawsLoading
-                            : userDrawPage <= 1 || userDrawsLoading
+                          showingGrantRecords
+                            ? grantPage <= 1 || adminGrantsLoading
+                            : showingAllRecords
+                              ? adminPage <= 1 || adminDrawsLoading
+                              : userDrawPage <= 1 || userDrawsLoading
                         }
                         onClick={() =>
-                          showingAllRecords
-                            ? setAdminPage((page) => page - 1)
-                            : setUserDrawPage((page) => page - 1)
+                          showingGrantRecords
+                            ? setGrantPage((page) => page - 1)
+                            : showingAllRecords
+                              ? setAdminPage((page) => page - 1)
+                              : setUserDrawPage((page) => page - 1)
                         }
                       >
                         {t('Previous')}
@@ -1194,14 +1583,20 @@ export function Lottery() {
                         variant='outline'
                         size='sm'
                         disabled={
-                          showingAllRecords
-                            ? adminPage >= adminTotalPages || adminDrawsLoading
-                            : userDrawPage >= userTotalPages || userDrawsLoading
+                          showingGrantRecords
+                            ? grantPage >= grantTotalPages || adminGrantsLoading
+                            : showingAllRecords
+                              ? adminPage >= adminTotalPages ||
+                                adminDrawsLoading
+                              : userDrawPage >= userTotalPages ||
+                                userDrawsLoading
                         }
                         onClick={() =>
-                          showingAllRecords
-                            ? setAdminPage((page) => page + 1)
-                            : setUserDrawPage((page) => page + 1)
+                          showingGrantRecords
+                            ? setGrantPage((page) => page + 1)
+                            : showingAllRecords
+                              ? setAdminPage((page) => page + 1)
+                              : setUserDrawPage((page) => page + 1)
                         }
                       >
                         {t('Next')}
@@ -1224,6 +1619,14 @@ export function Lottery() {
               : current
           )
           void loadStatus()
+        }}
+      />
+      <ManualLotteryGrantDialog
+        open={manualGrantOpen}
+        onOpenChange={setManualGrantOpen}
+        onSuccess={async () => {
+          setGrantPage(1)
+          await Promise.all([loadAdminGrants(1), loadStatus()])
         }}
       />
       <ConfirmDialog

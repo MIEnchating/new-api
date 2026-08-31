@@ -140,19 +140,8 @@ func completePendingTopUpTx(tx *gorm.DB, topUp *TopUp, quotaToAdd int, userUpdat
 		return nil, err
 	}
 
-	// Generate recharge lottery grants as part of the successful top-up flow.
-	// The status endpoint still performs a full idempotent sync for recovery,
-	// but eligible users should see the grant without opening the lottery page.
-	lotteryConfig := GetLotteryConfig()
-	if len(lotteryConfig.GrantRules) > 0 {
-		if err := syncLotteryRechargeGrants(
-			tx,
-			topUp.UserId,
-			lotteryConfig.GrantRules,
-			topUp.CompleteTime,
-		); err != nil {
-			return nil, err
-		}
+	if err := syncSuccessfulLotteryRechargeGrantsTx(tx, topUp); err != nil {
+		return nil, err
 	}
 
 	rebateQuota := calculateInviteRechargeRebateQuota(quotaToAdd)
@@ -187,6 +176,18 @@ func completePendingTopUpTx(tx *gorm.DB, topUp *TopUp, quotaToAdd int, userUpdat
 		InviteeId:   topUp.UserId,
 		RebateQuota: rebateQuota,
 	}, nil
+}
+
+func syncSuccessfulLotteryRechargeGrantsTx(tx *gorm.DB, topUp *TopUp) error {
+	if tx == nil || topUp == nil || topUp.Status != common.TopUpStatusSuccess {
+		return nil
+	}
+	lotteryConfig := GetLotteryConfig()
+	if len(lotteryConfig.GrantRules) == 0 {
+		return nil
+	}
+	createdAt := common.GetTimestamp()
+	return syncLotteryRechargeGrants(tx, topUp.UserId, lotteryConfig.GrantRules, createdAt)
 }
 
 func recordInviteRechargeRebateLog(result *inviteRechargeRebateResult, quotaToAdd int, payMoney float64) {
@@ -342,7 +343,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 		}
 		if topUp.Status == common.TopUpStatusSuccess {
 			alreadyDone = true
-			return nil
+			return syncSuccessfulLotteryRechargeGrantsTx(tx, topUp)
 		}
 		if topUp.Status != common.TopUpStatusPending {
 			return ErrTopUpStatusInvalid
@@ -403,7 +404,7 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		}
 
 		if topUp.Status == common.TopUpStatusSuccess {
-			return nil
+			return syncSuccessfulLotteryRechargeGrantsTx(tx, topUp)
 		}
 
 		if topUp.Status != common.TopUpStatusPending {
@@ -734,7 +735,7 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 
 		// 幂等处理：已成功直接返回
 		if topUp.Status == common.TopUpStatusSuccess {
-			return nil
+			return syncSuccessfulLotteryRechargeGrantsTx(tx, topUp)
 		}
 
 		if topUp.Status != common.TopUpStatusPending {
@@ -812,7 +813,7 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		}
 
 		if topUp.Status == common.TopUpStatusSuccess {
-			return nil
+			return syncSuccessfulLotteryRechargeGrantsTx(tx, topUp)
 		}
 
 		if topUp.Status != common.TopUpStatusPending {
@@ -890,7 +891,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 		}
 
 		if topUp.Status == common.TopUpStatusSuccess {
-			return nil // 幂等：已成功直接返回
+			return syncSuccessfulLotteryRechargeGrantsTx(tx, topUp)
 		}
 
 		if topUp.Status != common.TopUpStatusPending {
@@ -951,7 +952,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 		}
 
 		if topUp.Status == common.TopUpStatusSuccess {
-			return nil
+			return syncSuccessfulLotteryRechargeGrantsTx(tx, topUp)
 		}
 
 		if topUp.Status != common.TopUpStatusPending {
