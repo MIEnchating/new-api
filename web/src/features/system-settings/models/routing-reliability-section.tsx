@@ -971,10 +971,7 @@ export function RoutingReliabilitySection({
                   }
                 }}
               >
-                <TabsList
-                  variant='line'
-                  className='grid h-10 w-full grid-cols-3 justify-stretch lg:w-[32rem]'
-                >
+                <TabsList className='grid w-full max-w-[32rem] grid-cols-3'>
                   <TabsTrigger
                     id='routing-reliability-tab-strategy'
                     value='strategy'
@@ -1034,7 +1031,7 @@ export function RoutingReliabilitySection({
                         control={form.control}
                         name='ChannelRouteCooldownEnabled'
                         render={({ field }) => (
-                          <FormItem className='w-full shrink-0 lg:w-[36rem] lg:max-w-[65%]'>
+                          <FormItem className='w-full max-w-[32rem] shrink-0'>
                             <FormLabel className='sr-only'>
                               {t('Active request strategy')}
                             </FormLabel>
@@ -1044,11 +1041,8 @@ export function RoutingReliabilitySection({
                                 field.onChange(value === 'routing')
                               }
                             >
-                              <TabsList className='border-border/70 bg-muted/40 grid w-full grid-cols-2 overflow-hidden rounded-md border p-1 group-data-horizontal/tabs:h-11'>
-                                <TabsTrigger
-                                  value='standard'
-                                  className='data-active:bg-primary data-active:text-primary-foreground dark:data-active:bg-primary dark:data-active:text-primary-foreground rounded-md px-3 data-active:shadow-none'
-                                >
+                              <TabsList className='grid w-full grid-cols-2'>
+                                <TabsTrigger value='standard'>
                                   <RefreshCcw />
                                   <span className='sm:hidden'>
                                     {t('Retry')}
@@ -1057,10 +1051,7 @@ export function RoutingReliabilitySection({
                                     {t('Standard request retry')}
                                   </span>
                                 </TabsTrigger>
-                                <TabsTrigger
-                                  value='routing'
-                                  className='data-active:bg-primary data-active:text-primary-foreground dark:data-active:bg-primary dark:data-active:text-primary-foreground rounded-md px-3 data-active:shadow-none'
-                                >
+                                <TabsTrigger value='routing'>
                                   <Route />
                                   <span className='sm:hidden'>
                                     {t('Route')}

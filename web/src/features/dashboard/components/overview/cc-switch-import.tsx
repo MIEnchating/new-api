@@ -18,15 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import {
-  ArrowRight,
-  ArrowRightLeft,
-  Check,
-  Copy,
-  KeyRound,
-  Loader2,
-  Search,
-} from 'lucide-react'
+import { Check, Copy, KeyRound, Loader2, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -152,42 +144,16 @@ export function CCSwitchImport(props: { compact?: boolean }) {
   return (
     <>
       {props.compact ? (
-        <Button
-          variant='outline'
-          size='sm'
-          className='bg-background/70 border-info/30 hover:border-info/50 hover:bg-info/5 h-8 min-w-30 gap-1.5 px-2.5'
+        <ApiKeyImportButton
           onClick={() => setKeyDialogOpen(true)}
-        >
-          <ArrowRightLeft className='text-info' data-icon='inline-start' />
-          <span>{t('Import to CC Switch')}</span>
-        </Button>
+          aria-label={t('Import to CC Switch')}
+        />
       ) : (
-        <Button
-          variant='outline'
-          className='border-info/35 bg-info/5 hover:border-info/55 hover:bg-info/10 h-auto justify-start rounded-xl px-3 py-3 text-left shadow-xs'
+        <ApiKeyImportButton
+          className='w-full'
           onClick={() => setKeyDialogOpen(true)}
-        >
-          <span className='bg-info/12 text-info border-info/20 flex size-10 shrink-0 items-center justify-center rounded-lg border'>
-            <ArrowRightLeft className='size-4.5' aria-hidden='true' />
-          </span>
-          <span className='flex min-w-0 flex-1 flex-col gap-1'>
-            <span className='flex min-w-0 items-center gap-2'>
-              <span className='truncate text-sm font-semibold'>
-                {t('Import to CC Switch')}
-              </span>
-              <span className='bg-info/10 text-info shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium'>
-                {t('Recommended')}
-              </span>
-            </span>
-            <span className='text-muted-foreground line-clamp-2 text-xs leading-relaxed'>
-              {t('Select an API key to continue with one-click import.')}
-            </span>
-          </span>
-          <ArrowRight
-            className='text-info size-4 shrink-0'
-            aria-hidden='true'
-          />
-        </Button>
+          aria-label={t('Import to CC Switch')}
+        />
       )}
 
       <Dialog

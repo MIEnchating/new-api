@@ -71,6 +71,23 @@ afterEach(() => {
 })
 
 describe('overview CC Switch API key list', () => {
+  test('uses the shared API key import button in compact guides', () => {
+    const queryClient = new QueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <CCSwitchImport compact />
+      </QueryClientProvider>
+    )
+
+    const importButton = screen.getByRole('button', {
+      name: 'Import to CC Switch',
+    })
+    expect(importButton).toHaveTextContent('One-click import')
+    expect(importButton).toHaveClass('rounded-lg', 'font-semibold')
+
+    queryClient.clear()
+  })
+
   test('imports an enabled key directly and disables unavailable rows', async () => {
     const keys = [
       createApiKey(1, 'gemini', 1),
@@ -100,14 +117,15 @@ describe('overview CC Switch API key list', () => {
       </QueryClientProvider>
     )
 
-    fireEvent.click(
-      screen.getByText('Import to CC Switch').closest('button') as HTMLElement
-    )
+    const overviewImport = screen.getByRole('button', {
+      name: 'Import to CC Switch',
+    })
+    expect(overviewImport).toHaveTextContent('One-click import')
+    fireEvent.click(overviewImport)
 
     expect(await screen.findByText('gemini')).toBeInTheDocument()
     expect(requestedUrls).toEqual(['/api/token/?p=1&size=8'])
     expect(screen.getByText('disabled-key')).toBeInTheDocument()
-    expect(screen.getAllByText('One-click import')).toHaveLength(2)
     expect(screen.getAllByText('API Key').length).toBeGreaterThan(0)
 
     const enabledImport = screen.getByRole('button', {
@@ -174,9 +192,7 @@ describe('overview CC Switch API key list', () => {
       </QueryClientProvider>
     )
 
-    fireEvent.click(
-      screen.getByText('Import to CC Switch').closest('button') as HTMLElement
-    )
+    fireEvent.click(screen.getByRole('button', { name: 'Import to CC Switch' }))
 
     expect(await screen.findByText('page-one-key')).toBeInTheDocument()
     expect(requestedUrls).toEqual(['/api/token/?p=1&size=8'])
