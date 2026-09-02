@@ -30,10 +30,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { resetModelRatios } from '../api'
 import { SettingsPageTitleStatusPortal } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
-import { useUpdateOption } from '../hooks/use-update-option'
+import {
+  useUpdateGroupSettings,
+  useUpdateOption,
+} from '../hooks/use-update-option'
+import type { GroupRenameRequest } from '../types'
 import { positiveIntegerSchema } from '../utils/numeric-field'
 import { GroupRatioForm } from './group-ratio-form'
 import { isGroupRatioScheduleMap } from './group-ratio-schedule'
+import { composeGroupRenames } from './group-rename'
 import { ModelRatioForm } from './model-ratio-form'
 import { ToolPriceSettings } from './tool-price-settings'
 import { UpstreamRatioSync } from './upstream-ratio-sync'
@@ -184,8 +189,10 @@ export function RatioSettingsCard({
 }: RatioSettingsCardProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const updateGroupSettings = useUpdateGroupSettings()
   const queryClient = useQueryClient()
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const pendingGroupRenames = useRef<GroupRenameRequest[]>([])
 
   const resetMutation = useMutation({
     mutationFn: resetModelRatios,
@@ -317,6 +324,7 @@ export function RatioSettingsCard({
   }, [modelDefaults, modelForm])
 
   useEffect(() => {
+    pendingGroupRenames.current = []
     groupNormalizedDefaults.current = {
       GroupRatio: normalizeJsonString(groupDefaults.GroupRatio),
       GroupRatioSchedule: normalizeJsonString(groupDefaults.GroupRatioSchedule),
@@ -350,6 +358,21 @@ export function RatioSettingsCard({
       ),
     })
   }, [groupDefaults, groupForm])
+
+  const trackGroupRename = useCallback(
+    (previousName: string, nextName: string) => {
+      const originalRatios = JSON.parse(
+        groupNormalizedDefaults.current.GroupRatio
+      ) as Record<string, number>
+      pendingGroupRenames.current = composeGroupRenames(
+        pendingGroupRenames.current,
+        new Set(Object.keys(originalRatios)),
+        previousName,
+        nextName
+      )
+    },
+    []
+  )
 
   const saveModelRatios = useCallback(
     async (values: ModelFormValues) => {
@@ -418,20 +441,35 @@ export function RatioSettingsCard({
           'group_ratio_setting.group_special_usable_group',
       }
 
-      const updates = (
+      const changedKeys = (
         Object.keys(normalized) as Array<keyof typeof normalized>
       ).filter(
         (key) => normalized[key] !== groupNormalizedDefaults.current[key]
       )
 
-      for (const key of updates) {
-        const apiKey = apiKeyMap[key] || key
-        await updateOption.mutateAsync({ key: apiKey, value: normalized[key] })
+      const finalGroups = new Set(
+        Object.keys(JSON.parse(normalized.GroupRatio) as Record<string, number>)
+      )
+      const renames = pendingGroupRenames.current.filter(
+        (rename) => !finalGroups.has(rename.from) && finalGroups.has(rename.to)
+      )
+      if (changedKeys.length === 0 && renames.length === 0) {
+        toast.info(t('No changes to save'))
+        return
       }
 
+      const options = (
+        Object.keys(normalized) as Array<keyof typeof normalized>
+      ).map((key) => ({
+        key: apiKeyMap[key] || key,
+        value: normalized[key],
+      }))
+      await updateGroupSettings.mutateAsync({ options, renames })
+
       groupNormalizedDefaults.current = normalized
+      pendingGroupRenames.current = []
     },
-    [updateOption]
+    [t, updateGroupSettings]
   )
 
   const handleResetRatios = useCallback(() => {
@@ -479,7 +517,8 @@ export function RatioSettingsCard({
         <GroupRatioForm
           form={groupForm}
           onSave={saveGroupRatios}
-          isSaving={updateOption.isPending}
+          onGroupRename={trackGroupRename}
+          isSaving={updateGroupSettings.isPending}
         />
       )
     }

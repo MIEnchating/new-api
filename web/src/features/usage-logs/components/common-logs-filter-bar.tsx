@@ -250,7 +250,7 @@ export function CommonLogsFilterBar<TData>(
       refetch: () =>
         Promise.all([
           queryClient.refetchQueries({
-            queryKey: ['logs', 'common', isAdmin],
+            queryKey: ['logs'],
             type: 'active',
           }),
           queryClient.refetchQueries({

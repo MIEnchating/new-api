@@ -119,7 +119,7 @@ function DataTableFacetedFilterInner<TData, TValue>({
     <Button
       variant='outline'
       size='sm'
-      className={cn('h-8 border-dashed', className)}
+      className={cn('h-8 border-solid', className)}
     >
       <PlusCircledIcon className='size-4' />
       <span className='min-w-0 truncate'>{title}</span>

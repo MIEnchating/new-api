@@ -79,12 +79,14 @@ type GroupFormValues = {
 type GroupRatioFormProps = {
   form: UseFormReturn<GroupFormValues>
   onSave: (values: GroupFormValues) => Promise<void>
+  onGroupRename: (previousName: string, nextName: string) => void
   isSaving: boolean
 }
 
 export const GroupRatioForm = memo(function GroupRatioForm({
   form,
   onSave,
+  onGroupRename,
   isSaving,
 }: GroupRatioFormProps) {
   const { t } = useTranslation()
@@ -206,6 +208,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
               onChange={(field, value) =>
                 handleFieldChange(field as keyof GroupFormValues, value)
               }
+              onGroupRename={onGroupRename}
             />
           </div>
         ) : (

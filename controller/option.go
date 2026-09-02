@@ -129,6 +129,11 @@ type OptionBulkUpdateRequest struct {
 	Options []OptionUpdateRequest `json:"options"`
 }
 
+type GroupSettingsUpdateRequest struct {
+	Options []OptionUpdateRequest `json:"options"`
+	Renames []service.GroupRename `json:"renames"`
+}
+
 var routingReliabilityBulkOptionKeys = map[string]struct{}{
 	"RetryTimes":                                {},
 	"ChannelRouteCooldownEnabled":               {},
@@ -596,6 +601,55 @@ func UpdateOptionsBulk(c *gin.Context) {
 		return
 	}
 
+	for _, option := range request.Options {
+		recordManageAudit(c, "option.update", buildOptionAuditParams(
+			option.Key,
+			previousValues[option.Key],
+			updates[option.Key],
+		))
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+	})
+}
+
+func UpdateGroupSettings(c *gin.Context) {
+	var request GroupSettingsUpdateRequest
+	if err := common.DecodeJson(c.Request.Body, &request); err != nil {
+		common.ApiErrorMsg(c, "invalid group settings request")
+		return
+	}
+
+	submitted := make(map[string]string, len(request.Options))
+	for _, option := range request.Options {
+		if !service.IsGroupSettingsOptionKey(option.Key) {
+			common.ApiErrorMsg(c, fmt.Sprintf("option %s is not a group setting", option.Key))
+			return
+		}
+		if _, duplicated := submitted[option.Key]; duplicated {
+			common.ApiErrorMsg(c, fmt.Sprintf("option %s is duplicated", option.Key))
+			return
+		}
+		submitted[option.Key] = optionValueToString(option.Value)
+	}
+
+	updates, renames, err := service.PrepareGroupSettingsUpdate(submitted, request.Renames)
+	if err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	previousValues := make(map[string]string, len(submitted))
+	common.OptionMapRWMutex.RLock()
+	for key := range submitted {
+		previousValues[key] = common.OptionMap[key]
+	}
+	common.OptionMapRWMutex.RUnlock()
+
+	if err := model.UpdateGroupSettingsAndReferences(updates, renames); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	for _, option := range request.Options {
 		recordManageAudit(c, "option.update", buildOptionAuditParams(
 			option.Key,

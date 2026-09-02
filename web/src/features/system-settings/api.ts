@@ -28,6 +28,7 @@ import type {
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpdateOptionsBulkRequest,
+  UpdateGroupSettingsRequest,
   UpstreamChannelsResponse,
   UpstreamRatiosResponse,
 } from './types'
@@ -46,6 +47,11 @@ export async function updateSystemOptionsBulk(
   request: UpdateOptionsBulkRequest
 ) {
   const res = await api.post<UpdateOptionResponse>('/api/option/bulk', request)
+  return res.data
+}
+
+export async function updateGroupSettings(request: UpdateGroupSettingsRequest) {
+  const res = await api.post<UpdateOptionResponse>('/api/option/group', request)
   return res.data
 }
 

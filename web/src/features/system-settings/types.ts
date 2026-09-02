@@ -35,6 +35,15 @@ export type UpdateOptionsBulkRequest = {
   options: UpdateOptionRequest[]
 }
 
+export type GroupRenameRequest = {
+  from: string
+  to: string
+}
+
+export type UpdateGroupSettingsRequest = UpdateOptionsBulkRequest & {
+  renames: GroupRenameRequest[]
+}
+
 export type UpdateOptionResponse = {
   success: boolean
   message: string

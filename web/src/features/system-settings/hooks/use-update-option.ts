@@ -20,8 +20,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 
-import { updateSystemOption, updateSystemOptionsBulk } from '../api'
+import {
+  updateGroupSettings,
+  updateSystemOption,
+  updateSystemOptionsBulk,
+} from '../api'
 import type {
+  UpdateGroupSettingsRequest,
   UpdateOptionRequest,
   UpdateOptionResponse,
   UpdateOptionsBulkRequest,
@@ -123,6 +128,34 @@ export function useUpdateOptionsBulk() {
       requireSuccessfulOptionUpdate(await updateSystemOptionsBulk(request)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
+    },
+  })
+}
+
+export function useUpdateGroupSettings() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (request: UpdateGroupSettingsRequest) =>
+      requireSuccessfulOptionUpdate(await updateGroupSettings(request)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      queryClient.invalidateQueries({ queryKey: ['groups'] })
+      queryClient.invalidateQueries({ queryKey: ['user-group-names'] })
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+      queryClient.invalidateQueries({ queryKey: ['keys'] })
+      queryClient.invalidateQueries({ queryKey: ['user-groups'] })
+      queryClient.invalidateQueries({ queryKey: ['token-auto-groups'] })
+      queryClient.invalidateQueries({ queryKey: ['channels'] })
+      queryClient.invalidateQueries({ queryKey: ['admin-subscription-plans'] })
+      toast.success(i18next.t('Setting updated successfully'), {
+        id: SYSTEM_OPTION_TOAST_ID,
+      })
+    },
+    onError: (error: Error) => {
+      toast.error(error.message || i18next.t('Failed to update setting'), {
+        id: SYSTEM_OPTION_TOAST_ID,
+      })
     },
   })
 }

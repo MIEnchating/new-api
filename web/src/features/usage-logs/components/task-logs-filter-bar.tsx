@@ -165,7 +165,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
       keys: taskLogSearchKeys,
       refetch: () =>
         queryClient.refetchQueries({
-          queryKey: ['logs', props.logCategory, isAdmin],
+          queryKey: ['logs'],
           type: 'active',
         }),
       navigate: () =>
@@ -177,7 +177,6 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     })
   }, [
     filters,
-    isAdmin,
     navigate,
     props.logCategory,
     queryClient,

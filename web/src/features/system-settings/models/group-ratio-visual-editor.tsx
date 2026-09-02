@@ -134,6 +134,7 @@ type GroupRatioVisualEditorProps = {
   groupSpecialUsableGroup: string
   autoGroupDefaultControl: ReactNode
   onChange: (field: string, value: string) => void
+  onGroupRename: (previousName: string, nextName: string) => void
 }
 
 type RegistryEntry = {
@@ -341,6 +342,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupSpecialUsableGroup,
   autoGroupDefaultControl,
   onChange,
+  onGroupRename,
 }: GroupRatioVisualEditorProps) {
   const { t } = useTranslation()
   const [detailGroup, setDetailGroup] = useState<string | null>(null)
@@ -415,6 +417,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
         topupGroupRatio={topupGroupRatio}
         groupOrder={groupOrder}
         onChange={onChange}
+        onGroupRename={onGroupRename}
         onShowDetail={setDetailGroup}
       />
 
@@ -519,6 +522,7 @@ type GroupPricingTableProps = {
   topupGroupRatio: string
   groupOrder: string
   onChange: (field: string, value: string) => void
+  onGroupRename: (previousName: string, nextName: string) => void
   onShowDetail: (name: string) => void
 }
 
@@ -530,6 +534,7 @@ function GroupPricingTable({
   topupGroupRatio,
   groupOrder,
   onChange,
+  onGroupRename,
   onShowDetail,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
@@ -769,10 +774,15 @@ function GroupPricingTable({
                           const previousName =
                             editingGroupNameRef.current[row._id] || row.name
                           delete editingGroupNameRef.current[row._id]
+                          const nextName = row.name.trim()
+                          if (nextName !== row.name) {
+                            updateRow(row._id, 'name', nextName)
+                          }
+                          onGroupRename(previousName, nextName)
                           const nextSchedule = renameGroupRatioSchedule(
                             groupRatioSchedule,
-                            previousName,
-                            row.name
+                            previousName.trim(),
+                            nextName
                           )
                           if (nextSchedule !== groupRatioSchedule) {
                             onChange('GroupRatioSchedule', nextSchedule)
