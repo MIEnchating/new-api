@@ -417,7 +417,22 @@ func firstNonEmptyString(values ...string) string {
 
 // DoRequest delegates to common helper.
 func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (*http.Response, error) {
-	return channel.DoTaskApiRequest(a, c, info, requestBody)
+	return channel.DoTaskApiRequest(PollingTaskAdaptor{TaskAdaptor: a}, c, info, requestBody)
+}
+
+// soraTaskPollingAdapter bridges the legacy Sora polling payload contract to
+// the shared task adaptor interface, which supplies persisted task context.
+type PollingTaskAdaptor struct{ *TaskAdaptor }
+
+func (a PollingTaskAdaptor) FetchTask(baseURL, key string, task *model.Task, proxy string) (*http.Response, error) {
+	return a.TaskAdaptor.FetchTask(baseURL, key, map[string]any{
+		"task_id": task.GetUpstreamTaskID(),
+		"action":  task.Action,
+	}, proxy)
+}
+
+func (a PollingTaskAdaptor) ParseTaskResult(_ *model.Task, _ *http.Response, body []byte) (*relaycommon.TaskInfo, error) {
+	return a.TaskAdaptor.ParseTaskResult(body)
 }
 
 // DoResponse handles upstream response, returns taskID etc.

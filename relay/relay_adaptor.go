@@ -192,7 +192,7 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 		if !pluginruntime.DefaultRegistry.Enabled() {
 			return nil
 		}
-		return &soracompat.TaskAdaptor{}
+		return soracompat.PollingTaskAdaptor{TaskAdaptor: &soracompat.TaskAdaptor{}}
 	}
 	plugin, ok := ResolveTaskPluginForPlatform(pluginruntime.DefaultRegistry.Generation(), platform)
 	if !ok {
@@ -211,7 +211,7 @@ func getTaskAdaptorForRequest(c *gin.Context, platform constant.TaskPlatform) (c
 				baseURL := common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl)
 				modelName := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 				if pluginruntime.DefaultRegistry.Enabled() && soracompat.UsesProviderCompatibility(baseURL, modelName) {
-					return constant.TaskPlatformSoraCompat, &soracompat.TaskAdaptor{}
+					return constant.TaskPlatformSoraCompat, soracompat.PollingTaskAdaptor{TaskAdaptor: &soracompat.TaskAdaptor{}}
 				}
 			}
 		}
@@ -241,7 +241,7 @@ func getTaskAdaptorForRequest(c *gin.Context, platform constant.TaskPlatform) (c
 		baseURL := common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl)
 		modelName := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
 		if pluginruntime.DefaultRegistry.Enabled() && soracompat.UsesProviderCompatibility(baseURL, modelName) {
-			return constant.TaskPlatformSoraCompat, &soracompat.TaskAdaptor{}
+			return constant.TaskPlatformSoraCompat, soracompat.PollingTaskAdaptor{TaskAdaptor: &soracompat.TaskAdaptor{}}
 		}
 	}
 	generation := pluginruntime.DefaultRegistry.Generation()

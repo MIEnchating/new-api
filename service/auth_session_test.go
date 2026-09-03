@@ -37,12 +37,14 @@ func TestWriteRefreshCookieUsesConfiguredParentDomain(t *testing.T) {
 	WriteRefreshCookie(context, "opaque-refresh-token")
 
 	cookies := recorder.Result().Cookies()
-	require.Len(t, cookies, 2)
+	require.Len(t, cookies, 3)
 	assert.Empty(t, cookies[0].Domain, "the stale host-only cookie must be cleared first")
 	assert.Equal(t, -1, cookies[0].MaxAge)
 	assert.Equal(t, "example.com", cookies[1].Domain)
 	assert.Equal(t, "opaque-refresh-token", cookies[1].Value)
 	assert.True(t, cookies[1].Secure)
+	assert.Equal(t, SessionHintCookieName, cookies[2].Name)
+	assert.Equal(t, SessionHintCookieValue, cookies[2].Value)
 }
 
 func TestWriteRefreshCookieKeepsHostOnlyScopeOutsideConfiguredDomain(t *testing.T) {
@@ -57,9 +59,11 @@ func TestWriteRefreshCookieKeepsHostOnlyScopeOutsideConfiguredDomain(t *testing.
 	WriteRefreshCookie(context, "opaque-refresh-token")
 
 	cookies := recorder.Result().Cookies()
-	require.Len(t, cookies, 1)
+	require.Len(t, cookies, 2)
 	assert.Empty(t, cookies[0].Domain)
 	assert.Equal(t, "opaque-refresh-token", cookies[0].Value)
+	assert.Equal(t, SessionHintCookieName, cookies[1].Name)
+	assert.Equal(t, SessionHintCookieValue, cookies[1].Value)
 }
 
 func TestClearRefreshCookieExpiresHostAndParentDomainVariants(t *testing.T) {
@@ -74,11 +78,13 @@ func TestClearRefreshCookieExpiresHostAndParentDomainVariants(t *testing.T) {
 	ClearRefreshCookie(context)
 
 	cookies := recorder.Result().Cookies()
-	require.Len(t, cookies, 2)
+	require.Len(t, cookies, 3)
 	assert.Empty(t, cookies[0].Domain)
 	assert.Equal(t, -1, cookies[0].MaxAge)
 	assert.Equal(t, "example.com", cookies[1].Domain)
 	assert.Equal(t, -1, cookies[1].MaxAge)
+	assert.Equal(t, SessionHintCookieName, cookies[2].Name)
+	assert.Equal(t, -1, cookies[2].MaxAge)
 }
 
 func setupAuthSessionTestDB(t *testing.T) *model.User {

@@ -200,9 +200,16 @@ const logUserVisibleKey = "user_visible"
 
 // MarkLogAdminOnly keeps a diagnostic log available to administrators while
 // excluding it from all user-facing log queries.
-func MarkLogAdminOnly(other map[string]interface{}) {
-	if other != nil {
-		other[logUserVisibleKey] = false
+func MarkLogAdminOnly(other any) {
+	switch value := other.(type) {
+	case map[string]interface{}:
+		if value != nil {
+			value[logUserVisibleKey] = false
+		}
+	case *LogOther:
+		if value != nil {
+			value.SetPublic(logUserVisibleKey, false)
+		}
 	}
 }
 
@@ -227,6 +234,26 @@ func appendUpstreamRequestIdsAdminInfo(c *gin.Context, other map[string]interfac
 				copiedSources[requestId] = source
 			}
 			adminInfo["upstream_request_id_sources"] = copiedSources
+		}
+	}
+}
+
+func appendUpstreamRequestIdsToLogOther(c *gin.Context, other *LogOther) {
+	if c == nil || other == nil {
+		return
+	}
+	requestIds := c.GetStringSlice(common.UpstreamRequestIdsKey)
+	if len(requestIds) == 0 {
+		return
+	}
+	other.SetAdmin("upstream_request_ids", append([]string(nil), requestIds...))
+	if sources, exists := c.Get(common.UpstreamRequestIdSourcesKey); exists {
+		if sourceByRequestId, ok := sources.(map[string]string); ok && len(sourceByRequestId) > 0 {
+			copiedSources := make(map[string]string, len(sourceByRequestId))
+			for requestId, source := range sourceByRequestId {
+				copiedSources[requestId] = source
+			}
+			other.SetAdmin("upstream_request_id_sources", copiedSources)
 		}
 	}
 }
@@ -274,21 +301,7 @@ func formatUserLogs(logs []*Log, startIdx int) {
 		logs[i].ChannelName = ""
 		logs[i].UpstreamRequestId = ""
 		logs[i].ActualResponseModel = nil
-		var otherMap map[string]interface{}
-		otherMap, _ = common.StrToMap(logs[i].Other)
-		if otherMap != nil {
-			// Remove admin-only debug fields.
-			delete(otherMap, "admin_info")
-			// Remove diagnostics reserved for root.
-			delete(otherMap, "root_info")
-			// Remove operation-audit details (operator/route info), admin-only.
-			delete(otherMap, "audit_info")
-			delete(otherMap, "channel_id")
-			delete(otherMap, "channel_name")
-			delete(otherMap, "channel_type")
-			delete(otherMap, logUserVisibleKey)
-		}
-		logs[i].Other = common.MapToJsonStr(otherMap)
+		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityUser)
 	}
 	assignDisplayLogIds(logs, startIdx)
 }
@@ -297,12 +310,15 @@ func formatUserLogs(logs []*Log, startIdx int) {
 // admin_info. Root callers must not pass their results through this formatter.
 func FormatAdminLogs(logs []*Log) {
 	for i := range logs {
-		otherMap, _ := common.StrToMap(logs[i].Other)
-		if otherMap == nil {
-			continue
-		}
-		delete(otherMap, "root_info")
-		logs[i].Other = common.MapToJsonStr(otherMap)
+		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityAdmin)
+	}
+}
+
+// FormatRootLogs normalizes legacy metadata into the current scoped shape
+// without removing root-only diagnostics.
+func FormatRootLogs(logs []*Log) {
+	for i := range logs {
+		logs[i].Other = formatLogOtherJSON(logs[i].Other, logOtherVisibilityRoot)
 	}
 }
 
@@ -349,10 +365,9 @@ func RecordLogWithAdminInfo(userId int, logType int, content string, adminInfo m
 		Content:   content,
 	}
 	if len(adminInfo) > 0 {
-		other := map[string]interface{}{
-			"admin_info": adminInfo,
-		}
-		log.Other = common.MapToJsonStr(other)
+		other := NewLogOther()
+		other.MergeAdmin(adminInfo)
+		log.Other = other.JSONString()
 	}
 	if err := createLog(log); err != nil {
 		common.SysLog("failed to record log: " + err.Error())
@@ -378,11 +393,9 @@ func buildOpField(action string, params map[string]interface{}) map[string]inter
 // requestId 应传入当前 HTTP 请求 ID，以便审计记录与请求链路关联。
 // extra 可携带 login_method、user_agent 等附加信息（普通用户可见）。
 func RecordLoginLog(userId int, username string, content string, ip string, requestId string, action string, params map[string]interface{}, extra map[string]interface{}) {
-	other := map[string]interface{}{}
-	for k, v := range extra {
-		other[k] = v
-	}
-	other["op"] = buildOpField(action, params)
+	other := NewLogOther()
+	other.MergePublic(extra)
+	other.SetPublic("op", buildOpField(action, params))
 	log := &Log{
 		UserId:    userId,
 		Username:  username,
@@ -391,7 +404,7 @@ func RecordLoginLog(userId int, username string, content string, ip string, requ
 		Content:   content,
 		Ip:        ip,
 		RequestId: requestId,
-		Other:     common.MapToJsonStr(other),
+		Other:     other.JSONString(),
 	}
 	if err := createLog(log); err != nil {
 		common.SysLog("failed to record login log: " + err.Error())
@@ -407,15 +420,10 @@ func RecordLoginLog(userId int, username string, content string, ip string, requ
 // requestId 应传入当前 HTTP 请求 ID，以便审计记录与请求链路关联。
 func RecordOperationAuditLog(logUserId int, content string, ip string, requestId string, action string, params map[string]interface{}, adminInfo map[string]interface{}, auditInfo map[string]interface{}) {
 	username, _ := GetUsernameById(logUserId, false)
-	other := map[string]interface{}{
-		"op": buildOpField(action, params),
-	}
-	if len(adminInfo) > 0 {
-		other["admin_info"] = adminInfo
-	}
-	if len(auditInfo) > 0 {
-		other["audit_info"] = auditInfo
-	}
+	other := NewLogOther()
+	other.SetPublic("op", buildOpField(action, params))
+	other.MergeAdmin(adminInfo)
+	other.MergeAudit(auditInfo)
 	log := &Log{
 		UserId:    logUserId,
 		Username:  username,
@@ -424,7 +432,7 @@ func RecordOperationAuditLog(logUserId int, content string, ip string, requestId
 		Content:   content,
 		Ip:        ip,
 		RequestId: requestId,
-		Other:     common.MapToJsonStr(other),
+		Other:     other.JSONString(),
 	}
 	if err := createLog(log); err != nil {
 		common.SysLog("failed to record operation audit log: " + err.Error())
@@ -433,17 +441,15 @@ func RecordOperationAuditLog(logUserId int, content string, ip string, requestId
 
 func RecordTopupLog(userId int, content string, callerIp string, paymentMethod string, callbackPaymentMethod string) {
 	username, _ := GetUsernameById(userId, false)
-	adminInfo := map[string]interface{}{
+	other := NewLogOther()
+	other.MergeAdmin(map[string]interface{}{
 		"server_ip":               common.GetIp(),
 		"node_name":               common.NodeName,
 		"caller_ip":               callerIp,
 		"payment_method":          paymentMethod,
 		"callback_payment_method": callbackPaymentMethod,
 		"version":                 common.Version,
-	}
-	other := map[string]interface{}{
-		"admin_info": adminInfo,
-	}
+	})
 	log := &Log{
 		UserId:    userId,
 		Username:  username,
@@ -451,7 +457,7 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 		Type:      LogTypeTopup,
 		Content:   content,
 		Ip:        callerIp,
-		Other:     common.MapToJsonStr(other),
+		Other:     other.JSONString(),
 	}
 	err := createLog(log)
 	if err != nil {
@@ -460,16 +466,13 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 }
 
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, actualResponseModel string, tokenName string, content string, tokenId int, useTimeSeconds int,
-	isStream bool, group string, other map[string]interface{}) {
+	isStream bool, group string, other *LogOther) {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
-	if other == nil {
-		other = make(map[string]interface{})
-	}
-	appendUpstreamRequestIdsAdminInfo(c, other)
-	otherStr := common.MapToJsonStr(other)
+	appendUpstreamRequestIdsToLogOther(c, other)
+	otherStr := other.JSONString()
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
@@ -511,19 +514,19 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 }
 
 type RecordConsumeLogParams struct {
-	ChannelId           int                    `json:"channel_id"`
-	PromptTokens        int                    `json:"prompt_tokens"`
-	CompletionTokens    int                    `json:"completion_tokens"`
-	ModelName           string                 `json:"model_name"`
-	ActualResponseModel string                 `json:"actual_response_model"`
-	TokenName           string                 `json:"token_name"`
-	Quota               int                    `json:"quota"`
-	Content             string                 `json:"content"`
-	TokenId             int                    `json:"token_id"`
-	UseTimeSeconds      int                    `json:"use_time_seconds"`
-	IsStream            bool                   `json:"is_stream"`
-	Group               string                 `json:"group"`
-	Other               map[string]interface{} `json:"other"`
+	ChannelId           int       `json:"channel_id"`
+	PromptTokens        int       `json:"prompt_tokens"`
+	CompletionTokens    int       `json:"completion_tokens"`
+	ModelName           string    `json:"model_name"`
+	ActualResponseModel string    `json:"actual_response_model"`
+	TokenName           string    `json:"token_name"`
+	Quota               int       `json:"quota"`
+	Content             string    `json:"content"`
+	TokenId             int       `json:"token_id"`
+	UseTimeSeconds      int       `json:"use_time_seconds"`
+	IsStream            bool      `json:"is_stream"`
+	Group               string    `json:"group"`
+	Other               *LogOther `json:"other"`
 }
 
 func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams) {
@@ -535,11 +538,8 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
-	if params.Other == nil {
-		params.Other = make(map[string]interface{})
-	}
-	appendUpstreamRequestIdsAdminInfo(c, params.Other)
-	otherStr := common.MapToJsonStr(params.Other)
+	appendUpstreamRequestIdsToLogOther(c, params.Other)
+	otherStr := params.Other.JSONString()
 	// 判断是否需要记录 IP
 	needRecordIp := false
 	if settingMap, err := GetUserSetting(userId, false); err == nil {
@@ -611,7 +611,7 @@ type RecordTaskBillingLogParams struct {
 	Quota     int
 	TokenId   int
 	Group     string
-	Other     map[string]interface{}
+	Other     *LogOther
 	NodeName  string // 任务发起节点；为空时回退当前节点
 }
 
@@ -639,7 +639,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		ChannelId: params.ChannelId,
 		TokenId:   params.TokenId,
 		Group:     params.Group,
-		Other:     common.MapToJsonStr(params.Other),
+		Other:     params.Other.JSONString(),
 	}
 	err := createLog(log)
 	if err != nil {

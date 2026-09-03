@@ -608,7 +608,7 @@ func channelExecutionErrorReason(err *types.NewAPIError) string {
 	return fmt.Sprintf("%s; transport_error=%s", reason, internalReason)
 }
 
-func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError) bool {
+func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfos ...*relaycommon.RelayInfo) bool {
 	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.Error())))
 	if types.IsStreamEventError(err) &&
 		(types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err)) {
@@ -635,6 +635,14 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			service.DisableChannel(channelError, err.ErrorWithStatusCode())
 		})
 	}
+	if len(relayInfos) > 0 {
+		previousChannelID, hadChannelID := c.Get("channel_id")
+		c.Set("channel_id", channelError.ChannelId)
+		recordChannelErrorLog(c, err, relayInfos[0], false)
+		if hadChannelID {
+			c.Set("channel_id", previousChannelID)
+		}
+	}
 	return channelRouteAdvanced || tokenGroupRouteAdvanced
 }
 
@@ -646,49 +654,34 @@ func recordChannelErrorLog(c *gin.Context, err *types.NewAPIError, relayInfo *re
 		modelName := c.GetString("original_model")
 		tokenId := c.GetInt("token_id")
 		userGroup := c.GetString("group")
-		channelId := c.GetInt("channel_id")
-		other := make(map[string]interface{})
+		other := model.NewLogOther()
 		if c.Request != nil && c.Request.URL != nil {
-			other["request_path"] = c.Request.URL.Path
+			other.SetPublic("request_path", c.Request.URL.Path)
 		}
-		other["error_type"] = err.GetErrorType()
-		other["error_code"] = err.GetErrorCode()
+		other.SetPublic("error_type", err.GetErrorType())
+		other.SetPublic("error_code", err.GetErrorCode())
 		statusCode, logContent := relayErrorLogDetails(c, err)
-		other["status_code"] = statusCode
-		other["channel_id"] = channelId
-		other["channel_name"] = c.GetString("channel_name")
-		other["channel_type"] = c.GetInt("channel_type")
-		service.AppendStreamStatus(relayInfo, other)
-		adminInfo := make(map[string]interface{})
-		adminInfo["use_channel"] = c.GetStringSlice("use_channel")
-		if relayInfo != nil {
-			if diagnostics := relayInfo.ConversionDiagnostics(); len(diagnostics) > 0 {
-				adminInfo["conversion_diagnostics"] = diagnostics
-			}
-			if relayInfo.ConversionDiagnosticsTruncated() {
-				adminInfo["conversion_diagnostics_truncated"] = true
-			}
-		}
-		isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
-		if isMultiKey {
-			adminInfo["is_multi_key"] = true
-			adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
-		}
-		service.AppendChannelAffinityAdminInfo(c, adminInfo)
-		service.AppendChannelExecutionTraceErrorAdminInfo(c, adminInfo)
+		other.SetPublic("status_code", statusCode)
+		service.AppendRelayLogAdminInfo(c, relayInfo, other)
+		service.AppendChannelExecutionTraceErrorAdminInfoToLogOther(c, other)
+		service.AppendStreamStatusForLog(relayInfo, other)
 		if adminOnly {
-			adminInfo["retry_intermediate"] = true
+			other.SetAdmin("retry_intermediate", true)
 			model.MarkLogAdminOnly(other)
 		}
-		other["admin_info"] = adminInfo
 		service.AppendTaskPluginContextAuditInfo(c, other)
 		startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 		if startTime.IsZero() {
 			startTime = time.Now()
 		}
 		useTimeSeconds := int(time.Since(startTime).Seconds())
-		model.RecordErrorLog(c, userId, channelId, modelName, relayInfo.ActualResponseModel(), tokenName, logContent, tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
+		actualResponseModel := ""
+		if relayInfo != nil {
+			actualResponseModel = relayInfo.ActualResponseModel()
+		}
+		model.RecordErrorLog(c, userId, c.GetInt("channel_id"), modelName, actualResponseModel, tokenName, logContent, tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
+
 }
 
 func prepareRelayErrorResponse(c *gin.Context, err *types.NewAPIError, requestId string) *relayErrorResponsePreparation {
@@ -699,7 +692,6 @@ func prepareRelayErrorResponse(c *gin.Context, err *types.NewAPIError, requestId
 			}
 		}
 	}
-
 	logMessage := err.Error()
 	originalMessage := logMessage
 	if originalErr := err.InternalError(); originalErr != nil {
@@ -709,36 +701,18 @@ func prepareRelayErrorResponse(c *gin.Context, err *types.NewAPIError, requestId
 	customErrorApplied, messageReplaced := operation_setting.ApplyCustomErrorResponseWithResult(err)
 	if messageReplaced {
 		err.DisableResponseMasking()
-	} else {
-		if originalErr := err.InternalError(); originalErr != nil {
-			err.SetResponseMessage(originalErr.Error())
-		}
+	} else if originalErr := err.InternalError(); originalErr != nil {
+		err.SetResponseMessage(originalErr.Error())
 	}
 	setRelayResponseRequestId(err, requestId)
 	userMessage := err.Error()
 	if !messageReplaced {
 		userMessage = common.MaskSensitiveInfo(userMessage)
 	}
-
-	preparation := &relayErrorResponsePreparation{
-		Err:                err,
-		LogMessage:         logMessage,
-		OriginalStatusCode: originalStatusCode,
-		OriginalMessage:    originalMessage,
-		UserStatusCode:     err.StatusCode,
-		UserMessage:        userMessage,
-		CustomErrorApplied: customErrorApplied,
-	}
+	preparation := &relayErrorResponsePreparation{Err: err, LogMessage: logMessage, OriginalStatusCode: originalStatusCode, OriginalMessage: originalMessage, UserStatusCode: err.StatusCode, UserMessage: userMessage, CustomErrorApplied: customErrorApplied}
 	if c != nil {
 		c.Set(relayErrorResponsePreparationKey, preparation)
-		service.RecordChannelExecutionFinalOutcome(
-			c,
-			preparation.OriginalStatusCode,
-			preparation.OriginalMessage,
-			preparation.UserStatusCode,
-			preparation.UserMessage,
-			preparation.CustomErrorApplied,
-		)
+		service.RecordChannelExecutionFinalOutcome(c, preparation.OriginalStatusCode, preparation.OriginalMessage, preparation.UserStatusCode, preparation.UserMessage, preparation.CustomErrorApplied)
 	}
 	return preparation
 }
@@ -1153,6 +1127,9 @@ func executeTaskSubmissionWith(
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData
+	if len(result.PluginState) > 0 {
+		task.PrivateData.PluginState = result.PluginState
+	}
 	task.Action = relayInfo.Action
 	if immediate := result.Immediate; immediate != nil {
 		task.Status = model.TaskStatus(immediate.Status)
