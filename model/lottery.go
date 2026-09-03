@@ -755,15 +755,51 @@ func lotteryRuleActive(rule LotteryChanceGrantRule, now time.Time) bool {
 }
 
 func syncLotteryRechargeGrants(tx *gorm.DB, userId int, rules []LotteryChanceGrantRule, createdAt int64) error {
+	rechargeRules := make([]LotteryChanceGrantRule, 0, len(rules))
+	for _, rule := range rules {
+		if rule.Enabled && rule.Type == LotteryChanceGrantRuleRecharge && rule.Threshold > 0 {
+			rechargeRules = append(rechargeRules, rule)
+		}
+	}
+	if len(rechargeRules) == 0 {
+		return nil
+	}
+
 	var topUps []TopUp
-	query := tx.Where("user_id = ? AND status = ? AND amount > 0", userId, common.TopUpStatusSuccess)
+	query := tx.Select("id", "amount", "money", "payment_provider", "create_time", "complete_time").
+		Where("user_id = ? AND status = ? AND amount > 0", userId, common.TopUpStatusSuccess)
+	var earliestStart int64
+	var latestEnd int64
+	openStart := false
+	openEnd := false
+	for _, rule := range rechargeRules {
+		if rule.StartAt <= 0 {
+			openStart = true
+		} else if earliestStart == 0 || rule.StartAt < earliestStart {
+			earliestStart = rule.StartAt
+		}
+		if rule.EndAt <= 0 {
+			openEnd = true
+		} else if rule.EndAt > latestEnd {
+			latestEnd = rule.EndAt
+		}
+	}
+	if !openStart && earliestStart > 0 {
+		query = query.Where(
+			"((complete_time > 0 AND complete_time >= ?) OR (COALESCE(complete_time, 0) <= 0 AND create_time >= ?))",
+			earliestStart, earliestStart,
+		)
+	}
+	if !openEnd && latestEnd > 0 {
+		query = query.Where(
+			"((complete_time > 0 AND complete_time < ?) OR (COALESCE(complete_time, 0) <= 0 AND create_time < ?))",
+			latestEnd, latestEnd,
+		)
+	}
 	if err := query.Order("id ASC").Find(&topUps).Error; err != nil {
 		return err
 	}
-	for _, rule := range rules {
-		if !rule.Enabled || rule.Type != LotteryChanceGrantRuleRecharge || rule.Threshold <= 0 {
-			continue
-		}
+	for _, rule := range rechargeRules {
 		limit := rule.Limit
 		if limit == "" {
 			limit = LotteryRechargeGrantCumulative
@@ -861,20 +897,30 @@ func syncDailyRechargeGrants(tx *gorm.DB, userId int, rule LotteryChanceGrantRul
 		totals[day] = totals[day].Add(lotteryTopUpRechargeAmount(topUp))
 	}
 	threshold := decimal.NewFromFloat(rule.Threshold)
+	eligibleDays := make([]string, 0, len(totals))
+	for day, total := range totals {
+		if total.GreaterThanOrEqual(threshold) {
+			eligibleDays = append(eligibleDays, day)
+		}
+	}
+	if len(eligibleDays) == 0 {
+		return nil
+	}
 	legacyEventKeys := make(map[string]struct{})
 	var existingEventKeys []string
+	legacyKeys := make([]string, 0, len(eligibleDays))
+	for _, day := range eligibleDays {
+		legacyKeys = append(legacyKeys, fmt.Sprintf("recharge:%s:day:%s", rule.Id, day))
+	}
 	if err := tx.Model(&LotteryChanceGrant{}).
-		Where("user_id = ? AND type = ?", userId, "recharge_"+rule.Id).
+		Where("user_id = ? AND type = ? AND event_key IN ?", userId, "recharge_"+rule.Id, legacyKeys).
 		Pluck("event_key", &existingEventKeys).Error; err != nil {
 		return err
 	}
 	for _, eventKey := range existingEventKeys {
 		legacyEventKeys[eventKey] = struct{}{}
 	}
-	for day, total := range totals {
-		if total.LessThan(threshold) {
-			continue
-		}
+	for _, day := range eligibleDays {
 		legacyEventKey := fmt.Sprintf("recharge:%s:day:%s", rule.Id, day)
 		eventKey := fmt.Sprintf("%s:user:%d", legacyEventKey, userId)
 		if _, exists := legacyEventKeys[legacyEventKey]; exists {

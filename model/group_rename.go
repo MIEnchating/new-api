@@ -70,7 +70,7 @@ func UpdateGroupSettingsAndReferences(optionValues map[string]string, renames ma
 func renameUserGroupsWithTx(tx *gorm.DB, renames map[string]string, effects *groupRenameEffects) error {
 	sources := groupRenameSources(renames)
 	var users []User
-	if err := tx.Select("id", commonGroupCol, "deleted_at").
+	if err := tx.Select("id").
 		Where(commonGroupCol+" IN ?", sources).
 		Find(&users).Error; err != nil {
 		return err
@@ -90,8 +90,16 @@ func renameUserGroupsWithTx(tx *gorm.DB, renames map[string]string, effects *gro
 
 func renameTokenGroupsWithTx(tx *gorm.DB, renames map[string]string) error {
 	var tokens []Token
+	conditions := make([]string, 0, len(renames)*3)
+	args := make([]any, 0, len(renames)*3)
+	for source := range renames {
+		conditions = append(conditions,
+			commonGroupCol+" = ? OR auto_groups LIKE ? OR group_route_config LIKE ?")
+		args = append(args, source, "%"+source+"%", "%"+source+"%")
+	}
 	if err := tx.Unscoped().
-		Where(commonGroupCol+" IN ? OR auto_groups <> ? OR group_route_config <> ?", groupRenameSources(renames), "", "").
+		Select("id", commonKeyCol, "group", "auto_groups", "group_route_config").
+		Where(strings.Join(conditions, " OR "), args...).
 		Find(&tokens).Error; err != nil {
 		return err
 	}
