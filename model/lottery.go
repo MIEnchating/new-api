@@ -79,7 +79,7 @@ type LotteryChanceGrant struct {
 	Id             int64  `json:"id"`
 	EventKey       string `json:"-" gorm:"type:varchar(128);uniqueIndex"`
 	UserId         int    `json:"-" gorm:"index:idx_lottery_grant_user_time,priority:1"`
-	Type           string `json:"type" gorm:"type:varchar(32);index"`
+	Type           string `json:"type" gorm:"type:varchar(80);index"`
 	SourceName     string `json:"source_name,omitempty" gorm:"type:varchar(80)"`
 	Chances        int    `json:"chances"`
 	Consumed       int    `json:"consumed"`
@@ -861,12 +861,27 @@ func syncDailyRechargeGrants(tx *gorm.DB, userId int, rule LotteryChanceGrantRul
 		totals[day] = totals[day].Add(lotteryTopUpRechargeAmount(topUp))
 	}
 	threshold := decimal.NewFromFloat(rule.Threshold)
+	legacyEventKeys := make(map[string]struct{})
+	var existingEventKeys []string
+	if err := tx.Model(&LotteryChanceGrant{}).
+		Where("user_id = ? AND type = ?", userId, "recharge_"+rule.Id).
+		Pluck("event_key", &existingEventKeys).Error; err != nil {
+		return err
+	}
+	for _, eventKey := range existingEventKeys {
+		legacyEventKeys[eventKey] = struct{}{}
+	}
 	for day, total := range totals {
 		if total.LessThan(threshold) {
 			continue
 		}
+		legacyEventKey := fmt.Sprintf("recharge:%s:day:%s", rule.Id, day)
+		eventKey := fmt.Sprintf("%s:user:%d", legacyEventKey, userId)
+		if _, exists := legacyEventKeys[legacyEventKey]; exists {
+			eventKey = legacyEventKey
+		}
 		if err := createLotteryRechargeGrant(tx, userId, rule,
-			fmt.Sprintf("recharge:%s:day:%s", rule.Id, day), createdAt); err != nil {
+			eventKey, createdAt); err != nil {
 			return err
 		}
 	}

@@ -62,6 +62,16 @@ func testLotteryChanceGrantAuditMigration(t *testing.T, db *gorm.DB) {
 	assert.Equal(t, legacy.Chances, migrated.Chances)
 	assert.Zero(t, migrated.OperatorUserId)
 	assert.Empty(t, migrated.Detail)
+
+	expandedType := "recharge_" + strings.Repeat("r", 64)
+	expanded := LotteryChanceGrant{
+		EventKey: "expanded-grant-type", UserId: 43, Type: expandedType,
+		Chances: 1, CreatedAt: 1_700_000_001,
+	}
+	require.NoError(t, db.Table(upgradeTable).Create(&expanded).Error)
+	var stored LotteryChanceGrant
+	require.NoError(t, db.Table(upgradeTable).Where("event_key = ?", expanded.EventKey).First(&stored).Error)
+	assert.Equal(t, expandedType, stored.Type)
 }
 
 func TestLotteryChanceGrantAuditMigrationSQLite(t *testing.T) {

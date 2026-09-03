@@ -388,6 +388,122 @@ func TestLotteryRechargeGrantDoesNotRewardSplitPaymentsTwice(t *testing.T) {
 	assert.EqualValues(t, 1, count)
 }
 
+func TestLotteryDailyRechargeGrantIsScopedPerUserAndIdempotent(t *testing.T) {
+	firstUserId, now := setupLotteryTest(t)
+	secondUser := User{
+		Id: 62, Username: "lottery-user-two", AffCode: "lottery_aff_two",
+		Status: common.UserStatusEnabled, Quota: 1000,
+	}
+	require.NoError(t, DB.Create(&secondUser).Error)
+	config := defaultLotteryConfig()
+	config.GrantRules = []LotteryChanceGrantRule{{
+		Id: "recharge-daily", Type: LotteryChanceGrantRuleRecharge,
+		Name: "Daily recharge", Enabled: true, Threshold: 50,
+		Limit: LotteryRechargeGrantDaily, Chances: 1,
+		StartAt: now.Add(-time.Hour).Unix(), EndAt: now.Add(72 * time.Hour).Unix(),
+	}}
+	setLotteryConfigForTest(t, config)
+	for _, userId := range []int{firstUserId, secondUser.Id} {
+		for index := 0; index < 2; index++ {
+			require.NoError(t, DB.Create(&TopUp{
+				UserId: userId, Amount: 25, Money: 25,
+				TradeNo:      fmt.Sprintf("lottery-daily-%d-%d", userId, index),
+				Status:       common.TopUpStatusSuccess,
+				CreateTime:   now.Add(-time.Duration(index+1) * time.Minute).Unix(),
+				CompleteTime: now.Unix(),
+			}).Error)
+		}
+	}
+
+	for _, userId := range []int{firstUserId, secondUser.Id} {
+		status, err := getLotteryStatusAt(userId, now)
+		require.NoError(t, err)
+		assert.Equal(t, 1, status.AvailableChances)
+		repeated, err := getLotteryStatusAt(userId, now)
+		require.NoError(t, err)
+		assert.Equal(t, 1, repeated.AvailableChances)
+
+		var count int64
+		eventKey := fmt.Sprintf(
+			"recharge:recharge-daily:day:%s:user:%d",
+			now.Format("2006-01-02"), userId,
+		)
+		require.NoError(t, DB.Model(&LotteryChanceGrant{}).
+			Where("event_key = ? AND user_id = ?", eventKey, userId).
+			Count(&count).Error)
+		assert.EqualValues(t, 1, count)
+	}
+}
+
+func TestLotteryDailyRechargeGrantPreservesLegacyRecipient(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	config := defaultLotteryConfig()
+	config.GrantRules = []LotteryChanceGrantRule{{
+		Id: "recharge-daily-legacy", Type: LotteryChanceGrantRuleRecharge,
+		Name: "Daily recharge legacy", Enabled: true, Threshold: 50,
+		Limit: LotteryRechargeGrantDaily, Chances: 1,
+		StartAt: now.Add(-time.Hour).Unix(), EndAt: now.Add(72 * time.Hour).Unix(),
+	}}
+	setLotteryConfigForTest(t, config)
+	require.NoError(t, DB.Create(&TopUp{
+		UserId: userId, Amount: 50, Money: 50,
+		TradeNo: "lottery-daily-legacy", Status: common.TopUpStatusSuccess,
+		CreateTime: now.Add(-time.Minute).Unix(), CompleteTime: now.Unix(),
+	}).Error)
+	legacyEventKey := fmt.Sprintf(
+		"recharge:recharge-daily-legacy:day:%s", now.Format("2006-01-02"),
+	)
+	require.NoError(t, DB.Create(&LotteryChanceGrant{
+		EventKey: legacyEventKey, UserId: userId,
+		Type: "recharge_recharge-daily-legacy", Chances: 1,
+		CreatedAt: now.Add(-time.Minute).Unix(),
+	}).Error)
+
+	status, err := getLotteryStatusAt(userId, now)
+	require.NoError(t, err)
+	assert.Equal(t, 1, status.AvailableChances)
+	var grants []LotteryChanceGrant
+	require.NoError(t, DB.Where(
+		"user_id = ? AND type = ?", userId, "recharge_recharge-daily-legacy",
+	).Find(&grants).Error)
+	require.Len(t, grants, 1)
+	assert.Equal(t, legacyEventKey, grants[0].EventKey)
+	assert.Equal(t, config.GrantRules[0].EndAt, grants[0].ExpiresAt)
+}
+
+func TestLotteryUnlimitedRechargeGrantRewardsEveryQualifyingTopUp(t *testing.T) {
+	userId, now := setupLotteryTest(t)
+	config := defaultLotteryConfig()
+	config.GrantRules = []LotteryChanceGrantRule{{
+		Id: "recharge-unlimited", Type: LotteryChanceGrantRuleRecharge,
+		Name: "Unlimited recharge", Enabled: true, Threshold: 50,
+		Limit: LotteryRechargeGrantUnlimited, Chances: 2,
+		StartAt: now.Add(-time.Hour).Unix(), EndAt: now.Add(72 * time.Hour).Unix(),
+	}}
+	setLotteryConfigForTest(t, config)
+	for index, amount := range []int64{50, 49, 100} {
+		require.NoError(t, DB.Create(&TopUp{
+			UserId: userId, Amount: amount, Money: float64(amount),
+			TradeNo:      fmt.Sprintf("lottery-unlimited-%d", index),
+			Status:       common.TopUpStatusSuccess,
+			CreateTime:   now.Add(-time.Duration(index+1) * time.Minute).Unix(),
+			CompleteTime: now.Unix(),
+		}).Error)
+	}
+
+	status, err := getLotteryStatusAt(userId, now)
+	require.NoError(t, err)
+	assert.Equal(t, 4, status.AvailableChances)
+	repeated, err := getLotteryStatusAt(userId, now)
+	require.NoError(t, err)
+	assert.Equal(t, 4, repeated.AvailableChances)
+	var count int64
+	require.NoError(t, DB.Model(&LotteryChanceGrant{}).
+		Where("user_id = ? AND type = ?", userId, "recharge_recharge-unlimited").
+		Count(&count).Error)
+	assert.EqualValues(t, 2, count)
+}
+
 func TestLotteryEventGrantIsClaimedOncePerUser(t *testing.T) {
 	userId, now := setupLotteryTest(t)
 	config := defaultLotteryConfig()
