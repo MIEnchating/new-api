@@ -25,6 +25,7 @@ import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
 import { GrokSettingsCard } from './grok-settings-card'
 import { RoutingReliabilitySection } from './routing-reliability-section'
+import { SmartRoutingSection } from './smart-routing-section'
 
 function formatJsonForEditor(value: string, fallback: string) {
   const raw = (value ?? '').toString().trim()
@@ -106,6 +107,20 @@ const MODELS_SECTIONS = [
             settings['request_error_routing_setting.enabled'],
           'request_error_routing_setting.rules':
             settings['request_error_routing_setting.rules'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'smart-routing',
+    titleKey: 'Smart Routing',
+    build: (settings: ModelSettings) => (
+      <SmartRoutingSection
+        defaultValues={{
+          'smart_routing_setting.enabled':
+            settings['smart_routing_setting.enabled'],
+          'smart_routing_setting.templates':
+            settings['smart_routing_setting.templates'],
         }}
       />
     ),

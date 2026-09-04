@@ -28,6 +28,7 @@ import type {
   ApiKeyGroupRoute,
   RouteStatus,
   TokenAutoGroupsConfig,
+  SmartRoutingTemplate,
 } from './types'
 
 // ============================================================================
@@ -95,6 +96,13 @@ export async function getTokenAutoGroups(): Promise<
   ApiResponse<TokenAutoGroupsConfig>
 > {
   const res = await api.get('/api/token/auto-groups')
+  return res.data
+}
+
+export async function getSmartRoutingTemplates(): Promise<
+  ApiResponse<SmartRoutingTemplate[]>
+> {
+  const res = await api.get('/api/token/smart-routing-templates')
   return res.data
 }
 

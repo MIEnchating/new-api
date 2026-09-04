@@ -48,6 +48,19 @@ func TestHandleConfigUpdateRefreshesErrorResponseSnapshot(t *testing.T) {
 	require.Equal(t, "custom", apiErr.ToOpenAIError().Message)
 }
 
+func TestHandleConfigUpdateRefreshesSmartRoutingSnapshot(t *testing.T) {
+	current := operation_setting.GetSmartRoutingSetting()
+	original := *current
+	original.Templates = operation_setting.CurrentSmartRoutingSetting().Templates
+	t.Cleanup(func() {
+		*current = original
+		operation_setting.RefreshSmartRoutingSnapshot()
+	})
+
+	require.True(t, handleConfigUpdate("smart_routing_setting.enabled", "true"))
+	require.True(t, operation_setting.CurrentSmartRoutingSetting().Enabled)
+}
+
 func TestUpdateOptionsBulkRollsBackBeforeUpdatingMemory(t *testing.T) {
 	previousDB := DB
 	common.OptionMapRWMutex.Lock()

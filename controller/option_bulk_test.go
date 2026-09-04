@@ -49,3 +49,20 @@ func TestPrepareRoutingReliabilityOptionUpdatesRejectsDuplicateAndForeignKeys(t 
 	assert.Nil(t, updates)
 	assert.Contains(t, err.Error(), "不支持批量更新")
 }
+
+func TestPrepareRoutingReliabilityOptionUpdatesValidatesSmartRoutingTemplates(t *testing.T) {
+	updates, err := prepareRoutingReliabilityOptionUpdates([]OptionUpdateRequest{
+		{Key: "smart_routing_setting.enabled", Value: true},
+		{Key: "smart_routing_setting.templates", Value: `[{"id":"claude","name":"Claude","enabled":true,"group_routes":[{"group":"default","priority":1,"cooldown_seconds":60}]}]`},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "true", updates["smart_routing_setting.enabled"])
+
+	updates, err = prepareRoutingReliabilityOptionUpdates([]OptionUpdateRequest{
+		{Key: "smart_routing_setting.templates", Value: `[{"id":"bad","name":"Bad","enabled":true,"group_routes":[{"group":"default","priority":1,"cooldown_seconds":0}]}]`},
+	})
+	require.Error(t, err)
+	assert.Nil(t, updates)
+	assert.Contains(t, err.Error(), "冷却时间")
+}

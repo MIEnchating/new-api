@@ -26,6 +26,7 @@ import {
   Network,
   Plus,
   Settings2,
+  Sparkles,
   Trash2,
   WalletCards,
 } from 'lucide-react'
@@ -67,6 +68,14 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Sheet,
   SheetClose,
   SheetContent,
@@ -93,6 +102,7 @@ import {
   updateApiKey,
   getApiKey,
   getTokenAutoGroups,
+  getSmartRoutingTemplates,
 } from '../api'
 import { ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import {
@@ -139,6 +149,8 @@ export function ApiKeysMutateDrawer({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [autoSortGroupRoutes, setAutoSortGroupRoutes] = useState(false)
+  const [selectedSmartRoutingTemplateId, setSelectedSmartRoutingTemplateId] =
+    useState<string | null>(null)
   const manualRoutePrioritiesRef = useRef(new Map<string, number>())
   const enabledRouteCooldownsRef = useRef(new Map<string, number>())
   const [initializedTarget, setInitializedTarget] = useState<string | null>(
@@ -185,6 +197,13 @@ export function ApiKeysMutateDrawer({
   } = useQuery({
     queryKey: ['token-auto-groups'],
     queryFn: getTokenAutoGroups,
+    enabled: open,
+    staleTime: 0,
+  })
+
+  const { data: smartRoutingTemplatesData } = useQuery({
+    queryKey: ['token-smart-routing-templates'],
+    queryFn: getSmartRoutingTemplates,
     enabled: open,
     staleTime: 0,
   })
@@ -239,6 +258,10 @@ export function ApiKeysMutateDrawer({
     Number(autoGroupsData?.data?.max_count) > 0
       ? Number(autoGroupsData?.data?.max_count)
       : 5
+  const smartRoutingTemplates = useMemo(
+    () => smartRoutingTemplatesData?.data || [],
+    [smartRoutingTemplatesData]
+  )
   const schema = useMemo(
     () => getApiKeyFormSchema(t, maxAutoGroups),
     [t, maxAutoGroups]
@@ -273,6 +296,7 @@ export function ApiKeysMutateDrawer({
     const target = isUpdate && currentRow ? `update:${currentRow.id}` : 'create'
     if (initializedTarget === target) return
     setAutoSortGroupRoutes(false)
+    setSelectedSmartRoutingTemplateId(null)
     manualRoutePrioritiesRef.current.clear()
     enabledRouteCooldownsRef.current.clear()
     if (isUpdate && currentRow) {
@@ -423,11 +447,75 @@ export function ApiKeysMutateDrawer({
   const autoGroupsMode = form.watch('auto_groups_mode')
   const unlimitedQuota = form.watch('unlimited_quota')
   const groupRouteEnabled = form.watch('group_route_enabled')
+  const groupRouteSticky = form.watch('group_route_sticky')
   const groupRoutes = form.watch('group_routes') || []
+  const selectedSmartRoutingTemplate = smartRoutingTemplates.find(
+    (template) => template.id === selectedSmartRoutingTemplateId
+  )
+  const selectedSmartRoutingTemplateIsApplied =
+    !!selectedSmartRoutingTemplate &&
+    !!groupRouteEnabled &&
+    selectedSmartRoutingTemplate.group_route_sticky === !!groupRouteSticky &&
+    selectedSmartRoutingTemplate.group_routes.length === groupRoutes.length &&
+    selectedSmartRoutingTemplate.group_routes.every((route, index) => {
+      const currentRoute = groupRoutes[index]
+      return (
+        currentRoute?.group === route.group &&
+        currentRoute.priority === route.priority &&
+        currentRoute.cooldown_seconds === route.cooldown_seconds &&
+        (currentRoute.enabled !== false) === (route.enabled !== false)
+      )
+    })
+
+  // When the administrator has configured templates, a newly created key
+  // starts from the first available template. Users can still choose another
+  // template before submitting, but never need to build the route manually.
+  useEffect(() => {
+    if (
+      !open ||
+      isUpdate ||
+      initializedTarget !== 'create' ||
+      selectedSmartRoutingTemplateId ||
+      smartRoutingTemplates.length === 0
+    ) {
+      return
+    }
+
+    const template = smartRoutingTemplates[0]
+    if (!template) return
+
+    setSelectedSmartRoutingTemplateId(template.id)
+    setAutoSortGroupRoutes(false)
+    manualRoutePrioritiesRef.current.clear()
+    enabledRouteCooldownsRef.current.clear()
+    routeFields.replace(
+      template.group_routes.map((route) => ({
+        ...route,
+        enabled: route.enabled !== false,
+      }))
+    )
+    form.setValue('group_route_enabled', true, {
+      shouldDirty: false,
+      shouldValidate: true,
+    })
+    form.setValue('group_route_sticky', template.group_route_sticky, {
+      shouldDirty: false,
+      shouldValidate: true,
+    })
+  }, [
+    open,
+    isUpdate,
+    initializedTarget,
+    selectedSmartRoutingTemplateId,
+    smartRoutingTemplates,
+    routeFields,
+    form,
+  ])
   const cooldownUnavailable = !canConfigureGroupRouteCooldown(groupRoutes)
   const groupRoutesMessage = getFormErrorMessage(
     form.formState.errors.group_routes
   )
+
   const nextRoutePriority = () => {
     const priorities =
       form.getValues('group_routes')?.map((route) => route.priority) || []
@@ -523,6 +611,7 @@ export function ApiKeysMutateDrawer({
         onOpenChange(v)
         if (!v) {
           form.reset()
+          setSelectedSmartRoutingTemplateId(null)
         }
       }}
     >
@@ -567,6 +656,70 @@ export function ApiKeysMutateDrawer({
                   </FormItem>
                 )}
               />
+
+              {smartRoutingTemplates.length > 0 && (
+                <div className='space-y-2'>
+                  <FormLabel>{t('Smart Routing')}</FormLabel>
+                  <Select
+                    value={
+                      selectedSmartRoutingTemplateIsApplied
+                        ? (selectedSmartRoutingTemplateId ?? undefined)
+                        : undefined
+                    }
+                    onValueChange={(templateId) => {
+                      if (!templateId) return
+                      const template = smartRoutingTemplates.find(
+                        (candidate) => candidate.id === templateId
+                      )
+                      if (!template) return
+
+                      setSelectedSmartRoutingTemplateId(template.id)
+                      setAutoSortGroupRoutes(false)
+                      manualRoutePrioritiesRef.current.clear()
+                      enabledRouteCooldownsRef.current.clear()
+                      routeFields.replace(
+                        template.group_routes.map((route) => ({
+                          ...route,
+                          enabled: route.enabled !== false,
+                        }))
+                      )
+                      form.setValue('group_route_enabled', true, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      })
+                      form.setValue(
+                        'group_route_sticky',
+                        template.group_route_sticky,
+                        { shouldDirty: true, shouldValidate: true }
+                      )
+                    }}
+                  >
+                    <SelectTrigger aria-label={t('Smart Routing')}>
+                      <Sparkles className='text-muted-foreground size-4' />
+                      <SelectValue>
+                        {selectedSmartRoutingTemplateIsApplied
+                          ? selectedSmartRoutingTemplate.name
+                          : t('Smart Routing')}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      <SelectGroup>
+                        {smartRoutingTemplates.map((template) => (
+                          <SelectItem key={template.id} value={template.id}>
+                            {template.name}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  {selectedSmartRoutingTemplateIsApplied &&
+                    selectedSmartRoutingTemplate.description && (
+                      <p className='text-muted-foreground text-xs'>
+                        {selectedSmartRoutingTemplate.description}
+                      </p>
+                    )}
+                </div>
+              )}
 
               <FormField
                 control={form.control}

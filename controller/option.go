@@ -155,6 +155,8 @@ var routingReliabilityBulkOptionKeys = map[string]struct{}{
 	"error_response_setting.rules":              {},
 	"request_error_routing_setting.enabled":     {},
 	"request_error_routing_setting.rules":       {},
+	"smart_routing_setting.enabled":             {},
+	"smart_routing_setting.templates":           {},
 }
 
 func optionValueToString(value any) string {
@@ -195,6 +197,8 @@ func validateRoutingReliabilityOption(key string, value string) error {
 		return operation_setting.ValidateCustomErrorResponseRulesJSON(value)
 	case "request_error_routing_setting.rules":
 		return operation_setting.ValidateRequestErrorRoutingRulesJSON(value)
+	case "smart_routing_setting.templates":
+		return operation_setting.ValidateSmartRoutingTemplatesJSON(value)
 	}
 	return nil
 }

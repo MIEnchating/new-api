@@ -304,6 +304,8 @@ export function ModelMutateDrawer({
       'claude.default_max_tokens': '',
       'claude.thinking_adapter_enabled': true,
       'claude.thinking_adapter_budget_tokens_percentage': 0.8,
+      'smart_routing_setting.enabled': false,
+      'smart_routing_setting.templates': '[]',
       ModelPrice: '',
       ModelRatio: '',
       CacheRatio: '',

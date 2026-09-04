@@ -341,6 +341,7 @@ func updateSnapshotConfigOptionsBulk(values map[string]string) (map[string]struc
 	configs := []snapshotConfigUpdate{
 		{prefix: "request_error_routing_setting.", apply: operation_setting.UpdateRequestErrorRoutingSetting},
 		{prefix: "error_response_setting.", apply: operation_setting.UpdateErrorResponseSetting},
+		{prefix: "smart_routing_setting.", apply: operation_setting.UpdateSmartRoutingSetting},
 	}
 	handled := make(map[string]struct{})
 	for _, cfg := range configs {
@@ -760,6 +761,8 @@ func handleConfigUpdate(key, value string) bool {
 		_ = operation_setting.UpdateRequestErrorRoutingSetting(configMap)
 	case "error_response_setting":
 		_ = operation_setting.UpdateErrorResponseSetting(configMap)
+	case "smart_routing_setting":
+		_ = operation_setting.UpdateSmartRoutingSetting(configMap)
 	default:
 		config.UpdateConfigFromMap(cfg, configMap)
 	}

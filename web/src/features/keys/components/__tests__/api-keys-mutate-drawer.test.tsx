@@ -23,6 +23,7 @@ const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { QueryClient, QueryClientProvider } =
   await import('@tanstack/react-query')
+const { default: userEvent } = await import('@testing-library/user-event')
 const { api } = await import('@/lib/api')
 const { ApiKeysProvider } = await import('../api-keys-provider')
 const { ApiKeysMutateDrawer } = await import('../api-keys-mutate-drawer')
@@ -47,7 +48,10 @@ const originalGet = apiClient.get
 const originalPost = apiClient.post
 let renderedDrawer: RenderedDrawer | null = null
 
-function installApiFixtures(createdPayloads: Array<Record<string, unknown>>) {
+function installApiFixtures(
+  createdPayloads: Array<Record<string, unknown>>,
+  smartRoutingTemplates = true
+) {
   apiClient.get = async (url) => {
     switch (url) {
       case '/api/status':
@@ -72,6 +76,37 @@ function installApiFixtures(createdPayloads: Array<Record<string, unknown>>) {
             data: { groups: ['vip', 'default'], max_count: 3 },
           },
         }
+      case '/api/token/smart-routing-templates':
+        return {
+          data: {
+            success: true,
+            data: smartRoutingTemplates
+              ? [
+                  {
+                    id: 'claude',
+                    name: 'Claude',
+                    description: 'Claude routing',
+                    enabled: true,
+                    group_routes: [
+                      {
+                        group: 'vip',
+                        priority: 2,
+                        cooldown_seconds: 60,
+                        enabled: true,
+                      },
+                      {
+                        group: 'default',
+                        priority: 1,
+                        cooldown_seconds: 120,
+                        enabled: true,
+                      },
+                    ],
+                    group_route_sticky: true,
+                  },
+                ]
+              : [],
+          },
+        }
       default:
         throw new Error(`Unexpected GET ${url}`)
     }
@@ -84,7 +119,7 @@ function installApiFixtures(createdPayloads: Array<Record<string, unknown>>) {
   }
 }
 
-async function renderCreateDrawer(): Promise<void> {
+async function renderCreateDrawer(smartRoutingTemplates = true): Promise<void> {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -94,6 +129,38 @@ async function renderCreateDrawer(): Promise<void> {
     { default_use_auto_group: true },
     { updatedAt: freshAt }
   )
+  if (smartRoutingTemplates) {
+    queryClient.setQueryData(
+      ['token-smart-routing-templates'],
+      {
+        success: true,
+        data: [
+          {
+            id: 'claude',
+            name: 'Claude',
+            description: 'Claude routing',
+            enabled: true,
+            group_routes: [
+              {
+                group: 'vip',
+                priority: 2,
+                cooldown_seconds: 60,
+                enabled: true,
+              },
+              {
+                group: 'default',
+                priority: 1,
+                cooldown_seconds: 120,
+                enabled: true,
+              },
+            ],
+            group_route_sticky: true,
+          },
+        ],
+      },
+      { updatedAt: freshAt }
+    )
+  }
   queryClient.setQueryData(
     ['user-models'],
     { success: true, data: [] },
@@ -206,8 +273,8 @@ afterEach(() => {
 describe('API keys mutate drawer Auto group integration', () => {
   test('inherits the root Auto order and sends an empty override for every batch-created key', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
-    installApiFixtures(createdPayloads)
-    await renderCreateDrawer()
+    installApiFixtures(createdPayloads, false)
+    await renderCreateDrawer(false)
 
     const groupTrigger = getControlByLabel('Group')
     expect(groupTrigger.textContent?.includes('auto')).toBe(true)
@@ -239,8 +306,8 @@ describe('API keys mutate drawer Auto group integration', () => {
 
   test('preserves an unsaved custom order and mode after Auto to ordinary to Auto changes', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
-    installApiFixtures(createdPayloads)
-    await renderCreateDrawer()
+    installApiFixtures(createdPayloads, false)
+    await renderCreateDrawer(false)
 
     const autoOrderControl = getControlByLabel('Auto group order')
     const addGroupTrigger = autoOrderControl.querySelector<HTMLButtonElement>(
@@ -280,10 +347,57 @@ describe('API keys mutate drawer Auto group integration', () => {
 })
 
 describe('API keys mutate drawer routing mode', () => {
-  test('disables press scaling on the advanced settings trigger', async () => {
+  test('applies a smart routing template before creating an API key', async () => {
+    const user = userEvent.setup()
     const createdPayloads: Array<Record<string, unknown>> = []
     installApiFixtures(createdPayloads)
     await renderCreateDrawer()
+
+    const templateTrigger = screen.getByRole('combobox', {
+      name: 'Smart Routing',
+    })
+    await waitFor(() => expect(templateTrigger).toHaveTextContent('Claude'))
+    expect(document.body).toHaveTextContent('Group routing rules')
+
+    await user.click(templateTrigger)
+    expect(screen.queryByRole('option', { name: 'Custom routing' })).toBeNull()
+    const claudeOption = screen.getByRole('option', { name: 'Claude' })
+    await user.click(claudeOption)
+
+    await waitFor(() => expect(templateTrigger).toHaveTextContent('Claude'))
+    expect(document.body).toHaveTextContent('Group routing rules')
+    expect(
+      document.querySelectorAll(
+        'button[aria-label="Remove group routing rule"]'
+      )
+    ).toHaveLength(2)
+
+    changeInput(getControlByLabel('Name'), 'templated')
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(createdPayloads).toHaveLength(1))
+
+    expect(createdPayloads[0]?.group).toBe('')
+    expect(createdPayloads[0]?.group_route_sticky).toBe(true)
+    expect(JSON.parse(String(createdPayloads[0]?.group_route_config))).toEqual([
+      {
+        group: 'vip',
+        priority: 2,
+        cooldown_seconds: 60,
+        enabled: true,
+      },
+      {
+        group: 'default',
+        priority: 1,
+        cooldown_seconds: 120,
+        enabled: true,
+      },
+    ])
+  })
+
+  test('disables press scaling on the advanced settings trigger', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads, false)
+    await renderCreateDrawer(false)
 
     const advancedTrigger = findButton('Advanced Settings', true)
     expect(advancedTrigger).toHaveAttribute('data-press-animation', 'none')
@@ -295,8 +409,8 @@ describe('API keys mutate drawer routing mode', () => {
 
   test('switches between single-group and group-routing cards', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
-    installApiFixtures(createdPayloads)
-    await renderCreateDrawer()
+    installApiFixtures(createdPayloads, false)
+    await renderCreateDrawer(false)
 
     const modeCards = [
       ...document.querySelectorAll<HTMLButtonElement>('[role="radio"]'),

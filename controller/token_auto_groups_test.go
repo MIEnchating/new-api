@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -232,6 +233,42 @@ func TestGetTokenAutoGroupsReturnsFullFilteredGlobalOrderAndLimit(t *testing.T) 
 	require.NoError(t, common.Unmarshal(response.Data, &data))
 	assert.Equal(t, []string{"vip", "default"}, data.Groups)
 	assert.Equal(t, 1, data.MaxCount)
+}
+
+func TestGetTokenSmartRoutingTemplatesOnlyReturnsUsableEnabledTemplates(t *testing.T) {
+	configureTokenAutoGroupsTest(t, "5", `[]`)
+	user := setupTokenAutoGroupsControllerTest(t)
+	original := operation_setting.CurrentSmartRoutingSetting()
+	t.Cleanup(func() {
+		data, err := common.Marshal(original.Templates)
+		require.NoError(t, err)
+		require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{
+			"enabled":   fmt.Sprintf("%t", original.Enabled),
+			"templates": string(data),
+		}))
+	})
+	require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{
+		"enabled": "true",
+		"templates": `[
+			{"id":"claude","name":"Claude","enabled":true,"group_routes":[{"group":"default","priority":2,"cooldown_seconds":60},{"group":"vip","priority":1,"cooldown_seconds":60}]},
+			{"id":"missing","name":"Missing","enabled":true,"group_routes":[{"group":"missing","priority":1,"cooldown_seconds":60}]},
+			{"id":"disabled","name":"Disabled","enabled":false,"group_routes":[]}
+		]`,
+	}))
+
+	ctx, recorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodGet, "/api/token/smart-routing-templates", nil, user.Id)
+	GetTokenSmartRoutingTemplates(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	var templates []operation_setting.SmartRoutingTemplate
+	require.NoError(t, common.Unmarshal(response.Data, &templates))
+	require.Len(t, templates, 1)
+	assert.Equal(t, "claude", templates[0].ID)
+	assert.Equal(t, []string{"default", "vip"}, []string{
+		templates[0].GroupRoutes[0].Group,
+		templates[0].GroupRoutes[1].Group,
+	})
 }
 
 func TestUpdateTokenGroupRoutesOnlyChangesRouteConfig(t *testing.T) {

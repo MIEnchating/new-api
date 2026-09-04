@@ -31,6 +31,15 @@ export const apiKeyGroupRouteSchema = z.object({
 
 export type ApiKeyGroupRoute = z.infer<typeof apiKeyGroupRouteSchema>
 
+export interface SmartRoutingTemplate {
+  id: string
+  name: string
+  description?: string
+  enabled: boolean
+  group_routes: ApiKeyGroupRoute[]
+  group_route_sticky: boolean
+}
+
 const routeStatusSchema = z.object({
   group: z.string().optional(),
   model: z.string().optional(),

@@ -133,6 +133,39 @@ func normalizeTokenGroupForUser(userID int, group string) (string, error) {
 	return group, nil
 }
 
+func GetTokenSmartRoutingTemplates(c *gin.Context) {
+	setting := operation_setting.CurrentSmartRoutingSetting()
+	if !setting.Enabled {
+		common.ApiSuccess(c, []operation_setting.SmartRoutingTemplate{})
+		return
+	}
+
+	userGroup, err := model.GetUserGroup(c.GetInt("id"), false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	templates := make([]operation_setting.SmartRoutingTemplate, 0, len(setting.Templates))
+	for _, template := range setting.Templates {
+		if !template.Enabled || len(template.GroupRoutes) == 0 {
+			continue
+		}
+		available := true
+		for _, route := range template.GroupRoutes {
+			if !service.IsUserSelectableGroup(userGroup, route.Group) {
+				available = false
+				break
+			}
+		}
+		if available {
+			templates = append(templates, template)
+		}
+	}
+
+	common.ApiSuccess(c, templates)
+}
+
 func getTokenRequestUserGroup(c *gin.Context) (string, error) {
 	if userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup); userGroup != "" {
 		return userGroup, nil
