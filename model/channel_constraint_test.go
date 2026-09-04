@@ -176,6 +176,42 @@ func TestFilterCandidateIDs(t *testing.T) {
 	}
 }
 
+func TestChannelSelectionUsesRoutingModelNameForModifiers(t *testing.T) {
+	const channelID = 900020
+	channel := &Channel{Id: channelID, Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled}
+
+	channelSyncLock.Lock()
+	previousGroups := group2model2channels
+	previousChannels := channelsIDM
+	group2model2channels = map[string]map[string][]int{
+		"default": {"qwen3-max": {channelID}},
+	}
+	channelsIDM = map[int]*Channel{channelID: channel}
+	channelSyncLock.Unlock()
+
+	previousCacheEnabled := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = true
+	t.Cleanup(func() {
+		common.MemoryCacheEnabled = previousCacheEnabled
+		channelSyncLock.Lock()
+		group2model2channels = previousGroups
+		channelsIDM = previousChannels
+		channelSyncLock.Unlock()
+	})
+
+	const modelName = "qwen3-max@thinking:on"
+	snapshot, err := LoadSatisfiedChannelSelectionSnapshot("default", modelName, "/v1/chat/completions")
+	require.NoError(t, err)
+	require.NotNil(t, snapshot)
+	require.Len(t, snapshot.Candidates(), 1)
+	assert.Equal(t, channelID, snapshot.Candidates()[0].ChannelID)
+
+	candidates, err := ListSatisfiedChannelCandidates("default", modelName, "/v1/chat/completions")
+	require.NoError(t, err)
+	require.Len(t, candidates, 1)
+	assert.Equal(t, channelID, candidates[0].ChannelID)
+}
+
 func TestChannelSatisfiesFilters(t *testing.T) {
 	alphaSetting := `{"task_plugin_key":"alpha"}`
 	alpha := &Channel{Id: 1, Type: constant.ChannelTypeTaskPlugin, Setting: &alphaSetting}

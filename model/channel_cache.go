@@ -198,7 +198,7 @@ func LoadSatisfiedChannelSelectionSnapshotWithFilters(group string, modelName st
 
 	channelIDs, _ := filterCandidateIDs(group2model2channels[group][modelName], modelName, filters)
 	if len(channelIDs) == 0 {
-		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
+		normalizedModel := ratio_setting.RoutingMatchModelName(modelName)
 		channelIDs, _ = filterCandidateIDs(group2model2channels[group][normalizedModel], modelName, filters)
 	}
 
@@ -226,7 +226,7 @@ func ListSatisfiedChannelCandidates(group string, modelName string, requestPath 
 	filters := []dto.ChannelFilter{{Kind: dto.FilterRequestPath, RequestPath: requestPath}}
 	channelIDs, _ := filterCandidateIDs(group2model2channels[group][modelName], modelName, filters)
 	if len(channelIDs) == 0 {
-		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
+		normalizedModel := ratio_setting.RoutingMatchModelName(modelName)
 		channelIDs, _ = filterCandidateIDs(group2model2channels[group][normalizedModel], modelName, filters)
 	}
 
