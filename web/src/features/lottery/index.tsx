@@ -95,6 +95,7 @@ import { ManualLotteryGrantDialog } from './manual-lottery-grant-dialog'
 import type {
   LotteryAdminGrant,
   LotteryAdminDraw,
+  LotteryChanceGrantRule,
   LotteryDraw,
   LotteryDrawFilters,
   LotteryGrantFilters,
@@ -108,6 +109,7 @@ const USER_PAGE_SIZE = 10
 const LOTTERY_GRID_SIZE = 9
 const LOTTERY_GRID_CENTER = 4
 const LOTTERY_GRID_ROUTE = [0, 1, 2, 5, 8, 7, 6, 3] as const
+const EMPTY_GRANT_RULES: LotteryChanceGrantRule[] = []
 // Let the draw animation complete a few rotations before revealing the result.
 // The API response is already available, so this delay only affects the visual
 // presentation and is skipped when the request itself fails.
@@ -1624,6 +1626,7 @@ export function Lottery() {
       <ManualLotteryGrantDialog
         open={manualGrantOpen}
         onOpenChange={setManualGrantOpen}
+        grantRules={status?.active_grant_rules ?? EMPTY_GRANT_RULES}
         onSuccess={async () => {
           setGrantPage(1)
           await Promise.all([loadAdminGrants(1), loadStatus()])

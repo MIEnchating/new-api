@@ -45,6 +45,52 @@ func verifyLotteryDailyRechargeGrantUserScope(t *testing.T, db *gorm.DB) {
 	assert.Equal(t, 910001, grants[0].UserId)
 	assert.Equal(t, 910002, grants[1].UserId)
 	assert.NotEqual(t, grants[0].EventKey, grants[1].EventKey)
+
+	legacyUserId := 910003
+	legacyTopUp := TopUp{
+		Id: legacyUserId, UserId: legacyUserId, Amount: 50,
+		Status: "success", CompleteTime: now.Unix(),
+	}
+	legacyEventKey := fmt.Sprintf("recharge:%s:topup:%d", ruleId, legacyTopUp.Id)
+	require.NoError(t, db.Create(&LotteryChanceGrant{
+		EventKey: legacyEventKey, UserId: legacyUserId,
+		Type: grantType, Chances: 1, CreatedAt: now.Add(-time.Minute).Unix(),
+	}).Error)
+	require.NoError(t, syncDailyRechargeGrants(
+		db, legacyUserId, rule, []TopUp{legacyTopUp}, now.Unix(),
+	))
+
+	var legacyGrants []LotteryChanceGrant
+	require.NoError(t, db.Where(
+		"user_id = ? AND type = ?", legacyUserId, grantType,
+	).Find(&legacyGrants).Error)
+	require.Len(t, legacyGrants, 1)
+	assert.Equal(t, legacyEventKey, legacyGrants[0].EventKey)
+
+	manualUserId := 910004
+	manualTopUp := TopUp{
+		Id: manualUserId, UserId: manualUserId, Amount: 50,
+		Status: "success", CompleteTime: now.Unix(),
+	}
+	manualEventKey := fmt.Sprintf(
+		"recharge:%s:day:%s:user:%d", ruleId,
+		now.Format("2006-01-02"), manualUserId,
+	)
+	require.NoError(t, db.Create(&LotteryChanceGrant{
+		EventKey: manualEventKey, UserId: manualUserId,
+		Type: LotteryGrantTypeManual, Chances: 1, CreatedAt: now.Add(-time.Minute).Unix(),
+	}).Error)
+	require.NoError(t, syncDailyRechargeGrants(
+		db, manualUserId, rule, []TopUp{manualTopUp}, now.Unix(),
+	))
+
+	var manualGrants []LotteryChanceGrant
+	require.NoError(t, db.Where(
+		"user_id = ? AND event_key = ?", manualUserId, manualEventKey,
+	).Find(&manualGrants).Error)
+	require.Len(t, manualGrants, 1)
+	assert.Equal(t, LotteryGrantTypeManual, manualGrants[0].Type)
+	assert.Equal(t, rule.EndAt, manualGrants[0].ExpiresAt)
 }
 
 func TestLotteryDailyRechargeGrantUserScopeSQLite(t *testing.T) {

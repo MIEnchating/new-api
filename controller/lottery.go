@@ -21,11 +21,13 @@ type lotteryRewardRevokeRequest struct {
 }
 
 type lotteryManualGrantRequest struct {
-	User      string `json:"user" binding:"required"`
-	Chances   int    `json:"chances" binding:"required"`
-	Reason    string `json:"reason" binding:"required"`
-	ExpiresAt int64  `json:"expires_at"`
-	RequestId string `json:"request_id" binding:"required"`
+	User           string `json:"user" binding:"required"`
+	Chances        int    `json:"chances" binding:"required"`
+	Reason         string `json:"reason" binding:"required"`
+	ExpiresAt      int64  `json:"expires_at"`
+	RequestId      string `json:"request_id" binding:"required"`
+	RechargeRuleId string `json:"recharge_rule_id"`
+	RechargeDate   string `json:"recharge_date"`
 }
 
 func GetLotteryStatus(c *gin.Context) {
@@ -126,7 +128,11 @@ func CreateManualLotteryGrant(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid manual lottery grant"})
 		return
 	}
-	grant, err := model.CreateManualLotteryGrant(request.User, request.Chances, request.Reason, request.ExpiresAt, c.GetInt("id"), request.RequestId)
+	grant, err := model.CreateManualLotteryGrant(model.LotteryManualGrantInput{
+		UserKeyword: request.User, Chances: request.Chances, Reason: request.Reason,
+		ExpiresAt: request.ExpiresAt, OperatorUserId: c.GetInt("id"), RequestId: request.RequestId,
+		RechargeRuleId: request.RechargeRuleId, RechargeDate: request.RechargeDate,
+	})
 	if err != nil {
 		switch {
 		case errors.Is(err, model.ErrInvalidLotteryManualGrant):

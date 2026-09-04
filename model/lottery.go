@@ -163,6 +163,17 @@ type LotteryDrawResult struct {
 	Status LotteryStatus `json:"status"`
 }
 
+type LotteryManualGrantInput struct {
+	UserKeyword    string
+	Chances        int
+	Reason         string
+	ExpiresAt      int64
+	OperatorUserId int
+	RequestId      string
+	RechargeRuleId string
+	RechargeDate   string
+}
+
 type LotteryDrawAdminItem struct {
 	Id             int64  `json:"id"`
 	UserId         int    `json:"user_id"`
@@ -884,6 +895,7 @@ func syncCumulativeRechargeGrant(tx *gorm.DB, userId int, rule LotteryChanceGran
 
 func syncDailyRechargeGrants(tx *gorm.DB, userId int, rule LotteryChanceGrantRule, topUps []TopUp, createdAt int64) error {
 	totals := make(map[string]decimal.Decimal)
+	topUpEventKeysByDay := make(map[string][]string)
 	for _, topUp := range topUps {
 		when := topUp.CompleteTime
 		if when <= 0 {
@@ -895,6 +907,8 @@ func syncDailyRechargeGrants(tx *gorm.DB, userId int, rule LotteryChanceGrantRul
 		}
 		day := moment.In(time.Local).Format("2006-01-02")
 		totals[day] = totals[day].Add(lotteryTopUpRechargeAmount(topUp))
+		topUpEventKeysByDay[day] = append(topUpEventKeysByDay[day],
+			fmt.Sprintf("recharge:%s:topup:%d", rule.Id, topUp.Id))
 	}
 	threshold := decimal.NewFromFloat(rule.Threshold)
 	eligibleDays := make([]string, 0, len(totals))
@@ -906,28 +920,47 @@ func syncDailyRechargeGrants(tx *gorm.DB, userId int, rule LotteryChanceGrantRul
 	if len(eligibleDays) == 0 {
 		return nil
 	}
-	legacyEventKeys := make(map[string]struct{})
+	existingEventKeySet := make(map[string]struct{})
 	var existingEventKeys []string
-	legacyKeys := make([]string, 0, len(eligibleDays))
-	for _, day := range eligibleDays {
-		legacyKeys = append(legacyKeys, fmt.Sprintf("recharge:%s:day:%s", rule.Id, day))
-	}
 	if err := tx.Model(&LotteryChanceGrant{}).
-		Where("user_id = ? AND type = ? AND event_key IN ?", userId, "recharge_"+rule.Id, legacyKeys).
+		Where("user_id = ? AND type = ?", userId, "recharge_"+rule.Id).
 		Pluck("event_key", &existingEventKeys).Error; err != nil {
 		return err
 	}
 	for _, eventKey := range existingEventKeys {
-		legacyEventKeys[eventKey] = struct{}{}
+		existingEventKeySet[eventKey] = struct{}{}
 	}
 	for _, day := range eligibleDays {
 		legacyEventKey := fmt.Sprintf("recharge:%s:day:%s", rule.Id, day)
-		eventKey := fmt.Sprintf("%s:user:%d", legacyEventKey, userId)
-		if _, exists := legacyEventKeys[legacyEventKey]; exists {
-			eventKey = legacyEventKey
+		currentEventKey := fmt.Sprintf("%s:user:%d", legacyEventKey, userId)
+		existingDayEventKey := ""
+		for _, eventKey := range []string{legacyEventKey, currentEventKey} {
+			if _, exists := existingEventKeySet[eventKey]; exists {
+				existingDayEventKey = eventKey
+				break
+			}
+		}
+		if existingDayEventKey != "" {
+			// Reusing the existing day key keeps legacy rows intact while
+			// refreshing their expiry when the rule configuration changes.
+			if err := createLotteryRechargeGrant(tx, userId, rule,
+				existingDayEventKey, createdAt); err != nil {
+				return err
+			}
+			continue
+		}
+		alreadyGrantedByTopUp := false
+		for _, eventKey := range topUpEventKeysByDay[day] {
+			if _, exists := existingEventKeySet[eventKey]; exists {
+				alreadyGrantedByTopUp = true
+				break
+			}
+		}
+		if alreadyGrantedByTopUp {
+			continue
 		}
 		if err := createLotteryRechargeGrant(tx, userId, rule,
-			eventKey, createdAt); err != nil {
+			currentEventKey, createdAt); err != nil {
 			return err
 		}
 	}
@@ -1312,10 +1345,15 @@ func GetAllLotteryDraws(page int, pageSize int, filter LotteryDrawFilter) (Lotte
 	}, nil
 }
 
-func CreateManualLotteryGrant(userKeyword string, chances int, reason string, expiresAt int64, operatorUserId int, requestId string) (LotteryGrantAdminItem, error) {
-	userKeyword = strings.TrimSpace(userKeyword)
-	reason = strings.TrimSpace(reason)
-	requestId = strings.TrimSpace(requestId)
+func CreateManualLotteryGrant(input LotteryManualGrantInput) (LotteryGrantAdminItem, error) {
+	userKeyword := strings.TrimSpace(input.UserKeyword)
+	reason := strings.TrimSpace(input.Reason)
+	requestId := strings.TrimSpace(input.RequestId)
+	rechargeRuleId := strings.TrimSpace(input.RechargeRuleId)
+	rechargeDate := strings.TrimSpace(input.RechargeDate)
+	chances := input.Chances
+	expiresAt := input.ExpiresAt
+	operatorUserId := input.OperatorUserId
 	reasonLength := utf8.RuneCountInString(reason)
 	if userKeyword == "" || chances < 1 || chances > 1000 || reasonLength < 2 || reasonLength > 200 || operatorUserId <= 0 || len(requestId) < 8 || len(requestId) > 64 {
 		return LotteryGrantAdminItem{}, ErrInvalidLotteryManualGrant
@@ -1325,7 +1363,39 @@ func CreateManualLotteryGrant(userKeyword string, chances int, reason string, ex
 			return LotteryGrantAdminItem{}, ErrInvalidLotteryManualGrant
 		}
 	}
-	if expiresAt > 0 && expiresAt <= common.GetTimestamp() {
+	now := time.Now()
+	nowUnix := now.Unix()
+	linkedRecharge := rechargeRuleId != "" || rechargeDate != ""
+	if (rechargeRuleId == "") != (rechargeDate == "") {
+		return LotteryGrantAdminItem{}, ErrInvalidLotteryManualGrant
+	}
+	var rechargeRule LotteryChanceGrantRule
+	if linkedRecharge {
+		rechargeDay, err := time.ParseInLocation("2006-01-02", rechargeDate, time.Local)
+		if err != nil || rechargeDay.Format("2006-01-02") != rechargeDate || rechargeDay.After(lotteryDayStart(now)) {
+			return LotteryGrantAdminItem{}, ErrInvalidLotteryManualGrant
+		}
+		found := false
+		for _, rule := range GetLotteryConfig().GrantRules {
+			if rule.Id == rechargeRuleId {
+				rechargeRule = rule
+				found = true
+				break
+			}
+		}
+		if !found || !rechargeRule.Enabled || rechargeRule.Type != LotteryChanceGrantRuleRecharge ||
+			rechargeRule.Limit != LotteryRechargeGrantDaily || !lotteryRuleActive(rechargeRule, now) ||
+			chances != rechargeRule.Chances {
+			return LotteryGrantAdminItem{}, ErrInvalidLotteryManualGrant
+		}
+		dayEnd := rechargeDay.AddDate(0, 0, 1)
+		if (rechargeRule.StartAt > 0 && dayEnd.Unix() <= rechargeRule.StartAt) ||
+			(rechargeRule.EndAt > 0 && rechargeDay.Unix() >= rechargeRule.EndAt) {
+			return LotteryGrantAdminItem{}, ErrInvalidLotteryManualGrant
+		}
+		expiresAt = rechargeRule.EndAt
+	}
+	if expiresAt > 0 && expiresAt <= nowUnix {
 		return LotteryGrantAdminItem{}, ErrInvalidLotteryManualGrant
 	}
 
@@ -1352,13 +1422,16 @@ func CreateManualLotteryGrant(userKeyword string, chances int, reason string, ex
 	}
 
 	eventKey := fmt.Sprintf("manual:%d:%s", operatorUserId, requestId)
+	if linkedRecharge {
+		eventKey = fmt.Sprintf("recharge:%s:day:%s:user:%d", rechargeRule.Id, rechargeDate, target.Id)
+	}
 	created := false
 	var grant LotteryChanceGrant
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		candidate := LotteryChanceGrant{
 			EventKey: eventKey, UserId: target.Id, Type: LotteryGrantTypeManual,
 			SourceName: LotteryGrantSourceManual, Chances: chances, ExpiresAt: expiresAt,
-			CreatedAt: common.GetTimestamp(), OperatorUserId: operatorUserId, Detail: reason,
+			CreatedAt: nowUnix, OperatorUserId: operatorUserId, Detail: reason,
 		}
 		result := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "event_key"}},
@@ -1371,7 +1444,7 @@ func CreateManualLotteryGrant(userKeyword string, chances int, reason string, ex
 		if err := tx.Where("event_key = ?", eventKey).First(&grant).Error; err != nil {
 			return err
 		}
-		if grant.UserId != target.Id || grant.Chances != chances || grant.ExpiresAt != expiresAt || grant.Detail != reason || grant.OperatorUserId != operatorUserId {
+		if grant.UserId != target.Id || grant.Type != LotteryGrantTypeManual || grant.Chances != chances || grant.ExpiresAt != expiresAt || grant.Detail != reason || grant.OperatorUserId != operatorUserId {
 			return ErrLotteryManualGrantConflict
 		}
 		return nil
@@ -1380,10 +1453,15 @@ func CreateManualLotteryGrant(userKeyword string, chances int, reason string, ex
 		return LotteryGrantAdminItem{}, err
 	}
 	if created {
-		RecordLogWithAdminInfo(target.Id, LogTypeSystem, fmt.Sprintf("管理员手动赠送 %d 次抽奖机会，原因：%s", chances, reason), map[string]interface{}{
+		adminInfo := map[string]interface{}{
 			"operator_user_id": operatorUserId,
 			"lottery_grant_id": grant.Id,
-		})
+		}
+		if linkedRecharge {
+			adminInfo["recharge_rule_id"] = rechargeRule.Id
+			adminInfo["recharge_date"] = rechargeDate
+		}
+		RecordLogWithAdminInfo(target.Id, LogTypeSystem, fmt.Sprintf("管理员手动赠送 %d 次抽奖机会，原因：%s", chances, reason), adminInfo)
 	}
 	return LotteryGrantAdminItem{
 		Id: grant.Id, UserId: target.Id, Username: target.Username,

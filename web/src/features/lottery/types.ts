@@ -120,6 +120,8 @@ export interface LotteryManualGrantRequest {
   reason: string
   expires_at: number
   request_id: string
+  recharge_rule_id?: string
+  recharge_date?: string
 }
 
 export interface LotteryGrantPage {

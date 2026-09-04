@@ -308,8 +308,27 @@ describe('lottery center', () => {
     let grantLoadCount = 0
     const manualGrantBodies: Record<string, unknown>[] = []
     let revokeRequested = false
+    const dailyRechargeRule = {
+      id: 'daily-recharge-repair',
+      type: 'recharge',
+      name: 'Daily recharge',
+      enabled: true,
+      threshold: 50,
+      limit: 'daily',
+      reclaim: false,
+      chances: 2,
+      start_at: 1_780_000_000,
+      end_at: 1_820_000_000,
+    } as const
     api.defaults.adapter = async (config) => {
-      let data: unknown = { success: true, data: baseStatus }
+      let data: unknown = {
+        success: true,
+        data: {
+          ...baseStatus,
+          grant_rules: [dailyRechargeRule],
+          active_grant_rules: [dailyRechargeRule],
+        },
+      }
       if (config.url?.includes('/revoke')) {
         revokeRequested = true
         data = { success: true, data: null }
@@ -593,9 +612,25 @@ describe('lottery center', () => {
     const manualReasonInput = document.querySelector<HTMLTextAreaElement>(
       '#lottery-manual-grant-reason'
     )
+    const linkRechargeCheckbox = document.querySelector<HTMLElement>(
+      '#lottery-manual-grant-link-recharge'
+    )
     assert.ok(manualUserInput)
     assert.ok(manualChancesInput)
     assert.ok(manualReasonInput)
+    assert.ok(linkRechargeCheckbox)
+    await act(async () => {
+      linkRechargeCheckbox.dispatchEvent(
+        new domWindow.MouseEvent('click', {
+          bubbles: true,
+        }) as unknown as MouseEvent
+      )
+    })
+    const rechargeDateInput = document.querySelector<HTMLInputElement>(
+      '#lottery-manual-grant-recharge-date'
+    )
+    assert.ok(rechargeDateInput)
+    assert.equal(manualChancesInput.disabled, true)
     await act(async () => {
       const inputValueSetter = Object.getOwnPropertyDescriptor(
         domWindow.HTMLInputElement.prototype,
@@ -611,8 +646,8 @@ describe('lottery center', () => {
       manualUserInput.dispatchEvent(
         new domWindow.Event('input', { bubbles: true }) as unknown as Event
       )
-      inputValueSetter.call(manualChancesInput, '2')
-      manualChancesInput.dispatchEvent(
+      inputValueSetter.call(rechargeDateInput, '2026-09-03')
+      rechargeDateInput.dispatchEvent(
         new domWindow.Event('input', { bubbles: true }) as unknown as Event
       )
       textareaValueSetter.call(
@@ -641,6 +676,8 @@ describe('lottery center', () => {
     assert.equal(manualGrantBody.chances, 2)
     assert.equal(manualGrantBody.reason, 'repair missed recharge grant')
     assert.equal(manualGrantBody.expires_at, 0)
+    assert.equal(manualGrantBody.recharge_rule_id, dailyRechargeRule.id)
+    assert.equal(manualGrantBody.recharge_date, '2026-09-03')
     assert.equal(typeof manualGrantBody.request_id, 'string')
     assert.ok(grantLoadCount >= 2)
 
