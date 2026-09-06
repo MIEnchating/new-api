@@ -25,10 +25,14 @@ type AuditOperation struct {
 }
 
 type AuditAdminInfo struct {
-	AdminID       int    `json:"admin_id,omitempty"`
-	AdminUsername string `json:"admin_username,omitempty"`
-	AdminRole     int    `json:"admin_role,omitempty"`
-	AuthMethod    string `json:"auth_method,omitempty"`
+	AdminID        int    `json:"admin_id,omitempty"`
+	AdminUsername  string `json:"admin_username,omitempty"`
+	AdminRole      int    `json:"admin_role,omitempty"`
+	AuthMethod     string `json:"auth_method,omitempty"`
+	OperatorUserID int    `json:"operator_user_id,omitempty"`
+	LotteryGrantID int64  `json:"lottery_grant_id,omitempty"`
+	RechargeRuleID string `json:"recharge_rule_id,omitempty"`
+	RechargeDate   string `json:"recharge_date,omitempty"`
 }
 
 type AuditRequestInfo struct {

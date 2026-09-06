@@ -1453,7 +1453,15 @@ func CreateManualLotteryGrant(input LotteryManualGrantInput) (LotteryGrantAdminI
 		return LotteryGrantAdminItem{}, err
 	}
 	if created {
-		adminInfo := &AuditAdminInfo{AdminID: operatorUserId}
+		adminInfo := &AuditAdminInfo{
+			AdminID:        operatorUserId,
+			OperatorUserID: operatorUserId,
+			LotteryGrantID: grant.Id,
+		}
+		if linkedRecharge {
+			adminInfo.RechargeRuleID = rechargeRule.Id
+			adminInfo.RechargeDate = rechargeDate
+		}
 		RecordLogWithAdminInfo(target.Id, LogTypeSystem, fmt.Sprintf("管理员手动赠送 %d 次抽奖机会，原因：%s", chances, reason), adminInfo, nil)
 	}
 	return LotteryGrantAdminItem{

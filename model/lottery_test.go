@@ -315,6 +315,16 @@ func TestCreateManualLotteryGrantIsAuditedAndIdempotent(t *testing.T) {
 	assert.Equal(t, LotteryGrantSourceManual, grant.SourceName)
 	assert.Equal(t, operator.Id, grant.OperatorUserId)
 	assert.Equal(t, "repair missed recharge grant", grant.Detail)
+	var grantLog Log
+	require.NoError(t, LOG_DB.Where("user_id = ? AND type = ?", userId, LogTypeSystem).First(&grantLog).Error)
+	var grantLogOther AuditOther
+	require.NoError(t, common.UnmarshalJsonStr(grantLog.Other, &grantLogOther))
+	require.NotNil(t, grantLogOther.AdminInfo)
+	assert.Equal(t, operator.Id, grantLogOther.AdminInfo.AdminID)
+	assert.Equal(t, operator.Id, grantLogOther.AdminInfo.OperatorUserID)
+	assert.Equal(t, grant.Id, grantLogOther.AdminInfo.LotteryGrantID)
+	assert.Empty(t, grantLogOther.AdminInfo.RechargeRuleID)
+	assert.Empty(t, grantLogOther.AdminInfo.RechargeDate)
 
 	repeated, err := CreateManualLotteryGrant(LotteryManualGrantInput{
 		UserKeyword: strconv.Itoa(userId), Chances: 3, Reason: "repair missed recharge grant",
@@ -389,6 +399,15 @@ func TestManualRechargeCompensationPreventsAutomaticDuplicate(t *testing.T) {
 	require.NoError(t, DB.Where("user_id = ?", userId).Find(&grants).Error)
 	require.Len(t, grants, 1)
 	assert.Equal(t, LotteryGrantTypeManual, grants[0].Type)
+	var grantLog Log
+	require.NoError(t, LOG_DB.Where("user_id = ? AND type = ?", userId, LogTypeSystem).First(&grantLog).Error)
+	var grantLogOther AuditOther
+	require.NoError(t, common.UnmarshalJsonStr(grantLog.Other, &grantLogOther))
+	require.NotNil(t, grantLogOther.AdminInfo)
+	assert.Equal(t, operator.Id, grantLogOther.AdminInfo.OperatorUserID)
+	assert.Equal(t, grant.Id, grantLogOther.AdminInfo.LotteryGrantID)
+	assert.Equal(t, rule.Id, grantLogOther.AdminInfo.RechargeRuleID)
+	assert.Equal(t, rechargeDate, grantLogOther.AdminInfo.RechargeDate)
 }
 
 func TestCreateManualLotteryGrantRejectsInvalidOrUnknownTargets(t *testing.T) {
