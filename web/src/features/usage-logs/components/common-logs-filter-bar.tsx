@@ -333,7 +333,9 @@ export function CommonLogsFilterBar<TData>(
       LOG_TYPE_FILTERS.filter((type) => type.value !== LOG_TYPE_ALL_VALUE).map(
         (type) => ({
           value: type.value,
-          label: t(type.label),
+          label: type.deprecated
+            ? `${t(type.label)} (${t('Deprecated')})`
+            : t(type.label),
         })
       ),
     [t]

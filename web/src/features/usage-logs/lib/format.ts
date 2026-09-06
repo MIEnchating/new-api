@@ -26,6 +26,7 @@ import {
 
 import type { UsageLog } from '../data/schema'
 import type { LogOtherData } from '../types'
+import { buildQuotaAuditOperation } from './quota-audit-operation'
 
 const PARAM_OVERRIDE_ACTION_MAP: Record<string, string> = {
   set: 'Set',
@@ -699,11 +700,32 @@ function normalizeAuditTemplateParams(
  * translatable instead of being frozen to whatever language was written to DB.
  */
 const AUDIT_TEMPLATES: Record<string, string> = {
+  'token.create': 'API token creation',
+  'token.update': 'API token configuration update',
+  'token.status_update': 'API token status update',
+  'token.delete': 'API token deletion',
+  'token.delete_batch': 'API token batch deletion',
+  'token.key_view': 'API token key access',
+  'token.key_view_batch': 'API token batch key access',
+  'access_token.generate': 'Generated a system access token',
+  'access_token.revoke': 'Revoked the system access token',
+  'user.2fa_setup': 'Started two-factor authentication setup',
+  'user.2fa_enable': 'Enabled two-factor authentication',
+  'user.2fa_disable_self': 'Disabled two-factor authentication',
+  'user.2fa_backup_codes': 'Regenerated two-factor backup codes',
+  'user.security_verify': 'Completed security verification',
+  'user.password_change': 'Account password change',
+  'user.binding_start': 'Account binding request',
+  'user.binding_bind': 'Account binding',
+  'user.binding_unbind': 'Account unlinking',
+  'user.email_binding_resend': 'Email confirmation code resend',
+
   login: 'Logged in successfully via {{method}}',
   // User management
   'user.create': 'Created user {{username}} (role {{role}})',
   'user.update': 'Updated user {{username}} (ID: {{id}})',
   'user.delete': 'Deleted user {{username}} (ID: {{id}})',
+  'user.account_delete': 'Account deletion',
   'user.manage': 'Performed {{action}} on user {{username}} (ID: {{id}})',
   'user.quota_add': 'Increased user quota by {{quota}}',
   'user.quota_subtract': 'Decreased user quota by {{quota}}',
@@ -820,6 +842,15 @@ export function renderAuditContent(
     return t('Performed operation {{action}}', {
       action: humanizeAuditIdentifier(op.action),
     })
+  }
+  const quotaOperation = buildQuotaAuditOperation(
+    op.action,
+    op.params ?? {},
+    other?.audit_info?.success !== false,
+    t
+  )
+  if (quotaOperation) {
+    return `${quotaOperation.summary} · ${quotaOperation.description}`
   }
   return t(
     template,

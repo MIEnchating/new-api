@@ -28,12 +28,13 @@ import { cn } from '@/lib/utils'
 export type ComboboxInputOption = {
   value: string
   label: string
-  description?: string
   icon?: React.ReactNode
+  disabled?: boolean
+  description?: string
 }
 
 interface ComboboxInputProps {
-  options: ComboboxInputOption[]
+  options: readonly ComboboxInputOption[]
   value?: string
   onValueChange: (value: string) => void
   placeholder?: string
@@ -145,6 +146,7 @@ export function ComboboxInput({
         break
       case 'Escape':
         e.preventDefault()
+        e.stopPropagation()
         setOpen(false)
         setSearchValue('')
         break
@@ -247,7 +249,9 @@ export function ComboboxInput({
                     )}
                   />
                   {option.icon && (
-                    <span className='self-start pt-1.5'>{option.icon}</span>
+                    <span className='self-start pt-1.5' aria-hidden>
+                      {option.icon}
+                    </span>
                   )}
                   <span className='flex min-w-0 flex-1 flex-col'>
                     <span className='truncate'>{option.label}</span>

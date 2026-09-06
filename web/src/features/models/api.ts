@@ -23,6 +23,7 @@ import type {
   GetModelsResponse,
   GetModelResponse,
   GetVendorsResponse,
+  GetVendorResponse,
   Model,
   Vendor,
   SearchModelsParams,
@@ -32,7 +33,7 @@ import type {
   PrefillGroupsResponse,
   SyncLocale,
   SyncSource,
-  SyncOverwritePayload,
+  MetadataSyncRequest,
   DeploymentSettingsResponse,
   ListDeploymentsResponse,
 } from './types'
@@ -75,7 +76,10 @@ export async function getModel(id: number): Promise<GetModelResponse> {
 export async function createModel(
   data: Partial<Model>
 ): Promise<{ success: boolean; message?: string; data?: Model }> {
-  const res = await api.post('/api/models/', data)
+  const res = await api.post('/api/models/', data, {
+    skipBusinessError: true,
+    skipErrorHandler: true,
+  })
   return res.data
 }
 
@@ -85,7 +89,10 @@ export async function createModel(
 export async function updateModel(
   data: Partial<Model> & { id: number }
 ): Promise<{ success: boolean; message?: string; data?: Model }> {
-  const res = await api.put('/api/models/', data)
+  const res = await api.put('/api/models/', data, {
+    skipBusinessError: true,
+    skipErrorHandler: true,
+  })
   return res.data
 }
 
@@ -104,9 +111,16 @@ export async function updateModelStatus(
  * Delete model
  */
 export async function deleteModel(
-  id: number
-): Promise<{ success: boolean; message?: string }> {
-  const res = await api.delete(`/api/models/${id}`)
+  id: number,
+  removeFromChannels = false,
+  removePricing = false
+): Promise<{ success: boolean; message?: string; data: ModelDeleteResult }> {
+  const res = await api.delete(`/api/models/${id}`, {
+    params: {
+      remove_from_channels: removeFromChannels,
+      remove_pricing: removePricing,
+    },
+  })
   return res.data
 }
 
@@ -124,6 +138,27 @@ export async function getVendors(params?: {
   const res = await api.get('/api/vendors/', {
     params: params || { page_size: 1000 },
   })
+  return res.data
+}
+
+/**
+ * Search vendors
+ */
+export async function searchVendors(params: {
+  association?: string
+  keyword?: string
+  p?: number
+  page_size?: number
+}): Promise<GetVendorsResponse> {
+  const res = await api.get('/api/vendors/search', { params })
+  return res.data
+}
+
+/**
+ * Get single vendor by ID
+ */
+export async function getVendor(id: number): Promise<GetVendorResponse> {
+  const res = await api.get(`/api/vendors/${id}`)
   return res.data
 }
 
@@ -154,11 +189,9 @@ export async function updateVendor(
 /**
  * Sync upstream models (missing only or with overwrite)
  */
-export async function syncUpstream(params?: {
-  locale?: SyncLocale
-  source?: SyncSource
-  overwrite?: SyncOverwritePayload[]
-}): Promise<SyncUpstreamResponse> {
+export async function syncUpstream(
+  params: MetadataSyncRequest
+): Promise<SyncUpstreamResponse> {
   const res = await api.post('/api/models/sync_upstream', params)
   return res.data
 }
@@ -183,17 +216,6 @@ export async function previewUpstreamDiff(params?: {
     : '/api/models/sync_upstream/preview'
   const res = await api.get(url)
   return res.data
-}
-
-/**
- * Apply upstream overwrite
- */
-export async function applyUpstreamOverwrite(params: {
-  overwrite: SyncOverwritePayload[]
-  locale?: SyncLocale
-  source?: SyncSource
-}): Promise<SyncUpstreamResponse> {
-  return syncUpstream(params)
 }
 
 // ============================================================================
@@ -568,6 +590,24 @@ export async function checkClusterNameAvailability(name: string): Promise<{
 }> {
   const res = await api.get('/api/deployments/check-name', {
     params: { name },
+  })
+  return res.data
+}
+
+export interface ModelDeleteResult {
+  deleted_count: number
+  updated_channels: number
+}
+
+export async function deleteModels(
+  modelIds: number[],
+  removeFromChannels = false,
+  removePricing = false
+): Promise<{ success: boolean; message?: string; data: ModelDeleteResult }> {
+  const res = await api.post('/api/models/delete', {
+    model_ids: modelIds,
+    remove_from_channels: removeFromChannels,
+    remove_pricing: removePricing,
   })
   return res.data
 }

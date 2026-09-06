@@ -18,6 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { Download, Loader2, RefreshCcw, Terminal } from 'lucide-react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
+import { Dialog } from '@/components/dialog'
+import { Button } from '@/components/ui/button'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -36,11 +41,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
-import { useTranslation } from 'react-i18next'
-
-import { Dialog } from '@/components/dialog'
-import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
 import { IconBadge } from '@/components/ui/icon-badge'
 import {
   Select,
@@ -259,8 +260,8 @@ export function ViewLogsDialog({
       <div className='mb-3 grid gap-2 sm:grid-cols-2 sm:gap-3'>
         <div className='space-y-1'>
           <div className='text-muted-foreground text-xs'>{t('Container')}</div>
-          <Select
-            items={containers.flatMap((c) => {
+          <Combobox
+            options={containers.flatMap((c) => {
               const id = c?.container_id
               if (typeof id !== 'string' || !id) return []
               const status =
@@ -270,43 +271,16 @@ export function ViewLogsDialog({
               return [
                 {
                   value: id,
-                  label: (
-                    <>
-                      {id}
-                      {status}
-                    </>
-                  ),
+                  label: `${id}${status}`,
                 },
               ]
             })}
             value={containerId}
             onValueChange={(v) => v !== null && setContainerId(v)}
             disabled={isLoadingContainers || containers.length === 0}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder={containerPlaceholder} />
-            </SelectTrigger>
-            <SelectContent alignItemWithTrigger={false}>
-              <SelectGroup>
-                {containers.map((c) => {
-                  const id = c?.container_id
-                  if (typeof id !== 'string' || !id) {
-                    return null
-                  }
-                  const status =
-                    typeof c?.status === 'string' && c.status
-                      ? ` (${c.status})`
-                      : ''
-                  return (
-                    <SelectItem key={id} value={id}>
-                      {id}
-                      {status}
-                    </SelectItem>
-                  )
-                })}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+            className='w-full'
+            placeholder={containerPlaceholder}
+          />
         </div>
         <div className='space-y-1'>
           <div className='text-muted-foreground text-xs'>{t('Stream')}</div>

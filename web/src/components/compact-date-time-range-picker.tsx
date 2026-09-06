@@ -220,6 +220,7 @@ export function CompactDateTimeRangePicker({
                   </span>
                 </div>
                 <TimeSelectRow
+                  label={t('Start Time')}
                   value={draftStart}
                   disabled={!draftStart}
                   onChange={(value) => updateTime('start', value)}
@@ -238,6 +239,7 @@ export function CompactDateTimeRangePicker({
                   </span>
                 </div>
                 <TimeSelectRow
+                  label={t('End Time')}
                   value={draftEnd}
                   disabled={!draftEnd}
                   onChange={(value) => updateTime('end', value)}
@@ -305,16 +307,23 @@ export function CompactDateTimeRangePicker({
 }
 
 interface TimeSelectRowProps {
+  label: string
   value?: Date
   disabled: boolean
   onChange: (value: string) => void
 }
 
-function TimeSelectRow({ value, disabled, onChange }: TimeSelectRowProps) {
+function TimeSelectRow({
+  label,
+  value,
+  disabled,
+  onChange,
+}: TimeSelectRowProps) {
   return (
     <TimePicker
       value={value ? dayjs(value).format('HH:mm') : '00:00'}
       disabled={disabled}
+      aria-label={label}
       showIcon={false}
       onChange={onChange}
     />

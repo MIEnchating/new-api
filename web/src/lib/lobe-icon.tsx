@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 /* eslint-disable react-refresh/only-export-components */
+import { toc as lobeIconToc } from '@lobehub/icons/es/toc.js'
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react'
 
 import { IconSub2api } from '@/assets/custom/icon-sub2api'
@@ -253,4 +254,12 @@ export function getLobeIcon(
   size: number = 20
 ): ReactNode {
   return <LobeIcon iconName={iconName} size={size} />
+}
+
+// The selector uses the same installed icon registry as the renderer.
+export function getLobeIconNames(): string[] {
+  const names = lobeIconToc.flatMap((icon) =>
+    icon.param.hasColor ? [icon.id, `${icon.id}.Color`] : [icon.id]
+  )
+  return [...new Set([...names, ...Object.keys(CUSTOM_ICONS)])].sort()
 }

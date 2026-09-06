@@ -25,6 +25,7 @@ export { DataTableViewOptions } from './toolbar/view-options'
 export { DataTableFacetedFilter } from './toolbar/faceted-filter'
 export { DataTableToolbar } from './toolbar/toolbar'
 export { DataTableBulkActions } from './toolbar/bulk-actions'
+export { DataTableViewModeToggle } from './toolbar/view-mode-toggle'
 export { StaticDataTable } from './static/static-data-table'
 
 export { staticDataTableClassNames } from './static/static-data-table-classnames'
@@ -35,6 +36,7 @@ export {
 } from './core/data-table-view'
 
 export { DataTablePage } from './layout/data-table-page'
+export { MobileCardList } from './layout/mobile-card-list'
 
 export { useDataTable } from './hooks/use-data-table'
 

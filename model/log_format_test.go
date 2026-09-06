@@ -1,6 +1,7 @@
 package model
 
 import (
+	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -272,7 +273,7 @@ func TestAuditLogsPreserveHTTPRequestID(t *testing.T) {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&User{}, &Log{}))
+	require.NoError(t, db.AutoMigrate(&User{}, &AuditLog{}))
 	require.NoError(t, db.Create(&User{Id: 7, Username: "audit-admin", Password: "password"}).Error)
 
 	previousDB := DB
@@ -287,40 +288,28 @@ func TestAuditLogsPreserveHTTPRequestID(t *testing.T) {
 		common.RedisEnabled = previousRedisEnabled
 	})
 
-	RecordLoginLog(
-		7,
-		"audit-admin",
-		"Logged in successfully via 2fa",
-		"127.0.0.1",
-		"http-login-request-id",
-		"login",
-		map[string]interface{}{"method": "2fa"},
-		map[string]interface{}{"second_factor_method": "totp"},
-	)
-	RecordOperationAuditLog(
-		7,
-		"Updated system setting RetryTimes",
-		"127.0.0.1",
-		"http-manage-request-id",
-		"option.update",
+	loginContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	loginContext.Request = httptest.NewRequest("POST", "/api/user/login", nil)
+	loginContext.Set(common.RequestIdKey, "http-login-request-id")
+	RecordLoginLog(7, common.RoleAdminUser, "audit-admin", "Logged in successfully via 2fa", "127.0.0.1", "login",
+		map[string]interface{}{"method": "2fa"}, AuditOther{LoginMethod: "2fa"}, loginContext)
+
+	manageContext, _ := gin.CreateTestContext(httptest.NewRecorder())
+	manageContext.Request = httptest.NewRequest("PUT", "/api/option", nil)
+	manageContext.Set(common.RequestIdKey, "http-manage-request-id")
+	RecordOperationAuditLog(7, common.RoleAdminUser, "Updated system setting RetryTimes", "127.0.0.1", "option.update",
 		map[string]interface{}{"key": "RetryTimes", "from": "0", "to": "1"},
-		map[string]interface{}{"admin_id": 7},
-		map[string]interface{}{"method": "PUT", "success": true},
-	)
+		&AuditAdminInfo{AdminID: 7}, &AuditRequestInfo{Method: "PUT", Status: 200, Success: true}, manageContext)
 
-	var loginLog Log
-	require.NoError(t, db.Where("type = ?", LogTypeLogin).First(&loginLog).Error)
+	var loginLog AuditLog
+	require.NoError(t, db.Where("category = ?", AuditCategoryLogin).First(&loginLog).Error)
 	require.Equal(t, "http-login-request-id", loginLog.RequestId)
-	loginOther, err := common.StrToMap(loginLog.Other)
-	require.NoError(t, err)
-	require.Equal(t, "totp", loginOther["second_factor_method"])
+	require.Equal(t, "2fa", loginLog.Other.LoginMethod)
 
-	var manageLog Log
-	require.NoError(t, db.Where("type = ?", LogTypeManage).First(&manageLog).Error)
+	var manageLog AuditLog
+	require.NoError(t, db.Where("category = ?", AuditCategoryOperation).First(&manageLog).Error)
 	require.Equal(t, "http-manage-request-id", manageLog.RequestId)
-	manageOther, err := common.StrToMap(manageLog.Other)
-	require.NoError(t, err)
-	require.Contains(t, manageOther, "audit_info")
+	require.NotNil(t, manageLog.Other.AuditInfo)
 }
 
 func TestTaskPluginLogVisibilityIsRoleSeparated(t *testing.T) {
