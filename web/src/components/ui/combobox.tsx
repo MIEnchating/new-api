@@ -37,6 +37,7 @@ import {
   InputGroupButton,
   InputGroupInput,
 } from '@/components/ui/input-group'
+import { usePortalContainer } from '@/components/ui/portal-container'
 import { cn } from '@/lib/utils'
 
 type LegacyComboboxProps = {
@@ -143,14 +144,7 @@ function OptionCombobox(props: LegacyComboboxProps) {
           className='h-full min-h-8 w-full'
         />
       </div>
-      <ComboboxContent
-        anchor={anchor}
-        portalContainer={
-          anchor.current?.closest<HTMLElement>(
-            '[data-slot="drawer-content"]'
-          ) ?? undefined
-        }
-      >
+      <ComboboxContent anchor={anchor}>
         <ComboboxEmpty>
           {props.emptyText ?? t('No results found')}
         </ComboboxEmpty>
@@ -278,8 +272,9 @@ function ComboboxContent({
   > & {
     portalContainer?: ComboboxPrimitive.Portal.Props['container']
   }) {
+  const container = usePortalContainer()
   return (
-    <ComboboxPrimitive.Portal container={portalContainer}>
+    <ComboboxPrimitive.Portal container={portalContainer ?? container}>
       <ComboboxPrimitive.Positioner
         side={side}
         sideOffset={sideOffset}

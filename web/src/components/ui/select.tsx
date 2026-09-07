@@ -27,6 +27,7 @@ import {
 import { HugeiconsIcon } from '@hugeicons/react'
 import * as React from 'react'
 
+import { usePortalContainer } from '@/components/ui/portal-container'
 import { cn } from '@/lib/utils'
 
 const Select = SelectPrimitive.Root
@@ -97,6 +98,7 @@ function SelectContent({
   > & {
     portalContainer?: SelectPrimitive.Portal.Props['container']
   }) {
+  const container = usePortalContainer()
   const content = (
     <SelectPrimitive.Positioner
       side={side}
@@ -125,7 +127,7 @@ function SelectContent({
   )
 
   return (
-    <SelectPrimitive.Portal container={portalContainer}>
+    <SelectPrimitive.Portal container={portalContainer ?? container}>
       {content}
     </SelectPrimitive.Portal>
   )

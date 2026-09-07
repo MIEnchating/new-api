@@ -62,3 +62,26 @@ func TestCacheHitRateUsesTokenRatioWhenAvailable(t *testing.T) {
 	require.Len(t, result.Groups, 1)
 	assert.Equal(t, 79.0, result.Groups[0].CacheHitRate)
 }
+
+func TestCacheGroupsMergeModelBucketsWithoutLosingTokenWeights(t *testing.T) {
+	buckets := map[string]map[int64]counters{}
+	mergeCacheGroupBucket(buckets, "default", 3600, counters{
+		requestCount: 2, cacheRequests: 2, cacheHits: 1,
+		cachedTokens: 30, cacheTokenReadTokens: 30, cacheTokenDenominator: 100,
+		outputTokens: 20, generationMs: 1000,
+	})
+	mergeCacheGroupBucket(buckets, "default", 3600, counters{
+		requestCount: 1, cacheRequests: 1, cacheHits: 1,
+		cachedTokens: 70, cacheTokenReadTokens: 70, cacheTokenDenominator: 100,
+		outputTokens: 40, generationMs: 1000,
+	})
+	result := buildCacheQueryResult(buckets)
+	require.Len(t, result.Groups, 1)
+	assert.EqualValues(t, 3, result.Groups[0].RequestCount)
+	assert.EqualValues(t, 2, result.Groups[0].HitCount)
+	assert.EqualValues(t, 100, result.Groups[0].CachedTokens)
+	assert.Equal(t, 50.0, result.Groups[0].CacheHitRate)
+	assert.Equal(t, 30.0, result.Groups[0].AvgTps)
+	require.Len(t, result.Groups[0].Series, 1)
+	assert.Equal(t, 50.0, result.Groups[0].Series[0].CacheHitRate)
+}
