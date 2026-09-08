@@ -404,7 +404,7 @@ func TestFetchModelsUsesSharedChannelFetchBehavior(t *testing.T) {
 	require.JSONEq(t, `{"success":true,"message":"","data":["claude-sonnet"]}`, recorder.Body.String())
 }
 
-func TestFetchNewAPIModelsUsesOpenAIContract(t *testing.T) {
+func TestFetchCompatibleModelsUsesOpenAIContract(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/v1/models", r.URL.Path)
 		assert.Equal(t, "Bearer new-api-key", r.Header.Get("Authorization"))
@@ -414,17 +414,17 @@ func TestFetchNewAPIModelsUsesOpenAIContract(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	baseURL := server.URL
-	channel := &model.Channel{
-		Type:    constant.ChannelTypeNewAPI,
-		Key:     "new-api-key",
-		BaseURL: &baseURL,
+	for _, channelType := range []int{constant.ChannelTypeNewAPI, constant.ChannelTypeSora} {
+		t.Run(constant.GetChannelTypeName(channelType), func(t *testing.T) {
+			baseURL := server.URL
+			channel := &model.Channel{
+				Type: channelType, Key: "new-api-key", BaseURL: &baseURL,
+			}
+			models, err := fetchChannelUpstreamModelIDs(channel)
+			require.NoError(t, err)
+			assert.Equal(t, []string{"gpt-5", "gpt-5-mini"}, models)
+		})
 	}
-
-	models, err := fetchChannelUpstreamModelIDs(channel)
-
-	require.NoError(t, err)
-	require.Equal(t, []string{"gpt-5", "gpt-5-mini"}, models)
 }
 
 func TestNormalizeModelNames(t *testing.T) {
