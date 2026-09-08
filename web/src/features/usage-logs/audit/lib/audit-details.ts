@@ -87,6 +87,8 @@ export function auditFieldLabel(key: string, t: TFunction): string {
       return t('Count')
     case 'total':
       return t('Total')
+    case 'requested_redemption_ids':
+      return t('Requested redemption code IDs')
     case 'requested_ids':
       return t('Requested token IDs')
     case 'returned_ids':
@@ -373,7 +375,19 @@ export function buildAuditDetails(entry: AuditLog, t: TFunction) {
     (action === '' || action === 'access_token.request')
   const summary = accessTokenRequest
     ? fallback
-    : renderAuditContent({ op: { action, params: summaryParams } }, t) ||
+    : renderAuditContent(
+        {
+          op: { action, params: summaryParams },
+          audit_info: {
+            method: entry.method,
+            route: entry.route,
+            path: entry.route,
+            status: entry.status,
+            success: entry.success,
+          },
+        },
+        t
+      ) ||
       (entry.content && entry.content !== action ? entry.content : fallback)
   const admin = isAuditDetailObject(metadata.admin_info)
     ? metadata.admin_info

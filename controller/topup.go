@@ -113,7 +113,7 @@ func GetTopUpInfo(c *gin.Context) {
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,
 		"invite_recharge_rebate_enabled":   complianceConfirmed && inviteRechargeRebateRatio > 0,
 		"invite_recharge_rebate_ratio":     inviteRechargeRebateRatio,
-		"waffo_pay_methods": func() interface{} {
+		"waffo_pay_methods": func() any {
 			if enableWaffo {
 				return setting.GetWaffoPayMethods()
 			}

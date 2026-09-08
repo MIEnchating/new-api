@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -56,12 +57,7 @@ var modelPricingOptionKeys = []string{
 var modelPricingMutationMu sync.Mutex
 
 func IsModelPricingOption(key string) bool {
-	for _, candidate := range modelPricingOptionKeys {
-		if key == candidate {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(modelPricingOptionKeys, key)
 }
 
 func ModelPricingVersion(values PricingValues) string {
@@ -82,23 +78,33 @@ func defaultPricingMaps() map[string]map[string]any {
 	return result
 }
 
-func readModelPricingMaps(db *gorm.DB) (map[string]map[string]any, error) {
+func readModelPricingMaps(db *gorm.DB) (map[string]map[string]any, map[string]bool, []string, error) {
 	var rows []Option
 	if err := db.Where(commonKeyCol+" IN ?", modelPricingOptionKeys).Find(&rows).Error; err != nil {
-		return nil, err
+		return nil, nil, nil, err
 	}
 	values := defaultPricingMaps()
+	existing := make(map[string]bool)
+	counts := make(map[string]int)
 	for _, row := range rows {
 		var entries map[string]any
 		if err := common.UnmarshalJsonStr(row.Value, &entries); err != nil {
-			return nil, fmt.Errorf("%s: %w", row.Key, err)
+			return nil, nil, nil, fmt.Errorf("%s: %w", row.Key, err)
 		}
 		if entries == nil {
-			return nil, fmt.Errorf("%s must be a JSON object", row.Key)
+			return nil, nil, nil, fmt.Errorf("%s must be a JSON object", row.Key)
 		}
 		values[row.Key] = entries
+		existing[row.Key] = true
+		counts[row.Key]++
 	}
-	return values, nil
+	var duplicated []string
+	for _, key := range modelPricingOptionKeys {
+		if counts[key] > 1 {
+			duplicated = append(duplicated, key)
+		}
+	}
+	return values, existing, duplicated, nil
 }
 
 func modelPricingValues(values map[string]map[string]any, name string) PricingValues {
@@ -153,7 +159,7 @@ func effectiveModelPricing(values map[string]map[string]any, name string) Pricin
 }
 
 func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
-	values, err := readModelPricingMaps(DB)
+	values, _, _, err := readModelPricingMaps(DB)
 	if err != nil {
 		return nil, err
 	}
@@ -345,8 +351,18 @@ func mutateModelPricingOptions(mutate func(*gorm.DB, map[string]map[string]any) 
 	defer modelPricingMutationMu.Unlock()
 	var committed map[string]map[string]any
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		values, existing, duplicated, err := readModelPricingMaps(lockForUpdate(tx))
+		if err != nil {
+			return err
+		}
+		if len(duplicated) > 0 {
+			return fmt.Errorf("options table has duplicate pricing keys [%s]; repair the primary key before editing prices", strings.Join(duplicated, ", "))
+		}
 		defaults := defaultPricingMaps()
 		for _, key := range modelPricingOptionKeys {
+			if existing[key] {
+				continue
+			}
 			encoded, err := common.Marshal(defaults[key])
 			if err != nil {
 				return err
@@ -356,9 +372,15 @@ func mutateModelPricingOptions(mutate func(*gorm.DB, map[string]map[string]any) 
 				return err
 			}
 		}
-		values, err := readModelPricingMaps(lockForUpdate(tx))
+		// A different instance may have inserted a missing row first. Read the
+		// persisted values after conflict handling instead of writing defaults
+		// over that instance's administrator overrides.
+		values, _, duplicated, err = readModelPricingMaps(lockForUpdate(tx))
 		if err != nil {
 			return err
+		}
+		if len(duplicated) > 0 {
+			return fmt.Errorf("options table has duplicate pricing keys [%s]; repair the primary key before editing prices", strings.Join(duplicated, ", "))
 		}
 		if err := mutate(tx, values); err != nil {
 			return err

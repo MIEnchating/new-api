@@ -79,8 +79,14 @@ export function DataTableRowActions<TData>({
 }: DataTableRowActionsProps<TData>) {
   const { t } = useTranslation()
   const apiKey = apiKeySchema.parse(row.original)
-  const { setOpen, setCurrentRow, triggerRefresh, resolveRealKey } =
-    useApiKeys()
+  const {
+    setOpen,
+    setCurrentRow,
+    triggerRefresh,
+    resolveRealKey,
+    loadingKeys,
+  } = useApiKeys()
+  const isRealKeyLoading = Boolean(loadingKeys[apiKey.id])
   const isEnabled = apiKey.status === API_KEY_STATUS.ENABLED
   const { chatPresets, serverAddress } = useChatPresets()
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
@@ -130,9 +136,9 @@ export function DataTableRowActions<TData>({
   )
 
   const handleToggleStatus = async (
-    e?: React.MouseEvent<HTMLButtonElement>
+    event?: React.MouseEvent<HTMLButtonElement>
   ) => {
-    e?.stopPropagation()
+    event?.stopPropagation()
     const newStatus = isEnabled
       ? API_KEY_STATUS.DISABLED
       : API_KEY_STATUS.ENABLED
@@ -212,6 +218,7 @@ export function DataTableRowActions<TData>({
         modal={false}
       >
         <DropdownMenuItem
+          disabled={isRealKeyLoading}
           onClick={async () => {
             const realKey = await resolveRealKey(apiKey.id)
             if (!realKey) return
@@ -225,6 +232,7 @@ export function DataTableRowActions<TData>({
           </DropdownMenuShortcut>
         </DropdownMenuItem>
         <DropdownMenuItem
+          disabled={isRealKeyLoading}
           onClick={async () => {
             const realKey = await resolveRealKey(apiKey.id)
             if (!realKey) return

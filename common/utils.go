@@ -118,7 +118,7 @@ func IsRunningInContainer() bool {
 	return false
 }
 
-func Interface2String(inter interface{}) string {
+func Interface2String(inter any) string {
 	switch inter.(type) {
 	case string:
 		return inter.(string)

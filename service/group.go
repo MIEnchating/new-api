@@ -56,11 +56,9 @@ func GetUserUsableGroups(userGroup string) map[string]string {
 			// Additions are applied first so an explicit removal always wins.
 			explicitlyRemoved := make(map[string]struct{})
 			for specialGroup, desc := range specialSettings {
-				if strings.HasPrefix(specialGroup, "-:") {
-					groupToRemove := strings.TrimPrefix(specialGroup, "-:")
+				if groupToRemove, ok := strings.CutPrefix(specialGroup, "-:"); ok {
 					explicitlyRemoved[groupToRemove] = struct{}{}
-				} else if strings.HasPrefix(specialGroup, "+:") {
-					groupToAdd := strings.TrimPrefix(specialGroup, "+:")
+				} else if groupToAdd, ok := strings.CutPrefix(specialGroup, "+:"); ok {
 					groupsCopy[groupToAdd] = desc
 				} else {
 					groupsCopy[specialGroup] = desc

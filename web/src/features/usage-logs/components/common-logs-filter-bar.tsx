@@ -26,11 +26,13 @@ import { useTranslation } from 'react-i18next'
 import { CompactDateTimeRangePicker } from '@/components/compact-date-time-range-picker'
 import { DataTableFacetedFilter } from '@/components/data-table'
 import { Button } from '@/components/ui/button'
+import { Combobox } from '@/components/ui/combobox'
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useMediaQuery } from '@/hooks'
 import { useDelayedLoading } from '@/hooks/use-delayed-loading'
 
 import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
@@ -129,6 +131,7 @@ export function CommonLogsFilterBar<TData>(
   props: CommonLogsFilterBarProps<TData>
 ) {
   const { t } = useTranslation()
+  const isMobile = useMediaQuery('(max-width: 640px)')
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const searchParams = route.useSearch()
@@ -225,55 +228,61 @@ export function CommonLogsFilterBar<TData>(
     [searchState]
   )
 
-  const handleApply = useCallback(async () => {
-    const filterParams = buildSearchParams(filters, 'common')
-    if (!useFixedTimeRange) {
-      delete filterParams.startTime
-      delete filterParams.endTime
-      const { start, end } = getDefaultTimeRange()
-      setDraft((current) => ({
-        ...current,
-        filters: { ...current.filters, startTime: start, endTime: end },
-      }))
-    } else {
-      filterParams.timeMode = 'fixed'
-    }
-    const nextSearch = {
-      ...filterParams,
-      type: [logType],
-      page: 1,
-    }
-    await applyLogSearch({
-      currentSearch: searchParams,
-      nextSearch,
-      keys: commonLogSearchKeys,
-      refetch: () =>
-        Promise.all([
-          queryClient.refetchQueries({
-            queryKey: ['logs'],
-            type: 'active',
+  const handleApply = useCallback(
+    async (
+      nextFilters: CommonLogFilters = filters,
+      fixedTimeRange = useFixedTimeRange
+    ) => {
+      const filterParams = buildSearchParams(nextFilters, 'common')
+      if (!fixedTimeRange) {
+        delete filterParams.startTime
+        delete filterParams.endTime
+        const { start, end } = getDefaultTimeRange()
+        setDraft((current) => ({
+          ...current,
+          filters: { ...current.filters, startTime: start, endTime: end },
+        }))
+      } else {
+        filterParams.timeMode = 'fixed'
+      }
+      const nextSearch = {
+        ...filterParams,
+        type: [logType],
+        page: 1,
+      }
+      await applyLogSearch({
+        currentSearch: searchParams,
+        nextSearch,
+        keys: commonLogSearchKeys,
+        refetch: () =>
+          Promise.all([
+            queryClient.refetchQueries({
+              queryKey: ['logs'],
+              type: 'active',
+            }),
+            queryClient.refetchQueries({
+              queryKey: ['usage-logs-stats', isAdmin],
+              type: 'active',
+            }),
+          ]),
+        navigate: () =>
+          navigate({
+            to: '/usage-logs/$section',
+            params: { section: 'common' },
+            search: nextSearch,
           }),
-          queryClient.refetchQueries({
-            queryKey: ['usage-logs-stats', isAdmin],
-            type: 'active',
-          }),
-        ]),
-      navigate: () =>
-        navigate({
-          to: '/usage-logs/$section',
-          params: { section: 'common' },
-          search: nextSearch,
-        }),
-    })
-  }, [
-    filters,
-    isAdmin,
-    logType,
-    navigate,
-    queryClient,
-    searchParams,
-    useFixedTimeRange,
-  ])
+      })
+    },
+    [
+      filters,
+      isAdmin,
+      logType,
+      navigate,
+      queryClient,
+      searchParams,
+      useFixedTimeRange,
+    ]
+  )
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
@@ -342,18 +351,15 @@ export function CommonLogsFilterBar<TData>(
   )
   const groupItems = useMemo(() => {
     const groups = includeSelectedUsageLogGroup(availableGroups, filters.group)
-    return groups.map((group) => ({
-      value: group,
-      label: group,
-      selectedLabel: sensitiveVisible ? group : '******',
-    }))
-  }, [availableGroups, filters.group, sensitiveVisible])
+    return groups
+      .filter((group) => group !== 'auto')
+      .map((group) => ({
+        value: group,
+        label: group,
+      }))
+  }, [availableGroups, filters.group])
 
-  const statsBar = (
-    <div className='flex flex-wrap items-center gap-2'>
-      <CommonLogsStats />
-    </div>
-  )
+  const statsBar = <CommonLogsStats />
   const sensitiveToggle = (
     <Tooltip>
       <TooltipTrigger
@@ -363,7 +369,7 @@ export function CommonLogsFilterBar<TData>(
             size='icon'
             onClick={() => setSensitiveVisible(!sensitiveVisible)}
             aria-label={sensitiveVisible ? t('Hide') : t('Show')}
-            className='text-muted-foreground hover:text-foreground size-7'
+            className='text-muted-foreground hover:text-foreground size-7 max-sm:size-11'
           />
         }
       >
@@ -384,6 +390,9 @@ export function CommonLogsFilterBar<TData>(
           setTimeRangeEdited(true)
           handleChange('startTime', start)
           handleChange('endTime', end)
+          if (isMobile) {
+            handleApply({ ...filters, startTime: start, endTime: end }, true)
+          }
         }}
       />
     </LogsFilterField>
@@ -399,16 +408,17 @@ export function CommonLogsFilterBar<TData>(
     </LogsFilterField>
   )
   const groupFilter = (
-    <LogsFilterField className='w-full'>
-      <DataTableFacetedFilter
-        title={t('Group')}
+    <LogsFilterField className={sensitiveInputClass}>
+      <Combobox
         options={groupItems}
-        className='min-w-0 justify-start overflow-hidden'
-        singleSelect
-        selectedValues={filters.group ? [filters.group] : []}
-        onSelectedValuesChange={(values) =>
-          handleChange('group', values[0] || undefined)
-        }
+        allowCustomValue
+        aria-label={t('Group')}
+        emptyText={t('No group found.')}
+        placeholder={t('Group')}
+        className='h-8 min-w-0 text-sm leading-5'
+        value={filters.group || ''}
+        onValueChange={(value) => handleChange('group', value ?? '')}
+        onKeyDown={handleKeyDown}
       />
     </LogsFilterField>
   )
@@ -493,6 +503,7 @@ export function CommonLogsFilterBar<TData>(
   return (
     <LogsFilterToolbar
       table={props.table}
+      compactMobile
       stats={statsBar}
       actionStart={sensitiveToggle}
       primaryFilters={
@@ -531,7 +542,7 @@ export function CommonLogsFilterBar<TData>(
       hasAdvancedActiveFilters={hasExpandedFilters}
       advancedFilterCount={expandedFilterCount}
       hasActiveFilters={hasAdditionalFilters}
-      onSearch={handleApply}
+      onSearch={() => void handleApply()}
       searchLoading={searchLoading}
       searchDisabled={fetchingLogs > 0}
       onReset={handleReset}

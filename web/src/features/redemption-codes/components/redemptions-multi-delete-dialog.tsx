@@ -16,8 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useMutation } from '@tanstack/react-query'
 import type { Table } from '@tanstack/react-table'
-import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -31,65 +31,70 @@ type RedemptionsMultiDeleteDialogProps<TData> = {
   open: boolean
   onOpenChange: (open: boolean) => void
   table: Table<TData>
+  targets?: Redemption[]
 }
 
 export function RedemptionsMultiDeleteDialog<TData>({
   open,
   onOpenChange,
   table,
+  targets: suppliedTargets,
 }: RedemptionsMultiDeleteDialogProps<TData>) {
   const { t } = useTranslation()
   const { triggerRefresh } = useRedemptions()
-  const [isDeleting, setIsDeleting] = useState(false)
-  const selectedRows = table.getFilteredSelectedRowModel().rows
-
-  const handleConfirm = async () => {
-    setIsDeleting(true)
-    try {
-      const ids = selectedRows.map((row) => (row.original as Redemption).id)
-      const result = await batchDeleteRedemptions(ids)
-
-      if (result.success) {
-        const count = result.data ?? ids.length
-        toast.success(
-          t('Successfully deleted {{count}} redemption code(s)', { count })
-        )
-        table.resetRowSelection()
-        triggerRefresh()
-        onOpenChange(false)
-      } else {
-        toast.error(
-          result.message || t('Failed to delete selected redemption codes')
-        )
-      }
-    } catch {
-      toast.error(t('Failed to delete selected redemption codes'))
-    } finally {
-      setIsDeleting(false)
-    }
-  }
+  const targets =
+    suppliedTargets ??
+    table
+      .getFilteredSelectedRowModel()
+      .rows.map((row) => row.original as Redemption)
+  const deletion = useMutation({
+    mutationFn: async (targets: Redemption[]) => {
+      const result = await batchDeleteRedemptions(
+        targets.map((code) => code.id)
+      )
+      if (!result.success) throw new Error(result.message)
+      return result.data ?? 0
+    },
+    onSuccess: (count, targets) => {
+      toast.success(
+        t('Successfully deleted {{count}} redemption codes', { count })
+      )
+      table.setRowSelection((previous) => {
+        const next = { ...previous }
+        for (const code of targets) delete next[String(code.id)]
+        return next
+      })
+      onOpenChange(false)
+      triggerRefresh()
+    },
+    onError: (_error, targets) => {
+      toast.error(
+        t('Failed to delete {{count}} redemption codes', {
+          count: targets.length,
+        })
+      )
+    },
+  })
 
   return (
     <ConfirmDialog
       destructive
       open={open}
-      onOpenChange={onOpenChange}
-      handleConfirm={handleConfirm}
-      isLoading={isDeleting}
-      className='max-w-md'
-      title={t('Delete {{count}} redemption code(s)?', {
-        count: selectedRows.length,
+      onOpenChange={(open) => {
+        if (!open && !deletion.isPending) onOpenChange(false)
+      }}
+      title={t('Delete {{count}} redemption codes?', {
+        count: targets.length ?? 0,
       })}
-      desc={
-        <>
-          {t('You are about to delete {{count}} redemption code(s).', {
-            count: selectedRows.length,
-          })}{' '}
-          <br />
-          {t('This action cannot be undone.')}
-        </>
-      }
-      confirmText={t('Delete')}
+      desc={t('This action cannot be undone.')}
+      confirmText={deletion.isPending ? t('Deleting...') : t('Delete')}
+      isLoading={deletion.isPending}
+      disabled={!targets.length}
+      handleConfirm={() => {
+        if (targets.length && !deletion.isPending) {
+          deletion.mutate(targets)
+        }
+      }}
     />
   )
 }

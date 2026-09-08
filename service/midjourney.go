@@ -276,7 +276,7 @@ func ConvertSimpleChangeParams(content string) *dto.MidjourneyRequest {
 func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestURL string) (*dto.MidjourneyResponseWithStatusCode, []byte, error) {
 	var nullBytes []byte
 	// read request body to json, delete accountFilter and notifyHook
-	var mapResult map[string]interface{}
+	var mapResult map[string]any
 	// if get request, no need to read request body
 	if c.Request.Method != "GET" {
 		err := json.NewDecoder(c.Request.Body).Decode(&mapResult)

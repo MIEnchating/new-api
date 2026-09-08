@@ -23,7 +23,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { z } from 'zod'
 
 // Usage log schema
-const usageLogSchema = z.object({
+export const usageLogSchema = z.object({
   id: z.number(),
   user_id: z.number(),
   created_at: z.number(),

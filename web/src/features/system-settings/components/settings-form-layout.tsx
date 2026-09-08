@@ -37,6 +37,7 @@ type SettingsSwitchRowProps = ComponentProps<'div'>
 type SettingsControlGroupProps = ComponentProps<'div'>
 type SettingsControlChildrenProps = ComponentProps<'div'>
 type SettingsSwitchFieldProps = SettingsSwitchRowProps & {
+  controlId?: string
   checked: boolean
   onCheckedChange: (checked: boolean) => void
   label: ReactNode
@@ -104,6 +105,7 @@ function SettingsSwitchRow({ className, ...props }: SettingsSwitchRowProps) {
 }
 
 export function SettingsSwitchField({
+  controlId,
   checked,
   onCheckedChange,
   label,
@@ -115,12 +117,23 @@ export function SettingsSwitchField({
   return (
     <SettingsSwitchRow className={className} {...props}>
       <SettingsSwitchContent>
-        <Label className='text-sm font-medium'>{label}</Label>
+        <Label htmlFor={controlId} className='text-sm font-medium'>
+          {label}
+        </Label>
         {description ? (
-          <p className='text-muted-foreground text-xs'>{description}</p>
+          <p
+            id={controlId ? `${controlId}-description` : undefined}
+            className='text-muted-foreground text-xs'
+          >
+            {description}
+          </p>
         ) : null}
       </SettingsSwitchContent>
       <Switch
+        id={controlId}
+        aria-describedby={
+          controlId && description ? `${controlId}-description` : undefined
+        }
         checked={checked}
         onCheckedChange={onCheckedChange}
         disabled={disabled}

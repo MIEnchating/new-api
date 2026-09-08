@@ -108,7 +108,7 @@ func AddRedemption(c *gin.Context) {
 		})
 		return
 	}
-	recordManageAudit(c, "redemption.create", map[string]interface{}{
+	recordManageAudit(c, "redemption.create", map[string]any{
 		"name":  redemption.Name,
 		"count": redemption.Count,
 		"quota": logger.LogQuota(redemption.Quota),
@@ -133,31 +133,6 @@ func DeleteRedemption(c *gin.Context) {
 		"message": "",
 	})
 	return
-}
-
-type redemptionBatchDeleteRequest struct {
-	Ids []int `json:"ids"`
-}
-
-func DeleteRedemptionBatch(c *gin.Context) {
-	request := redemptionBatchDeleteRequest{}
-	if err := c.ShouldBindJSON(&request); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	count, err := model.BatchDeleteRedemptions(request.Ids)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	recordManageAudit(c, "redemption.delete_batch", map[string]interface{}{
-		"count": count,
-	})
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    count,
-	})
 }
 
 func UpdateRedemption(c *gin.Context) {
@@ -226,4 +201,25 @@ func validateExpiredTime(c *gin.Context, expired int64) (bool, string) {
 		return false, i18n.T(c, i18n.MsgRedemptionExpireTimeInvalid)
 	}
 	return true, ""
+}
+
+func DeleteRedemptionBatch(c *gin.Context) {
+	var request struct {
+		Ids []int `json:"ids" binding:"required,min=1,max=1000,dive,gt=0"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	count, err := model.BatchDeleteRedemptions(request.Ids)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "redemption.delete_batch", map[string]any{
+		"count":                    count,
+		"total":                    len(request.Ids),
+		"requested_redemption_ids": request.Ids,
+	})
+	common.ApiSuccess(c, count)
 }

@@ -128,7 +128,7 @@ func normalizeMonitorHeartbeats(monitor *Monitor) {
 	monitor.Ping = latest.Ping
 }
 
-func getAndDecode(ctx context.Context, client *http.Client, url string, dest interface{}) error {
+func getAndDecode(ctx context.Context, client *http.Client, url string, dest any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -222,7 +222,7 @@ func fetchBadgeUptime(
 	return parseUptimeBadge(resp.Body)
 }
 
-func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[string]interface{}) (UptimeGroupResult, error) {
+func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[string]any) (UptimeGroupResult, error) {
 	url, _ := groupConfig["url"].(string)
 	slug, _ := groupConfig["slug"].(string)
 	categoryName, _ := groupConfig["categoryName"].(string)
@@ -379,7 +379,6 @@ func fetchUptimeStatusSnapshot(ctx context.Context, groups []map[string]interfac
 
 	g, gCtx := errgroup.WithContext(ctx)
 	for i, group := range groups {
-		i, group := i, group
 		g.Go(func() error {
 			results[i], errorsByGroup[i] = fetchGroupData(gCtx, client, group)
 			return nil

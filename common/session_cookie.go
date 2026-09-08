@@ -72,9 +72,9 @@ func InitSessionCookieSettings() error {
 		return fmt.Errorf("SESSION_COOKIE_DOMAIN must be a valid parent domain without scheme or port")
 	}
 
-	trustedURLs := strings.Split(trustedURLsRaw, ",")
-	seenTrustedURLs := make(map[string]struct{}, len(trustedURLs))
-	for _, trustedURL := range trustedURLs {
+	trustedURLs := strings.SplitSeq(trustedURLsRaw, ",")
+	seenTrustedURLs := make(map[string]struct{})
+	for trustedURL := range trustedURLs {
 		trustedURL = strings.TrimSpace(trustedURL)
 		if trustedURL == "" {
 			return fmt.Errorf("SESSION_COOKIE_TRUSTED_URL contains an empty URL")

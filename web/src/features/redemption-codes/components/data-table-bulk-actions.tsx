@@ -33,20 +33,18 @@ import {
 import type { Redemption } from '../types'
 import { RedemptionsMultiDeleteDialog } from './redemptions-multi-delete-dialog'
 
-type DataTableBulkActionsProps<TData> = {
-  table: Table<TData>
+type DataTableBulkActionsProps = {
+  table: Table<Redemption>
 }
 
-export function DataTableBulkActions<TData>({
-  table,
-}: DataTableBulkActionsProps<TData>) {
+export function DataTableBulkActions(props: DataTableBulkActionsProps) {
   const { t } = useTranslation()
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
-  const selectedRows = table.getFilteredSelectedRowModel().rows
+  const [deleteTargets, setDeleteTargets] = useState<Redemption[] | null>(null)
+  const selectedRows = props.table.getFilteredSelectedRowModel().rows
 
   const contentToCopy = useMemo(() => {
     const selectedCodes = selectedRows.map((row) => {
-      const redemption = row.original as Redemption
+      const redemption = row.original
       return `${redemption.name}\t${redemption.key}`
     })
     return selectedCodes.join('\n')
@@ -54,7 +52,7 @@ export function DataTableBulkActions<TData>({
 
   return (
     <>
-      <BulkActionsToolbar table={table} entityName={t('redemption code')}>
+      <BulkActionsToolbar table={props.table} entityName={t('redemption code')}>
         <CopyButton
           value={contentToCopy}
           variant='outline'
@@ -64,7 +62,6 @@ export function DataTableBulkActions<TData>({
           successTooltip={t('Codes copied!')}
           aria-label={t('Copy selected codes')}
         />
-
         <Tooltip>
           <TooltipTrigger
             render={
@@ -72,26 +69,27 @@ export function DataTableBulkActions<TData>({
                 variant='destructive'
                 size='icon'
                 className='size-8'
-                onClick={() => setShowDeleteConfirm(true)}
                 aria-label={t('Delete selected redemption codes')}
+                onClick={() =>
+                  setDeleteTargets(selectedRows.map((row) => row.original))
+                }
               />
             }
           >
-            <Trash2 className='size-4' />
-            <span className='sr-only'>
-              {t('Delete selected redemption codes')}
-            </span>
+            <Trash2 aria-hidden='true' />
           </TooltipTrigger>
           <TooltipContent>
-            <p>{t('Delete selected redemption codes')}</p>
+            {t('Delete selected redemption codes')}
           </TooltipContent>
         </Tooltip>
       </BulkActionsToolbar>
-
       <RedemptionsMultiDeleteDialog
-        open={showDeleteConfirm}
-        onOpenChange={setShowDeleteConfirm}
-        table={table}
+        open={deleteTargets !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTargets(null)
+        }}
+        table={props.table}
+        targets={deleteTargets ?? []}
       />
     </>
   )

@@ -311,10 +311,7 @@ func WriteRefreshCookie(c *gin.Context, rawToken string) {
 			expiresAt = time.Unix(session.ExpiresAt, 0)
 		}
 	}
-	maxAge := int(time.Until(expiresAt) / time.Second)
-	if maxAge < 1 {
-		maxAge = 1
-	}
+	maxAge := max(int(time.Until(expiresAt)/time.Second), 1)
 	domain := common.SessionDomainForHost(c.Request.Host)
 	if domain != "" {
 		writeRefreshCookie(c, "", -1, time.Unix(1, 0), "")

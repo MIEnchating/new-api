@@ -25,7 +25,6 @@ import { GroupBadge } from '@/components/group-badge'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Progress } from '@/components/ui/progress'
 import {
   Tooltip,
   TooltipContent,
@@ -34,15 +33,19 @@ import {
 import { useMediaQuery } from '@/hooks'
 import { toIntlLocale } from '@/i18n/languages'
 import { getUserGroups } from '@/lib/api'
-import dayjs from '@/lib/dayjs'
-import { formatQuota } from '@/lib/format'
+import { getCurrencyDisplay } from '@/lib/currency'
 import { cn } from '@/lib/utils'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { API_KEY_STATUSES } from '../constants'
 import { parseApiKeyGroupRouteConfig } from '../lib'
 import type { ApiKey } from '../types'
 import { ApiKeyGroupCell } from './api-key-group-cell'
-import { ApiKeyTimestampCell } from './api-key-timestamp-cell'
+import { ApiKeyQuotaCell } from './api-key-quota-cell'
+import {
+  ApiKeyActivityCell,
+  ApiKeyTimestampCell,
+} from './api-key-timestamp-cell'
 import {
   ApiKeyCell,
   ModelLimitsCell,
@@ -50,12 +53,6 @@ import {
 } from './api-keys-cells'
 import { useApiKeys } from './api-keys-provider'
 import { DataTableRowActions } from './data-table-row-actions'
-
-function getQuotaProgressColor(percentage: number): string {
-  if (percentage <= 10) return '[&_[data-slot=progress-indicator]]:bg-rose-500'
-  if (percentage <= 30) return '[&_[data-slot=progress-indicator]]:bg-amber-500'
-  return '[&_[data-slot=progress-indicator]]:bg-emerald-500'
-}
 
 type GroupRatioInfo = {
   ratio: number | string
@@ -89,10 +86,12 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
   const { t, i18n } = useTranslation()
   const groupRatioInfo = useGroupRatioInfo()
   const { setCurrentRow, setOpen } = useApiKeys()
+  useSystemConfigStore((state) => state.config.currency)
+  const { meta: currency } = getCurrencyDisplay()
+  const quotaUnit = currency.kind === 'tokens' ? t('Tokens') : currency.symbol
   const shouldReduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const justNowLabel = t('Just now')
-  const staleAccessThreshold = dayjs(now).subtract(3, 'month').valueOf()
   return [
     {
       id: 'select',
@@ -101,7 +100,7 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
           checked={table.getIsAllPageRowsSelected()}
           indeterminate={table.getIsSomePageRowsSelected()}
           onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
-          aria-label='Select all'
+          aria-label={t('Select all')}
           className='translate-y-[2px]'
         />
       ),
@@ -109,7 +108,7 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         <Checkbox
           checked={row.getIsSelected()}
           onCheckedChange={(value) => row.toggleSelected(!!value)}
-          aria-label='Select row'
+          aria-label={t('Select row')}
           className='translate-y-[2px]'
         />
       ),
@@ -157,66 +156,10 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
     {
       id: 'quota',
       accessorKey: 'remain_quota',
-      header: t('Quota'),
-      cell: ({ row }) => {
-        const apiKey = row.original
-        const used = apiKey.used_quota
-        if (apiKey.unlimited_quota) {
-          return (
-            <div className='text-xs'>
-              <span className='font-medium tabular-nums'>
-                {formatQuota(used)}
-              </span>
-              <span className='text-muted-foreground'>
-                {' / '}
-                {t('Unlimited')}
-              </span>
-            </div>
-          )
-        }
-
-        const remaining = apiKey.remain_quota
-        const total = used + remaining
-        const remainingPercentage = total > 0 ? (remaining / total) * 100 : 0
-
-        return (
-          <Tooltip>
-            <TooltipTrigger render={<div className='w-[150px] space-y-1' />}>
-              <div className='text-xs'>
-                <span className='font-medium tabular-nums'>
-                  {formatQuota(used)}
-                </span>
-                <span className='text-muted-foreground tabular-nums'>
-                  {' '}
-                  / {formatQuota(total)}
-                </span>
-              </div>
-              <Progress
-                value={remainingPercentage}
-                className={cn(
-                  'h-1.5',
-                  getQuotaProgressColor(remainingPercentage)
-                )}
-              />
-            </TooltipTrigger>
-            <TooltipContent>
-              <div className='space-y-1 text-xs'>
-                <div>
-                  {t('Used:')} {formatQuota(used)}
-                </div>
-                <div>
-                  {t('Remaining:')} {formatQuota(remaining)} (
-                  {remainingPercentage.toFixed(1)}%)
-                </div>
-                <div>
-                  {t('Total:')} {formatQuota(total)}
-                </div>
-              </div>
-            </TooltipContent>
-          </Tooltip>
-        )
-      },
-      size: 170,
+      header: `${t('Quota')} (${quotaUnit})`,
+      cell: ({ row }) => <ApiKeyQuotaCell apiKey={row.original} now={now} />,
+      size: 260,
+      minSize: 260,
     },
     {
       accessorKey: 'group',
@@ -338,39 +281,11 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
       meta: { mobileHidden: true },
     },
     {
+      id: 'activity_time',
       accessorKey: 'created_time',
-      header: t('Created'),
-      cell: ({ row }) => (
-        <ApiKeyTimestampCell
-          timestamp={row.getValue('created_time')}
-          now={now}
-          locale={locale}
-          justNowLabel={justNowLabel}
-          className='text-muted-foreground'
-        />
-      ),
-      size: 180,
-      meta: { mobileHidden: true },
-    },
-    {
-      accessorKey: 'accessed_time',
-      header: t('Last Used'),
-      cell: ({ row }) => {
-        const accessedTime = row.getValue('accessed_time') as number
-        const isStale =
-          accessedTime > 0 && accessedTime * 1000 < staleAccessThreshold
-
-        return (
-          <ApiKeyTimestampCell
-            timestamp={accessedTime}
-            now={now}
-            locale={locale}
-            justNowLabel={justNowLabel}
-            className={isStale ? 'text-warning' : 'text-muted-foreground'}
-          />
-        )
-      },
-      size: 180,
+      header: t('Time'),
+      cell: ({ row }) => <ApiKeyActivityCell apiKey={row.original} now={now} />,
+      size: 220,
       meta: { mobileHidden: true },
     },
     {
@@ -388,16 +303,17 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
             />
           )
         }
-        const isExpired = expiredTime * 1000 < now
         return (
           <ApiKeyTimestampCell
             timestamp={expiredTime}
             now={now}
             locale={locale}
             justNowLabel={justNowLabel}
-            className={cn(
-              isExpired ? 'text-destructive' : 'text-muted-foreground'
-            )}
+            className={
+              expiredTime * 1000 <= now
+                ? 'text-destructive'
+                : 'text-muted-foreground'
+            }
           />
         )
       },

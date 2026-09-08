@@ -27,6 +27,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { useMediaQuery } from '@/hooks'
+import { cn } from '@/lib/utils'
 
 import {
   AutoGroupBadge,
@@ -45,21 +47,34 @@ type ApiKeyGroupCellProps = {
 
 export function ApiKeyGroupCell(props: ApiKeyGroupCellProps) {
   const { t } = useTranslation()
+  const isMobile = useMediaQuery('(max-width: 640px)')
 
-  if (props.group !== 'auto') {
-    const ratio = typeof props.ratio === 'number' ? props.ratio : undefined
+  const group = props.group?.trim() || ''
+  if (group !== 'auto') {
+    const ratio =
+      group && typeof props.ratio === 'number' ? props.ratio : undefined
     return (
       <div
         className='flex w-full min-w-0 items-center gap-1'
         data-api-key-group-cell='normal'
       >
         <TruncatedCell
-          className='-ml-1.5 flex-1'
+          className={cn('flex-1', isMobile ? 'w-full' : 'max-w-50')}
           contentClassName='flex w-full min-w-0 [&>span]:min-w-0 [&>span]:w-full'
-          tooltipContent={props.group || '-'}
+          tabIndex={0}
+          tooltipContent={group || t('Follow user group')}
           tooltipClassName='break-all'
         >
-          <GroupBadge className='flex-1' group={props.group} ratio={ratio} />
+          <GroupBadge
+            group={group}
+            ratio={ratio}
+            ratioLabel={group ? undefined : t('Inherited')}
+            className='px-0'
+            containerClassName={cn(
+              'gap-3',
+              isMobile && 'w-full justify-between'
+            )}
+          />
         </TruncatedCell>
         {props.scheduleEnabled && (
           <Tooltip>
@@ -98,7 +113,11 @@ export function ApiKeyGroupCell(props: ApiKeyGroupCellProps) {
         render={
           <BadgeCell
             data-api-key-group-cell='auto'
-            className='gap-1.5 overflow-visible text-xs'
+            tabIndex={0}
+            className={cn(
+              'ml-0 gap-3 overflow-visible text-xs',
+              isMobile ? 'w-full justify-between' : 'max-w-50'
+            )}
           />
         }
       >

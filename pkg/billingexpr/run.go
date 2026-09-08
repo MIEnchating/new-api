@@ -47,7 +47,7 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, params TokenP
 	}
 	headers := normalizeHeaders(request.Headers)
 
-	env := map[string]interface{}{
+	env := map[string]any{
 		"p":     params.P,
 		"c":     params.C,
 		"len":   params.Len,
@@ -84,7 +84,7 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, params TokenP
 		"header": func(key string) string {
 			return headers[strings.ToLower(strings.TrimSpace(key))]
 		},
-		"param": func(path string) interface{} {
+		"param": func(path string) any {
 			path = strings.TrimSpace(path)
 			if path == "" || len(request.Body) == 0 {
 				return nil
@@ -95,13 +95,13 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, params TokenP
 			}
 			return result.Value()
 		},
-		"u": func(name string) interface{} {
+		"u": func(name string) any {
 			if request.Usage == nil {
 				return nil
 			}
 			return request.Usage[strings.TrimSpace(name)]
 		},
-		"has": func(source interface{}, substr string) bool {
+		"has": func(source any, substr string) bool {
 			if source == nil || substr == "" {
 				return false
 			}

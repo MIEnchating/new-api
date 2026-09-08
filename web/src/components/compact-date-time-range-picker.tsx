@@ -82,6 +82,11 @@ export function CompactDateTimeRangePicker({
     return `${startText} ~ ${endText}`
   }, [dateFormat, end, start, t])
 
+  const mobileLabel = useMemo(() => {
+    if (!start || !end || !dayjs(start).isSame(end, 'day')) return label
+    return `${dayjs(start).format('MM/DD HH:mm')}–${dayjs(end).format('HH:mm')}`
+  }, [start, end, label])
+
   const handleOpenChange = (nextOpen: boolean) => {
     if (nextOpen) {
       setDraftStart(start)
@@ -161,6 +166,8 @@ export function CompactDateTimeRangePicker({
           <Button
             type='button'
             variant='outline'
+            aria-label={label}
+            title={label}
             className={cn(
               'h-8 w-full justify-start gap-2 px-2.5 text-sm leading-5 font-normal tabular-nums',
               !start && !end && 'text-muted-foreground',
@@ -170,7 +177,12 @@ export function CompactDateTimeRangePicker({
         }
       >
         <CalendarDays className='text-muted-foreground size-4 shrink-0' />
-        <span className='truncate'>{label}</span>
+        <span aria-hidden className='hidden truncate sm:inline'>
+          {label}
+        </span>
+        <span aria-hidden className='truncate sm:hidden'>
+          {mobileLabel}
+        </span>
       </PopoverTrigger>
       <PopoverContent
         align='start'
