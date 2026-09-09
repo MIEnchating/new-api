@@ -51,6 +51,7 @@ import {
 
 type ModelFormValues = {
   ModelPrice: string
+  ModelSecondPrice: string
   ModelRatio: string
   CacheRatio: string
   CreateCacheRatio: string
@@ -296,7 +297,8 @@ export const ModelRatioForm = memo(function ModelRatioForm({
           <div className='flex min-h-0 flex-1 flex-col gap-6'>
             <ModelRatioVisualEditor
               ref={visualEditorRef}
-              savedModelPrice={savedValues.ModelPrice}
+            savedModelPrice={savedValues.ModelPrice}
+            savedModelSecondPrice={savedValues.ModelSecondPrice}
               savedModelRatio={savedValues.ModelRatio}
               savedCacheRatio={savedValues.CacheRatio}
               savedCreateCacheRatio={savedValues.CreateCacheRatio}
@@ -307,6 +309,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               savedBillingMode={savedValues.BillingMode}
               savedBillingExpr={savedValues.BillingExpr}
               modelPrice={form.watch('ModelPrice')}
+              modelSecondPrice={form.watch('ModelSecondPrice')}
               modelRatio={form.watch('ModelRatio')}
               cacheRatio={form.watch('CacheRatio')}
               createCacheRatio={form.watch('CreateCacheRatio')}

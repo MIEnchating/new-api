@@ -51,6 +51,7 @@ var ErrModelPricingConflict = errors.New("model pricing changed; reload before s
 var modelPricingOptionKeys = []string{
 	"AudioCompletionRatio", "AudioRatio", "CacheRatio", "CompletionRatio",
 	"CreateCacheRatio", "ImageRatio", "ModelPrice", "ModelRatio",
+	"ModelSecondPrice",
 	"billing_setting.billing_expr", "billing_setting.billing_mode",
 }
 
@@ -121,7 +122,7 @@ func effectiveModelPricing(values map[string]map[string]any, name string) Pricin
 	result := modelPricingValues(values, name)
 	// Legacy wildcard aliases are resolved by the same normalization as relay.
 	alias := ratio_setting.FormatMatchingModelName(name)
-	for _, key := range modelPricingOptionKeys[:8] {
+	for _, key := range modelPricingOptionKeys[:9] {
 		if value, exists := values[key][alias]; exists {
 			result[key] = value
 		}
@@ -252,6 +253,23 @@ func ValidateModelPricing(name string, values PricingValues) error {
 			}
 			if err != nil {
 				return fmt.Errorf("model %s: %w", name, err)
+			}
+			continue
+		}
+		if key == "ModelSecondPrice" {
+			config, ok := value.(map[string]any)
+			if !ok {
+				return fmt.Errorf("%s must be an object", key)
+			}
+			prices, ok := config["prices"].(map[string]any)
+			if !ok {
+				return fmt.Errorf("%s.prices must be an object", key)
+			}
+			for resolution, raw := range prices {
+				price, ok := raw.(float64)
+				if strings.TrimSpace(resolution) == "" || !ok || math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+					return fmt.Errorf("%s must contain finite, non-negative prices", key)
+				}
 			}
 			continue
 		}

@@ -257,119 +257,130 @@ export function Affiliate() {
 
   return (
     <Main>
-      <div className='min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-4 sm:py-6'>
-        <CardStaggerContainer className='mx-auto flex w-full max-w-7xl flex-col gap-4 sm:gap-6'>
+      <div className='min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-6 sm:py-6'>
+        <CardStaggerContainer className='mx-auto flex w-full max-w-6xl flex-col gap-5 sm:gap-6'>
           <CardStaggerItem>
-            <div className='flex flex-col gap-1'>
-              <h1 className='flex items-center gap-2 text-xl font-semibold'>
-                <Gift className='text-primary size-5' aria-hidden='true' />
-                {t('Invitation Rebates')}
-              </h1>
-              <p className='text-muted-foreground text-sm'>{description}</p>
+            <header className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
+              <div className='flex min-w-0 items-start gap-3'>
+                <div className='bg-primary/10 text-primary flex size-11 shrink-0 items-center justify-center rounded-xl'>
+                  <Gift className='size-5' aria-hidden='true' />
+                </div>
+                <div className='min-w-0'>
+                  <h1 className='text-xl font-semibold tracking-tight sm:text-2xl'>
+                    {t('Invitation Rebates')}
+                  </h1>
+                  <p className='text-muted-foreground mt-1.5 max-w-2xl text-sm leading-6'>
+                    {description}
+                  </p>
+                </div>
+              </div>
+              <Button
+                type='button'
+                className='h-10 w-full shrink-0 sm:w-auto'
+                onClick={() => setTransferOpen(true)}
+                disabled={
+                  (user?.aff_quota ?? 0) < quotaUnit ||
+                  transferring ||
+                  !complianceConfirmed
+                }
+              >
+                <WalletCards aria-hidden='true' />
+                {t('Transfer to Balance')}
+              </Button>
+            </header>
+          </CardStaggerItem>
+
+          <CardStaggerItem>
+            <div
+              role='group'
+              aria-label={t('Referral Program')}
+              className='grid min-w-0 gap-3 sm:grid-cols-3 sm:gap-4'
+              data-testid='affiliate-summary'
+            >
+              {[
+                {
+                  label: t('Available referral balance'),
+                  value: formatQuota(user?.aff_quota ?? 0),
+                  icon: WalletCards,
+                },
+                {
+                  label: t('Total referral income'),
+                  value: formatQuota(user?.aff_history_quota ?? 0),
+                  icon: TrendingUp,
+                },
+                {
+                  label: t('People invited'),
+                  value: String(user?.aff_count ?? 0),
+                  icon: Users,
+                },
+              ].map((stat) => {
+                const Icon = stat.icon
+                return (
+                  <Card
+                    key={stat.label}
+                    data-card-hover='false'
+                    className='min-w-0 gap-3 rounded-xl py-5'
+                  >
+                    <CardHeader className='flex flex-row items-center justify-between gap-3 px-5'>
+                      <span className='text-muted-foreground text-sm'>
+                        {stat.label}
+                      </span>
+                      <Icon
+                        className='text-primary size-4 shrink-0'
+                        aria-hidden='true'
+                      />
+                    </CardHeader>
+                    <CardContent className='px-5'>
+                      {loading ? (
+                        <Skeleton className='h-9 w-28' />
+                      ) : (
+                        <div className='text-3xl font-semibold tracking-tight [overflow-wrap:anywhere] tabular-nums'>
+                          {stat.value}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })}
             </div>
           </CardStaggerItem>
 
           <CardStaggerItem>
-            <Card data-card-hover='false' className='gap-0 py-0'>
-              <CardHeader className='border-b py-4'>
+            <Card
+              data-card-hover='false'
+              className='gap-4 rounded-xl py-5 sm:gap-5'
+            >
+              <CardHeader className='px-5'>
                 <CardTitle className='flex items-center gap-2 text-base'>
                   <Link2 className='text-primary size-4' aria-hidden='true' />
-                  {t('Referral Program')}
+                  {t('Referral link')}
                 </CardTitle>
               </CardHeader>
-              <CardContent className='space-y-4 py-4'>
-                <div
-                  className='grid divide-y overflow-hidden rounded-md border sm:grid-cols-3 sm:divide-x sm:divide-y-0'
-                  data-testid='affiliate-summary'
-                >
-                  {[
-                    {
-                      label: t('Available referral balance'),
-                      value: formatQuota(user?.aff_quota ?? 0),
-                      icon: WalletCards,
-                    },
-                    {
-                      label: t('Total referral income'),
-                      value: formatQuota(user?.aff_history_quota ?? 0),
-                      icon: TrendingUp,
-                    },
-                    {
-                      label: t('People invited'),
-                      value: String(user?.aff_count ?? 0),
-                      icon: Users,
-                    },
-                  ].map((stat) => {
-                    const Icon = stat.icon
-                    return (
-                      <div
-                        key={stat.label}
-                        className='flex min-w-0 items-center gap-3 px-4 py-3'
-                      >
-                        <div className='bg-primary/8 text-primary flex size-9 shrink-0 items-center justify-center rounded-md'>
-                          <Icon className='size-4' aria-hidden='true' />
-                        </div>
-                        <div className='min-w-0'>
-                          <div className='text-muted-foreground text-xs'>
-                            {stat.label}
-                          </div>
-                          {loading ? (
-                            <Skeleton className='mt-1 h-6 w-20' />
-                          ) : (
-                            <div className='mt-0.5 text-lg font-semibold tabular-nums'>
-                              {stat.value}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-                <div className='grid items-end gap-3 lg:grid-cols-[minmax(0,1fr)_auto]'>
-                  <div className='min-w-0 space-y-1.5'>
-                    <div className='text-sm font-medium'>
-                      {t('Referral link')}
-                    </div>
-                    <div className='flex min-w-0 gap-2'>
-                      {loading ? (
-                        <Skeleton className='h-9 flex-1' />
-                      ) : (
-                        <div className='relative min-w-0 flex-1'>
-                          <Link2
-                            className='text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2'
-                            aria-hidden='true'
-                          />
-                          <Input
-                            value={affiliateLink}
-                            readOnly
-                            aria-label={t('Referral link')}
-                            className='pl-9 font-mono text-xs'
-                          />
-                        </div>
-                      )}
-                      <CopyButton
-                        value={affiliateLink}
-                        variant='outline'
-                        tooltip={t('Copy referral link')}
-                        aria-label={t('Copy referral link')}
-                      />
-                    </div>
-                  </div>
-                  <Button
-                    type='button'
-                    className='w-full lg:w-auto'
-                    onClick={() => setTransferOpen(true)}
-                    disabled={
-                      (user?.aff_quota ?? 0) < quotaUnit ||
-                      transferring ||
-                      !complianceConfirmed
-                    }
+              <CardContent className='flex min-w-0 flex-col gap-3 px-5'>
+                <div className='flex min-w-0 flex-col gap-2 sm:flex-row'>
+                  {loading ? (
+                    <Skeleton className='h-11 min-w-0 shrink-0 sm:flex-1' />
+                  ) : (
+                    <Input
+                      value={affiliateLink}
+                      readOnly
+                      aria-label={t('Referral link')}
+                      className='bg-muted/30 h-11 min-w-0 shrink-0 font-mono text-sm sm:flex-1'
+                    />
+                  )}
+                  <CopyButton
+                    value={affiliateLink}
+                    size='default'
+                    variant='outline'
+                    tooltip={t('Copy referral link')}
+                    aria-label={t('Copy referral link')}
+                    className='h-11 w-full px-4 sm:w-auto'
                   >
-                    <WalletCards aria-hidden='true' />
-                    {t('Transfer to Balance')}
-                  </Button>
+                    {t('Copy referral link')}
+                  </CopyButton>
                 </div>
                 {!complianceConfirmed ? (
-                  <p className='text-muted-foreground text-xs'>
+                  <p className='text-muted-foreground text-xs leading-5'>
                     {t(
                       'Referral reward transfer is disabled until the administrator confirms compliance terms.'
                     )}
@@ -381,8 +392,8 @@ export function Affiliate() {
 
           <CardStaggerItem>
             <Card data-card-hover='false' className='gap-0 py-0'>
-              <CardHeader className='flex-row flex-wrap items-center justify-between gap-3 space-y-0 border-b py-4'>
-                <div className='space-y-0.5'>
+              <CardHeader className='flex flex-row flex-wrap items-center justify-between gap-3 border-b px-5 py-5'>
+                <div className='flex min-w-0 flex-col gap-1'>
                   <CardTitle className='flex items-center gap-2 text-base'>
                     <Users className='text-primary size-4' aria-hidden='true' />
                     {t('Invitation History')}
@@ -393,7 +404,7 @@ export function Affiliate() {
                     )}
                   </p>
                 </div>
-                <div className='flex items-center gap-3'>
+                <div className='flex flex-wrap items-center gap-3'>
                   {isAdmin ? (
                     <Tabs
                       value={recordScope}
@@ -427,7 +438,7 @@ export function Affiliate() {
               <CardContent className='p-0'>
                 {isAdmin && recordScope === 'all' ? (
                   <form
-                    className='grid gap-2 border-b p-3 md:grid-cols-[minmax(160px,1fr)_minmax(160px,1fr)_180px_auto]'
+                    className='grid gap-2 border-b p-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_180px_auto]'
                     onSubmit={handleRecordSearch}
                   >
                     <Input
@@ -582,7 +593,7 @@ export function Affiliate() {
                 </Table>
                 {hasLoadedRewards && (
                   <div
-                    className='flex items-center justify-between border-t px-3 py-3 text-sm'
+                    className='flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm'
                     data-testid='affiliate-records-pagination'
                   >
                     <span className='text-muted-foreground'>

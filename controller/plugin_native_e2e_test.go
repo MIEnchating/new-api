@@ -113,6 +113,7 @@ func TestKlingNativeRouteSubmitPollSettleAndQuery(t *testing.T) {
 				return
 			}
 			assert.Contains(t, string(body), `"model_name":"kling-v1"`)
+			w.WriteHeader(http.StatusAccepted)
 			_, _ = io.WriteString(w, `{"code":0,"message":"","data":{"task_id":"kling-private-1","task_status":"submitted"}}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/kling/v1/videos/text2video/kling-private-1":
 			queryCalls.Add(1)

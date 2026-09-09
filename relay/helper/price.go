@@ -201,6 +201,23 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 	groupRatioInfo := HandleGroupRatio(c, info)
 
 	modelPrice, success := ratio_setting.GetModelPrice(info.OriginModelName, true)
+	if req, err := relaycommon.GetTaskRequest(c); err == nil {
+		resolution := req.Size
+		if config, configured := model.GetModelSecondPriceConfig(info.GetOriginModelName()); configured && config.ResolutionField != "" {
+			if value, ok := req.Metadata[config.ResolutionField].(string); ok {
+				resolution = value
+			}
+		}
+		if resolution == "" {
+			if value, ok := req.Metadata["resolution"].(string); ok {
+				resolution = value
+			}
+		}
+		if configured, ok := model.GetModelSecondPrice(info.GetOriginModelName(), resolution); ok {
+			modelPrice = configured
+			success = true
+		}
+	}
 	usePrice := success
 	var modelRatio float64
 

@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 
 import { Window } from 'happy-dom'
-import { afterAll, beforeEach, describe, test } from 'vitest'
+import { afterAll, beforeEach, describe, expect, test } from 'vitest'
 
 const domWindow = new Window()
 for (const key of [
@@ -164,7 +164,17 @@ describe('lottery center', () => {
       '[data-testid="lottery-rules-grid"]'
     )
     assert.ok(rulesGrid)
-    assert.equal(rulesGrid.classList.contains('xl:grid-cols-2'), true)
+    expect(rulesGrid.classList.contains('sm:grid-cols-2')).toBe(true)
+    const grid = container.querySelector(
+      '[role="group"][aria-label="Mystery gifts"]'
+    )
+    expect(grid?.classList.contains('grid-cols-3')).toBe(true)
+    expect(grid?.classList.contains('max-w-sm')).toBe(true)
+    expect(
+      container
+        .querySelector('[data-testid="lottery-draw-button"]')
+        ?.getAttribute('aria-label')
+    ).toBe('Draw now')
     const streak = container.querySelector(
       '[data-testid="lottery-current-streak"]'
     )

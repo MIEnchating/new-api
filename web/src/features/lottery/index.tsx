@@ -597,26 +597,31 @@ export function Lottery() {
 
   return (
     <Main>
-      <div className='min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-4 sm:py-6'>
-        <CardStaggerContainer className='mx-auto flex w-full max-w-6xl flex-col gap-4 sm:gap-6'>
+      <div className='min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-6 sm:py-6'>
+        <CardStaggerContainer className='mx-auto flex w-full max-w-6xl flex-col gap-5 sm:gap-6'>
           <CardStaggerItem>
-            <div className='flex items-start justify-between gap-3'>
-              <div className='flex min-w-0 flex-col gap-1'>
-                <h1 className='flex items-center gap-2 text-xl font-semibold'>
-                  <Dices className='text-primary size-5' aria-hidden='true' />
-                  {t('Lottery Center')}
-                </h1>
-                <p className='text-muted-foreground text-sm'>
-                  {t(
-                    'Earn chances through weekly usage and activity streaks, then draw quota rewards.'
-                  )}
-                </p>
+            <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
+              <div className='flex min-w-0 items-start gap-3'>
+                <div className='bg-primary/10 text-primary flex size-11 shrink-0 items-center justify-center rounded-xl'>
+                  <Dices className='size-5' aria-hidden='true' />
+                </div>
+                <div className='min-w-0'>
+                  <h1 className='text-xl font-semibold tracking-tight sm:text-2xl'>
+                    {t('Lottery Center')}
+                  </h1>
+                  <p className='text-muted-foreground mt-1.5 max-w-2xl text-sm leading-6'>
+                    {t(
+                      'Earn chances through weekly usage and activity streaks, then draw quota rewards.'
+                    )}
+                  </p>
+                </div>
               </div>
               {isAdmin ? (
                 <Button
                   type='button'
                   variant='outline'
                   size='sm'
+                  className='h-10 shrink-0'
                   disabled={loading}
                   onClick={() => setSettingsOpen(true)}
                 >
@@ -627,24 +632,24 @@ export function Lottery() {
             </div>
           </CardStaggerItem>
 
-          <div className='grid min-w-0 gap-4 lg:grid-cols-[minmax(340px,0.94fr)_minmax(0,1.06fr)] lg:items-start'>
-            <CardStaggerItem className='h-fit'>
+          <div className='grid min-w-0 items-stretch gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]'>
+            <CardStaggerItem className='h-full min-w-0'>
               <Card
                 data-card-hover='false'
-                className='gap-0 overflow-hidden py-0'
+                className='h-full gap-0 overflow-hidden rounded-xl py-0'
                 data-testid='lottery-mystery-card'
               >
-                <CardHeader className='flex-row items-center justify-between space-y-0 border-b py-4'>
+                <CardHeader className='flex flex-row flex-wrap items-center justify-between gap-3 border-b px-5 py-5'>
                   <CardTitle className='flex items-center gap-2 text-base'>
                     <Gift className='text-primary size-4' aria-hidden='true' />
                     {t('Mystery gifts')}
                   </CardTitle>
-                  <div className='flex items-center gap-2 text-sm'>
+                  <div className='bg-primary/10 flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm'>
                     <Sparkles
                       className='text-warning size-4'
                       aria-hidden='true'
                     />
-                    <span className='text-muted-foreground hidden sm:inline'>
+                    <span className='text-muted-foreground'>
                       {t('Available chances')}
                     </span>
                     {loading ? (
@@ -656,8 +661,12 @@ export function Lottery() {
                     )}
                   </div>
                 </CardHeader>
-                <CardContent className='flex flex-col items-center px-4 py-5 sm:px-6'>
-                  <div className='grid w-full max-w-xs grid-cols-3 gap-2 sm:gap-2.5'>
+                <CardContent className='from-primary/[0.03] flex flex-1 flex-col items-center justify-center bg-gradient-to-b to-transparent px-4 py-6 sm:px-6 sm:py-8'>
+                  <div
+                    role='group'
+                    aria-label={t('Mystery gifts')}
+                    className='grid w-full max-w-sm grid-cols-3 gap-2.5 sm:gap-3'
+                  >
                     {Array.from(
                       { length: LOTTERY_GRID_SIZE },
                       (_, boxIndex) => {
@@ -666,7 +675,8 @@ export function Lottery() {
                         const subdued = latestDraw !== null && !selected
                         const isCenter = boxIndex === LOTTERY_GRID_CENTER
                         return (
-                          <button
+                          <Button
+                            variant='ghost'
                             key={boxIndex}
                             type='button'
                             data-lottery-grid-cell='true'
@@ -699,18 +709,21 @@ export function Lottery() {
                             }
                             onClick={() => void handleDraw()}
                             className={cn(
-                              'group bg-background relative isolate flex aspect-square min-w-0 items-center justify-center overflow-hidden rounded-md border p-1.5 transition-[border-color,background-color,box-shadow,opacity] duration-300 outline-none sm:p-2',
+                              'group border-border bg-background relative isolate flex aspect-square h-auto w-full min-w-0 items-center justify-center overflow-hidden rounded-xl border p-1.5 transition-[border-color,background-color,box-shadow,opacity] duration-300 outline-none sm:p-2',
                               'hover:border-primary/45 hover:bg-primary/[0.03] hover:shadow-sm focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
-                              'disabled:pointer-events-none disabled:cursor-not-allowed',
+                              'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-100',
                               isCenter &&
-                                'border-primary/30 bg-primary/[0.04] shadow-primary/5 shadow-sm',
+                                'border-primary/40 bg-primary/10 shadow-primary/10 shadow-sm',
                               selected &&
                                 drawing &&
                                 'border-primary bg-primary/10 ring-primary/25 shadow-primary/15 shadow-md ring-2',
-                              drawing && !selected && !isCenter && 'opacity-55',
+                              drawing &&
+                                !selected &&
+                                !isCenter &&
+                                'disabled:opacity-55',
                               revealed &&
                                 'border-success/45 bg-success/[0.04] shadow-success/10 shadow-md',
-                              subdued && !isCenter && 'opacity-35'
+                              subdued && !isCenter && 'disabled:opacity-35'
                             )}
                           >
                             <span className='relative z-10 flex min-h-16 items-center justify-center'>
@@ -767,7 +780,7 @@ export function Lottery() {
                                 </span>
                               )}
                             </span>
-                          </button>
+                          </Button>
                         )
                       }
                     )}
@@ -811,19 +824,22 @@ export function Lottery() {
             </CardStaggerItem>
 
             <div
-              className='grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-2'
+              className='grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2'
               data-testid='lottery-rules-grid'
             >
-              <CardStaggerItem className='h-full min-h-44'>
-                <Card data-card-hover='false' className='h-full gap-0 py-0'>
-                  <CardHeader className='border-b py-4'>
+              <CardStaggerItem className='h-full min-w-0'>
+                <Card
+                  data-card-hover='false'
+                  className='h-full gap-0 rounded-xl py-0'
+                >
+                  <CardHeader className='border-b px-5 py-4'>
                     <CardTitle className='flex items-center gap-2 text-base'>
                       <Trophy className='text-chart-2 size-4' />
                       {t('Weekly lottery chances')}
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className='space-y-3 py-4'>
-                    <div className='flex items-end justify-between gap-3'>
+                  <CardContent className='flex flex-col gap-3 px-5 py-4'>
+                    <div className='flex flex-wrap items-end justify-between gap-3'>
                       <div>
                         <p className='text-muted-foreground text-xs'>
                           {t('Weekly spending')}
@@ -857,16 +873,19 @@ export function Lottery() {
                 </Card>
               </CardStaggerItem>
 
-              <CardStaggerItem className='h-full min-h-44'>
-                <Card data-card-hover='false' className='h-full gap-0 py-0'>
-                  <CardHeader className='border-b py-4'>
+              <CardStaggerItem className='h-full min-w-0'>
+                <Card
+                  data-card-hover='false'
+                  className='h-full gap-0 rounded-xl py-0'
+                >
+                  <CardHeader className='border-b px-5 py-4'>
                     <CardTitle className='flex items-center gap-2 text-base'>
                       <CalendarDays className='text-chart-3 size-4' />
                       {t('Daily activity')}
                     </CardTitle>
                   </CardHeader>
-                  <CardContent className='space-y-3 py-4'>
-                    <div className='flex items-center justify-between gap-3'>
+                  <CardContent className='flex flex-col gap-3 px-5 py-4'>
+                    <div className='flex flex-wrap items-center justify-between gap-3'>
                       <div>
                         <p className='text-muted-foreground text-xs'>
                           {t('Today spent')}
@@ -901,9 +920,12 @@ export function Lottery() {
                 </Card>
               </CardStaggerItem>
 
-              <CardStaggerItem className='h-full min-h-44 xl:col-span-2'>
-                <Card data-card-hover='false' className='h-full gap-0 py-0'>
-                  <CardHeader className='flex-row items-center justify-between space-y-0 border-b py-4'>
+              <CardStaggerItem className='h-full min-w-0 sm:col-span-2'>
+                <Card
+                  data-card-hover='false'
+                  className='h-full gap-0 rounded-xl py-0'
+                >
+                  <CardHeader className='flex flex-row flex-wrap items-center justify-between gap-3 border-b px-5 py-4'>
                     <CardTitle className='flex items-center gap-2 text-base'>
                       <Flame
                         className='text-warning size-4'
@@ -925,11 +947,11 @@ export function Lottery() {
                       </span>
                     </div>
                   </CardHeader>
-                  <CardContent className='flex flex-1 flex-col gap-4 py-4'>
+                  <CardContent className='flex flex-1 flex-col gap-4 px-5 py-4'>
                     <p className='text-muted-foreground text-xs'>
                       {t('Current streak')}
                     </p>
-                    <div className='grid grid-cols-7 gap-2'>
+                    <div className='grid grid-cols-7 gap-1 sm:gap-2'>
                       {activity.map((day) => (
                         <div
                           key={day.date}
@@ -938,7 +960,7 @@ export function Lottery() {
                         >
                           <div
                             className={cn(
-                              'flex size-7 items-center justify-center rounded-full border',
+                              'flex size-8 items-center justify-center rounded-lg border',
                               day.active
                                 ? 'border-success/30 bg-success/10 text-success'
                                 : 'text-muted-foreground'
@@ -960,7 +982,7 @@ export function Lottery() {
                       {(status?.rules?.streak_rewards || []).map((reward) => (
                         <div
                           key={reward.days}
-                          className='rounded-md border px-3 py-2'
+                          className='bg-muted/30 rounded-lg px-3 py-2'
                         >
                           <span className='text-sm font-medium'>
                             {t('{{days}}-day streak', { days: reward.days })}
@@ -981,26 +1003,26 @@ export function Lottery() {
 
           <CardStaggerItem>
             <Card data-card-hover='false' className='gap-0 py-0'>
-              <CardHeader className='border-b py-4'>
+              <CardHeader className='border-b px-5 py-4'>
                 <CardTitle className='flex items-center gap-2 text-base'>
                   <Sparkles className='text-warning size-4' />
                   {t('Campaign')}
                 </CardTitle>
               </CardHeader>
               {campaignRules.length > 0 ? (
-                <CardContent className='grid items-stretch gap-3 py-4 sm:grid-cols-2 lg:grid-cols-3'>
+                <CardContent className='grid items-stretch gap-3 px-5 py-5 md:grid-cols-2'>
                   {campaignRules.map((rule) => {
                     const state = campaignStatus(rule, campaignNow, t)
                     return (
                       <div
                         key={rule.id}
-                        className='flex h-full min-w-0 flex-col gap-2 rounded-md border px-3 py-3'
+                        className='bg-muted/20 flex h-full min-w-0 flex-col gap-3 rounded-xl border p-4'
                       >
-                        <div className='flex min-h-7 items-center justify-between gap-3'>
-                          <span className='min-w-0 truncate text-sm font-medium'>
+                        <div className='flex min-h-7 flex-wrap items-center justify-between gap-2'>
+                          <span className='min-w-0 text-sm font-medium break-words'>
                             {rule.name || t('Campaign')}
                           </span>
-                          <div className='flex shrink-0 items-center gap-1.5'>
+                          <div className='flex flex-wrap items-center gap-1.5'>
                             <StatusBadge variant='info'>
                               {t('{{count}} chances', { count: rule.chances })}
                             </StatusBadge>
@@ -1069,7 +1091,7 @@ export function Lottery() {
 
           <CardStaggerItem>
             <Card data-card-hover='false' className='gap-0 py-0'>
-              <CardHeader className='flex-row flex-wrap items-center justify-between gap-3 border-b py-4'>
+              <CardHeader className='flex flex-row flex-wrap items-center justify-between gap-3 border-b px-5 py-5'>
                 <CardTitle className='text-base'>
                   {showingGrantRecords
                     ? t('Chance grant records')
@@ -1149,7 +1171,7 @@ export function Lottery() {
               <CardContent className='p-0'>
                 {showingGrantRecords ? (
                   <form
-                    className='grid gap-2 border-b p-3 md:grid-cols-[minmax(200px,1fr)_170px_150px_auto]'
+                    className='grid gap-2 border-b p-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_170px_150px_auto]'
                     onSubmit={handleGrantSearch}
                   >
                     <Input
@@ -1238,7 +1260,7 @@ export function Lottery() {
                   </form>
                 ) : isAdmin && recordScope === 'all' ? (
                   <form
-                    className='grid gap-2 border-b p-3 sm:grid-cols-[minmax(220px,1fr)_180px_auto]'
+                    className='grid gap-2 border-b p-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px_auto]'
                     onSubmit={handleDrawSearch}
                   >
                     <Input
@@ -1542,7 +1564,7 @@ export function Lottery() {
                     : !recordsLoading
                 ) ? (
                   <div
-                    className='flex items-center justify-between border-t px-4 py-3 text-sm'
+                    className='flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm'
                     data-testid='lottery-records-pagination'
                   >
                     <span className='text-muted-foreground tabular-nums'>

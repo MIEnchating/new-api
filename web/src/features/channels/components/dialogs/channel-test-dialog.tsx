@@ -965,6 +965,7 @@ function ChannelTestDialogContent({
     <>
       <Dialog
         open={open}
+        initialFocus={false}
         onOpenChange={handleDialogOpenChange}
         title={
           <span className='inline-flex max-w-full min-w-0 items-center gap-1.5'>
@@ -989,6 +990,7 @@ function ChannelTestDialogContent({
                 options={endpointSelectItems}
                 value={endpointType}
                 onValueChange={handleEndpointTypeChange}
+                openOnFocus={false}
                 id='endpoint-type'
                 className='w-full min-w-0'
                 placeholder={t('Auto detect (default)')}

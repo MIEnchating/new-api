@@ -76,6 +76,7 @@ import {
 
 type ModelRatioVisualEditorProps = {
   savedModelPrice: string
+  savedModelSecondPrice?: string
   savedModelRatio: string
   savedCacheRatio: string
   savedCreateCacheRatio: string
@@ -86,6 +87,7 @@ type ModelRatioVisualEditorProps = {
   savedBillingMode: string
   savedBillingExpr: string
   modelPrice: string
+  modelSecondPrice?: string
   modelRatio: string
   cacheRatio: string
   createCacheRatio: string
@@ -115,6 +117,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
 >(function ModelRatioVisualEditor(
   {
     savedModelPrice,
+    savedModelSecondPrice = '{}',
     savedModelRatio,
     savedCacheRatio,
     savedCreateCacheRatio,
@@ -125,6 +128,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedBillingMode,
     savedBillingExpr,
     modelPrice,
+    modelSecondPrice = '{}',
     modelRatio,
     cacheRatio,
     createCacheRatio,
@@ -218,6 +222,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
   const models = useMemo(() => {
     const savedRows = buildModelSnapshots({
       modelPrice: savedModelPrice,
+      modelSecondPrice: savedModelSecondPrice,
       modelRatio: savedModelRatio,
       cacheRatio: savedCacheRatio,
       createCacheRatio: savedCreateCacheRatio,
@@ -230,6 +235,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     })
     const draftRows = buildModelSnapshots({
       modelPrice,
+      modelSecondPrice,
       modelRatio,
       cacheRatio,
       createCacheRatio,
@@ -282,7 +288,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedAudioCompletionRatio,
     savedBillingMode,
     savedBillingExpr,
-    modelPrice,
+        modelPrice,
+        modelSecondPrice,
     modelRatio,
     cacheRatio,
     createCacheRatio,
@@ -346,6 +353,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         billingMode: editBillingMode,
         billingExpr: editableModel.billingExpr,
         requestRuleExpr: editableModel.requestRuleExpr,
+        secondPriceConfig: editableModel.secondPriceConfig,
       })
       setEditorOpen(true)
       if (isMobile) setSheetOpen(true)
@@ -523,6 +531,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         CompletionRatio: completionRatio,
         CacheRatio: cacheRatio,
         CreateCacheRatio: createCacheRatio,
+        ModelSecondPrice: modelSecondPrice,
         ImageRatio: imageRatio,
         AudioRatio: audioRatio,
         AudioCompletionRatio: audioCompletionRatio,

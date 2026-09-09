@@ -315,9 +315,10 @@ func WriteRefreshCookie(c *gin.Context, rawToken string) {
 	domain := common.SessionDomainForHost(c.Request.Host)
 	if domain != "" {
 		writeRefreshCookie(c, "", -1, time.Unix(1, 0), "")
+		writeSessionHintCookie(c, "", -1, time.Unix(1, 0), "")
 	}
 	writeRefreshCookie(c, rawToken, maxAge, expiresAt, domain)
-	writeSessionHintCookie(c, maxAge, expiresAt)
+	writeSessionHintCookie(c, SessionHintCookieValue, maxAge, expiresAt, domain)
 }
 
 func writeRefreshCookie(c *gin.Context, value string, maxAge int, expiresAt time.Time, domain string) {
@@ -336,13 +337,14 @@ func writeRefreshCookie(c *gin.Context, value string, maxAge int, expiresAt time
 
 func ClearRefreshCookie(c *gin.Context) {
 	writeRefreshCookie(c, "", -1, time.Unix(1, 0), "")
+	writeSessionHintCookie(c, "", -1, time.Unix(1, 0), "")
 	if domain := common.SessionDomainForHost(c.Request.Host); domain != "" {
 		writeRefreshCookie(c, "", -1, time.Unix(1, 0), domain)
+		writeSessionHintCookie(c, "", -1, time.Unix(1, 0), domain)
 	}
-	clearSessionHintCookie(c)
 }
 
-// writeSessionHintCookie mirrors the Refresh Cookie's lifetime with a
+// writeSessionHintCookie mirrors the Refresh Cookie's lifetime and domain with a
 // script-readable marker. The Refresh Cookie itself is HttpOnly and scoped to
 // /api/user/auth, so a page at / cannot tell whether a login session exists;
 // without this hint the frontend has to POST /api/user/auth/refresh on every
@@ -359,29 +361,17 @@ func ClearRefreshCookie(c *gin.Context) {
 // why it lives inside these two helpers rather than at their call sites: both
 // cookies then ride the same response with the same expiry, and no login path
 // can set one without the other.
-func writeSessionHintCookie(c *gin.Context, maxAge int, expiresAt time.Time) {
+func writeSessionHintCookie(c *gin.Context, value string, maxAge int, expiresAt time.Time, domain string) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name:     SessionHintCookieName,
-		Value:    SessionHintCookieValue,
+		Value:    value,
 		Path:     "/",
 		MaxAge:   maxAge,
 		Expires:  expiresAt,
 		HttpOnly: false,
 		Secure:   common.SessionCookieSecure,
 		SameSite: http.SameSiteStrictMode,
-	})
-}
-
-func clearSessionHintCookie(c *gin.Context) {
-	http.SetCookie(c.Writer, &http.Cookie{
-		Name:     SessionHintCookieName,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		Expires:  time.Unix(1, 0),
-		HttpOnly: false,
-		Secure:   common.SessionCookieSecure,
-		SameSite: http.SameSiteStrictMode,
+		Domain:   domain,
 	})
 }
 

@@ -21,8 +21,15 @@ import { splitBillingExprAndRequestRules } from '@/features/pricing/lib/billing-
 import { safeJsonParse } from '../utils/json-parser'
 import { formatPricingNumber } from './pricing-format'
 
+type SecondPriceConfig = {
+  resolution_field?: string
+  duration_field?: string
+  prices: Record<string, number>
+}
+
 export type ModelPricingSnapshotInput = {
   modelPrice: string
+  modelSecondPrice?: string
   modelRatio: string
   cacheRatio: string
   createCacheRatio: string
@@ -47,6 +54,7 @@ export type ModelPricingSnapshot = {
   billingMode?: string
   billingExpr?: string
   requestRuleExpr?: string
+  secondPriceConfig?: SecondPriceConfig
   hasConflict: boolean
 }
 
@@ -161,6 +169,7 @@ export const getPriceDetail = (
 
 export const buildModelSnapshots = ({
   modelPrice,
+  modelSecondPrice = '{}',
   modelRatio,
   cacheRatio,
   createCacheRatio,
@@ -175,6 +184,10 @@ export const buildModelSnapshots = ({
     fallback: {},
     context: 'model prices',
   })
+  const secondPriceMap = safeJsonParse<Record<string, SecondPriceConfig>>(
+    modelSecondPrice,
+    { fallback: {}, context: 'model second prices' }
+  )
   const ratioMap = safeJsonParse<Record<string, number>>(modelRatio, {
     fallback: {},
     context: 'model ratios',
@@ -214,6 +227,7 @@ export const buildModelSnapshots = ({
 
   const modelNames = new Set([
     ...Object.keys(priceMap),
+    ...Object.keys(secondPriceMap),
     ...Object.keys(ratioMap),
     ...Object.keys(cacheMap),
     ...Object.keys(createCacheMap),
@@ -242,10 +256,12 @@ export const buildModelSnapshots = ({
         splitBillingExprAndRequestRules(fullExpr)
       return {
         name,
+        secondPriceConfig: secondPriceMap[name],
         billingMode: 'tiered_expr',
         billingExpr: pureExpr,
         requestRuleExpr,
         price,
+        secondPriceConfig: secondPriceMap[name],
         ratio,
         cacheRatio: cache,
         createCacheRatio: createCache,
@@ -260,6 +276,7 @@ export const buildModelSnapshots = ({
     if (modeForModel === 'per_second') {
       return {
         name,
+        secondPriceConfig: secondPriceMap[name],
         price,
         ratio,
         cacheRatio: cache,
@@ -275,6 +292,7 @@ export const buildModelSnapshots = ({
 
     return {
       name,
+      secondPriceConfig: secondPriceMap[name],
       price,
       ratio,
       cacheRatio: cache,
@@ -300,6 +318,7 @@ export const buildModelSnapshots = ({
 export const getSnapshotSignature = (snapshot?: ModelPricingSnapshot) => {
   if (!snapshot) return ''
   return JSON.stringify({
+    secondPriceConfig: snapshot.secondPriceConfig || null,
     price: snapshot.price || '',
     ratio: snapshot.ratio || '',
     cacheRatio: snapshot.cacheRatio || '',

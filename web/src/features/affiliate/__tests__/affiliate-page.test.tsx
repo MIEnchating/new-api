@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 
 import { Window } from 'happy-dom'
-import { afterAll, test } from 'vitest'
+import { afterAll, expect, test } from 'vitest'
 
 import zh from '@/i18n/locales/zh.json'
 
@@ -142,7 +142,18 @@ test('renders a translated referral summary and empty income state', async () =>
     await flushRequests()
   })
 
-  assert.ok(container.querySelector('[data-testid="affiliate-summary"]'))
+  const summary = container.querySelector('[data-testid="affiliate-summary"]')
+  expect(summary?.classList.contains('sm:grid-cols-3')).toBe(true)
+  expect(summary?.querySelectorAll('[data-slot="card"]').length).toBe(3)
+  const referralLink =
+    container.querySelector<HTMLInputElement>('input[readonly]')
+  expect(referralLink?.value).toContain('invite-code')
+  expect(referralLink?.classList.contains('min-w-0')).toBe(true)
+  const copyButton = container.querySelector<HTMLButtonElement>(
+    `button[aria-label="${i18n.t('Copy referral link')}"]`
+  )
+  expect(copyButton?.textContent).toContain(i18n.t('Copy referral link'))
+  expect(copyButton?.classList.contains('sm:w-auto')).toBe(true)
   assert.match(container.textContent || '', /可转余额/)
   assert.match(container.textContent || '', /累计收入/)
   assert.match(container.textContent || '', /邀请人数/)

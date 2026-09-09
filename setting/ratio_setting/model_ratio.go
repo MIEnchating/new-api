@@ -409,7 +409,8 @@ func GetDefaultModelPriceMap() map[string]float64 {
 func GetDefaultPricingMaps() map[string]map[string]float64 {
 	defaults := map[string]map[string]float64{
 		"ModelPrice": defaultModelPrice, "ModelRatio": defaultModelRatio,
-		"CompletionRatio": defaultCompletionRatio, "CacheRatio": defaultCacheRatio,
+		"ModelSecondPrice": {},
+		"CompletionRatio":  defaultCompletionRatio, "CacheRatio": defaultCacheRatio,
 		"CreateCacheRatio": defaultCreateCacheRatio, "ImageRatio": defaultImageRatio,
 		"AudioRatio": defaultAudioRatio, "AudioCompletionRatio": defaultAudioCompletionRatio,
 	}

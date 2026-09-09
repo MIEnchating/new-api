@@ -30,6 +30,7 @@ import type { ModelPricingEntry } from './api'
 
 export const PRICING_KEYS = [
   'ModelPrice',
+  'ModelSecondPrice',
   'ModelRatio',
   'CompletionRatio',
   'CacheRatio',
@@ -41,7 +42,7 @@ export const PRICING_KEYS = [
   'billing_setting.billing_expr',
 ] as const
 export type PricingKey = (typeof PRICING_KEYS)[number]
-export type PricingValues = Partial<Record<PricingKey, number | string>>
+export type PricingValues = Partial<Record<PricingKey, number | string | Record<string, number>>>
 export type PricingOptions = Record<PricingKey, string>
 
 export function modelPricingDisplay(
@@ -61,6 +62,10 @@ export function modelPricingDisplay(
     completion_ratio: Number(values.CompletionRatio ?? Number.NaN),
     model_price:
       values.ModelPrice === undefined ? undefined : Number(values.ModelPrice),
+    model_second_price:
+      values.ModelSecondPrice && typeof values.ModelSecondPrice === 'object'
+        ? (values.ModelSecondPrice as { prices?: Record<string, number> }).prices
+        : undefined,
     cache_ratio:
       values.CacheRatio === undefined ? undefined : Number(values.CacheRatio),
     create_cache_ratio:
@@ -98,6 +103,8 @@ export const pricingFieldMap = {
   audioCompletionRatio: 'AudioCompletionRatio',
 } as const
 
+const secondPriceKey = 'ModelSecondPrice' as const
+
 export function pricingOptions(
   values: Record<string, string | boolean>
 ): PricingOptions {
@@ -114,6 +121,7 @@ export function pricingOptions(
 export function pricingRows(options: PricingOptions): ModelPricingSnapshot[] {
   return buildModelSnapshots({
     modelPrice: options.ModelPrice,
+    modelSecondPrice: options.ModelSecondPrice,
     modelRatio: options.ModelRatio,
     completionRatio: options.CompletionRatio,
     cacheRatio: options.CacheRatio,
@@ -141,7 +149,12 @@ export function pricingRow(
   if (row?.billingMode === 'tiered_expr') billingMode = 'tiered_expr'
   else if (row?.billingMode === 'per-second') billingMode = 'per-second'
   else if (row?.price) billingMode = 'per-request'
-  return { ...row, name, billingMode }
+  const configured = values[secondPriceKey]
+  const secondPriceConfig =
+    configured && typeof configured === 'object' && !Array.isArray(configured)
+      ? (configured as ModelRatioData['secondPriceConfig'])
+      : undefined
+  return { ...row, name, billingMode, secondPriceConfig }
 }
 
 export function pricingFromDraft(data: ModelRatioData): PricingValues {
@@ -174,6 +187,9 @@ export function pricingFromDraft(data: ModelRatioData): PricingValues {
       data.billingExpr || '',
       data.requestRuleExpr || ''
     )
+  }
+  if (data.billingMode === 'per-second' && data.secondPriceConfig) {
+    values[secondPriceKey] = data.secondPriceConfig
   }
   return values
 }
@@ -220,7 +236,11 @@ export function pricingValuesByModel(
       throw new Error(t('Pricing must be a JSON object'))
     }
     for (const [name, value] of Object.entries(map)) {
-      if (typeof value !== 'number' && typeof value !== 'string') {
+      if (
+        typeof value !== 'number' &&
+        typeof value !== 'string' &&
+        (typeof value !== 'object' || value === null || Array.isArray(value))
+      ) {
         throw new Error(t('Invalid pricing value'))
       }
       const model = models.get(name) ?? {}

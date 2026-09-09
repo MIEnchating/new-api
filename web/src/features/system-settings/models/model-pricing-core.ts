@@ -71,6 +71,11 @@ export type ModelRatioData = {
   billingMode?: PricingMode
   billingExpr?: string
   requestRuleExpr?: string
+  secondPriceConfig?: {
+    resolution_field?: string
+    duration_field?: string
+    prices: Record<string, number>
+  }
 }
 
 export type PreviewRow = {
@@ -254,7 +259,7 @@ export function buildPreviewRows(
     return [
       {
         key: 'price',
-        label: 'ModelPrice',
+        label: t('Price per second'),
         value: values.price || t('Empty'),
       },
     ]

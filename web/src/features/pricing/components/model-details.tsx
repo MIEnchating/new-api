@@ -57,6 +57,7 @@ import {
 } from '@/features/performance-metrics/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
+import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 
 import { DEFAULT_TOKEN_UNIT } from '../constants'
 import { usePricingData } from '../hooks/use-pricing-data'
@@ -74,7 +75,11 @@ import {
 } from '../lib/dynamic-price'
 import { parseTags } from '../lib/filters'
 import { getAvailableGroups, isTokenBasedModel } from '../lib/model-helpers'
-import { formatFixedPrice, formatGroupPrice } from '../lib/price'
+import {
+  formatFixedPrice,
+  formatGroupPrice,
+  formatRequestPrice,
+} from '../lib/price'
 import {
   evaluateTaskUsageExamples,
   getTaskEnumFields,
@@ -802,24 +807,56 @@ function PriceSection(props: {
   }
 
   if (!isTokenBased) {
+    const resolutionPrices = Object.entries(
+      props.model.model_second_price || {}
+    ).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
     return (
       <section>
         <SectionTitle>{t('Base Price')}</SectionTitle>
         <div className='flex items-baseline justify-between'>
           <span className='text-muted-foreground text-sm'>
-            {t('Per request')}
+            {t(props.model.billing_mode === 'per_second' ? 'Per-second' : 'Per request')}
           </span>
           <span className='text-foreground font-mono text-sm font-semibold tabular-nums'>
-            {formatFixedPrice(
+            {props.model.billing_mode === 'per_second'
+              ? formatRequestPrice(
+                  props.model,
+                  props.showRechargePrice,
+                  props.priceRate,
+                  props.usdExchangeRate,
+                  undefined,
+                  true
+                )
+              : formatFixedPrice(
               props.model,
               baseGroupKey,
               props.showRechargePrice,
               props.priceRate,
               props.usdExchangeRate,
               baseGroupRatioMap
-            )}
+                )}
+            <span className='text-muted-foreground/40 ml-1 text-xs font-normal'>
+              / {t(props.model.billing_mode === 'per_second' ? 'second' : 'request')}
+            </span>
           </span>
         </div>
+        {props.model.billing_mode === 'per_second' && resolutionPrices.length > 0 && (
+          <div className='bg-muted/20 mt-3 rounded-lg border px-3 py-2.5'>
+            <div className='text-muted-foreground mb-2 text-sm'>
+              {t('Prices by resolution')}
+            </div>
+            <div className='space-y-1.5'>
+              {resolutionPrices.map(([resolution, price]) => (
+                <div key={resolution} className='flex items-baseline justify-between gap-4'>
+                  <span className='text-muted-foreground/70 text-sm'>{resolution}</span>
+                  <span className='text-muted-foreground font-mono text-sm tabular-nums'>
+                    {formatBillingCurrencyFromUSD(price, { showSymbol: true, digitsLarge: 4, digitsSmall: 6, abbreviate: false })} / {t('second')}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
     )
   }

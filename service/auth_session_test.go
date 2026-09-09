@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -20,71 +23,108 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestWriteRefreshCookieUsesConfiguredParentDomain(t *testing.T) {
+func TestSessionCookiesFollowConfiguredDomain(t *testing.T) {
 	previousDomain := common.SessionCookieDomain
 	previousSecure := common.SessionCookieSecure
-	common.SessionCookieDomain = "example.com"
 	common.SessionCookieSecure = true
 	t.Cleanup(func() {
 		common.SessionCookieDomain = previousDomain
 		common.SessionCookieSecure = previousSecure
 	})
 
-	recorder := httptest.NewRecorder()
-	context, _ := gin.CreateTestContext(recorder)
-	context.Request = httptest.NewRequest("POST", "https://www.example.com/api/user/auth/refresh", nil)
+	for _, test := range []struct {
+		name             string
+		configuredDomain string
+		host             string
+		cookieDomain     string
+	}{
+		{name: "parent domain login", configuredDomain: "example.com", host: "example.com", cookieDomain: "example.com"},
+		{name: "subdomain login", configuredDomain: "example.com", host: "www.example.com", cookieDomain: "example.com"},
+		{name: "host only by default", host: "www.example.com"},
+		{name: "outside configured domain", configuredDomain: "example.com", host: "example.net"},
+		{name: "domain suffix is not a subdomain", configuredDomain: "example.com", host: "notexample.com"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			common.SessionCookieDomain = test.configuredDomain
+			jar, err := cookiejar.New(nil)
+			require.NoError(t, err)
+			origin := &url.URL{Scheme: "https", Host: test.host, Path: "/api/user/auth/refresh"}
+			// A browser upgrading from host-only cookies must not retain
+			// duplicate credentials or hints after the next refresh.
+			jar.SetCookies(origin, []*http.Cookie{
+				{Name: RefreshCookieName, Value: "old-refresh-token", Path: "/api/user/auth", Secure: true, HttpOnly: true},
+				{Name: SessionHintCookieName, Value: SessionHintCookieValue, Path: "/", Secure: true},
+			})
+			recorder := httptest.NewRecorder()
+			context, _ := gin.CreateTestContext(recorder)
+			context.Request = httptest.NewRequest(http.MethodPost, origin.String(), nil)
+			WriteRefreshCookie(context, "opaque-refresh-token")
 
-	WriteRefreshCookie(context, "opaque-refresh-token")
+			cookies := recorder.Result().Cookies()
+			var refresh, hint *http.Cookie
+			for _, cookie := range cookies {
+				if cookie.MaxAge < 0 {
+					continue
+				}
+				switch cookie.Name {
+				case RefreshCookieName:
+					refresh = cookie
+				case SessionHintCookieName:
+					hint = cookie
+				}
+			}
+			require.NotNil(t, refresh)
+			require.NotNil(t, hint)
+			assert.Equal(t, test.cookieDomain, refresh.Domain)
+			assert.Equal(t, refresh.Domain, hint.Domain)
+			assert.Equal(t, refresh.Expires, hint.Expires)
+			assert.Equal(t, refresh.MaxAge, hint.MaxAge)
+			assert.Positive(t, hint.MaxAge)
+			assert.True(t, refresh.Secure)
+			assert.True(t, hint.Secure)
+			assert.True(t, refresh.HttpOnly)
+			assert.False(t, hint.HttpOnly, "the public homepage must be able to read the non-secret hint")
+			assert.Equal(t, http.SameSiteStrictMode, refresh.SameSite)
+			assert.Equal(t, http.SameSiteStrictMode, hint.SameSite)
+			assert.Equal(t, "opaque-refresh-token", refresh.Value)
+			assert.Equal(t, SessionHintCookieValue, hint.Value)
+			jar.SetCookies(origin, cookies)
+			assert.Len(t, jar.Cookies(origin), 2, "host-only cookies must be replaced, not duplicated")
 
-	cookies := recorder.Result().Cookies()
-	require.Len(t, cookies, 3)
-	assert.Empty(t, cookies[0].Domain, "the stale host-only cookie must be cleared first")
-	assert.Equal(t, -1, cookies[0].MaxAge)
-	assert.Equal(t, "example.com", cookies[1].Domain)
-	assert.Equal(t, "opaque-refresh-token", cookies[1].Value)
-	assert.True(t, cookies[1].Secure)
-	assert.Equal(t, SessionHintCookieName, cookies[2].Name)
-	assert.Equal(t, SessionHintCookieValue, cookies[2].Value)
-}
+			home := &url.URL{Scheme: "https", Host: test.host, Path: "/"}
+			assert.Equal(t, []*http.Cookie{{Name: SessionHintCookieName, Value: SessionHintCookieValue}}, jar.Cookies(home))
+			for _, host := range []string{"example.com", "www.example.com", "api.example.com", "imageapi.example.com", "unrelated.net"} {
+				target := &url.URL{Scheme: "https", Host: host, Path: "/"}
+				if host == test.host || (test.cookieDomain != "" && host != "unrelated.net") {
+					assert.Equal(t, jar.Cookies(home), jar.Cookies(target), "homepage at %s must see the session hint", host)
+					target.Path = "/api/user/auth/refresh"
+					assert.ElementsMatch(t, jar.Cookies(origin), jar.Cookies(target))
+				} else {
+					assert.Empty(t, jar.Cookies(target), "cookies must not escape their configured domain")
+				}
+			}
+			insecure := *origin
+			insecure.Scheme = "http"
+			assert.Empty(t, jar.Cookies(&insecure), "session cookies must not travel over HTTP")
 
-func TestWriteRefreshCookieKeepsHostOnlyScopeOutsideConfiguredDomain(t *testing.T) {
-	previousDomain := common.SessionCookieDomain
-	common.SessionCookieDomain = "example.com"
-	t.Cleanup(func() { common.SessionCookieDomain = previousDomain })
-
-	recorder := httptest.NewRecorder()
-	context, _ := gin.CreateTestContext(recorder)
-	context.Request = httptest.NewRequest("POST", "https://example.net/api/user/auth/refresh", nil)
-
-	WriteRefreshCookie(context, "opaque-refresh-token")
-
-	cookies := recorder.Result().Cookies()
-	require.Len(t, cookies, 2)
-	assert.Empty(t, cookies[0].Domain)
-	assert.Equal(t, "opaque-refresh-token", cookies[0].Value)
-	assert.Equal(t, SessionHintCookieName, cookies[1].Name)
-	assert.Equal(t, SessionHintCookieValue, cookies[1].Value)
-}
-
-func TestClearRefreshCookieExpiresHostAndParentDomainVariants(t *testing.T) {
-	previousDomain := common.SessionCookieDomain
-	common.SessionCookieDomain = "example.com"
-	t.Cleanup(func() { common.SessionCookieDomain = previousDomain })
-
-	recorder := httptest.NewRecorder()
-	context, _ := gin.CreateTestContext(recorder)
-	context.Request = httptest.NewRequest("POST", "https://www.example.com/api/user/auth/logout", nil)
-
-	ClearRefreshCookie(context)
-
-	cookies := recorder.Result().Cookies()
-	require.Len(t, cookies, 3)
-	assert.Empty(t, cookies[0].Domain)
-	assert.Equal(t, -1, cookies[0].MaxAge)
-	assert.Equal(t, "example.com", cookies[1].Domain)
-	assert.Equal(t, -1, cookies[1].MaxAge)
-	assert.Equal(t, SessionHintCookieName, cookies[2].Name)
-	assert.Equal(t, -1, cookies[2].MaxAge)
+			logoutOrigin := *origin
+			logoutOrigin.Path = "/api/user/auth/logout"
+			if test.cookieDomain != "" {
+				logoutOrigin.Host = "api.example.com"
+			}
+			// A legacy host-only hint on the logout host is also removed.
+			jar.SetCookies(&logoutOrigin, []*http.Cookie{
+				{Name: SessionHintCookieName, Value: SessionHintCookieValue, Path: "/", Secure: true},
+			})
+			recorder = httptest.NewRecorder()
+			context, _ = gin.CreateTestContext(recorder)
+			context.Request = httptest.NewRequest(http.MethodPost, logoutOrigin.String(), nil)
+			ClearRefreshCookie(context)
+			jar.SetCookies(&logoutOrigin, recorder.Result().Cookies())
+			assert.Empty(t, jar.Cookies(origin), "logout must remove the shared credential and homepage hint")
+			assert.Empty(t, jar.Cookies(&logoutOrigin), "logout must also clear old host-only cookies")
+		})
+	}
 }
 
 func setupAuthSessionTestDB(t *testing.T) *model.User {
