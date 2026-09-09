@@ -120,9 +120,9 @@ describe('overview setup guide', () => {
     for (const name of ['API Keys', 'Channels', 'Usage Logs', 'Pricing']) {
       expect(screen.queryByRole('button', { name })).not.toBeInTheDocument()
     }
-    const panel = document.getElementById(
-      toggle.getAttribute('aria-controls') ?? ''
-    )
+    const panelId = toggle.getAttribute('aria-controls')
+    expect(panelId).not.toBeNull()
+    const panel = document.querySelector(`[id="${panelId}"]`)
     expect(panel).toBeInTheDocument()
     expect(panel).not.toBeVisible()
   })
@@ -136,9 +136,9 @@ describe('overview setup guide', () => {
     expect(toggle).toHaveFocus()
     await user.keyboard('{Enter}')
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
-    expect(
-      document.getElementById(toggle.getAttribute('aria-controls') ?? '')
-    ).toBeVisible()
+    const panelId = toggle.getAttribute('aria-controls')
+    expect(panelId).not.toBeNull()
+    expect(document.querySelector(`[id="${panelId}"]`)).toBeVisible()
     expect(
       screen.getByRole('heading', {
         name: 'Build on your API gateway in minutes',

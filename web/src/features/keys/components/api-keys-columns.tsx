@@ -34,6 +34,7 @@ import { useMediaQuery } from '@/hooks'
 import { toIntlLocale } from '@/i18n/languages'
 import { getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay } from '@/lib/currency'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
@@ -64,7 +65,7 @@ type GroupRatioInfo = {
 function useGroupRatioInfo(): Record<string, GroupRatioInfo> {
   const { data } = useQuery({
     queryKey: ['user-groups'],
-    queryFn: getUserGroups,
+    queryFn: async () => requireServerSuccess(await getUserGroups()),
     staleTime: 0,
     refetchInterval: 60_000,
     select: (res) => {

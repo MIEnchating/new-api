@@ -68,6 +68,7 @@ import { Slider } from '@/components/ui/slider'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatThroughput } from '@/features/performance-metrics/lib/format'
 import { useIsAdmin } from '@/hooks/use-admin'
+import { handleServerError } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
 
 import { updateCacheHitRateBaseline, updateCacheMonitorGroups } from './api'
@@ -448,10 +449,16 @@ export function CacheMonitor(props: {
     setSavingBaseline(true)
     return updateCacheHitRateBaseline(baselineDraft)
       .then((response) => {
-        if (!response.success) return
+        if (!response.success) {
+          handleServerError(response, t('Failed to update setting'))
+          return
+        }
         setBaseline(response.data.baseline)
         setBaselineDraft(response.data.baseline)
         toast.success(t('Setting updated successfully'))
+      })
+      .catch((error) => {
+        handleServerError(error, t('Failed to update setting'))
       })
       .finally(() => {
         setSavingBaseline(false)
@@ -503,10 +510,16 @@ export function CacheMonitor(props: {
     setSavingGroups(true)
     return updateCacheMonitorGroups(allGroupsDraft, groupDraft)
       .then((response) => {
-        if (!response.success) return
+        if (!response.success) {
+          handleServerError(response, t('Failed to update setting'))
+          return
+        }
         setGroupsOpen(false)
         toast.success(t('Setting updated successfully'))
         props.onRefresh()
+      })
+      .catch((error) => {
+        handleServerError(error, t('Failed to update setting'))
       })
       .finally(() => setSavingGroups(false))
   }

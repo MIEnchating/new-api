@@ -64,6 +64,8 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { getSmartRoutingGroups } from '../api'
 import {
@@ -383,7 +385,7 @@ export function SmartRoutingSection(props: SmartRoutingSectionProps) {
   const updateOptions = useUpdateOptionsBulk()
   const groupsQuery = useQuery({
     queryKey: ['smart-routing-groups'],
-    queryFn: getSmartRoutingGroups,
+    queryFn: async () => requireServerSuccess(await getSmartRoutingGroups()),
     staleTime: 60_000,
   })
   const groupNames = (groupsQuery.data?.data || []).filter(
@@ -426,9 +428,7 @@ export function SmartRoutingSection(props: SmartRoutingSectionProps) {
         options: updates.map((key) => ({ key, value: normalized[key] })),
       })
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : t('Failed to update setting')
-      )
+      handleServerError(error, t('Failed to update setting'))
       return
     }
 

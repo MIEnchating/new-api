@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 type UserGroupMetadata = {
   order?: number
@@ -59,5 +60,5 @@ export function includeSelectedUsageLogGroup(
 export async function getUsageLogGroups(isAdmin: boolean): Promise<string[]> {
   const path = isAdmin ? '/api/group/' : '/api/user/self/groups'
   const res = await api.get<GroupResponse>(path)
-  return normalizeUsageLogGroups(res.data?.data)
+  return normalizeUsageLogGroups(requireServerSuccess(res.data)?.data)
 }

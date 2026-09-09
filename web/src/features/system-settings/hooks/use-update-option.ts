@@ -20,6 +20,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 
+import { handleServerError } from '@/lib/handle-server-error'
+import { createServerError } from '@/lib/server-error-message'
+
 import {
   updateGroupSettings,
   updateSystemOption,
@@ -48,7 +51,7 @@ export function requireSuccessfulOptionUpdate(
   response: UpdateOptionResponse
 ): UpdateOptionResponse {
   if (!response.success) {
-    throw new Error(response.message || i18next.t('Failed to update setting'))
+    throw createServerError(response, i18next.t('Failed to update setting'))
   }
   return response
 }
@@ -112,7 +115,7 @@ export function useUpdateOption() {
     },
     onError: (error: Error, variables) => {
       if (shouldShowUpdateOptionNotification(variables)) {
-        toast.error(error.message || i18next.t('Failed to update setting'), {
+        handleServerError(error, i18next.t('Failed to update setting'), {
           id: SYSTEM_OPTION_TOAST_ID,
         })
       }
@@ -153,7 +156,7 @@ export function useUpdateGroupSettings() {
       })
     },
     onError: (error: Error) => {
-      toast.error(error.message || i18next.t('Failed to update setting'), {
+      handleServerError(error, i18next.t('Failed to update setting'), {
         id: SYSTEM_OPTION_TOAST_ID,
       })
     },

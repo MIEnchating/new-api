@@ -42,6 +42,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
   clearApiKeyRouteCooldown,
@@ -99,7 +100,8 @@ export function ApiKeyRouteDetailDialog() {
   const isDirty = JSON.stringify(draftRoutes) !== JSON.stringify(storedRoutes)
   const { data: routeStatusData, refetch: refetchRouteStatus } = useQuery({
     queryKey: ['api-key-route-status', currentRow?.id],
-    queryFn: () => getApiKeyRouteStatus(currentRow?.id ?? 0),
+    queryFn: async () =>
+      requireServerSuccess(await getApiKeyRouteStatus(currentRow?.id ?? 0)),
     enabled: open === 'route-detail' && !!currentRow?.id,
   })
   const routeStatusMap = useMemo(() => {

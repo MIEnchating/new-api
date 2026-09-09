@@ -42,7 +42,13 @@ export const PRICING_KEYS = [
   'billing_setting.billing_expr',
 ] as const
 export type PricingKey = (typeof PRICING_KEYS)[number]
-export type PricingValues = Partial<Record<PricingKey, number | string | Record<string, number>>>
+type ModelSecondPriceConfig = NonNullable<ModelRatioData['secondPriceConfig']>
+export type PricingValues = Partial<
+  Record<
+    PricingKey,
+    number | string | Record<string, number> | ModelSecondPriceConfig
+  >
+>
 export type PricingOptions = Record<PricingKey, string>
 
 export function modelPricingDisplay(
@@ -64,7 +70,8 @@ export function modelPricingDisplay(
       values.ModelPrice === undefined ? undefined : Number(values.ModelPrice),
     model_second_price:
       values.ModelSecondPrice && typeof values.ModelSecondPrice === 'object'
-        ? (values.ModelSecondPrice as { prices?: Record<string, number> }).prices
+        ? (values.ModelSecondPrice as { prices?: Record<string, number> })
+            .prices
         : undefined,
     cache_ratio:
       values.CacheRatio === undefined ? undefined : Number(values.CacheRatio),

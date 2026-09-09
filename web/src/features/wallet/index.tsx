@@ -23,6 +23,8 @@ import { SectionPageLayout } from '@/components/layout'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { getSelf } from '@/lib/api'
+import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { BillingHistoryDialog } from './components/dialogs/billing-history-dialog'
 import { CreemConfirmDialog } from './components/dialogs/creem-confirm-dialog'
@@ -103,17 +105,16 @@ export function Wallet(props: WalletProps) {
   const fetchUser = useCallback(async () => {
     try {
       setUserLoading(true)
-      const response = await getSelf()
+      const response = requireServerSuccess(await getSelf())
       if (response.success && response.data) {
         setUser(response.data as UserWalletData)
       }
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.error('Failed to fetch user data:', error)
+      handleServerError(error, t('Failed to fetch user information'))
     } finally {
       setUserLoading(false)
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     fetchUser()

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api, type ApiRequestConfig } from '@/lib/api'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
   normalizeChannelExecutionOptions,
@@ -67,7 +68,7 @@ export async function getTaskPluginOptions(): Promise<TaskPluginOption[]> {
     success: boolean
     data: TaskPluginOption[]
   }>('/api/task_plugin_options')
-  return response.data.data
+  return requireServerSuccess(response.data).data
 }
 
 export type CodexUsageResponse = {
@@ -292,7 +293,7 @@ export async function getChannelExecutionPlan(params: {
     '/api/channel/route/plan',
     channelActionConfig({ params })
   )
-  return res.data
+  return requireServerSuccess(res.data)
 }
 
 export async function getChannelExecutionOptions(): Promise<{
@@ -308,7 +309,7 @@ export async function getChannelExecutionOptions(): Promise<{
     message?: string
     data?: RawChannelExecutionOptions
   }>('/api/channel/route/channels', channelActionConfig())
-  const response = res.data
+  const response = requireServerSuccess(res.data)
   return {
     ...response,
     data: response.success
@@ -326,7 +327,7 @@ export async function getChannelExecutionTrace(requestId: string): Promise<{
     `/api/channel/route/trace/${encodeURIComponent(requestId)}`,
     channelActionConfig()
   )
-  return res.data
+  return requireServerSuccess(res.data)
 }
 
 export async function getRecentChannelExecutionTraces(params: {
@@ -342,7 +343,7 @@ export async function getRecentChannelExecutionTraces(params: {
     '/api/channel/route/traces',
     channelActionConfig({ params })
   )
-  return res.data
+  return requireServerSuccess(res.data)
 }
 
 /**

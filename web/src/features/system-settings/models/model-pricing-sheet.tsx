@@ -27,6 +27,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -114,6 +115,7 @@ type ModelPricingEditorPanelProps = Omit<
 > & {
   className?: string
   embedded?: boolean
+  scrollHeader?: ReactNode
 }
 
 export type ModelPricingEditorPanelHandle = {
@@ -186,6 +188,7 @@ export const ModelPricingEditorPanel = forwardRef<
     usageSchema,
     onDirtyChange,
     embedded = false,
+    scrollHeader,
   },
   ref
 ) {
@@ -214,7 +217,9 @@ export const ModelPricingEditorPanel = forwardRef<
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
   const [resolutionField, setResolutionField] = useState('')
   const [durationField, setDurationField] = useState('')
-  const [resolutionPrices, setResolutionPrices] = useState<ResolutionPriceRow[]>([])
+  const [resolutionPrices, setResolutionPrices] = useState<
+    ResolutionPriceRow[]
+  >([])
   const [editorReloadToken, setEditorReloadToken] = useState(0)
   const autoSwitchedForRef = useRef<string | null>(null)
   const isEditMode = !!editData
@@ -302,7 +307,15 @@ export const ModelPricingEditorPanel = forwardRef<
       setRequestRuleExpr(editData.requestRuleExpr || '')
       setResolutionField(editData.secondPriceConfig?.resolution_field || '')
       setDurationField(editData.secondPriceConfig?.duration_field || '')
-      setResolutionPrices(Object.entries(editData.secondPriceConfig?.prices || {}).map(([resolution, price], index) => ({ id: `${resolution}-${index}`, resolution, price: String(price) })))
+      setResolutionPrices(
+        Object.entries(editData.secondPriceConfig?.prices || {}).map(
+          ([resolution, price], index) => ({
+            id: `${resolution}-${index}`,
+            resolution,
+            price: String(price),
+          })
+        )
+      )
     } else {
       form.reset({
         name: '',
@@ -351,9 +364,10 @@ export const ModelPricingEditorPanel = forwardRef<
       form.formState.isDirty ||
         pricingMode !== originalMode ||
         billingExpr !== (editData?.billingExpr ?? '') ||
-        requestRuleExpr !== (editData?.requestRuleExpr ?? '')
-        || resolutionField !== (editData?.secondPriceConfig?.resolution_field ?? '')
-        || durationField !== (editData?.secondPriceConfig?.duration_field ?? '')
+        requestRuleExpr !== (editData?.requestRuleExpr ?? '') ||
+        resolutionField !==
+          (editData?.secondPriceConfig?.resolution_field ?? '') ||
+        durationField !== (editData?.secondPriceConfig?.duration_field ?? '')
     )
   }, [
     onDirtyChange,
@@ -621,23 +635,42 @@ export const ModelPricingEditorPanel = forwardRef<
         data.billingExpr = resolvedBillingExpr
         data.requestRuleExpr = requestRuleExpr
       }
-      if (pricingMode === 'per-second' && (resolutionField || durationField || resolutionPrices.length)) {
+      if (
+        pricingMode === 'per-second' &&
+        (resolutionField || durationField || resolutionPrices.length)
+      ) {
         data.secondPriceConfig = {
           resolution_field: resolutionField.trim() || undefined,
           duration_field: durationField.trim() || undefined,
-          prices: Object.fromEntries(resolutionPrices.filter((row) => row.resolution.trim() && row.price !== '').map((row) => [row.resolution.trim(), Number(row.price)])),
+          prices: Object.fromEntries(
+            resolutionPrices
+              .filter((row) => row.resolution.trim() && row.price !== '')
+              .map((row) => [row.resolution.trim(), Number(row.price)])
+          ),
         }
       }
 
       return data
     },
-    [pricingMode, requestRuleExpr, resolvedBillingExpr, resolutionField, durationField, resolutionPrices]
+    [
+      pricingMode,
+      requestRuleExpr,
+      resolvedBillingExpr,
+      resolutionField,
+      durationField,
+      resolutionPrices,
+    ]
   )
 
   useImperativeHandle(
     ref,
     () => ({
       commitDraft: async () => {
+        if (
+          formElementRef.current?.querySelector('[data-billing-invalid="true"]')
+        ) {
+          return null
+        }
         const amounts =
           formElementRef.current?.querySelectorAll<HTMLInputElement>(
             'input[data-pricing-amount]'
@@ -688,6 +721,9 @@ export const ModelPricingEditorPanel = forwardRef<
             }
             className='@container/pricing-editor min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 pb-6'
           >
+            {scrollHeader && (
+              <div className='mb-4 space-y-3'>{scrollHeader}</div>
+            )}
             <div className='grid min-w-0 items-start gap-4 @min-[960px]/pricing-editor:grid-cols-[minmax(0,1fr)_260px]'>
               <FieldGroup className='min-w-0'>
                 {warnings.length > 0 && (
@@ -938,28 +974,107 @@ export const ModelPricingEditorPanel = forwardRef<
                       />
                       <FieldGroup className='gap-3 rounded-lg border p-4'>
                         <div>
-                          <FieldLabel>{t('Resolution pricing (optional)')}</FieldLabel>
-                          <FieldDescription>{t('Configure different prices per second for each resolution.')}</FieldDescription>
+                          <FieldLabel>
+                            {t('Resolution pricing (optional)')}
+                          </FieldLabel>
+                          <FieldDescription>
+                            {t(
+                              'Configure different prices per second for each resolution.'
+                            )}
+                          </FieldDescription>
                         </div>
                         <div className='grid gap-3 @min-[560px]/pricing-fields:grid-cols-2'>
                           <Field>
                             <FieldLabel>{t('Resolution field')}</FieldLabel>
-                            <Input value={resolutionField} placeholder='resolution' onChange={(e) => setResolutionField(e.target.value)} />
+                            <Input
+                              value={resolutionField}
+                              placeholder='resolution'
+                              onChange={(e) =>
+                                setResolutionField(e.target.value)
+                              }
+                            />
                           </Field>
                           <Field>
                             <FieldLabel>{t('Duration field')}</FieldLabel>
-                            <Input value={durationField} placeholder='seconds' onChange={(e) => setDurationField(e.target.value)} />
+                            <Input
+                              value={durationField}
+                              placeholder='seconds'
+                              onChange={(e) => setDurationField(e.target.value)}
+                            />
                           </Field>
                         </div>
                         <div className='flex flex-col gap-2'>
                           {resolutionPrices.map((row) => (
-                            <div className='grid grid-cols-[1fr_1fr_auto] items-end gap-2' key={row.id}>
-                              <Field><FieldLabel>{t('Resolution')}</FieldLabel><Input value={row.resolution} onChange={(e) => setResolutionPrices((current) => current.map((item) => item.id === row.id ? { ...item, resolution: e.target.value } : item))} /></Field>
-                              <Field><FieldLabel>{t('Price per second')}</FieldLabel><Input value={row.price} type='number' min='0' step='any' onChange={(e) => setResolutionPrices((current) => current.map((item) => item.id === row.id ? { ...item, price: e.target.value } : item))} /></Field>
-                              <Button type='button' variant='ghost' onClick={() => setResolutionPrices((current) => current.filter((item) => item.id !== row.id))}>{t('Remove')}</Button>
+                            <div
+                              className='grid grid-cols-[1fr_1fr_auto] items-end gap-2'
+                              key={row.id}
+                            >
+                              <Field>
+                                <FieldLabel>{t('Resolution')}</FieldLabel>
+                                <Input
+                                  value={row.resolution}
+                                  onChange={(e) =>
+                                    setResolutionPrices((current) =>
+                                      current.map((item) =>
+                                        item.id === row.id
+                                          ? {
+                                              ...item,
+                                              resolution: e.target.value,
+                                            }
+                                          : item
+                                      )
+                                    )
+                                  }
+                                />
+                              </Field>
+                              <Field>
+                                <FieldLabel>{t('Price per second')}</FieldLabel>
+                                <Input
+                                  value={row.price}
+                                  type='number'
+                                  min='0'
+                                  step='any'
+                                  onChange={(e) =>
+                                    setResolutionPrices((current) =>
+                                      current.map((item) =>
+                                        item.id === row.id
+                                          ? { ...item, price: e.target.value }
+                                          : item
+                                      )
+                                    )
+                                  }
+                                />
+                              </Field>
+                              <Button
+                                type='button'
+                                variant='ghost'
+                                onClick={() =>
+                                  setResolutionPrices((current) =>
+                                    current.filter((item) => item.id !== row.id)
+                                  )
+                                }
+                              >
+                                {t('Remove')}
+                              </Button>
                             </div>
                           ))}
-                          <Button type='button' variant='outline' className='w-fit' onClick={() => setResolutionPrices((current) => [...current, { id: createResolutionPriceRowId(), resolution: '', price: '' }])}>{t('Add resolution price')}</Button>
+                          <Button
+                            type='button'
+                            variant='outline'
+                            className='w-fit'
+                            onClick={() =>
+                              setResolutionPrices((current) => [
+                                ...current,
+                                {
+                                  id: createResolutionPriceRowId(),
+                                  resolution: '',
+                                  price: '',
+                                },
+                              ])
+                            }
+                          >
+                            {t('Add resolution price')}
+                          </Button>
                         </div>
                       </FieldGroup>
                     </FieldGroup>

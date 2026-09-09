@@ -41,6 +41,8 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { useMediaQuery } from '@/hooks'
 import dayjs from '@/lib/dayjs'
+import { handleServerError } from '@/lib/handle-server-error'
+import { createServerError } from '@/lib/server-error-message'
 
 import { getTopUpStats, updateTopUpInvoice, updateTopUpInvoices } from './api'
 import { useTopUpStatsColumns } from './components/topup-stats-columns'
@@ -199,7 +201,7 @@ export function TopUpStats() {
           ? await updateTopUpInvoice(targets[0], action)
           : await updateTopUpInvoices(targets, action)
       if (!response.success) {
-        throw new Error(response.message || t('Failed to update invoice'))
+        throw createServerError(response, t('Failed to update invoice'))
       }
       return { action, count: items.length }
     },
@@ -214,7 +216,7 @@ export function TopUpStats() {
       setRowSelection({})
       await queryClient.invalidateQueries({ queryKey: ['admin-topup-stats'] })
     },
-    onError: (error: Error) => toast.error(error.message),
+    onError: (error) => handleServerError(error, t('Failed to update invoice')),
   })
 
   const openInvoiceConfirmation = useCallback(
@@ -268,7 +270,7 @@ export function TopUpStats() {
         page_size: pagination.pageSize,
       })
       if (!response.success || !response.data) {
-        throw new Error(response.message || t('Failed to load order history'))
+        throw createServerError(response, t('Failed to load order history'))
       }
       return response.data
     },
@@ -306,7 +308,7 @@ export function TopUpStats() {
         page_size: 1,
       })
       if (!response.success || !response.data) {
-        throw new Error(response.message || t('Failed to load order history'))
+        throw createServerError(response, t('Failed to load order history'))
       }
       return response.data.daily_stats ?? []
     },

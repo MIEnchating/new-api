@@ -23,6 +23,7 @@ import {
   parseCustomMenuPages,
   type CustomMenuPage,
 } from '@/lib/custom-menu-pages'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
 type CustomMenuPagesResponse = {
@@ -37,7 +38,7 @@ export const customMenuPagesQueryOptions = (role: number) =>
       const response = await api.get<CustomMenuPagesResponse>(
         '/api/custom-menu-pages'
       )
-      return parseCustomMenuPages(response.data.data)
+      return parseCustomMenuPages(requireServerSuccess(response.data).data)
     },
     staleTime: 5 * 60 * 1000,
   })

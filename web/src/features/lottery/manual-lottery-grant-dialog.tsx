@@ -41,6 +41,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { handleServerError } from '@/lib/handle-server-error'
 
 import { createManualLotteryGrant } from './api'
 import type { LotteryChanceGrantRule } from './types'
@@ -149,15 +150,15 @@ export function ManualLotteryGrantDialog(props: ManualLotteryGrantDialogProps) {
         recharge_date: linkRecharge ? rechargeDate : undefined,
       })
       if (!response.success || !response.data) {
-        toast.error(t(response.message || 'Failed to grant lottery chances'))
+        handleServerError(response, t('Failed to grant lottery chances'))
         return
       }
       toast.success(t('Lottery chances granted'))
       reset()
       props.onOpenChange(false)
       await props.onSuccess()
-    } catch {
-      toast.error(t('Failed to grant lottery chances'))
+    } catch (error) {
+      handleServerError(error, t('Failed to grant lottery chances'))
     } finally {
       setLoading(false)
     }

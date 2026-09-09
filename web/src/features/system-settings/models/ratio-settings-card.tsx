@@ -245,12 +245,14 @@ export function RatioSettingsCard({
       toast.success(t('Model prices reset successfully'))
       setConfirmOpen(false)
     },
-    onError: handleServerError,
+    onError: (error) => handleServerError(error),
   })
 
   const modelNormalizedDefaults = useRef({
     ModelPrice: normalizeJsonString(modelDefaults.ModelPrice),
-    ModelSecondPrice: normalizeJsonString(modelDefaults.ModelSecondPrice ?? '{}'),
+    ModelSecondPrice: normalizeJsonString(
+      modelDefaults.ModelSecondPrice ?? '{}'
+    ),
     ModelRatio: normalizeJsonString(modelDefaults.ModelRatio),
     CacheRatio: normalizeJsonString(modelDefaults.CacheRatio),
     CreateCacheRatio: normalizeJsonString(modelDefaults.CreateCacheRatio),
@@ -292,7 +294,9 @@ export function RatioSettingsCard({
     defaultValues: {
       ...modelDefaults,
       ModelPrice: formatJsonForTextarea(modelDefaults.ModelPrice),
-      ModelSecondPrice: formatJsonForTextarea(modelDefaults.ModelSecondPrice ?? '{}'),
+      ModelSecondPrice: formatJsonForTextarea(
+        modelDefaults.ModelSecondPrice ?? '{}'
+      ),
       ModelRatio: formatJsonForTextarea(modelDefaults.ModelRatio),
       CacheRatio: formatJsonForTextarea(modelDefaults.CacheRatio),
       CreateCacheRatio: formatJsonForTextarea(modelDefaults.CreateCacheRatio),
@@ -331,7 +335,9 @@ export function RatioSettingsCard({
   useEffect(() => {
     modelNormalizedDefaults.current = {
       ModelPrice: normalizeJsonString(modelDefaults.ModelPrice),
-      ModelSecondPrice: normalizeJsonString(modelDefaults.ModelSecondPrice ?? '{}'),
+      ModelSecondPrice: normalizeJsonString(
+        modelDefaults.ModelSecondPrice ?? '{}'
+      ),
       ModelRatio: normalizeJsonString(modelDefaults.ModelRatio),
       CacheRatio: normalizeJsonString(modelDefaults.CacheRatio),
       CreateCacheRatio: normalizeJsonString(modelDefaults.CreateCacheRatio),
@@ -350,7 +356,9 @@ export function RatioSettingsCard({
     modelForm.reset({
       ...modelDefaults,
       ModelPrice: formatJsonForTextarea(modelDefaults.ModelPrice),
-      ModelSecondPrice: formatJsonForTextarea(modelDefaults.ModelSecondPrice ?? '{}'),
+      ModelSecondPrice: formatJsonForTextarea(
+        modelDefaults.ModelSecondPrice ?? '{}'
+      ),
       ModelRatio: formatJsonForTextarea(modelDefaults.ModelRatio),
       CacheRatio: formatJsonForTextarea(modelDefaults.CacheRatio),
       CreateCacheRatio: formatJsonForTextarea(modelDefaults.CreateCacheRatio),

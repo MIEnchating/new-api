@@ -45,6 +45,7 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { useStatus } from '@/hooks/use-status'
 import { getBgColorClass } from '@/lib/colors'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import { getApiKeyModels } from '../../api'
@@ -254,7 +255,8 @@ export function CCSwitchDialog(props: Props) {
 
   const { data: modelsData, isFetching: modelsFetching } = useQuery({
     queryKey: ['api-key-models-ccswitch', props.tokenId],
-    queryFn: () => getApiKeyModels(props.tokenId),
+    queryFn: async () =>
+      requireServerSuccess(await getApiKeyModels(props.tokenId)),
     enabled: props.open && props.tokenId > 0,
   })
 

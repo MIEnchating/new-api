@@ -91,6 +91,8 @@ import { useIsAdmin } from '@/hooks/use-admin'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { getSelf } from '@/lib/api'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 const PAGE_SIZE = 10
 const EMPTY_FILTERS: AffiliateRewardFilters = {
@@ -138,12 +140,12 @@ export function Affiliate() {
   const loadUser = useCallback(async () => {
     setLoading(true)
     try {
-      const response = await getSelf()
+      const response = requireServerSuccess(await getSelf())
       if (response.success && response.data) {
         setUser(response.data as UserWalletData)
       }
-    } catch {
-      toast.error(t('Failed to load referral rewards'))
+    } catch (error) {
+      handleServerError(error, t('Failed to load referral rewards'))
     } finally {
       setLoading(false)
     }
@@ -154,10 +156,11 @@ export function Affiliate() {
       const requestId = ++rewardsRequestId.current
       setRewardsLoading(true)
       try {
-        const rewardsResponse =
+        const rewardsResponse = requireServerSuccess(
           scope === 'all'
             ? await getAllAffiliateRewards(nextPage, PAGE_SIZE, appliedFilters)
             : await getAffiliateRewards(nextPage, PAGE_SIZE)
+        )
         if (requestId !== rewardsRequestId.current) return
         if (rewardsResponse.success && rewardsResponse.data) {
           setItems(rewardsResponse.data.items || [])
@@ -165,9 +168,9 @@ export function Affiliate() {
           setDisplayedRecordScope(scope)
           setHasLoadedRewards(true)
         }
-      } catch {
+      } catch (error) {
         if (requestId === rewardsRequestId.current) {
-          toast.error(t('Failed to load referral rewards'))
+          handleServerError(error, t('Failed to load referral rewards'))
         }
       } finally {
         if (requestId === rewardsRequestId.current) {
@@ -182,12 +185,14 @@ export function Affiliate() {
     let cancelled = false
     const loadAffiliateCode = async () => {
       try {
-        const response = await getAffiliateCode()
+        const response = requireServerSuccess(await getAffiliateCode())
         if (!cancelled && response.success && response.data) {
           setAffiliateLink(generateAffiliateLink(response.data))
         }
-      } catch {
-        if (!cancelled) toast.error(t('Failed to load referral rewards'))
+      } catch (error) {
+        if (!cancelled) {
+          handleServerError(error, t('Failed to load referral rewards'))
+        }
       }
     }
     void loadAffiliateCode()
@@ -215,14 +220,14 @@ export function Affiliate() {
     try {
       const response = await transferAffiliateQuota({ quota: amount })
       if (!response.success) {
-        toast.error(response.message || t('Transfer failed'))
+        handleServerError(response, t('Transfer failed'))
         return false
       }
       toast.success(t('Transfer successful'))
       await loadUser()
       return true
-    } catch {
-      toast.error(t('Transfer failed'))
+    } catch (error) {
+      handleServerError(error, t('Transfer failed'))
       return false
     } finally {
       setTransferring(false)

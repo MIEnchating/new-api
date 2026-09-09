@@ -256,7 +256,6 @@ export const buildModelSnapshots = ({
         splitBillingExprAndRequestRules(fullExpr)
       return {
         name,
-        secondPriceConfig: secondPriceMap[name],
         billingMode: 'tiered_expr',
         billingExpr: pureExpr,
         requestRuleExpr,

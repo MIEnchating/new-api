@@ -42,6 +42,7 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { handleServerError } from '@/lib/handle-server-error'
 
 import { getLotteryConfig, updateLotteryConfig } from './api'
 import type {
@@ -171,12 +172,12 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
     try {
       const response = await getLotteryConfig()
       if (!response.success || !response.data) {
-        toast.error(t(response.message || 'Failed to load lottery settings'))
+        handleServerError(response, t('Failed to load lottery settings'))
         return
       }
       setConfig(normalizeConfig(response.data))
-    } catch {
-      toast.error(t('Failed to load lottery settings'))
+    } catch (error) {
+      handleServerError(error, t('Failed to load lottery settings'))
     } finally {
       setLoading(false)
     }
@@ -262,7 +263,7 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
     try {
       const response = await updateLotteryConfig(nextConfig)
       if (!response.success || !response.data) {
-        toast.error(t(response.message || 'Failed to save lottery settings'))
+        handleServerError(response, t('Failed to save lottery settings'))
         return
       }
       const savedConfig = normalizeConfig(response.data)
@@ -270,8 +271,8 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
       props.onSaved(savedConfig)
       props.onOpenChange(false)
       toast.success(t('Lottery settings saved'))
-    } catch {
-      toast.error(t('Failed to save lottery settings'))
+    } catch (error) {
+      handleServerError(error, t('Failed to save lottery settings'))
     } finally {
       setSaving(false)
     }

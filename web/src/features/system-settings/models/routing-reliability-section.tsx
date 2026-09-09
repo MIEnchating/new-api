@@ -77,7 +77,9 @@ import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { getChannelFilterGroups } from '@/features/channels/api'
+import { handleServerError } from '@/lib/handle-server-error'
 import { parseHttpStatusCodeRules } from '@/lib/http-status-code-rules'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import {
@@ -792,7 +794,8 @@ export function RoutingReliabilitySection({
 
   const groupOptionsQuery = useQuery({
     queryKey: ['channel-route-group-options'],
-    queryFn: () => getChannelFilterGroups(true),
+    queryFn: async () =>
+      requireServerSuccess(await getChannelFilterGroups(true)),
     enabled: view === 'routing',
   })
   const groupOptions = useMemo(
@@ -869,9 +872,7 @@ export function RoutingReliabilitySection({
         options: updates.map((key) => ({ key, value: normalized[key] })),
       })
     } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : t('Failed to update setting')
-      )
+      handleServerError(error, t('Failed to update setting'))
       return
     }
 

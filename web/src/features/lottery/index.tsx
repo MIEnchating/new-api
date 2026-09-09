@@ -80,6 +80,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useIsAdmin } from '@/hooks/use-admin'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { handleServerError } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
 
 import {
@@ -298,12 +299,12 @@ export function Lottery() {
     try {
       const response = await getLotteryStatus()
       if (!response.success || !response.data) {
-        toast.error(t(response.message || 'Failed to load lottery status'))
+        handleServerError(response, t('Failed to load lottery status'))
         return
       }
       setStatus(response.data)
-    } catch {
-      toast.error(t('Failed to load lottery status'))
+    } catch (error) {
+      handleServerError(error, t('Failed to load lottery status'))
     } finally {
       setLoading(false)
     }
@@ -320,15 +321,15 @@ export function Lottery() {
       const response = await getUserLotteryDraws(userDrawPage, USER_PAGE_SIZE)
       if (requestId !== userDrawRequestId.current) return
       if (!response.success || !response.data) {
-        toast.error(t(response.message || 'Failed to load lottery records'))
+        handleServerError(response, t('Failed to load lottery records'))
         return
       }
       setUserDraws(response.data.items || [])
       setUserDrawTotal(response.data.total || 0)
       setHasLoadedUserDraws(true)
-    } catch {
+    } catch (error) {
       if (requestId === userDrawRequestId.current) {
-        toast.error(t('Failed to load lottery records'))
+        handleServerError(error, t('Failed to load lottery records'))
       }
     } finally {
       if (requestId === userDrawRequestId.current) {
@@ -353,16 +354,16 @@ export function Lottery() {
       )
       if (requestId !== adminDrawRequestId.current) return
       if (!response.success || !response.data) {
-        toast.error(t(response.message || 'Failed to load lottery records'))
+        handleServerError(response, t('Failed to load lottery records'))
         return
       }
       setAdminDraws(response.data.items || [])
       setAdminTotal(response.data.total || 0)
       setDisplayedRecordScope('all')
       setHasLoadedAdminDraws(true)
-    } catch {
+    } catch (error) {
       if (requestId === adminDrawRequestId.current) {
-        toast.error(t('Failed to load lottery records'))
+        handleServerError(error, t('Failed to load lottery records'))
       }
     } finally {
       if (requestId === adminDrawRequestId.current) {
@@ -388,17 +389,15 @@ export function Lottery() {
         )
         if (requestId !== adminGrantRequestId.current) return
         if (!response.success || !response.data) {
-          toast.error(
-            t(response.message || 'Failed to load chance grant records')
-          )
+          handleServerError(response, t('Failed to load chance grant records'))
           return
         }
         setAdminGrants(response.data.items || [])
         setGrantTotal(response.data.total || 0)
         setHasLoadedAdminGrants(true)
-      } catch {
+      } catch (error) {
         if (requestId === adminGrantRequestId.current) {
-          toast.error(t('Failed to load chance grant records'))
+          handleServerError(error, t('Failed to load chance grant records'))
         }
       } finally {
         if (requestId === adminGrantRequestId.current) {
@@ -476,7 +475,7 @@ export function Lottery() {
     try {
       const response = await drawLottery()
       if (!response.success || !response.data) {
-        toast.error(t(response.message || 'Lottery draw failed'))
+        handleServerError(response, t('Lottery draw failed'))
         setDrawing(false)
         setSelectedBox(null)
         return
@@ -490,8 +489,8 @@ export function Lottery() {
         )
         setUserDrawTotal((current) => current + 1)
       }
-    } catch {
-      toast.error(t('Lottery draw failed'))
+    } catch (error) {
+      handleServerError(error, t('Lottery draw failed'))
       setDrawing(false)
       setSelectedBox(null)
     }
@@ -547,7 +546,7 @@ export function Lottery() {
     try {
       const response = await revokeLotteryReward(revokeDraw.id, reason)
       if (!response.success) {
-        toast.error(t(response.message || 'Failed to reverse lottery reward'))
+        handleServerError(response, t('Failed to reverse lottery reward'))
         return
       }
       toast.success(t('Lottery reward reversed'))
@@ -557,8 +556,8 @@ export function Lottery() {
       if (userDrawPage === 1) {
         await loadUserDraws()
       }
-    } catch {
-      toast.error(t('Failed to reverse lottery reward'))
+    } catch (error) {
+      handleServerError(error, t('Failed to reverse lottery reward'))
     } finally {
       setRevoking(false)
     }
