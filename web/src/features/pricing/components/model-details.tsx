@@ -66,6 +66,11 @@ import { usePricingData } from '../hooks/use-pricing-data'
 import type { ParsedTaskTier } from '../lib/billing-expr'
 import { formatBillingCondition } from '../lib/billing-expression/condition-display'
 import {
+  getDailyTimePricingTiers,
+  formatDailyTimePriceLabel,
+  type DailyTimePrice,
+} from '../lib/daily-time-pricing'
+import {
   formatTaskUsageUnitPrice,
   getDynamicPriceEntries,
   getDynamicPriceUnitLabelKey,
@@ -978,7 +983,10 @@ function AutoGroupChain(props: { model: PricingModel; autoGroups: string[] }) {
 }
 
 type DynamicPriceOptions = Parameters<typeof getDynamicPriceEntries>[1]
-type DynamicPricingTier = ReturnType<typeof getDynamicPricingTiers>[number]
+type DynamicPricingTier = ReturnType<typeof getDynamicPricingTiers>[number] & {
+  timePrice?: DailyTimePrice
+  otherTimes?: boolean
+}
 type DynamicFormattedPricesByTier = Map<DynamicPricingTier, Map<string, string>>
 
 function getDynamicPriceFields(
@@ -1079,15 +1087,29 @@ function GroupPricingSection(props: {
   )
 
   if (isDynamicPricingModel(props.model)) {
-    const dynamicTiers = props.model.billing_usage_schema
-      ? getTaskPricingDisplayTiers(
-          props.model.billing_expr,
-          props.model.billing_usage_schema
-        )
-      : getDynamicPricingTiers(props.model)
+    const timePrices = props.model.billing_usage_schema
+      ? null
+      : getDailyTimePricingTiers(props.model.billing_expr || '')
+    const dynamicTiers: DynamicPricingTier[] =
+      timePrices?.tiers ??
+      (props.model.billing_usage_schema
+        ? getTaskPricingDisplayTiers(
+            props.model.billing_expr,
+            props.model.billing_usage_schema
+          )
+        : getDynamicPricingTiers(props.model))
     const hasRequestPrice = dynamicTiers.some(
       (tier) => !('unitPrices' in tier) && tier.billingUnit === 'request'
     )
+    let tierColumnLabel = props.model.billing_usage_schema
+      ? t('Applicable conditions')
+      : t('Tier')
+    if (timePrices) tierColumnLabel = t('Time period')
+    const timeBaseTierCount = timePrices
+      ? timePrices.tiers.filter(
+          (tier) => tier.timePrice === timePrices.tiers[0]?.timePrice
+        ).length
+      : 0
 
     if (dynamicTiers.length === 0) {
       return (
@@ -1131,7 +1153,7 @@ function GroupPricingSection(props: {
     })
     const formattedPricesByGroup = new Map(
       availableGroups.map((group) => {
-        const ratio = props.groupRatio[group] || 1
+        const ratio = props.groupRatio[group] ?? 1
         return [
           group,
           getDynamicFormattedPricesByTier(dynamicTiers, {
@@ -1152,7 +1174,7 @@ function GroupPricingSection(props: {
         <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
         <div className='space-y-3'>
           {availableGroups.map((group) => {
-            const ratio = props.groupRatio[group] || 1
+            const ratio = props.groupRatio[group] ?? 1
             const formattedPricesByTier =
               formattedPricesByGroup.get(group) ??
               new Map<DynamicPricingTier, Map<string, string>>()
@@ -1171,7 +1193,7 @@ function GroupPricingSection(props: {
                   headerRowClassName='hover:bg-transparent'
                   data={dynamicTiers}
                   getRowKey={(tier, tierIndex) =>
-                    `${group}-${tier.label || tierIndex}`
+                    `${group}-${tier.label}-${tierIndex}`
                   }
                   columns={[
                     ...(hasSimpleTaskPricing(props.model)
@@ -1179,9 +1201,7 @@ function GroupPricingSection(props: {
                       : [
                           {
                             id: 'tier',
-                            header: props.model.billing_usage_schema
-                              ? t('Applicable conditions')
-                              : t('Tier'),
+                            header: tierColumnLabel,
                             className: thClass,
                             cellClassName:
                               'text-muted-foreground py-2.5 whitespace-normal break-words',
@@ -1201,6 +1221,21 @@ function GroupPricingSection(props: {
                                   )
                                 )
                               }
+                              if (tier.timePrice) {
+                                const label = formatDailyTimePriceLabel(tier, t)
+                                return (
+                                  <div>
+                                    <div className='text-foreground'>
+                                      {label}
+                                    </div>
+                                    {timeBaseTierCount > 1 && (
+                                      <div className='text-xs'>
+                                        {tier.label}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              }
                               if (tier.conditionText) {
                                 return `${tier.label}: ${formatBillingCondition(tier.conditionText, t, i18n.language) ?? tier.conditionText}`
                               }
@@ -1212,7 +1247,7 @@ function GroupPricingSection(props: {
                       const unitLabelKey =
                         getDynamicPriceUnitLabelKey(fieldEntry)
                       let unitLabel = unitLabelKey ? t(unitLabelKey) : ''
-                      if (!unitLabel && hasRequestPrice) {
+                      if (!unitLabel && (hasRequestPrice || timePrices)) {
                         unitLabel = t('{{unit}} tokens', {
                           unit: tokenUnitLabel,
                         })
@@ -1433,14 +1468,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
     Boolean(props.model.billing_expr)
 
   const simpleTaskPricing = hasSimpleTaskPricing(props.model)
-  const taskTiers = getTaskPricingDisplayTiers(
-    props.model.billing_expr,
-    props.model.billing_usage_schema
-  )
-  const showBasePrices =
-    !props.model.billing_usage_schema ||
-    simpleTaskPricing ||
-    taskTiers.length === 0
+  const showDynamicPricing = isDynamic && !simpleTaskPricing
 
   return (
     <div className='@container/details space-y-4'>
@@ -1468,7 +1496,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
 
           <section className='bg-card/60 space-y-5 rounded-xl border p-4 shadow-sm'>
             <SectionTitle>{t('Pricing')}</SectionTitle>
-            {showBasePrices && (
+            {!showDynamicPricing && (
               <PriceSection
                 model={props.model}
                 priceRate={props.priceRate}
@@ -1477,7 +1505,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
                 showRechargePrice={showRechargePrice}
               />
             )}
-            {isDynamic && !simpleTaskPricing && (
+            {showDynamicPricing && (
               <DynamicPricingBreakdown
                 billingExpr={props.model.billing_expr}
                 usageSchema={props.model.billing_usage_schema}

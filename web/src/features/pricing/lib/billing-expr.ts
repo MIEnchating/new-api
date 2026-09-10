@@ -772,7 +772,7 @@ function buildTimeConditionExpr(cond: TimeCondition): string {
   return `${fn} ${opMap[mode] || '=='} ${v}`
 }
 
-function buildRequestConditionExpr(cond: RequestCondition): string {
+export function buildRequestConditionExpr(cond: RequestCondition): string {
   if (cond.source === 'time') return buildTimeConditionExpr(cond)
   const normalized = normalizeCondition(cond) as ParamHeaderCondition
   const path = normalized.path.trim()
