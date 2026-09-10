@@ -72,16 +72,18 @@ type SummaryAllResult struct {
 }
 
 type CacheBucketPoint struct {
-	Ts           int64   `json:"ts"`
-	RequestCount int64   `json:"request_count,omitempty"`
-	HitCount     int64   `json:"hit_count,omitempty"`
-	CachedTokens int64   `json:"cached_tokens"`
-	CacheHitRate float64 `json:"cache_hit_rate"`
-	AvgTps       float64 `json:"avg_tps"`
-	HasData      bool    `json:"has_data"`
+	Health       MonitorHealth `json:"health"`
+	Ts           int64         `json:"ts"`
+	RequestCount int64         `json:"request_count,omitempty"`
+	HitCount     int64         `json:"hit_count,omitempty"`
+	CachedTokens int64         `json:"cached_tokens"`
+	CacheHitRate float64       `json:"cache_hit_rate"`
+	AvgTps       float64       `json:"avg_tps"`
+	HasData      bool          `json:"has_data"`
 }
 
 type CacheGroupResult struct {
+	Health       MonitorHealth      `json:"health"`
 	Group        string             `json:"group"`
 	RequestCount int64              `json:"request_count,omitempty"`
 	HitCount     int64              `json:"hit_count,omitempty"`
@@ -92,7 +94,22 @@ type CacheGroupResult struct {
 	Series       []CacheBucketPoint `json:"series"`
 }
 
+type CacheSummaryPoint struct {
+	Ts           int64         `json:"ts"`
+	Health       MonitorHealth `json:"health"`
+	CacheHitRate float64       `json:"cache_hit_rate"`
+	HasData      bool          `json:"has_data"`
+}
+
+type CacheSummary struct {
+	Series       []CacheSummaryPoint `json:"series"`
+	Health       MonitorHealth       `json:"health"`
+	CacheHitRate float64             `json:"cache_hit_rate"`
+	HasData      bool                `json:"has_data"`
+}
+
 type CacheQueryResult struct {
+	Summary CacheSummary       `json:"summary"`
 	StartTs int64              `json:"start_ts"`
 	EndTs   int64              `json:"end_ts"`
 	Groups  []CacheGroupResult `json:"groups"`

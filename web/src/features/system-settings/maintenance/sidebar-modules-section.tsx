@@ -103,7 +103,7 @@ export function SidebarModulesSection({
         description: t('Aggregated usage metrics and trend charts.'),
       },
       status: {
-        title: t('Status Monitor'),
+        title: t('Channel Monitor'),
         description: t('Uptime Kuma service status page.'),
       },
       token: {

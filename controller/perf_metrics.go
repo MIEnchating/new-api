@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"sort"
@@ -69,15 +68,17 @@ func GetCacheMetrics(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"start_ts":         result.StartTs,
-			"end_ts":           result.EndTs,
-			"groups":           result.Groups,
-			"baseline":         perf_metrics_setting.GetCacheHitRateBaseline(),
-			"bucket_seconds":   perf_metrics_setting.GetBucketSeconds(),
-			"available_groups": availableGroups,
-			"display_groups":   displayGroups,
-			"all_groups":       len(configuredGroups) == 0,
-			"counts_visible":   countsVisible,
+			"start_ts":          result.StartTs,
+			"end_ts":            result.EndTs,
+			"groups":            result.Groups,
+			"summary":           result.Summary,
+			"baseline":          perf_metrics_setting.GetHealthThresholds().WarningCacheRate,
+			"health_thresholds": perf_metrics_setting.GetHealthThresholds(),
+			"bucket_seconds":    perf_metrics_setting.GetBucketSeconds(),
+			"available_groups":  availableGroups,
+			"display_groups":    displayGroups,
+			"all_groups":        len(configuredGroups) == 0,
+			"counts_visible":    countsVisible,
 		},
 	})
 }
@@ -152,15 +153,24 @@ func UpdateCacheHitRateBaseline(c *gin.Context) {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
-	if err := model.UpdateOption(
-		"perf_metrics_setting.cache_hit_rate_baseline",
-		strconv.Itoa(*request.Baseline),
-	); err != nil {
+
+	thresholds := perf_metrics_setting.GetHealthThresholds()
+	thresholds.WarningCacheRate = float64(*request.Baseline)
+	thresholds.CriticalCacheRate = min(thresholds.CriticalCacheRate, thresholds.WarningCacheRate)
+	encoded, err := common.Marshal(thresholds)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.UpdateOptionsBulk(map[string]string{
+		"perf_metrics_setting.cache_hit_rate_baseline": strconv.Itoa(*request.Baseline),
+		"perf_metrics_setting.health_thresholds":       string(encoded),
+	}); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	recordManageAudit(c, "cache_hit_rate_baseline.update", map[string]interface{}{
+	recordManageAudit(c, "cache_hit_rate_baseline.update", map[string]any{
 		"baseline": *request.Baseline,
 	})
 	c.JSON(http.StatusOK, gin.H{
@@ -197,10 +207,10 @@ func buildCacheMonitorGroupsAuditParams(
 	availableGroups []string,
 	previousGroups []string,
 	groups []string,
-) map[string]interface{} {
+) map[string]any {
 	displayGroups := resolveCacheMonitorGroups(availableGroups, groups)
 	previousDisplayGroups := resolveCacheMonitorGroups(availableGroups, previousGroups)
-	return map[string]interface{}{
+	return map[string]any{
 		"all_groups":              len(groups) == 0,
 		"display_groups":          displayGroups,
 		"group_count":             len(displayGroups),
@@ -223,12 +233,12 @@ func UpdateCacheMonitorGroups(c *gin.Context) {
 		common.ApiErrorMsg(c, err.Error())
 		return
 	}
-	encoded, err := json.Marshal(groups)
+	encoded, err := common.Marshal(groups)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if err := model.UpdateOption("perf_metrics_setting.cache_monitor_groups", string(encoded)); err != nil {
+	if err := model.UpdateOptionsBulk(map[string]string{"perf_metrics_setting.cache_monitor_groups": string(encoded)}); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -289,4 +299,27 @@ func filterActiveGroups(groups []perfmetrics.GroupResult) []perfmetrics.GroupRes
 		_, ok := activeRatios[g.Group]
 		return ok || g.Group == "auto"
 	})
+}
+
+func UpdateMonitorHealthThresholds(c *gin.Context) {
+	var thresholds perf_metrics_setting.HealthThresholds
+	if err := common.DecodeJson(c.Request.Body, &thresholds); err != nil {
+		common.ApiErrorMsg(c, "无效的参数")
+		return
+	}
+	if err := thresholds.Validate(); err != nil {
+		common.ApiErrorMsg(c, err.Error())
+		return
+	}
+	encoded, err := common.Marshal(thresholds)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := model.UpdateOptionsBulk(map[string]string{"perf_metrics_setting.health_thresholds": string(encoded)}); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "option.update", map[string]any{"key": "perf_metrics_setting.health_thresholds", "health_thresholds": thresholds})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": thresholds})
 }

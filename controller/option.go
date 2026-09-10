@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 
@@ -488,6 +489,16 @@ func UpdateOption(c *gin.Context) {
 				"success": false,
 				"message": err.Error(),
 			})
+			return
+		}
+	case "perf_metrics_setting.health_thresholds":
+		var thresholds perf_metrics_setting.HealthThresholds
+		if err := common.UnmarshalJsonStr(option.Value.(string), &thresholds); err != nil {
+			common.ApiErrorMsg(c, "无效的健康阈值")
+			return
+		}
+		if err := thresholds.Validate(); err != nil {
+			common.ApiErrorMsg(c, err.Error())
 			return
 		}
 	case "perf_metrics_setting.cache_hit_rate_baseline":

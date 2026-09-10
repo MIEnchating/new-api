@@ -242,6 +242,9 @@ func QueryCache(hours int, groups []string) (CacheQueryResult, error) {
 	for _, row := range rows {
 		mergeCacheGroupBucket(groupBuckets, row.Group, row.BucketTs, counters{
 			requestCount:          row.RequestCount,
+			successCount:          row.SuccessCount,
+			ttftSumMs:             row.TtftSumMs,
+			ttftCount:             row.TtftCount,
 			outputTokens:          row.OutputTokens,
 			generationMs:          row.GenerationMs,
 			cacheRequests:         row.CacheRequests,
@@ -324,6 +327,9 @@ func mergeCacheGroupBucket(groupBuckets map[string]map[int64]counters, group str
 	}
 	current := groupBuckets[group][bucketTs]
 	current.requestCount += value.requestCount
+	current.successCount += value.successCount
+	current.ttftSumMs += value.ttftSumMs
+	current.ttftCount += value.ttftCount
 	current.outputTokens += value.outputTokens
 	current.generationMs += value.generationMs
 	current.cacheRequests += value.cacheRequests
@@ -415,18 +421,29 @@ func buildCacheQueryResult(groupBuckets map[string]map[int64]counters) CacheQuer
 	}
 	sort.Strings(groupNames)
 
+	thresholds := perf_metrics_setting.GetHealthThresholds()
 	results := make([]CacheGroupResult, 0, len(groupNames))
+	summaryBuckets := map[string]map[int64]counters{}
 	for _, group := range groupNames {
-		result := buildCacheGroupResult(group, groupBuckets[group])
+		for ts, value := range groupBuckets[group] {
+			mergeCacheGroupBucket(summaryBuckets, "", ts, value)
+		}
+		result := buildCacheGroupResult(group, groupBuckets[group], thresholds)
 		results = append(results, result)
 	}
 
+	summary := buildCacheGroupResult("", summaryBuckets[""], thresholds)
+	series := make([]CacheSummaryPoint, 0, len(summary.Series))
+	for _, point := range summary.Series {
+		series = append(series, CacheSummaryPoint{Ts: point.Ts, Health: point.Health, CacheHitRate: point.CacheHitRate, HasData: point.HasData})
+	}
 	return CacheQueryResult{
-		Groups: results,
+		Summary: CacheSummary{Series: series, Health: summary.Health, CacheHitRate: summary.CacheHitRate, HasData: summary.HasData},
+		Groups:  results,
 	}
 }
 
-func buildCacheGroupResult(group string, buckets map[int64]counters) CacheGroupResult {
+func buildCacheGroupResult(group string, buckets map[int64]counters, thresholds perf_metrics_setting.HealthThresholds) CacheGroupResult {
 	timestamps := make([]int64, 0, len(buckets))
 	for ts := range buckets {
 		timestamps = append(timestamps, ts)
@@ -438,6 +455,9 @@ func buildCacheGroupResult(group string, buckets map[int64]counters) CacheGroupR
 	for _, ts := range timestamps {
 		value := buckets[ts]
 		total.requestCount += value.requestCount
+		total.successCount += value.successCount
+		total.ttftSumMs += value.ttftSumMs
+		total.ttftCount += value.ttftCount
 		total.outputTokens += value.outputTokens
 		total.generationMs += value.generationMs
 		total.cacheRequests += value.cacheRequests
@@ -446,6 +466,7 @@ func buildCacheGroupResult(group string, buckets map[int64]counters) CacheGroupR
 		total.cacheTokenReadTokens += value.cacheTokenReadTokens
 		total.cacheTokenDenominator += value.cacheTokenDenominator
 		series = append(series, CacheBucketPoint{
+			Health:       monitorHealth(value, thresholds),
 			Ts:           ts,
 			RequestCount: value.cacheRequests,
 			HitCount:     value.cacheHits,
@@ -457,6 +478,7 @@ func buildCacheGroupResult(group string, buckets map[int64]counters) CacheGroupR
 	}
 
 	return CacheGroupResult{
+		Health:       monitorHealth(total, thresholds),
 		Group:        group,
 		RequestCount: total.cacheRequests,
 		HitCount:     total.cacheHits,

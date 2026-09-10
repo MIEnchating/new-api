@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { AlertTriangle, Save } from 'lucide-react'
+import { AlertTriangle, Plus, Save, Trash2 } from 'lucide-react'
 import {
   forwardRef,
   useCallback,
@@ -32,7 +32,10 @@ import {
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
-import { sideDrawerContentClassName } from '@/components/drawer-layout'
+import {
+  SideDrawerSectionHeader,
+  sideDrawerContentClassName,
+} from '@/components/drawer-layout'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -52,6 +55,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon } from '@/components/ui/input-group'
+import { Separator } from '@/components/ui/separator'
 import {
   Sheet,
   SheetContent,
@@ -77,6 +81,7 @@ import { cn } from '@/lib/utils'
 import { usePricingPreferencesStore } from '@/stores/pricing-preferences-store'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
+import { SettingsControlGroup } from '../components/settings-form-layout'
 import {
   EMPTY_LANE_ENABLED,
   EMPTY_LANE_PRICES,
@@ -194,6 +199,7 @@ export const ModelPricingEditorPanel = forwardRef<
 ) {
   const { t } = useTranslation()
   const promptPriceId = useId()
+  const resolutionPricingId = useId()
   const formElementRef = useRef<HTMLFormElement>(null)
   const currencyConfig = useSystemConfigStore((state) => state.config.currency)
   const preference = usePricingPreferencesStore((state) => state.currency)
@@ -934,8 +940,11 @@ export const ModelPricingEditorPanel = forwardRef<
                     </FieldGroup>
                   </TabsContent>
 
-                  <TabsContent value='per-second' className='pt-0'>
-                    <FieldGroup className='gap-5'>
+                  <TabsContent
+                    value='per-second'
+                    className='@container/pricing-fields min-w-0 pt-0'
+                  >
+                    <FieldGroup className='gap-4'>
                       <FormField
                         control={form.control}
                         name='price'
@@ -972,111 +981,148 @@ export const ModelPricingEditorPanel = forwardRef<
                           </FormItem>
                         )}
                       />
-                      <FieldGroup className='gap-3 rounded-lg border p-4'>
-                        <div>
-                          <FieldLabel>
-                            {t('Resolution pricing (optional)')}
-                          </FieldLabel>
-                          <FieldDescription>
-                            {t(
+                      <SettingsControlGroup className='space-y-0 p-3 @min-[480px]/pricing-fields:p-4'>
+                        <FieldGroup className='gap-4'>
+                          <SideDrawerSectionHeader
+                            title={t('Resolution pricing (optional)')}
+                            description={t(
                               'Configure different prices per second for each resolution.'
                             )}
-                          </FieldDescription>
-                        </div>
-                        <div className='grid gap-3 @min-[560px]/pricing-fields:grid-cols-2'>
-                          <Field>
-                            <FieldLabel>{t('Resolution field')}</FieldLabel>
-                            <Input
-                              value={resolutionField}
-                              placeholder='resolution'
-                              onChange={(e) =>
-                                setResolutionField(e.target.value)
-                              }
-                            />
-                          </Field>
-                          <Field>
-                            <FieldLabel>{t('Duration field')}</FieldLabel>
-                            <Input
-                              value={durationField}
-                              placeholder='seconds'
-                              onChange={(e) => setDurationField(e.target.value)}
-                            />
-                          </Field>
-                        </div>
-                        <div className='flex flex-col gap-2'>
-                          {resolutionPrices.map((row) => (
-                            <div
-                              className='grid grid-cols-[1fr_1fr_auto] items-end gap-2'
-                              key={row.id}
-                            >
-                              <Field>
-                                <FieldLabel>{t('Resolution')}</FieldLabel>
-                                <Input
-                                  value={row.resolution}
-                                  onChange={(e) =>
-                                    setResolutionPrices((current) =>
-                                      current.map((item) =>
-                                        item.id === row.id
-                                          ? {
-                                              ...item,
-                                              resolution: e.target.value,
-                                            }
-                                          : item
-                                      )
-                                    )
-                                  }
-                                />
-                              </Field>
-                              <Field>
-                                <FieldLabel>{t('Price per second')}</FieldLabel>
-                                <Input
-                                  value={row.price}
-                                  type='number'
-                                  min='0'
-                                  step='any'
-                                  onChange={(e) =>
-                                    setResolutionPrices((current) =>
-                                      current.map((item) =>
-                                        item.id === row.id
-                                          ? { ...item, price: e.target.value }
-                                          : item
-                                      )
-                                    )
-                                  }
-                                />
-                              </Field>
-                              <Button
-                                type='button'
-                                variant='ghost'
-                                onClick={() =>
-                                  setResolutionPrices((current) =>
-                                    current.filter((item) => item.id !== row.id)
-                                  )
-                                }
+                          />
+                          <div className='grid min-w-0 grid-cols-1 gap-3 @min-[480px]/pricing-fields:grid-cols-2'>
+                            <Field className='min-w-0'>
+                              <FieldLabel
+                                htmlFor={`${resolutionPricingId}-resolution-field`}
                               >
-                                {t('Remove')}
-                              </Button>
-                            </div>
-                          ))}
-                          <Button
-                            type='button'
-                            variant='outline'
-                            className='w-fit'
-                            onClick={() =>
-                              setResolutionPrices((current) => [
-                                ...current,
-                                {
-                                  id: createResolutionPriceRowId(),
-                                  resolution: '',
-                                  price: '',
-                                },
-                              ])
-                            }
-                          >
-                            {t('Add resolution price')}
-                          </Button>
-                        </div>
-                      </FieldGroup>
+                                {t('Resolution field')}
+                              </FieldLabel>
+                              <Input
+                                id={`${resolutionPricingId}-resolution-field`}
+                                className='font-mono'
+                                value={resolutionField}
+                                placeholder='resolution'
+                                onChange={(e) =>
+                                  setResolutionField(e.target.value)
+                                }
+                              />
+                            </Field>
+                            <Field className='min-w-0'>
+                              <FieldLabel
+                                htmlFor={`${resolutionPricingId}-duration-field`}
+                              >
+                                {t('Duration field')}
+                              </FieldLabel>
+                              <Input
+                                id={`${resolutionPricingId}-duration-field`}
+                                className='font-mono'
+                                value={durationField}
+                                placeholder='seconds'
+                                onChange={(e) =>
+                                  setDurationField(e.target.value)
+                                }
+                              />
+                            </Field>
+                          </div>
+                          <Separator />
+                          <div className='flex min-w-0 flex-col gap-3'>
+                            {resolutionPrices.map((row) => (
+                              <div
+                                className='grid min-w-0 grid-cols-1 items-end gap-3 border-t pt-3 first:border-t-0 first:pt-0 @min-[400px]/pricing-fields:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]'
+                                key={row.id}
+                              >
+                                <Field className='min-w-0'>
+                                  <FieldLabel
+                                    htmlFor={`${resolutionPricingId}-${row.id}-resolution`}
+                                  >
+                                    {t('Resolution')}
+                                  </FieldLabel>
+                                  <Input
+                                    id={`${resolutionPricingId}-${row.id}-resolution`}
+                                    placeholder='1080p'
+                                    value={row.resolution}
+                                    onChange={(e) =>
+                                      setResolutionPrices((current) =>
+                                        current.map((item) =>
+                                          item.id === row.id
+                                            ? {
+                                                ...item,
+                                                resolution: e.target.value,
+                                              }
+                                            : item
+                                        )
+                                      )
+                                    }
+                                  />
+                                </Field>
+                                <Field className='min-w-0'>
+                                  <FieldLabel
+                                    htmlFor={`${resolutionPricingId}-${row.id}-price`}
+                                  >
+                                    {t('Price per second')}
+                                  </FieldLabel>
+                                  <Input
+                                    id={`${resolutionPricingId}-${row.id}-price`}
+                                    className='tabular-nums'
+                                    placeholder='0.01'
+                                    value={row.price}
+                                    type='number'
+                                    min='0'
+                                    step='any'
+                                    onChange={(e) =>
+                                      setResolutionPrices((current) =>
+                                        current.map((item) =>
+                                          item.id === row.id
+                                            ? { ...item, price: e.target.value }
+                                            : item
+                                        )
+                                      )
+                                    }
+                                  />
+                                </Field>
+                                <Button
+                                  type='button'
+                                  variant='ghost'
+                                  size='icon'
+                                  className='text-muted-foreground justify-self-end'
+                                  aria-label={t('Remove')}
+                                  title={t('Remove')}
+                                  onClick={() =>
+                                    setResolutionPrices((current) =>
+                                      current.filter(
+                                        (item) => item.id !== row.id
+                                      )
+                                    )
+                                  }
+                                >
+                                  <Trash2 aria-hidden='true' />
+                                </Button>
+                              </div>
+                            ))}
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='sm'
+                              className='w-full @min-[480px]/pricing-fields:w-fit'
+                              onClick={() =>
+                                setResolutionPrices((current) => [
+                                  ...current,
+                                  {
+                                    id: createResolutionPriceRowId(),
+                                    resolution: '',
+                                    price: '',
+                                  },
+                                ])
+                              }
+                            >
+                              <Plus
+                                data-icon='inline-start'
+                                aria-hidden='true'
+                              />
+                              {t('Add resolution price')}
+                            </Button>
+                          </div>
+                        </FieldGroup>
+                      </SettingsControlGroup>
                     </FieldGroup>
                   </TabsContent>
 

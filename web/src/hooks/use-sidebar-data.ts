@@ -142,7 +142,7 @@ export function useSidebarData(): SidebarData {
             icon: ListTodo,
           },
           {
-            title: t('Status Monitor'),
+            title: t('Channel Monitor'),
             url: '/status-monitor',
             icon: HeartPulse,
           },

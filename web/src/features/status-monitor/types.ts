@@ -16,7 +16,42 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+export type HealthThresholds = {
+  minimum_sample: number
+  warning_error_rate: number
+  critical_error_rate: number
+  target_ttft_ms: number
+  warning_ttft_ms: number
+  critical_ttft_ms: number
+  warning_cache_rate: number
+  critical_cache_rate: number
+}
+
+export type MonitorHealth = {
+  overall: 'healthy' | 'warning' | 'critical' | 'unknown'
+  error_rate: 'healthy' | 'warning' | 'critical' | 'unknown'
+  ttft: 'healthy' | 'warning' | 'critical' | 'unknown'
+  cache: 'healthy' | 'warning' | 'critical' | 'unknown'
+  score: number | null
+  error_rate_percent: number | null
+  avg_ttft_ms: number | null
+}
+
+export function defaultHealthThresholds(baseline = 85): HealthThresholds {
+  return {
+    minimum_sample: 50,
+    warning_error_rate: 5,
+    critical_error_rate: 20,
+    target_ttft_ms: 3000,
+    warning_ttft_ms: 8000,
+    critical_ttft_ms: 20000,
+    warning_cache_rate: baseline,
+    critical_cache_rate: Math.min(60, baseline),
+  }
+}
+
 export type CacheMetricPoint = {
+  health?: MonitorHealth
   ts: number
   request_count?: number
   hit_count?: number
@@ -27,6 +62,7 @@ export type CacheMetricPoint = {
 }
 
 export type CacheMetricGroup = {
+  health?: MonitorHealth
   group: string
   request_count?: number
   hit_count?: number
@@ -44,7 +80,17 @@ export type CacheMetricsResponse = {
     start_ts: number
     end_ts: number
     groups: CacheMetricGroup[]
+    summary?: {
+      series?: Pick<
+        CacheMetricPoint,
+        'ts' | 'health' | 'cache_hit_rate' | 'has_data'
+      >[]
+      health: MonitorHealth
+      cache_hit_rate: number
+      has_data: boolean
+    }
     baseline: number
+    health_thresholds?: HealthThresholds
     bucket_seconds: number
     available_groups: string[]
     display_groups: string[]

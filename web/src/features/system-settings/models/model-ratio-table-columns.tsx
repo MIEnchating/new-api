@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
 
-import { DataTableColumnHeader } from '@/components/data-table/core/column-header'
+import { DataTableColumnHeader, TruncatedCell } from '@/components/data-table'
 import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
 import { StatusBadge } from '@/components/status-badge'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -97,44 +97,57 @@ export function buildModelRatioColumns({
           isTaskModel && !hasConfiguredTaskPricing
 
         return (
-          <div className='flex min-w-0 items-center gap-2 font-medium'>
-            <span className='min-w-0 truncate'>{row.getValue('name')}</span>
-            {showTieredBadge ? (
-              <StatusBadge
-                label={t('Tiered')}
-                variant='info'
-                copyable={false}
-                className='shrink-0'
-              />
-            ) : null}
-            {showTaskPricingBadge ? (
-              <StatusBadge
-                label={t('Task pricing')}
-                variant='info'
-                copyable={false}
-                className='shrink-0'
-              />
-            ) : null}
-            {row.original.hasConflict && (
-              <StatusBadge
-                label={t('Conflict')}
-                variant='danger'
-                copyable={false}
-                className='shrink-0'
-              />
+          <div className='flex min-w-0 flex-col items-start gap-1 font-medium'>
+            <TruncatedCell tabIndex={0} tooltipContent={row.original.name}>
+              {row.original.name}
+            </TruncatedCell>
+            {(showTieredBadge ||
+              showTaskPricingBadge ||
+              row.original.hasConflict ||
+              showUnconfiguredTaskBadge) && (
+              <div
+                className='flex max-w-full flex-wrap items-center gap-x-2 gap-y-1'
+                data-table-text='secondary'
+              >
+                {showTieredBadge ? (
+                  <StatusBadge
+                    label={t('Tiered')}
+                    variant='info'
+                    copyable={false}
+                    className='shrink-0'
+                  />
+                ) : null}
+                {showTaskPricingBadge ? (
+                  <StatusBadge
+                    label={t('Task pricing')}
+                    variant='info'
+                    copyable={false}
+                    className='shrink-0'
+                  />
+                ) : null}
+                {row.original.hasConflict && (
+                  <StatusBadge
+                    label={t('Conflict')}
+                    variant='danger'
+                    copyable={false}
+                    className='shrink-0'
+                  />
+                )}
+                {showUnconfiguredTaskBadge ? (
+                  <StatusBadge
+                    label={t('Task pricing not configured')}
+                    variant='warning'
+                    copyable={false}
+                    className='shrink-0'
+                  />
+                ) : null}
+              </div>
             )}
-            {showUnconfiguredTaskBadge ? (
-              <StatusBadge
-                label={t('Task pricing not configured')}
-                variant='warning'
-                copyable={false}
-                className='shrink-0'
-              />
-            ) : null}
           </div>
         )
       },
       enableHiding: false,
+      meta: { label: t('Model name') },
     },
     {
       accessorKey: 'billingMode',
@@ -168,6 +181,7 @@ export function buildModelRatioColumns({
     },
     {
       id: 'priceSummary',
+      accessorFn: (row) => getPriceSummary(row, t),
       header: ({ column }) => (
         <DataTableColumnHeader column={column} title={t('Price summary')} />
       ),
@@ -189,7 +203,7 @@ export function buildModelRatioColumns({
     },
     {
       id: 'actions',
-      header: () => <div>{t('Actions')}</div>,
+      header: () => <div className='text-right'>{t('Actions')}</div>,
       cell: ({ row }) => (
         <StaticRowActions
           editLabel={t('Edit')}

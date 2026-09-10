@@ -53,6 +53,8 @@ const headerNavSchema = z.object({
   console: z.boolean(),
   pricingEnabled: z.boolean(),
   pricingRequireAuth: z.boolean(),
+  siteStatusEnabled: z.boolean(),
+  siteStatusRequireAuth: z.boolean(),
   rankingsEnabled: z.boolean(),
   rankingsRequireAuth: z.boolean(),
   docs: z.boolean(),
@@ -82,6 +84,10 @@ const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
     config.pricing?.requireAuth === undefined
       ? HEADER_NAV_DEFAULT.pricing.requireAuth
       : Boolean(config.pricing.requireAuth),
+  siteStatusEnabled:
+    config.siteStatus?.enabled ?? HEADER_NAV_DEFAULT.siteStatus.enabled,
+  siteStatusRequireAuth:
+    config.siteStatus?.requireAuth ?? HEADER_NAV_DEFAULT.siteStatus.requireAuth,
   rankingsEnabled:
     config.rankings?.enabled === undefined
       ? HEADER_NAV_DEFAULT.rankings.enabled
@@ -126,6 +132,10 @@ export function HeaderNavigationSection({
         ...(config.pricing ?? HEADER_NAV_DEFAULT.pricing),
         enabled: values.pricingEnabled,
         requireAuth: values.pricingRequireAuth,
+      },
+      siteStatus: {
+        enabled: values.siteStatusEnabled,
+        requireAuth: values.siteStatusRequireAuth,
       },
       rankings: {
         ...(config.rankings ?? HEADER_NAV_DEFAULT.rankings),
@@ -179,7 +189,10 @@ export function HeaderNavigationSection({
   const accessModules: Array<{
     enabledKey: HeaderNavBooleanField
     requireAuthKey: HeaderNavBooleanField
-    requireAuthDependsOn: 'pricingEnabled' | 'rankingsEnabled'
+    requireAuthDependsOn:
+      | 'pricingEnabled'
+      | 'rankingsEnabled'
+      | 'siteStatusEnabled'
     title: string
     description: string
     requireAuthTitle: string
@@ -194,6 +207,17 @@ export function HeaderNavigationSection({
       requireAuthTitle: t('Require login to view models'),
       requireAuthDescription: t(
         'Visitors must authenticate before accessing the pricing directory.'
+      ),
+    },
+    {
+      enabledKey: 'siteStatusEnabled',
+      requireAuthKey: 'siteStatusRequireAuth',
+      requireAuthDependsOn: 'siteStatusEnabled',
+      title: t('Site status'),
+      description: t('Service availability and uptime history.'),
+      requireAuthTitle: t('Require login to view site status'),
+      requireAuthDescription: t(
+        'Visitors must authenticate before accessing site status.'
       ),
     },
     {

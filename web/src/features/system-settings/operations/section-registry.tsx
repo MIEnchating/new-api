@@ -25,6 +25,7 @@ import { PerformanceSection } from '../maintenance/performance-section'
 import { UpdateCheckerSection } from '../maintenance/update-checker-section'
 import type { OperationsSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
+import { ChannelMonitorSettingsSection } from './channel-monitor-settings-section'
 
 const OPERATIONS_SECTIONS = [
   {
@@ -58,6 +59,11 @@ const OPERATIONS_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    id: 'channel-monitor',
+    titleKey: 'Channel Monitor',
+    build: () => <ChannelMonitorSettingsSection />,
   },
   {
     id: 'email',

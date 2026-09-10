@@ -89,7 +89,7 @@ export const STATIC_I18N_KEYS = [
   'Console',
   'Model Square',
   'Rankings',
-  'Status Monitor',
+  'Channel Monitor',
   'Docs',
   'About',
 

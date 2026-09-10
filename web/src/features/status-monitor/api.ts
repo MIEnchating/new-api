@@ -20,6 +20,7 @@ import { api } from '@/lib/api'
 
 import type {
   CacheMetricsResponse,
+  HealthThresholds,
   OfficialProviderStatusResponse,
   UpdateCacheHitRateBaselineResponse,
   UpdateCacheMonitorGroupsResponse,
@@ -54,5 +55,14 @@ export function updateCacheMonitorGroups(allGroups: boolean, groups: string[]) {
 export function getOfficialProviderStatuses() {
   return api
     .get<OfficialProviderStatusResponse>('/api/status-monitor/providers')
+    .then((response) => response.data)
+}
+
+export function updateMonitorHealthThresholds(thresholds: HealthThresholds) {
+  return api
+    .put<{ success: boolean; message?: string; data: HealthThresholds }>(
+      '/api/status-monitor/cache/health-thresholds',
+      thresholds
+    )
     .then((response) => response.data)
 }

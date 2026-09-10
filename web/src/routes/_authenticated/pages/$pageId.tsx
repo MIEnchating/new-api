@@ -67,14 +67,15 @@ function CustomMenuPageRoute() {
         </div>
         <Button
           variant='ghost'
-          size='icon-sm'
+          size='sm'
           aria-label={t('Open in new tab')}
           title={t('Open in new tab')}
           render={
             <a href={page.url} target='_blank' rel='noreferrer noopener' />
           }
         >
-          <ExternalLink />
+          <ExternalLink data-icon='inline-start' aria-hidden='true' />
+          {t('Open in new tab')}
         </Button>
       </div>
       <iframe

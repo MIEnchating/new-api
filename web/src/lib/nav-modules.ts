@@ -22,12 +22,13 @@ import { readCachedStatus, statusQueryOptions } from '@/lib/status-query'
 
 export type ModuleAccess = { enabled: boolean; requireAuth: boolean }
 
-export type HeaderNavModule = 'rankings' | 'pricing'
+export type HeaderNavModule = 'rankings' | 'pricing' | 'siteStatus'
 
 export type HeaderNavModules = {
   home: boolean
   console: boolean
   pricing: ModuleAccess
+  siteStatus: ModuleAccess
   rankings: ModuleAccess
   docs: boolean
   about: boolean
@@ -39,6 +40,7 @@ const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
   console: true,
   pricing: { enabled: true, requireAuth: false },
   rankings: { enabled: true, requireAuth: false },
+  siteStatus: { enabled: true, requireAuth: false },
   docs: true,
   about: true,
 }
@@ -46,6 +48,7 @@ const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
 const DEFAULTS: Record<HeaderNavModule, ModuleAccess> = {
   pricing: DEFAULT_HEADER_NAV_MODULES.pricing,
   rankings: DEFAULT_HEADER_NAV_MODULES.rankings,
+  siteStatus: DEFAULT_HEADER_NAV_MODULES.siteStatus,
 }
 
 function cloneHeaderNavDefaults(): HeaderNavModules {
@@ -53,6 +56,7 @@ function cloneHeaderNavDefaults(): HeaderNavModules {
     ...DEFAULT_HEADER_NAV_MODULES,
     pricing: { ...DEFAULT_HEADER_NAV_MODULES.pricing },
     rankings: { ...DEFAULT_HEADER_NAV_MODULES.rankings },
+    siteStatus: { ...DEFAULT_HEADER_NAV_MODULES.siteStatus },
   }
 }
 
@@ -111,6 +115,10 @@ function parseHeaderNavModules(raw: unknown): HeaderNavModules {
   Object.entries(parsed).forEach(([key, value]) => {
     if (key === 'pricing') {
       result.pricing = parseAccess(value, result.pricing)
+      return
+    }
+    if (key === 'siteStatus') {
+      result.siteStatus = parseAccess(value, result.siteStatus)
       return
     }
     if (key === 'rankings') {

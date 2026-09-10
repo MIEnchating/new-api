@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -172,18 +173,50 @@ func TestHeaderNavPublicRouteRejectsExpiredInternalAccessToken(t *testing.T) {
 	withHeaderNavModules(t, "")
 	gin.SetMode(gin.TestMode)
 
-	router := gin.New()
-	router.GET("/api/test", HeaderNavModuleAuth("pricing"), func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"success": true})
-	})
-	request := httptest.NewRequest(http.MethodGet, "/api/test", nil)
-	request.Header.Set("Authorization", "Bearer "+issueExpiredDashboardAccessToken(t, service.AuthIdentity{
-		UserID: 1, SessionID: "expired-header-nav-session", UserAuthVersion: 1, SessionVersion: 1,
-	}))
-	response := httptest.NewRecorder()
+	for _, tc := range []struct {
+		name       string
+		middleware gin.HandlerFunc
+	}{
+		{"pricing", HeaderNavModuleAuth("pricing")},
+		{"site status", HeaderNavModulePublicOrUserAuth("siteStatus")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router := gin.New()
+			router.GET("/api/test", tc.middleware, func(c *gin.Context) {
+				c.JSON(http.StatusOK, gin.H{"success": true})
+			})
+			request := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+			request.Header.Set("Authorization", "Bearer "+issueExpiredDashboardAccessToken(t, service.AuthIdentity{
+				UserID: 1, SessionID: "expired-header-nav-session", UserAuthVersion: 1, SessionVersion: 1,
+			}))
+			response := httptest.NewRecorder()
 
-	router.ServeHTTP(response, request)
+			router.ServeHTTP(response, request)
 
-	require.Equal(t, http.StatusUnauthorized, response.Code)
-	require.Contains(t, response.Body.String(), "AUTH_TOKEN_EXPIRED")
+			require.Equal(t, http.StatusUnauthorized, response.Code)
+			require.Contains(t, response.Body.String(), "AUTH_TOKEN_EXPIRED")
+		})
+	}
+}
+
+func TestSiteStatusAccess(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		config        string
+		authenticated bool
+		want          int
+	}{
+		{"legacy public access", `{"pricing":true}`, false, http.StatusOK},
+		{"enabled public access", `{"siteStatus":{"enabled":true,"requireAuth":false}}`, false, http.StatusOK},
+		{"login required", `{"siteStatus":{"enabled":true,"requireAuth":true}}`, false, http.StatusUnauthorized},
+		{"signed in", `{"siteStatus":{"enabled":true,"requireAuth":true}}`, true, http.StatusOK},
+		{"disabled anonymous", `{"siteStatus":false}`, false, http.StatusUnauthorized},
+		{"disabled console access", `{"siteStatus":false}`, true, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withHeaderNavModules(t, tc.config)
+			response := performHeaderNavRequest(t, HeaderNavModulePublicOrUserAuth("siteStatus"), tc.authenticated)
+			assert.Equal(t, tc.want, response.Code)
+		})
+	}
 }

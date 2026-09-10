@@ -31,6 +31,7 @@ import {
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { EmptyState } from '@/components/empty-state'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -55,7 +56,6 @@ import {
   getActiveOfficialIncidents,
   getAffectedOfficialComponents,
   getEffectiveOfficialIndicator,
-  isOfficialComponentAffected,
   isOfficialProviderAffected,
 } from './official-provider-status-utils'
 import type {
@@ -180,23 +180,17 @@ function ProviderComponentRow(props: {
   locale?: string
 }) {
   const { t } = useTranslation()
-  const affected = isOfficialComponentAffected(props.component)
   const variant = getComponentVariant(props.component.status)
   const content = (
-    <div
-      className={cn(
-        'flex min-w-0 items-center justify-between gap-3 px-3.5 py-2.5 sm:px-4',
-        affected && 'bg-warning/5'
-      )}
-    >
-      <div className='flex min-w-0 items-center gap-2.5'>
+    <div className='bg-muted/20 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg px-3 py-2.5'>
+      <div className='flex min-w-0 flex-1 items-start gap-2.5'>
         <span
           className={cn(
-            'size-2 shrink-0 rounded-full',
+            'mt-1.5 size-1.5 shrink-0 rounded-full',
             getComponentDotClass(props.component.status)
           )}
         />
-        <span className='truncate text-sm font-medium'>
+        <span className='text-sm leading-5 [overflow-wrap:anywhere]'>
           {props.component.name}
         </span>
       </div>
@@ -237,9 +231,11 @@ function ProviderAction(props: {
       variant='ghost'
       size='icon-sm'
       aria-label={props.label}
+      role='link'
+      className='text-muted-foreground hover:text-foreground rounded-lg'
       render={<a href={props.href} target='_blank' rel='noreferrer' />}
     >
-      <Icon />
+      <Icon aria-hidden='true' />
     </Button>
   )
 
@@ -298,9 +294,18 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
     (component) => !component.group
   )
   const effectiveIndicator = getEffectiveOfficialIndicator(provider)
-  const [componentsOpen, setComponentsOpen] = useState(
-    affectedComponents.length > 0
+  const affectedComponentKeys = new Set(
+    affectedComponents.map((component) => component.id || component.name)
   )
+  const serviceComponents = [
+    ...affectedComponents,
+    ...provider.components.filter(
+      (component) =>
+        !component.group &&
+        !affectedComponentKeys.has(component.id || component.name)
+    ),
+  ]
+  const [componentsOpen, setComponentsOpen] = useState(true)
   const meta = provider.available
     ? (INDICATOR_META[effectiveIndicator] ?? UNKNOWN_META)
     : UNAVAILABLE_META
@@ -326,70 +331,57 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
       : null
 
   return (
-    <article className='bg-card min-w-0 overflow-hidden rounded-lg border'>
-      <header className='flex min-w-0 items-start justify-between gap-3 p-3.5 sm:p-4'>
-        <div className='flex min-w-0 items-center gap-3'>
-          <span
-            className={cn(
-              'flex size-10 shrink-0 items-center justify-center rounded-md',
-              meta.iconSurfaceClassName
-            )}
-          >
-            <StatusIcon className={cn('size-4.5', meta.iconClassName)} />
-          </span>
-          <div className='min-w-0'>
-            <h3 className='truncate text-sm font-semibold sm:text-base'>
+    <article className='bg-card hover:border-foreground/20 min-w-0 overflow-hidden rounded-xl border shadow-xs transition-[box-shadow,border-color] duration-200 hover:shadow-md'>
+      <header className='space-y-2.5 p-4'>
+        <div className='flex flex-wrap items-center justify-between gap-3'>
+          <div className='flex min-w-0 items-center gap-3'>
+            <span
+              className={cn(
+                'flex size-9 shrink-0 items-center justify-center rounded-lg',
+                meta.iconSurfaceClassName
+              )}
+            >
+              <StatusIcon
+                aria-hidden='true'
+                className={cn('size-5', meta.iconClassName)}
+              />
+            </span>
+            <h3 className='min-w-0 text-base leading-6 font-semibold [overflow-wrap:anywhere]'>
               {provider.provider}
             </h3>
-            <div className='mt-1 flex min-w-0 items-center gap-2'>
-              <StatusBadge
-                variant={meta.variant}
-                copyable={false}
-                type='text'
-                showDot
-              >
-                {t(meta.label)}
-              </StatusBadge>
-              {activeIncidents.length > 0 ? (
-                <span className='text-muted-foreground text-xs tabular-nums'>
-                  {activeIncidents.length} {t('Active incidents')}
+          </div>
+          <div className='flex flex-wrap items-center gap-x-3 gap-y-2'>
+            <StatusBadge
+              variant={meta.variant}
+              copyable={false}
+              type='text'
+              showDot
+              className='gap-2 text-xs leading-5 whitespace-normal'
+            >
+              {t(meta.label)}
+            </StatusBadge>
+            {activeIncidents.length > 0 ? (
+              <span className='text-muted-foreground text-xs tabular-nums'>
+                {t('Active incidents')}
+                <span className='bg-muted text-foreground ml-2 inline-flex min-w-5 items-center justify-center rounded-md px-1.5 py-0.5 font-medium'>
+                  {activeIncidents.length}
                 </span>
-              ) : null}
-            </div>
-            <p className='text-muted-foreground mt-1.5 flex items-center gap-1.5 text-xs tabular-nums'>
-              <Clock3 className='size-3.5 shrink-0' />
-              <span className='truncate'>
-                {t('Official check time')}:{' '}
-                {formatOfficialTime(provider.checked_at, locale)}
               </span>
-            </p>
-            {provider.available &&
-            effectiveIndicator !== 'none' &&
-            provider.description ? (
-              <p className='text-muted-foreground mt-1.5 text-xs leading-4 [overflow-wrap:anywhere]'>
-                {provider.description}
-              </p>
             ) : null}
           </div>
         </div>
-
-        <div className='flex shrink-0 items-center gap-0.5'>
-          <ProviderAction
-            href={provider.status_url}
-            label={t('Open official status page')}
-            icon={ExternalLink}
-          />
-          <ProviderAction
-            href={provider.subscribe_url}
-            label={t('Subscribe to official updates')}
-            icon={BellRing}
-          />
-        </div>
+        {provider.available &&
+        effectiveIndicator !== 'none' &&
+        provider.description ? (
+          <p className='text-muted-foreground text-xs leading-5 [overflow-wrap:anywhere]'>
+            {provider.description}
+          </p>
+        ) : null}
       </header>
 
       {!provider.available ? (
-        <div className='border-destructive/25 bg-destructive/5 border-t px-3.5 py-3 sm:px-4'>
-          <div className='text-destructive flex items-start gap-2 text-sm'>
+        <div className='bg-muted/30 mx-4 mb-3 rounded-lg border p-3'>
+          <div className='text-muted-foreground flex items-start gap-2.5 text-sm leading-5'>
             <AlertTriangle className='mt-0.5 size-4 shrink-0' />
             <div className='min-w-0'>
               <p className='font-medium'>{errorLabel}</p>
@@ -404,19 +396,33 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
       ) : null}
 
       {activeIncidents.length > 0 ? (
-        <div className='divide-y border-t'>
+        <div className='space-y-2 px-4 pb-3'>
           {activeIncidents.map((incident) => {
             const incidentComponents = incident.components
+            const hasDetails =
+              Boolean(incident.message) || incidentComponents.length > 0
 
             return (
-              <div
+              <Collapsible
                 key={`${incident.name}-${incident.updated_at}`}
-                className='bg-muted/10 px-3.5 py-3.5 sm:px-4'
+                className='bg-muted/20 min-w-0 space-y-2.5 rounded-lg border p-3'
               >
-                <div className='flex min-w-0 items-start justify-between gap-3'>
-                  <div className='min-w-0 text-sm leading-5 font-medium [overflow-wrap:anywhere] break-words'>
-                    {incident.name}
-                  </div>
+                <div className='space-y-2.5'>
+                  <h4 className='text-sm leading-6 font-semibold [overflow-wrap:anywhere]'>
+                    {hasDetails ? (
+                      <CollapsibleTrigger className='group focus-visible:ring-ring hover:text-primary flex w-full min-w-0 items-start justify-between gap-3 rounded-sm text-left outline-none focus-visible:ring-2'>
+                        <span className='min-w-0 [overflow-wrap:anywhere]'>
+                          {incident.name}
+                        </span>
+                        <ChevronDown
+                          aria-hidden='true'
+                          className='text-muted-foreground mt-1 size-4 shrink-0 transition-transform group-aria-expanded:rotate-180'
+                        />
+                      </CollapsibleTrigger>
+                    ) : (
+                      incident.name
+                    )}
+                  </h4>
                   <StatusBadge
                     variant={getIncidentVariant(
                       incident.status,
@@ -425,7 +431,7 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
                     copyable={false}
                     type='text'
                     showDot
-                    className='shrink-0 text-xs'
+                    className='text-xs leading-5 whitespace-normal'
                   >
                     {formatIncidentStatus(
                       incident.status || incident.impact,
@@ -433,37 +439,42 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
                     )}
                   </StatusBadge>
                 </div>
-                {incident.message ? (
-                  <p className='text-muted-foreground mt-1.5 text-sm leading-5 [overflow-wrap:anywhere] break-words whitespace-pre-line'>
-                    {incident.message}
-                  </p>
-                ) : null}
-                {incidentComponents.length > 0 ? (
-                  <div className='mt-2.5 flex min-w-0 flex-wrap items-center gap-1.5'>
-                    <span className='text-muted-foreground mr-0.5 text-xs'>
-                      {t('Affected components')}:
-                    </span>
-                    {incidentComponents.map((component) => (
-                      <StatusBadge
-                        key={component.id || component.name}
-                        variant={getComponentVariant(component.status)}
-                        copyable={false}
-                        type='text'
-                        className='max-w-full text-xs'
-                      >
-                        <span className='truncate'>{component.name}</span>
-                      </StatusBadge>
-                    ))}
-                  </div>
-                ) : null}
-                <div className='mt-2.5 flex flex-wrap items-center justify-between gap-2'>
+                <CollapsibleContent className='space-y-3'>
+                  {incident.message ? (
+                    <p className='text-muted-foreground text-sm leading-6 [overflow-wrap:anywhere] whitespace-pre-line'>
+                      {incident.message}
+                    </p>
+                  ) : null}
+                  {incidentComponents.length > 0 ? (
+                    <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+                      <span className='text-muted-foreground mr-0.5 text-xs'>
+                        {t('Affected components')}:
+                      </span>
+                      {incidentComponents.map((component) => (
+                        <StatusBadge
+                          key={component.id || component.name}
+                          variant={getComponentVariant(component.status)}
+                          copyable={false}
+                          type='text'
+                          className='bg-background max-w-full rounded-md border px-2 py-1 text-xs leading-4 whitespace-normal'
+                        >
+                          <span className='min-w-0 [overflow-wrap:anywhere]'>
+                            {component.name}
+                          </span>
+                        </StatusBadge>
+                      ))}
+                    </div>
+                  ) : null}
+                </CollapsibleContent>
+                <div className='flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t pt-3'>
                   <span className='text-muted-foreground flex items-center gap-1.5 text-xs tabular-nums'>
-                    <Clock3 className='size-3.5' />
+                    <Clock3 aria-hidden='true' className='size-3.5 shrink-0' />
                     {formatOfficialTime(incident.updated_at, locale)}
                   </span>
                   {incident.url ? (
                     <Button
                       variant='link'
+                      role='link'
                       size='xs'
                       render={
                         <a
@@ -478,48 +489,40 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
                     </Button>
                   ) : null}
                 </div>
-              </div>
+              </Collapsible>
             )
           })}
         </div>
-      ) : (
-        <div className='text-muted-foreground flex items-center gap-2 border-t px-3.5 py-4 text-sm sm:px-4'>
-          {provider.available ? (
-            <CheckCircle2 className='text-status-success size-4' />
-          ) : (
-            <CircleDashed className='size-4' />
-          )}
-          <span>
-            {provider.available
-              ? t('No active incidents')
-              : t('Official status unavailable')}
-          </span>
-        </div>
-      )}
+      ) : null}
 
-      {provider.available && affectedComponents.length > 0 ? (
+      {activeIncidents.length === 0 &&
+      serviceComponents.length === 0 &&
+      provider.available ? (
+        <div className='text-muted-foreground bg-muted/20 mx-4 mb-3 flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm'>
+          <CheckCircle2
+            aria-hidden='true'
+            className='text-status-success size-4 shrink-0'
+          />
+          <span>{t('No active incidents')}</span>
+        </div>
+      ) : null}
+
+      {provider.available && serviceComponents.length > 0 ? (
         <Collapsible
           open={componentsOpen}
           onOpenChange={setComponentsOpen}
-          className='border-t'
+          className='@container mx-4 border-t'
         >
           <CollapsibleTrigger
             data-press-animation='none'
-            className='hover:bg-muted/30 focus-visible:ring-ring flex w-full min-w-0 items-center justify-between gap-3 px-3.5 py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset sm:px-4'
+            className='hover:text-foreground text-muted-foreground focus-visible:ring-ring flex w-full min-w-0 items-center justify-between gap-3 rounded-md py-3 text-left transition-colors outline-none focus-visible:ring-2 focus-visible:ring-inset'
           >
-            <div className='min-w-0'>
-              <h4 className='text-sm font-semibold'>
-                {t('Affected components')}
-              </h4>
-              <p className='text-muted-foreground mt-0.5 text-xs'>
-                {t('{{count}} affected components', {
-                  count: affectedComponents.length,
-                })}
-              </p>
-            </div>
+            <span className='text-sm font-medium'>
+              {t('Service components')}
+            </span>
             <div className='flex shrink-0 items-center gap-2'>
-              <span className='text-muted-foreground text-xs tabular-nums'>
-                {affectedComponents.length} {t('components')}
+              <span className='bg-muted text-muted-foreground min-w-5 rounded-md px-1.5 py-0.5 text-center text-xs tabular-nums'>
+                {serviceComponents.length}
               </span>
               <ChevronDown
                 className={cn(
@@ -529,9 +532,9 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
               />
             </div>
           </CollapsibleTrigger>
-          <CollapsibleContent className='border-t'>
-            <div className='divide-y'>
-              {affectedComponents.map((component) => (
+          <CollapsibleContent className='pb-4'>
+            <div className='grid min-w-0 gap-2 @min-[28rem]:grid-cols-2'>
+              {serviceComponents.map((component) => (
                 <ProviderComponentRow
                   key={component.id || component.name}
                   component={component}
@@ -542,6 +545,29 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
           </CollapsibleContent>
         </Collapsible>
       ) : null}
+      <footer className='bg-muted/10 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t px-4 py-2'>
+        <div className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs'>
+          <p>{t('Official check time')}</p>
+          <p className='flex items-center gap-1.5 leading-5 tabular-nums'>
+            <Clock3 aria-hidden='true' className='size-3.5 shrink-0' />
+            <span className='[overflow-wrap:anywhere]'>
+              {formatOfficialTime(provider.checked_at, locale)}
+            </span>
+          </p>
+        </div>
+        <div className='flex shrink-0 items-center gap-1'>
+          <ProviderAction
+            href={provider.status_url}
+            label={t('Open official status page')}
+            icon={ExternalLink}
+          />
+          <ProviderAction
+            href={provider.subscribe_url}
+            label={t('Subscribe to official updates')}
+            icon={BellRing}
+          />
+        </div>
+      </footer>
     </article>
   )
 }
@@ -550,6 +576,7 @@ export function OfficialProviderStatuses(props: {
   response: OfficialProviderStatusResponse | null
   loading: boolean
   failed: boolean
+  compact?: boolean
 }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
@@ -571,7 +598,13 @@ export function OfficialProviderStatuses(props: {
     .filter(Boolean)
     .sort((left, right) => Date.parse(right) - Date.parse(left))[0]
   let content = (
-    <div className='grid min-w-0 items-start gap-3 lg:grid-cols-2'>
+    <div
+      className={cn(
+        'grid min-w-0 items-start gap-4',
+        providers.length > 1 && 'md:grid-cols-2',
+        props.compact && providers.length > 2 && 'xl:grid-cols-3'
+      )}
+    >
       {providers.map((provider) => (
         <ProviderCard
           key={`${provider.provider}-${provider.available}-${getEffectiveOfficialIndicator(provider)}`}
@@ -583,74 +616,106 @@ export function OfficialProviderStatuses(props: {
 
   if (props.loading) {
     content = (
-      <div className='grid items-start gap-3 lg:grid-cols-2'>
-        <Skeleton className='h-64 w-full' />
-        <Skeleton className='h-64 w-full' />
+      <div
+        className={cn(
+          'grid min-w-0 items-start gap-4 overflow-clip md:grid-cols-2',
+          props.compact && 'xl:grid-cols-3'
+        )}
+      >
+        {Array.from({ length: props.compact ? 3 : 2 }, (_, index) => (
+          <div
+            key={index}
+            aria-hidden='true'
+            className='bg-card min-w-0 overflow-hidden rounded-xl border'
+          >
+            <div className='space-y-3 p-4'>
+              <div className='flex items-center gap-3'>
+                <Skeleton className='size-9 shrink-0 rounded-lg' />
+                <Skeleton className='h-5 w-28' />
+              </div>
+              <div className='grid grid-cols-2 gap-2'>
+                {Array.from({ length: 6 }, (_, componentIndex) => (
+                  <Skeleton key={componentIndex} className='h-10 rounded-lg' />
+                ))}
+              </div>
+            </div>
+            <div className='flex items-center justify-between border-t px-4 py-3'>
+              <div className='space-y-2'>
+                <Skeleton className='h-3 w-20' />
+                <Skeleton className='h-3 w-36' />
+              </div>
+              <Skeleton className='size-8 rounded-lg' />
+            </div>
+          </div>
+        ))}
       </div>
     )
   } else if (props.failed || providers.length === 0) {
     content = (
-      <div className='text-muted-foreground border-y border-dashed py-10 text-center text-sm'>
-        {t('Official status unavailable')}
-      </div>
+      <EmptyState
+        icon={CircleDashed}
+        title={t('Official status unavailable')}
+      />
     )
   }
 
   return (
     <TooltipProvider delay={0}>
       <section className='min-w-0 space-y-4'>
-        <div className='space-y-3'>
-          <div className='flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
-            <div className='flex min-w-0 items-center gap-3'>
-              <span className='bg-info/10 text-info flex size-9 shrink-0 items-center justify-center rounded-md'>
-                <Radio className='size-4' />
-              </span>
-              <div className='min-w-0'>
-                <h2 className='text-sm font-semibold'>
-                  {t('Official provider status')}
-                </h2>
-                <p className='text-muted-foreground mt-0.5 text-xs'>
-                  {t('Live incident messages from official status pages')}
-                </p>
+        {!props.compact && (
+          <div className='space-y-3'>
+            <div className='flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+              <div className='flex min-w-0 items-center gap-3'>
+                <span className='bg-info/10 text-info flex size-9 shrink-0 items-center justify-center rounded-md'>
+                  <Radio className='size-4' />
+                </span>
+                <div className='min-w-0'>
+                  <h2 className='text-sm font-semibold'>
+                    {t('Official provider status')}
+                  </h2>
+                  <p className='text-muted-foreground mt-0.5 text-xs'>
+                    {t('Live incident messages from official status pages')}
+                  </p>
+                </div>
               </div>
+              {latestCheckedAt ? (
+                <span className='text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs tabular-nums'>
+                  <Clock3 aria-hidden='true' className='size-3.5 shrink-0' />
+                  {formatOfficialTime(latestCheckedAt, locale)}
+                </span>
+              ) : null}
             </div>
-            {latestCheckedAt ? (
-              <span className='text-muted-foreground flex shrink-0 items-center gap-1.5 text-xs tabular-nums'>
-                <Clock3 className='size-3.5' />
-                {formatOfficialTime(latestCheckedAt, locale)}
-              </span>
+
+            {!props.loading && providers.length > 0 ? (
+              <div className='grid grid-cols-2 gap-2 lg:grid-cols-4'>
+                <OfficialSummaryMetric
+                  label={t('Operational')}
+                  value={`${operationalProviders} / ${providers.length}`}
+                  icon={CheckCircle2}
+                  tone='success'
+                />
+                <OfficialSummaryMetric
+                  label={t('Affected providers')}
+                  value={String(affectedProviders)}
+                  icon={AlertTriangle}
+                  tone={affectedProviders > 0 ? 'warning' : 'default'}
+                />
+                <OfficialSummaryMetric
+                  label={t('Active incidents')}
+                  value={String(activeIncidents)}
+                  icon={BellRing}
+                  tone={activeIncidents > 0 ? 'warning' : 'default'}
+                />
+                <OfficialSummaryMetric
+                  label={t('Official status unavailable')}
+                  value={String(unavailableProviders)}
+                  icon={CircleDashed}
+                  tone={unavailableProviders > 0 ? 'danger' : 'default'}
+                />
+              </div>
             ) : null}
           </div>
-
-          {!props.loading && providers.length > 0 ? (
-            <div className='grid grid-cols-2 gap-2 lg:grid-cols-4'>
-              <OfficialSummaryMetric
-                label={t('Operational')}
-                value={`${operationalProviders} / ${providers.length}`}
-                icon={CheckCircle2}
-                tone='success'
-              />
-              <OfficialSummaryMetric
-                label={t('Affected providers')}
-                value={String(affectedProviders)}
-                icon={AlertTriangle}
-                tone={affectedProviders > 0 ? 'warning' : 'default'}
-              />
-              <OfficialSummaryMetric
-                label={t('Active incidents')}
-                value={String(activeIncidents)}
-                icon={BellRing}
-                tone={activeIncidents > 0 ? 'warning' : 'default'}
-              />
-              <OfficialSummaryMetric
-                label={t('Official status unavailable')}
-                value={String(unavailableProviders)}
-                icon={CircleDashed}
-                tone={unavailableProviders > 0 ? 'danger' : 'default'}
-              />
-            </div>
-          ) : null}
-        </div>
+        )}
 
         {content}
       </section>

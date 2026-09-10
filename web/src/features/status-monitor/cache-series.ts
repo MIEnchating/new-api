@@ -49,13 +49,21 @@ export function buildCacheChartSeries(
   rangeStart?: number,
   rangeEnd?: number
 ): CacheChartPoint[] {
-  if (series.length === 0) return []
-
-  const interval = Math.max(1, bucketSeconds)
+  const interval = Number.isFinite(bucketSeconds)
+    ? Math.max(1, bucketSeconds)
+    : 3600
+  if (
+    series.length === 0 &&
+    (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd))
+  ) {
+    return []
+  }
   const points = new Map(series.map((point) => [point.ts, point]))
   const timestamps = [...points.keys()].sort((left, right) => left - right)
-  const firstTimestamp = timestamps[0]
-  const lastTimestamp = timestamps.at(-1) ?? firstTimestamp
+  const firstTimestamp =
+    timestamps[0] ?? Math.floor(Number(rangeStart) / interval) * interval
+  const lastTimestamp =
+    timestamps.at(-1) ?? Math.floor(Number(rangeEnd) / interval) * interval
   const normalizedStart = Number.isFinite(rangeStart)
     ? Math.floor(Number(rangeStart) / interval) * interval
     : firstTimestamp

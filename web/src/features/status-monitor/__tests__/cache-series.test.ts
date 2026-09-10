@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 
-import { describe, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 
 import { buildCacheChartSeries } from '../cache-series'
 
@@ -75,4 +75,16 @@ describe('cache chart series', () => {
     assert.equal(result[0]?.ts, 3_600)
     assert.equal(result[0]?.missing, false)
   })
+})
+
+test('empty groups retain missing buckets across the requested window', () => {
+  const points = buildCacheChartSeries([], 3600, 0, 7200)
+  expect(
+    points.map((point) => [point.ts, point.has_data, point.cache_hit_rate])
+  ).toEqual([
+    [0, false, null],
+    [3600, false, null],
+    [7200, false, null],
+  ])
+  expect(buildCacheChartSeries([], 3600)).toEqual([])
 })

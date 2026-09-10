@@ -54,6 +54,7 @@ import {
 } from '@/features/model-pricing/pricing'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { useMediaQuery } from '@/hooks'
+import { cn } from '@/lib/utils'
 
 import { safeJsonParse } from '../utils/json-parser'
 import type { PricingMode } from './model-pricing-core'
@@ -110,6 +111,13 @@ export type ModelRatioVisualEditorHandle = {
 }
 
 const STORAGE_KEY = 'model-ratio-column-visibility'
+const MODEL_COLUMN_WIDTHS: Record<string, string> = {
+  select: 'w-10',
+  name: 'w-auto',
+  billingMode: 'w-[120px]',
+  priceSummary: 'w-[240px]',
+  actions: 'w-[72px]',
+}
 
 const ModelRatioVisualEditorComponent = forwardRef<
   ModelRatioVisualEditorHandle,
@@ -611,6 +619,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
   )
 
   const hasRows = table.getRowModel().rows.length > 0
+  const showMode = table.getColumn('billingMode')?.getIsVisible()
+  const showPriceSummary = table.getColumn('priceSummary')?.getIsVisible()
 
   let emptyStateText = t('No models configured. Use Add model to get started.')
   if (table.getState().globalFilter) {
@@ -622,15 +632,16 @@ const ModelRatioVisualEditorComponent = forwardRef<
   }
 
   return (
-    <div className='flex min-h-0 flex-1 flex-col gap-4'>
+    <div className='flex min-h-0 min-w-0 flex-1 flex-col gap-4'>
       <div
         role='region'
         aria-label={t('Model prices')}
-        className='grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4 md:grid-cols-[minmax(300px,0.72fr)_minmax(520px,1.28fr)] xl:grid-cols-[minmax(320px,0.68fr)_minmax(640px,1.32fr)]'
+        className='grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]'
       >
-        <div className='flex min-h-0 min-w-0 flex-col gap-3'>
+        <div className='@container/model-list flex min-h-0 min-w-0 flex-col gap-3'>
           <DataTableToolbar
             table={table}
+            className='shrink-0 [&_input]:w-auto [&_input]:min-w-0 [&_input]:flex-1 [&_input]:basis-40'
             searchPlaceholder={t('Search models...')}
             searchDebounceMs={250}
             filters={[
@@ -666,10 +677,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
                 ],
               },
             ]}
-            preActions={
-              filterMode === 'unset' ? undefined : (
+            leftActions={
+              filterMode === 'unset' ? null : (
                 <Button onClick={handleAdd}>
-                  <Plus data-icon='inline-start' />
+                  <Plus data-icon='inline-start' aria-hidden='true' />
                   {t('Add model')}
                 </Button>
               )
@@ -683,10 +694,16 @@ const ModelRatioVisualEditorComponent = forwardRef<
           ) : (
             <DataTableView
               table={table}
-              containerClassName='min-h-0 flex-1 rounded-md'
+              containerClassName='min-h-0 flex-1 rounded-lg'
               tableContainerClassName='h-full'
-              tableClassName='min-w-[852px] table-fixed'
+              tableClassName={cn(
+                'w-full min-w-[320px] table-fixed',
+                showMode && 'min-w-[440px]',
+                showPriceSummary && 'min-w-[560px]',
+                showMode && showPriceSummary && 'min-w-[680px]'
+              )}
               tableHeaderClassName='[&_tr]:border-b-0'
+              tableBodyClassName='[&>tr]:h-12'
               splitHeaderScrollClassName='h-full'
               bodyContainerClassName='[scrollbar-gutter:stable]'
               splitHeader
@@ -698,11 +715,12 @@ const ModelRatioVisualEditorComponent = forwardRef<
               ]}
               colgroup={
                 <colgroup>
-                  <col className='w-9' />
-                  <col className='w-[300px]' />
-                  <col className='w-[120px]' />
-                  <col className='w-[300px]' />
-                  <col className='w-auto' />
+                  {table.getVisibleLeafColumns().map((column) => (
+                    <col
+                      key={column.id}
+                      className={MODEL_COLUMN_WIDTHS[column.id]}
+                    />
+                  ))}
                 </colgroup>
               }
               renderRow={(row, { getCellClassName }) => (
@@ -730,7 +748,16 @@ const ModelRatioVisualEditorComponent = forwardRef<
             />
           )}
 
-          {hasRows && <DataTablePagination table={table} />}
+          {hasRows && (
+            <div className='shrink-0 border-t pt-3'>
+              <div className='@min-[560px]/model-list:hidden'>
+                <DataTablePagination table={table} compact />
+              </div>
+              <div className='hidden @min-[560px]/model-list:block'>
+                <DataTablePagination table={table} />
+              </div>
+            </div>
+          )}
         </div>
 
         <div className='hidden min-h-0 min-w-0 md:block'>

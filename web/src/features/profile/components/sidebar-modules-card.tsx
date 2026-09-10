@@ -86,7 +86,7 @@ export function SidebarModulesCard() {
         },
         {
           key: 'status',
-          title: t('Status Monitor'),
+          title: t('Channel Monitor'),
           description: t('Uptime Kuma service status page.'),
         },
         {

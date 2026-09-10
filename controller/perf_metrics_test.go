@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -77,8 +79,10 @@ func TestBuildCacheMonitorGroupsAuditParams(t *testing.T) {
 }
 
 func TestHideCacheMetricCountsPreservesRatesAndDataState(t *testing.T) {
+	score := 90.0
 	result := perfmetrics.CacheQueryResult{Groups: []perfmetrics.CacheGroupResult{{
 		Group:        "default",
+		Health:       perfmetrics.MonitorHealth{Overall: "healthy", Cache: "warning", Score: &score},
 		RequestCount: 20,
 		HitCount:     15,
 		CacheHitRate: 75,
@@ -93,6 +97,8 @@ func TestHideCacheMetricCountsPreservesRatesAndDataState(t *testing.T) {
 
 	hideCacheMetricCounts(&result)
 
+	assert.Equal(t, "healthy", result.Groups[0].Health.Overall)
+	assert.Equal(t, &score, result.Groups[0].Health.Score)
 	assert.Zero(t, result.Groups[0].RequestCount)
 	assert.Zero(t, result.Groups[0].HitCount)
 	assert.Equal(t, float64(75), result.Groups[0].CacheHitRate)
@@ -100,4 +106,34 @@ func TestHideCacheMetricCountsPreservesRatesAndDataState(t *testing.T) {
 	assert.Zero(t, result.Groups[0].Series[0].RequestCount)
 	assert.Zero(t, result.Groups[0].Series[0].HitCount)
 	assert.True(t, result.Groups[0].Series[0].HasData)
+}
+
+func TestUpdateMonitorHealthThresholdsRejectsInvalidValues(t *testing.T) {
+	defaults := perf_metrics_setting.GetHealthThresholds()
+	for _, tc := range []struct {
+		name   string
+		change func(*perf_metrics_setting.HealthThresholds)
+	}{
+		{"zero sample", func(h *perf_metrics_setting.HealthThresholds) { h.MinimumSample = 0 }},
+		{"oversized sample", func(h *perf_metrics_setting.HealthThresholds) { h.MinimumSample = 1000001 }},
+		{"reversed error bands", func(h *perf_metrics_setting.HealthThresholds) { h.WarningErrorRate = h.CriticalErrorRate }},
+		{"percentage outside range", func(h *perf_metrics_setting.HealthThresholds) { h.WarningCacheRate = 101 }},
+		{"reversed cache bands", func(h *perf_metrics_setting.HealthThresholds) { h.CriticalCacheRate = 90 }},
+		{"target above warning", func(h *perf_metrics_setting.HealthThresholds) { h.TargetTTFTMs = 9000 }},
+		{"warning at critical", func(h *perf_metrics_setting.HealthThresholds) { h.WarningTTFTMs = h.CriticalTTFTMs }},
+		{"oversized latency", func(h *perf_metrics_setting.HealthThresholds) { h.CriticalTTFTMs = 3600001 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := defaults
+			tc.change(&h)
+			body, err := common.Marshal(h)
+			require.NoError(t, err)
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPut, "/api/status-monitor/cache/health-thresholds", strings.NewReader(string(body)))
+			UpdateMonitorHealthThresholds(ctx)
+			assert.Contains(t, recorder.Body.String(), `"success":false`)
+			assert.Equal(t, defaults, perf_metrics_setting.GetHealthThresholds())
+		})
+	}
 }
