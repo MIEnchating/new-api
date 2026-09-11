@@ -17,8 +17,15 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  render as testingRender,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactElement } from 'react'
 import { toast } from 'sonner'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
@@ -47,6 +54,15 @@ const credential = {
     userHandle: null,
   },
   getClientExtensionResults: () => ({}),
+}
+
+function render(ui: ReactElement) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return testingRender(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+  )
 }
 
 beforeEach(() => {
@@ -173,16 +189,11 @@ it('refreshes Telegram bindings from the server result after the callback popup 
   })
   const onUpdate = vi.fn()
   const user = userEvent.setup()
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
   render(
-    <QueryClientProvider client={client}>
-      <AccountBindings
-        profile={{ email: 'bound@example.com' } as UserProfile}
-        onUpdate={onUpdate}
-      />
-    </QueryClientProvider>
+    <AccountBindings
+      profile={{ email: 'bound@example.com' } as UserProfile}
+      onUpdate={onUpdate}
+    />
   )
   const telegram = (await screen.findByText('Telegram')).closest('li')
   if (!telegram) throw new Error('Telegram binding entry is missing')

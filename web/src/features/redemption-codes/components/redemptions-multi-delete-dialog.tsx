@@ -67,11 +67,14 @@ export function RedemptionsMultiDeleteDialog<TData>({
       onOpenChange(false)
       triggerRefresh()
     },
-    onError: (_error, targets) => {
+    onError: (error, targets) => {
+      const fallbackMessage = t('Failed to delete {{count}} redemption codes', {
+        count: targets.length,
+      })
       toast.error(
-        t('Failed to delete {{count}} redemption codes', {
-          count: targets.length,
-        })
+        error instanceof Error && error.message
+          ? error.message
+          : fallbackMessage
       )
     },
   })

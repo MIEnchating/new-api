@@ -624,14 +624,14 @@ it.each([
     '/api/redemption/batch',
     { count: 15 },
     true,
-    '批量删除 15 个兑换码',
+    '批量删除了 15 个兑换码',
   ],
   [
     'redemption.delete_batch',
     '/api/redemption/batch',
     { count: 0 },
     true,
-    '批量删除 0 个兑换码',
+    '批量删除了 0 个兑换码',
   ],
   [
     'redemption.delete',

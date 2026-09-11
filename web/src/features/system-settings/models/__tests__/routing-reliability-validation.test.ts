@@ -47,6 +47,7 @@ function values() {
     monitor_setting: {
       auto_test_channel_enabled: false,
       auto_test_channel_minutes: 10,
+      channel_test_concurrency: 4,
       channel_test_mode: 'scheduled_all' as const,
     },
     error_response_setting: {
