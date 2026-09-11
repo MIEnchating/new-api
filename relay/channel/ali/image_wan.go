@@ -13,7 +13,10 @@ import (
 )
 
 func oaiFormEdit2WanxImageEdit(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (*AliImageRequest, error) {
-	var err error
+	count, err := request.ImageCount(true)
+	if err != nil {
+		return nil, err
+	}
 	var imageRequest AliImageRequest
 	imageRequest.Model = request.Model
 	imageRequest.ResponseFormat = request.ResponseFormat
@@ -29,9 +32,11 @@ func oaiFormEdit2WanxImageEdit(c *gin.Context, info *relaycommon.RelayInfo, requ
 	}
 	imageRequest.Input = wanInput
 	imageRequest.Parameters = AliImageParameters{
-		N: int(lo.FromPtrOr(request.N, uint(1))),
+		N: common.GetPointer(uint(count)),
 	}
-	info.PriceData.AddOtherRatio("n", float64(imageRequest.Parameters.N))
+	if request.BillingParameters != nil {
+		imageRequest.Parameters.PromptExtend = request.BillingParameters.PromptExtend
+	}
 
 	return &imageRequest, nil
 }

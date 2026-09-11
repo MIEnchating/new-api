@@ -47,6 +47,7 @@ import {
 } from '@/components/ui/collapsible'
 import { Combobox } from '@/components/ui/combobox'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Select,
@@ -1750,7 +1751,7 @@ export function ParamOverrideEditorDialog(
       headerClassName='border-b px-6 py-4'
       footerClassName='border-t px-6 py-4'
       contentHeight='min(72vh, 720px)'
-      bodyClassName='flex h-full min-h-0 flex-col space-y-4'
+      bodyClassName='space-y-4'
       footer={
         <>
           <Button
@@ -1833,8 +1834,8 @@ export function ParamOverrideEditorDialog(
       </div>
       {/* Content */}
       <div className='min-h-0 flex-1 overflow-hidden'>
-        {editMode === 'visual' ? (
-          visualMode === 'legacy' ? (
+        {editMode === 'visual' &&
+          (visualMode === 'legacy' ? (
             <div className='p-4'>
               <p className='text-muted-foreground mb-2 text-sm'>
                 {t('Legacy Format (JSON Object)')}
@@ -2046,9 +2047,9 @@ export function ParamOverrideEditorDialog(
                 )}
               </div>
             </div>
-          )
-        ) : (
-          /* JSON mode */
+          ))}
+        {/* JSON mode */}
+        {editMode !== 'visual' && (
           <div className='p-4'>
             <div className='mb-2 flex items-center gap-2'>
               <span className='text-muted-foreground text-xs'>
@@ -2129,6 +2130,10 @@ function RuleEditor(ruleEditorProps: RuleEditorProps) {
   const { t } = useTranslation()
   const operation = ruleEditorProps.operation
   const mode = operation.mode || 'set'
+  const returnErrorDraft =
+    mode === 'return_error' ? ruleEditorProps.returnErrorDraft : null
+  const pruneObjectsDraft =
+    mode === 'prune_objects' ? ruleEditorProps.pruneObjectsDraft : null
   const meta = MODE_META[mode] || MODE_META.set
   const conditions = operation.conditions
   const syncFromTarget =
@@ -2243,62 +2248,67 @@ function RuleEditor(ruleEditorProps: RuleEditorProps) {
         </div>
 
         {/* Value section */}
-        {meta.value &&
-          (mode === 'return_error' && ruleEditorProps.returnErrorDraft ? (
-            <ReturnErrorEditor
-              operationId={operation.id}
-              draft={ruleEditorProps.returnErrorDraft}
-              updateDraft={ruleEditorProps.updateReturnErrorDraft}
-            />
-          ) : mode === 'prune_objects' && ruleEditorProps.pruneObjectsDraft ? (
-            <PruneObjectsEditor
-              operationId={operation.id}
-              draft={ruleEditorProps.pruneObjectsDraft}
-              updateDraft={ruleEditorProps.updatePruneObjectsDraft}
-              addRule={ruleEditorProps.addPruneRule}
-              updateRule={ruleEditorProps.updatePruneRule}
-              removeRule={ruleEditorProps.removePruneRule}
-            />
-          ) : (
-            <div className='space-y-1.5'>
-              <div className='flex items-center justify-between'>
-                <label className='text-xs font-medium'>
-                  {t(getModeValueLabel(mode))}
-                </label>
-                {operation.value_text.trim().startsWith('{') && (
-                  <Button
-                    type='button'
-                    variant='ghost'
-                    size='sm'
-                    className='text-muted-foreground h-auto px-1.5 py-0.5 text-xs'
-                    onClick={() => {
-                      try {
-                        const parsed = JSON.parse(operation.value_text)
-                        ruleEditorProps.updateOperation(operation.id, {
-                          value_text: JSON.stringify(parsed, null, 2),
-                        })
-                      } catch {
-                        /* not valid JSON */
-                      }
-                    }}
-                  >
-                    {t('Format')}
-                  </Button>
-                )}
-              </div>
-              <Textarea
-                value={operation.value_text}
-                onChange={(e) =>
-                  ruleEditorProps.updateOperation(operation.id, {
-                    value_text: e.target.value,
-                  })
-                }
-                placeholder={getModeValuePlaceholder(mode)}
-                rows={3}
-                className='max-h-[200px] resize-y overflow-y-auto font-mono text-xs'
+        {meta.value && (
+          <>
+            {returnErrorDraft && (
+              <ReturnErrorEditor
+                operationId={operation.id}
+                draft={returnErrorDraft}
+                updateDraft={ruleEditorProps.updateReturnErrorDraft}
               />
-            </div>
-          ))}
+            )}
+            {pruneObjectsDraft && (
+              <PruneObjectsEditor
+                operationId={operation.id}
+                draft={pruneObjectsDraft}
+                updateDraft={ruleEditorProps.updatePruneObjectsDraft}
+                addRule={ruleEditorProps.addPruneRule}
+                updateRule={ruleEditorProps.updatePruneRule}
+                removeRule={ruleEditorProps.removePruneRule}
+              />
+            )}
+            {!returnErrorDraft && !pruneObjectsDraft && (
+              <div className='space-y-1.5'>
+                <div className='flex items-center justify-between'>
+                  <label className='text-xs font-medium'>
+                    {t(getModeValueLabel(mode))}
+                  </label>
+                  {operation.value_text.trim().startsWith('{') && (
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      className='text-muted-foreground h-auto px-1.5 py-0.5 text-xs'
+                      onClick={() => {
+                        try {
+                          const parsed = JSON.parse(operation.value_text)
+                          ruleEditorProps.updateOperation(operation.id, {
+                            value_text: JSON.stringify(parsed, null, 2),
+                          })
+                        } catch {
+                          /* not valid JSON */
+                        }
+                      }}
+                    >
+                      {t('Format')}
+                    </Button>
+                  )}
+                </div>
+                <Textarea
+                  value={operation.value_text}
+                  onChange={(e) =>
+                    ruleEditorProps.updateOperation(operation.id, {
+                      value_text: e.target.value,
+                    })
+                  }
+                  placeholder={getModeValuePlaceholder(mode)}
+                  rows={3}
+                  className='max-h-[200px] resize-y overflow-y-auto font-mono text-xs'
+                />
+              </div>
+            )}
+          </>
+        )}
 
         {/* keep_origin */}
         {meta.keepOrigin && (
@@ -2318,14 +2328,15 @@ function RuleEditor(ruleEditorProps: RuleEditorProps) {
         )}
 
         {/* sync_fields */}
-        {mode === 'sync_fields' && syncFromTarget && syncToTarget ? (
+        {mode === 'sync_fields' && syncFromTarget && syncToTarget && (
           <SyncFieldsEditor
             operationId={operation.id}
             syncFromTarget={syncFromTarget}
             syncToTarget={syncToTarget}
             updateOperation={ruleEditorProps.updateOperation}
           />
-        ) : (meta.from || meta.to !== undefined) && mode !== 'sync_fields' ? (
+        )}
+        {(meta.from || meta.to !== undefined) && mode !== 'sync_fields' && (
           <div className='grid gap-3 sm:grid-cols-2'>
             {(meta.from || meta.to === false) && (
               <div className='space-y-1.5'>
@@ -2362,7 +2373,7 @@ function RuleEditor(ruleEditorProps: RuleEditorProps) {
               </div>
             )}
           </div>
-        ) : null}
+        )}
 
         {/* Conditions */}
         <div className='rounded-lg border p-3'>
@@ -2678,9 +2689,9 @@ function ReturnErrorEditor(returnErrorEditorProps: ReturnErrorEditorProps) {
       </div>
 
       <div className='space-y-1.5'>
-        <label className='text-xs font-medium'>
-          {t('Error Message (required)')}
-        </label>
+        <Label required className='text-xs font-medium'>
+          {t('Error Message')}
+        </Label>
         <Textarea
           value={draft.message}
           onChange={(e) =>

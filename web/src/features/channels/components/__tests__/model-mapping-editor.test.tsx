@@ -16,62 +16,94 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { fireEvent, render, screen } from '@testing-library/react'
-import { useState } from 'react'
-import { describe, expect, test } from 'vitest'
+import { act, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { createInstance } from 'i18next'
+import { I18nextProvider } from 'react-i18next'
+import { expect, test, vi } from 'vitest'
 
-const { createInstance } = await import('i18next')
-const { I18nextProvider, initReactI18next } = await import('react-i18next')
-const { ModelMappingEditor } = await import('../model-mapping-editor')
+import en from '@/i18n/locales/en.json'
+import zh from '@/i18n/locales/zh.json'
 
-const i18n = createInstance()
-await i18n.use(initReactI18next).init({
-  lng: 'en',
-  resources: {
-    en: {
-      translation: {
-        Visual: 'Visual',
-        JSON: 'JSON',
-        'Fill Template': 'Fill Template',
-        'Original Model': 'Original Model',
-        'Replacement Model': 'Replacement Model',
-        'Delete mapping': 'Delete mapping',
-        'Add Mapping': 'Add Mapping',
-        'No model mappings configured. Click "Add Mapping" to get started.':
-          'No model mappings configured. Click "Add Mapping" to get started.',
-      },
-    },
-  },
+import { ModelMappingEditor } from '../model-mapping-editor'
+
+test('external mapping changes update the editor without emitting an edit', () => {
+  const onChange = vi.fn()
+  const view = render(
+    <ModelMappingEditor value='{"client-a":"upstream-a"}' onChange={onChange} />
+  )
+  expect(screen.getByDisplayValue('client-a')).toBeVisible()
+  expect(screen.getByDisplayValue('upstream-a')).toBeVisible()
+
+  view.rerender(
+    <ModelMappingEditor value='{"client-b":"upstream-b"}' onChange={onChange} />
+  )
+  expect(screen.getByDisplayValue('client-b')).toBeVisible()
+  expect(screen.getByDisplayValue('upstream-b')).toBeVisible()
+  expect(screen.queryByDisplayValue('client-a')).not.toBeInTheDocument()
+  expect(onChange).not.toHaveBeenCalled()
 })
 
-function EditorHarness(props: { initialValue: string }) {
-  const [value, setValue] = useState(props.initialValue)
-  return (
+test('language changes preserve draft mappings and explain the same direction in JSON mode', async () => {
+  const i18n = createInstance()
+  await i18n.init({
+    lng: 'en',
+    fallbackLng: 'en',
+    resources: { en, zh },
+    keySeparator: false,
+    interpolation: { escapeValue: false },
+  })
+  const user = userEvent.setup()
+  const onChange = vi.fn()
+  render(
     <I18nextProvider i18n={i18n}>
-      <ModelMappingEditor value={value} onChange={setValue} />
+      <ModelMappingEditor value='' onChange={onChange} />
     </I18nextProvider>
   )
-}
+  await user.click(screen.getByRole('button', { name: 'Add Mapping' }))
+  await user.type(screen.getByPlaceholderText('gpt-3.5-turbo'), 'client-alias')
+  await user.type(
+    screen.getByPlaceholderText('gpt-3.5-turbo-0125'),
+    'provider-model'
+  )
 
-describe('model mapping editor', () => {
-  test('adds the first blank mapping row with one click', () => {
-    render(<EditorHarness initialValue='' />)
+  await act(() => i18n.changeLanguage('zh'))
+  expect(screen.getByText('请求模型名称')).toBeVisible()
+  expect(screen.getByText('上游模型名称')).toBeVisible()
+  expect(screen.getByDisplayValue('client-alias')).toBeVisible()
+  expect(screen.getByDisplayValue('provider-model')).toBeVisible()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Mapping' }))
+  await user.click(screen.getByRole('tab', { name: 'JSON' }))
+  expect(
+    screen.getByText('JSON 的键是请求模型名称，值是上游模型名称。')
+  ).toBeVisible()
+  expect(screen.getByRole('textbox', { name: '模型映射' })).toHaveValue(
+    '{\n  "client-alias": "provider-model"\n}'
+  )
+  expect(onChange).toHaveBeenLastCalledWith(
+    '{\n  "client-alias": "provider-model"\n}'
+  )
+})
 
-    expect(screen.getAllByRole('combobox')).toHaveLength(2)
-    expect(screen.getByPlaceholderText('gpt-3.5-turbo')).toHaveValue('')
-  })
+test('adds the first blank mapping row with one click', async () => {
+  const user = userEvent.setup()
+  render(<ModelMappingEditor value='' onChange={vi.fn()} />)
 
-  test('keeps a newly added row when the stored JSON uses compact formatting', () => {
-    render(<EditorHarness initialValue='{"gpt-4":"gpt-4o"}' />)
+  await user.click(screen.getByRole('button', { name: 'Add Mapping' }))
 
-    fireEvent.click(screen.getByRole('button', { name: 'Add Mapping' }))
+  expect(screen.getAllByRole('combobox')).toHaveLength(2)
+  expect(screen.getByPlaceholderText('gpt-3.5-turbo')).toHaveValue('')
+})
 
-    const inputs = screen.getAllByRole('combobox')
-    expect(inputs).toHaveLength(4)
-    expect(screen.getByDisplayValue('gpt-4')).toBeVisible()
-    expect(inputs[2]).toHaveValue('')
-    expect(inputs[3]).toHaveValue('')
-  })
+test('keeps a newly added row when the stored JSON uses compact formatting', async () => {
+  const user = userEvent.setup()
+  render(<ModelMappingEditor value='{"gpt-4":"gpt-4o"}' onChange={vi.fn()} />)
+
+  await user.click(screen.getByRole('button', { name: 'Add Mapping' }))
+
+  const inputs = screen.getAllByRole('combobox')
+  expect(inputs).toHaveLength(4)
+  expect(screen.getByDisplayValue('gpt-4')).toBeVisible()
+  expect(inputs[2]).toHaveValue('')
+  expect(inputs[3]).toHaveValue('')
 })

@@ -47,7 +47,7 @@ const channelInfoSchema = z.object({
   multi_key_polling_index: z.number().default(0),
   multi_key_mode: z.enum(['random', 'polling']).default('random'),
 })
-const channelSchema = z.object({
+export const channelSchema = z.object({
   id: z.number(),
   type: z.number(),
   key: z.string(),

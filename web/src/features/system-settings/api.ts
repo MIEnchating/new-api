@@ -29,6 +29,8 @@ import type {
   UpdateOptionResponse,
   UpdateOptionsBulkRequest,
   UpdateGroupSettingsRequest,
+  UpdatePasskeyDomainsRequest,
+  UpdatePasskeyDomainsResponse,
   UpstreamChannelsResponse,
   UpstreamRatiosResponse,
 } from './types'
@@ -59,6 +61,20 @@ export async function updateSystemOptionsBulk(
 
 export async function updateGroupSettings(request: UpdateGroupSettingsRequest) {
   const res = await api.post<UpdateOptionResponse>('/api/option/group', request)
+  return res.data
+}
+
+export async function updatePasskeyDomains(
+  request: UpdatePasskeyDomainsRequest
+) {
+  const res = await api.put<UpdatePasskeyDomainsResponse>(
+    '/api/option/passkey/domains',
+    request,
+    {
+      validateStatus: (status) =>
+        (status >= 200 && status < 300) || status === 409,
+    }
+  )
   return res.data
 }
 

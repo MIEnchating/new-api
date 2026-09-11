@@ -56,7 +56,7 @@ export type BillingVar = {
   group?: string
 }
 
-const BILLING_VARS: BillingVar[] = [
+export const BILLING_VARS: BillingVar[] = [
   {
     key: 'p',
     field: 'inputPrice',
@@ -99,6 +99,15 @@ const BILLING_VARS: BillingVar[] = [
     tierField: 'cache_create_unit_cost',
     label: 'Cache create price',
     shortLabel: 'Cache Write',
+    side: 'input',
+    group: 'cache',
+  },
+  {
+    key: 'img_cr',
+    field: 'imageCachePrice',
+    tierField: 'image_cache_unit_cost',
+    label: 'Image cache input price',
+    shortLabel: 'Image Cache',
     side: 'input',
     group: 'cache',
   },
@@ -273,6 +282,7 @@ function mapTokenTier(
 ): ParsedTier {
   return {
     label: tier.label,
+    ...(tier.imageCount ? { imageCount: true } : {}),
     conditions: tier.conditions,
     ...(tier.billingUnit === 'request'
       ? { billingUnit: tier.billingUnit, fixedPrice: tier.fixedPrice }
@@ -594,19 +604,26 @@ export function splitBillingExprAndRequestRules(expr: string): {
 
   parts.forEach((part) => {
     const parsed = tryParseRequestRuleExpr(part)
-    if (parsed && parsed.length > 0) {
+    const compiled = compileBillingExpression(part)
+    const traced =
+      compiled.status === 'ready' &&
+      compiled.requestRules.some((rule) => rule.node === compiled.ast)
+    if ((parsed && parsed.length > 0) || traced) {
       ruleParts.push(part)
     } else {
       baseParts.push(part)
     }
   })
 
-  if (ruleParts.length === 0 || baseParts.length !== 1) {
+  const quantityParts = baseParts.filter(
+    (part) => unwrapOuterParens(part) === 'image_count'
+  )
+  if (ruleParts.length === 0 || baseParts.length - quantityParts.length !== 1) {
     return { billingExpr: trimmed, requestRuleExpr: '' }
   }
 
   return {
-    billingExpr: unwrapOuterParens(baseParts[0]),
+    billingExpr: baseParts.map(unwrapOuterParens).join(' * '),
     requestRuleExpr: ruleParts.join(' * '),
   }
 }
