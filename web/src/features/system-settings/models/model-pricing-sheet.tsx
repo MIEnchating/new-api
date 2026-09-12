@@ -231,6 +231,8 @@ export const ModelPricingEditorPanel = forwardRef<
       ? siteCurrency
       : USD_PRICING_CURRENCY
   const [pricingMode, setPricingMode] = useState<PricingMode>('tiered_expr')
+  const isLegacyPricingMode =
+    pricingMode === 'per-token' || pricingMode === 'per-request'
   const [promptPrice, setPromptPrice] = useState('')
   const [lanePrices, setLanePrices] = useState<Record<LaneKey, string>>({
     ...EMPTY_LANE_PRICES,
@@ -789,7 +791,7 @@ export const ModelPricingEditorPanel = forwardRef<
       conversion.isPending ||
       conversionPreview ||
       billingExpr.trim() ||
-      pricingMode === 'tiered_expr'
+      !isLegacyPricingMode
     ) {
       return
     }
@@ -839,7 +841,7 @@ export const ModelPricingEditorPanel = forwardRef<
     setConversionPreview(null)
     if (
       billingExpr.trim() ||
-      pricingMode === 'tiered_expr' ||
+      !isLegacyPricingMode ||
       JSON.stringify(buildSubmitData(form.getValues())) !==
         conversionPreview.draftFingerprint
     ) {
@@ -1016,7 +1018,7 @@ export const ModelPricingEditorPanel = forwardRef<
                       </TabsTrigger>
                     </TabsList>
 
-                    {pricingMode !== 'tiered_expr' && (
+                    {isLegacyPricingMode && (
                       <Alert className='border-amber-500/40 bg-amber-500/10 p-4 text-amber-900 dark:text-amber-100'>
                         <AlertTriangle aria-hidden='true' className='size-5' />
                         <AlertDescription className='space-y-3 text-sm text-inherit'>
@@ -1051,7 +1053,8 @@ export const ModelPricingEditorPanel = forwardRef<
                         </AlertDescription>
                       </Alert>
                     )}
-                    {(pricingMode !== 'tiered_expr' || wasConverted) && (
+                    {(isLegacyPricingMode ||
+                      (pricingMode === 'tiered_expr' && wasConverted)) && (
                       <p className='text-muted-foreground text-xs'>
                         {t(
                           'After conversion, expression reservation and rounding rules apply. Effective unit prices are preserved; individual rounded charges may differ.'

@@ -704,3 +704,17 @@ func TestSoraAdaptorAcceptsAgnesVideoIDOnSubmit(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "task_public", clientResponse.VideoID)
 }
+
+func TestParseTaskResultRunningAndVideoURLCompatibility(t *testing.T) {
+	adaptor := &TaskAdaptor{}
+	running, err := adaptor.ParseTaskResult([]byte(`{"status":"running","progress":42}`))
+	require.NoError(t, err)
+	assert.Equal(t, model.TaskStatusInProgress, running.Status)
+	assert.Equal(t, "42%", running.Progress)
+
+	completed, err := adaptor.ParseTaskResult([]byte(`{"status":"completed","progress":100,"data":[{"mime_type":"video/mp4","url":"https://media.example/result.mp4"}],"video_url":"https://media.example/result.mp4"}`))
+	require.NoError(t, err)
+	assert.Equal(t, model.TaskStatusSuccess, completed.Status)
+	assert.Equal(t, "100%", completed.Progress)
+	assert.Equal(t, "https://media.example/result.mp4", completed.Url)
+}

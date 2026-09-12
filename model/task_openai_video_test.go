@@ -8,6 +8,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestTaskToOpenAIVideoConvertsFractionalProgress(t *testing.T) {
+	task := &Task{TaskID: "task_public", Status: TaskStatusInProgress, Progress: "22.7%"}
+	video := task.ToOpenAIVideo()
+	assert.Equal(t, "in_progress", video.Status)
+	assert.Equal(t, 23, video.Progress)
+	encoded, err := common.Marshal(video)
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, common.Unmarshal(encoded, &fields))
+	assert.Equal(t, float64(23), fields["progress"])
+}
+
 func TestTaskToOpenAIVideoDoesNotExposeResultURL(t *testing.T) {
 	task := &Task{
 		TaskID:    "task_public",

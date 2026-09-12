@@ -288,6 +288,14 @@ function buildTypeDetailSegments(
         muted: true,
       })
     }
+  } else if (other.billing_mode === 'per_second') {
+    const modelPrice = other.model_price
+    segments.push({
+      text:
+        modelPrice != null && Number.isFinite(modelPrice) && modelPrice >= 0
+          ? `${t('Per-second')} · ${formatPriceCompact(modelPrice)}/${t('second')}`
+          : t('Per-second'),
+    })
   } else {
     const modelPrice = other.model_price
     const isPerCall = isPerCallBilling(modelPrice)

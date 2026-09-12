@@ -2,15 +2,31 @@ package sub2api
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestSetupRequestHeaderPropagatesNewAPIRequestID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Set(common.RequestIdKey, "new-api-request-id")
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ApiKey: "secret"}}
+	header := make(http.Header)
+
+	require.NoError(t, (&Adaptor{}).SetupRequestHeader(c, &header, info))
+	assert.Equal(t, "new-api-request-id", header.Get("X-Request-ID"))
+}
 
 func TestGetRequestURLAlphaSearch(t *testing.T) {
 	adaptor := &Adaptor{}

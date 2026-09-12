@@ -187,6 +187,7 @@ test.each([
   '',
   'tier("base", p * 3.00 + c * 9)',
   'tier("request", fixed(0.0100))',
+  'tier("image", fixed(0.08)) * image_count',
   'len < 200000 ? tier("short", p * 3 + c * 9) : tier("long", p * 6 + c * 18)',
 ])(
   'uses condition trees by default without changing pricing: %s',
@@ -220,6 +221,40 @@ test.each([
     expect(onRequestRuleExprChange).not.toHaveBeenCalled()
   }
 )
+
+test('edits per-image pricing while retaining image count and request multipliers', async () => {
+  const onBillingExprChange = vi.fn()
+  const rule = '(header("x-plan") == "fast" ? 2.00 : 1)'
+  render(
+    <TieredPricingEditor
+      billingExpr='tier("image", fixed(0.08)) * image_count'
+      requestRuleExpr={rule}
+      onBillingExprChange={onBillingExprChange}
+      onRequestRuleExprChange={vi.fn()}
+    />
+  )
+  const price = screen.getByRole('textbox', { name: 'Price per image' })
+  expect(price).toHaveValue('0.08')
+  expect(
+    screen.getByRole('combobox', { name: 'Tier billing mode' })
+  ).toHaveTextContent('Per image')
+  expect(
+    screen.getByRole('button', { name: 'Edit pricing rule image' })
+  ).toHaveTextContent('Price per image: $0.08/image')
+  fireEvent.change(price, { target: { value: '0.12' } })
+  const updated = 'tier("image", fixed(0.12)) * image_count'
+  expect(onBillingExprChange).toHaveBeenLastCalledWith(updated)
+  expect(evaluateBillingExpression(updated, { imageCount: 3 })).toMatchObject({
+    status: 'success',
+    cost: 360000,
+  })
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('combobox', { name: 'Editor mode' }))
+  await user.click(screen.getByRole('option', { name: 'Expression editor' }))
+  expect(
+    screen.getByRole('textbox', { name: 'Billing expression' })
+  ).toHaveValue(combineBillingExpr(updated, rule))
+})
 
 test('keeps the condition tree as the default after switching models and applying presets', async () => {
   const props = {

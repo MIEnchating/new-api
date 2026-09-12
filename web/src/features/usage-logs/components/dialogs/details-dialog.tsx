@@ -432,6 +432,28 @@ function BillingBreakdown(props: {
         value: other.matched_tier || t('No matching results'),
       })
     }
+  } else if (other.billing_mode === 'per_second') {
+    rows.push({ label: t('Billing Mode'), value: t('Per-second') })
+    if (
+      other.model_price != null &&
+      Number.isFinite(other.model_price) &&
+      other.model_price >= 0
+    ) {
+      rows.push({
+        label: t('Price per second'),
+        value: `${fmtPrice(other.model_price)}/${t('second')}`,
+      })
+    }
+    if (
+      other.seconds != null &&
+      Number.isFinite(other.seconds) &&
+      other.seconds > 0
+    ) {
+      rows.push({
+        label: t('Billable duration'),
+        value: `${other.seconds} ${t('second')}`,
+      })
+    }
   } else if (isPerCall) {
     rows.push({ label: t('Billing Mode'), value: t('Per-call') })
     if (other.model_price != null) {

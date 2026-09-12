@@ -30,6 +30,7 @@ const (
 	AuthFlowPurposeTwoFASetup        = "2fa_setup"
 	AuthFlowPurposeSecurityProof     = "security_proof"
 	AuthFlowPurposeEmailBinding      = "email_binding"
+	AuthFlowPurposeChatGPT2APISSO    = "chatgpt2api_sso"
 	AuthFlowTokenBytes               = 32
 	AuthFlowDefaultCleanupRetention  = 24 * time.Hour
 )

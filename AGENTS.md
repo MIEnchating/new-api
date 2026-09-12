@@ -21,6 +21,15 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - The Go gateway handles management APIs, upstream relay, billing, and background tasks across `router/`, `middleware/`, `controller/`, `service/`, `model/`, and `relay/`.
 - `relaykit/` is an independent Go module for protocol DTOs and conversions; transport, authentication, database access, and billing stay in the host.
 - JavaScript task plugins live in `plugins/tasks/`, run through `pkg/jsplugin/`, and integrate with host task polling and settlement.
+
+## Development Runtime
+
+- 日常开发、调试和本地验证必须使用宿主机开发进程，不使用 Docker 容器替代前端或后端开发环境。
+- 前端使用 `cd web && bun run dev` 启动开发服务器，并连接宿主机运行的后端。
+- 后端使用 Go 开发命令直接启动，或使用仓库已有的本机开发启动脚本；修改后优先重启宿主机进程。
+- Docker Compose、Dockerfile 和本地镜像只用于明确的部署、发布前镜像验证或用户明确要求的容器集成测试。
+- 未经明确要求，不得启动、重建、替换或重启生产容器；容器验证前必须检查端口、网络和数据卷，避免影响开发服务。
+- 开发验证应优先覆盖宿主机进程的编译、测试和接口检查；容器能启动不能替代本机开发验证。
 - `web/` is the React frontend (see `web/AGENTS.md`); `electron/` is the desktop wrapper.
 
 ## Internationalization (i18n)

@@ -155,6 +155,8 @@ export function parseTaskResult(ctx, body) {
     pending: "QUEUED",
     processing: "IN_PROGRESS",
     in_progress: "IN_PROGRESS",
+    running: "IN_PROGRESS",
+    generating: "IN_PROGRESS",
     completed: "SUCCESS",
     failed: "FAILURE",
     cancelled: "FAILURE",
@@ -162,22 +164,55 @@ export function parseTaskResult(ctx, body) {
   const mapped = statuses[body.status];
   const result = { status: mapped || "UNKNOWN" };
   if (!mapped) result.reason = "unrecognized status: " + String(body.status || "");
-  if (body.progress > 0 && body.progress < 100) result.progress = body.progress + "%";
+  const progress = Number(body.progress);
+  if (Number.isFinite(progress) && progress >= 0 && progress <= 100) result.progress = progress + "%";
+  const url = videoURL(body);
+  if (url) result.url = url;
   if (result.status === "FAILURE") result.reason = body.error && body.error.message ? body.error.message : "task failed";
   return result;
 }
 
+function videoURL(value) {
+  const seen = [];
+  function visit(node, depth) {
+    if (!node || depth > 5) return "";
+    if (typeof node === "string") return /^https?:\/\//i.test(node.trim()) ? node.trim() : "";
+    if (typeof node !== "object" || seen.includes(node)) return "";
+    seen.push(node);
+    for (const key of ["video_url", "url", "output_url", "download_url"]) {
+      const found = visit(node[key], depth + 1);
+      if (found) return found;
+    }
+    for (const key of ["data", "result", "output", "results"]) {
+      const found = visit(node[key], depth + 1);
+      if (found) return found;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found = visit(item, depth + 1);
+        if (found) return found;
+      }
+    }
+    return "";
+  }
+  return visit(value, 0);
+}
+
+function artifactData(value) {
+  const data = (value && value.data) || {};
+  if (data.data && typeof data.data === "object" && data.task_id && Object.prototype.hasOwnProperty.call(data, "data")) return data.data;
+  return data;
+}
+
 export function listArtifacts(task) {
-  return task.status === "SUCCESS" ? [{ key: "video", type: "video" }] : [];
+  return task.status === "SUCCESS" && videoURL(artifactData(task)) ? [{ key: "video", type: "video", mimeType: "video/mp4" }] : [];
 }
 
 export function buildContentRequest(ctx) {
   if (ctx.artifactKey !== "video") throw new Error("artifact_not_found");
-  return {
-    url: ctx.baseUrl + "/v1/videos/" + encodeURIComponent(ctx.upstreamTaskId) + "/content",
-    method: ctx.clientRequest.method,
-    headers: { Authorization: "Bearer " + ctx.apiKey },
-  };
+  const url = videoURL(artifactData(ctx));
+  if (url) return { url: url, method: ctx.clientRequest.method, credentialless: true };
+  return { url: ctx.baseUrl + "/v1/videos/" + encodeURIComponent(ctx.upstreamTaskId) + "/content", method: ctx.clientRequest.method, headers: { Authorization: "Bearer " + ctx.apiKey } };
 }
 
 export const protocols = {

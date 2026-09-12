@@ -557,17 +557,33 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 	taskResult := relaycommon.TaskInfo{
 		Code: 0,
 	}
+	// Normalize provider-specific nested payloads (including typed arrays) to
+	// generic JSON values before searching for a media URL.
+	toGenericJSON := func(value any) any {
+		if value == nil {
+			return nil
+		}
+		encoded, err := common.Marshal(value)
+		if err != nil {
+			return value
+		}
+		var generic any
+		if err := common.Unmarshal(encoded, &generic); err != nil {
+			return value
+		}
+		return generic
+	}
 
 	switch strings.ToLower(resTask.Status) {
 	case "submitting":
 		taskResult.Status = model.TaskStatusSubmitted
 	case "queued", "pending":
 		taskResult.Status = model.TaskStatusQueued
-	case "processing", "in_progress", "enhancing":
+	case "processing", "in_progress", "enhancing", "running", "generating":
 		taskResult.Status = model.TaskStatusInProgress
 	case "completed", "complete", "success", "succeeded", "done":
 		taskResult.Status = model.TaskStatusSuccess
-		taskResult.Url = firstNonEmptyVideoURL(resTask.VideoURL, resTask.URL, resTask.OutputURL, resTask.DownloadURL, nestedVideoURL(resTask.Data), nestedVideoURL(resTask.Result), nestedVideoURL(resTask.Output))
+		taskResult.Url = firstNonEmptyVideoURL(resTask.VideoURL, resTask.URL, resTask.OutputURL, resTask.DownloadURL, nestedVideoURL(toGenericJSON(resTask.Data)), nestedVideoURL(toGenericJSON(resTask.Result)), nestedVideoURL(toGenericJSON(resTask.Output)))
 	case "failed", "fail", "error", "cancelled", "canceled":
 		taskResult.Status = model.TaskStatusFailure
 		if resTask.Error != nil {
@@ -577,7 +593,7 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 		}
 	default:
 	}
-	if resTask.Progress > 0 && resTask.Progress < 100 {
+	if resTask.Progress >= 0 && resTask.Progress <= 100 && (resTask.Progress > 0 || taskResult.Status == model.TaskStatusSuccess) {
 		taskResult.Progress = fmt.Sprintf("%d%%", resTask.Progress)
 	}
 

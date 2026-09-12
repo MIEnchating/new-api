@@ -245,6 +245,60 @@ it('previews legacy conversion in the selected currency and applies only after c
   expect(
     screen.getByRole('button', { name: 'Convert to expression' })
   ).toBeDisabled()
+  await userEvent.setup().click(screen.getByRole('tab', { name: 'Per-second' }))
+  expect(
+    screen.queryByText(
+      'After conversion, expression reservation and rounding rules apply. Effective unit prices are preserved; individual rounded charges may differ.'
+    )
+  ).not.toBeInTheDocument()
+})
+
+it('only offers legacy conversion in per-token and per-request modes', async () => {
+  vi.spyOn(api, 'post').mockResolvedValue({
+    data: { success: true, data: { effective: { ModelRatio: 1 } } },
+  })
+  const data: Partial<ModelRatioData> = {
+    billingMode: 'per-second',
+    price: '0.35',
+    secondPriceConfig: {
+      duration_field: 'seconds',
+      resolution_field: 'resolution',
+      prices: { '1080p': 0.5 },
+    },
+  }
+  const editor = renderEditor(data)
+  const user = userEvent.setup()
+  for (const legacyMode of [
+    'Per-token (deprecated)',
+    'Per-request (deprecated)',
+  ]) {
+    expect(screen.getByRole('tab', { name: 'Per-second' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(
+      screen.queryByRole('button', { name: 'Convert to expression' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        'Legacy pricing is deprecated. Convert the current prices to an expression draft, then save to apply it.'
+      )
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        'After conversion, expression reservation and rounding rules apply. Effective unit prices are preserved; individual rounded charges may differ.'
+      )
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: legacyMode }))
+    expect(
+      screen.getByRole('button', { name: 'Convert to expression' })
+    ).toBeEnabled()
+    await user.click(screen.getByRole('tab', { name: 'Per-second' }))
+  }
+  expect(screen.getByRole('textbox', { name: 'Price per second' })).toHaveValue(
+    '0.35'
+  )
+  expect(await commit(editor.ref)).toMatchObject(data)
 })
 
 it.each([

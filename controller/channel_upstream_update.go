@@ -383,6 +383,25 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		if !ok {
 			return nil, fmt.Errorf("task plugin %q is not registered", channel.GetSetting().TaskPluginKey)
 		}
+		// Sora plugins use the OpenAI-compatible /v1/models endpoint. Keep
+		// discovery dynamic for type-61 channels while retaining the manifest
+		// models as a fallback for self-hosted endpoints without model listing.
+		if channel.GetSetting().TaskPluginKey == "sora" && channel.GetBaseURL() != "" {
+			key, _, apiErr := channel.GetNextEnabledKey()
+			if apiErr != nil {
+				return nil, fmt.Errorf("获取渠道密钥失败: %w", apiErr)
+			}
+			key = strings.TrimSpace(key)
+			headers, err := buildFetchModelsHeaders(channel, key)
+			if err == nil {
+				body, fetchErr := getFetchModelsResponseBody(http.MethodGet, strings.TrimRight(channel.GetBaseURL(), "/")+"/v1/models", channel, headers)
+				if fetchErr == nil {
+					if models, parseErr := parseOpenAIModelIDs(body); parseErr == nil {
+						return models, nil
+					}
+				}
+			}
+		}
 		return normalizeModelNames(plugin.Meta.Models), nil
 	}
 	baseURL := constant.GetChannelBaseURL(channel.Type)

@@ -57,7 +57,11 @@ export type VisualPricingNode =
       yes: VisualPricingNode
       no: VisualPricingNode
     })
-export type VisualBillingDocument = { source: string; root: VisualPricingNode }
+export type VisualBillingDocument = {
+  source: string
+  root: VisualPricingNode
+  imageCountMultiplier?: { pricingOrigin: ExpressionNode }
+}
 export type VisualBillingIssue = { id: string; message: string }
 export type VisualBillingSerialization =
   | { ok: true; source: string }
@@ -206,9 +210,26 @@ export function parseVisualBillingDocument(
 ): VisualBillingDocument | null {
   const compiled = compileBillingExpression(source)
   if (compiled.status !== 'ready') return null
-  const root = readVisualPricing(compiled.ast)
+  let pricing = compiled.ast
+  let imageCountMultiplier: VisualBillingDocument['imageCountMultiplier']
+  if (pricing.kind === 'binary' && pricing.operator === '*') {
+    if (
+      pricing.right.kind === 'variable' &&
+      pricing.right.name === 'image_count'
+    ) {
+      pricing = pricing.left
+      imageCountMultiplier = { pricingOrigin: pricing }
+    } else if (
+      pricing.left.kind === 'variable' &&
+      pricing.left.name === 'image_count'
+    ) {
+      pricing = pricing.right
+      imageCountMultiplier = { pricingOrigin: pricing }
+    }
+  }
+  const root = readVisualPricing(pricing)
   if (!root) return null
-  const document = { source, root }
+  const document = { source, root, imageCountMultiplier }
   return serializeVisualBillingDocument(document).ok ? document : null
 }
 
@@ -480,9 +501,21 @@ export function serializeVisualBillingDocument(
       ],
     }
   }
+  let expression = body
+  if (document.imageCountMultiplier) {
+    const pricingOrigin = document.imageCountMultiplier.pricingOrigin
+    // Replaced branches must stay inside the image-count multiplication too.
+    const text =
+      document.root.kind === 'branch' && document.root.origin !== pricingOrigin
+        ? `(${body})`
+        : body
+    expression = patchSource(document.source, original.ast, [
+      { node: pricingOrigin, text },
+    ])
+  }
   const source =
     document.source.slice(0, original.ast.start) +
-    body +
+    expression +
     document.source.slice(original.ast.end)
   if (compileBillingExpression(source).status !== 'ready') {
     return {

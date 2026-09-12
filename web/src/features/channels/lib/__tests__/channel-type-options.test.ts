@@ -49,6 +49,10 @@ test('Sora supports model discovery and retains configured upstream detection se
   })
 })
 
+test('Task Plugin channels support model discovery', () => {
+  expect(MODEL_FETCHABLE_TYPES.has(CHANNEL_TYPE_TASK_PLUGIN)).toBe(true)
+})
+
 describe('channel type options for task plugin bind', () => {
   test('hides the task plugin type when the caller cannot bind', () => {
     const options = channelTypeOptionsForTaskPluginBind(false)

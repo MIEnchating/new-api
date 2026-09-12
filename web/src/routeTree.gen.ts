@@ -50,6 +50,7 @@ import { Route as AuthenticatedPlaygroundIndexRouteImport } from './routes/_auth
 import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authenticated/profile/index'
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedSecurityIndexRouteImport } from './routes/_authenticated/security/index'
+import { Route as AuthenticatedSsoChatgpt2apiRouteImport } from './routes/_authenticated/sso/chatgpt2api'
 import { Route as AuthenticatedStatusMonitorIndexRouteImport } from './routes/_authenticated/status-monitor/index'
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
@@ -294,6 +295,12 @@ const AuthenticatedSecurityIndexRoute =
     path: '/security/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedSsoChatgpt2apiRoute =
+  AuthenticatedSsoChatgpt2apiRouteImport.update({
+    id: '/sso/chatgpt2api',
+    path: '/sso/chatgpt2api',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedStatusMonitorIndexRoute =
   AuthenticatedStatusMonitorIndexRouteImport.update({
     id: '/status-monitor/',
@@ -479,6 +486,7 @@ export interface FileRoutesByFullPath {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/pages/$pageId': typeof AuthenticatedPagesPageIdRoute
+  '/sso/chatgpt2api': typeof AuthenticatedSsoChatgpt2apiRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/affiliate/': typeof AuthenticatedAffiliateIndexRoute
@@ -545,6 +553,7 @@ export interface FileRoutesByTo {
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/pages/$pageId': typeof AuthenticatedPagesPageIdRoute
+  '/sso/chatgpt2api': typeof AuthenticatedSsoChatgpt2apiRoute
   '/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/affiliate': typeof AuthenticatedAffiliateIndexRoute
@@ -615,6 +624,7 @@ export interface FileRoutesById {
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
   '/_authenticated/pages/$pageId': typeof AuthenticatedPagesPageIdRoute
+  '/_authenticated/sso/chatgpt2api': typeof AuthenticatedSsoChatgpt2apiRoute
   '/_authenticated/usage-logs/$section': typeof AuthenticatedUsageLogsSectionRoute
   '/_authenticated/usage-logs/audit': typeof AuthenticatedUsageLogsAuditRoute
   '/_authenticated/affiliate/': typeof AuthenticatedAffiliateIndexRoute
@@ -684,6 +694,7 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/models/$section'
     | '/pages/$pageId'
+    | '/sso/chatgpt2api'
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/affiliate/'
@@ -750,6 +761,7 @@ export interface FileRouteTypes {
     | '/errors/$error'
     | '/models/$section'
     | '/pages/$pageId'
+    | '/sso/chatgpt2api'
     | '/usage-logs/$section'
     | '/usage-logs/audit'
     | '/affiliate'
@@ -819,6 +831,7 @@ export interface FileRouteTypes {
     | '/_authenticated/errors/$error'
     | '/_authenticated/models/$section'
     | '/_authenticated/pages/$pageId'
+    | '/_authenticated/sso/chatgpt2api'
     | '/_authenticated/usage-logs/$section'
     | '/_authenticated/usage-logs/audit'
     | '/_authenticated/affiliate/'
@@ -1166,6 +1179,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSecurityIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/sso/chatgpt2api': {
+      id: '/_authenticated/sso/chatgpt2api'
+      path: '/sso/chatgpt2api'
+      fullPath: '/sso/chatgpt2api'
+      preLoaderRoute: typeof AuthenticatedSsoChatgpt2apiRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/status-monitor/': {
       id: '/_authenticated/status-monitor/'
       path: '/status-monitor'
@@ -1442,6 +1462,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
   AuthenticatedPagesPageIdRoute: typeof AuthenticatedPagesPageIdRoute
+  AuthenticatedSsoChatgpt2apiRoute: typeof AuthenticatedSsoChatgpt2apiRoute
   AuthenticatedUsageLogsSectionRoute: typeof AuthenticatedUsageLogsSectionRoute
   AuthenticatedUsageLogsAuditRoute: typeof AuthenticatedUsageLogsAuditRoute
   AuthenticatedAffiliateIndexRoute: typeof AuthenticatedAffiliateIndexRoute
@@ -1473,6 +1494,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
   AuthenticatedPagesPageIdRoute: AuthenticatedPagesPageIdRoute,
+  AuthenticatedSsoChatgpt2apiRoute: AuthenticatedSsoChatgpt2apiRoute,
   AuthenticatedUsageLogsSectionRoute: AuthenticatedUsageLogsSectionRoute,
   AuthenticatedUsageLogsAuditRoute: AuthenticatedUsageLogsAuditRoute,
   AuthenticatedAffiliateIndexRoute: AuthenticatedAffiliateIndexRoute,

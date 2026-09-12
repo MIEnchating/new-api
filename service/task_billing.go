@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -25,8 +26,12 @@ import (
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model.Task) {
 	tokenName := c.GetString("token_name")
 	logContent := fmt.Sprintf("操作 %s", info.Action)
+	billingMode := ""
+	if task != nil && task.PrivateData.BillingContext != nil {
+		billingMode = task.PrivateData.BillingContext.BillingMode
+	}
 	// 支持任务仅按次计费
-	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
+	if billingMode != billing_setting.BillingModePerSecond && common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
 		logContent = fmt.Sprintf("%s，按次计费", logContent)
 	} else {
 		var contents []string
@@ -50,6 +55,12 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	other.SetPublic("is_task", true)
 	other.SetPublic("request_path", c.Request.URL.Path)
 	other.SetPublic("model_price", info.PriceData.ModelPrice)
+	if billingMode == billing_setting.BillingModePerSecond && info.TieredBillingSnapshot == nil {
+		other.SetPublic("billing_mode", billingMode)
+		if seconds, ok := info.PriceData.OtherRatios()["seconds"]; ok {
+			other.SetPublic("seconds", seconds)
+		}
+	}
 	if info.PriceData.ModelRatio > 0 {
 		other.SetPublic("model_ratio", info.PriceData.ModelRatio)
 	}

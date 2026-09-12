@@ -159,6 +159,26 @@ test.each([
     expected: 'Per-call · $0.25',
   },
   {
+    name: 'historical task multiplier without a recorded billing mode',
+    other: { is_task: true, model_price: 0.4, seconds: 5 },
+    expected: 'Per-call · $0.4',
+  },
+  {
+    name: 'per-second',
+    other: { billing_mode: 'per_second', model_price: 0.4, seconds: 5 },
+    expected: 'Per-second · $0.4/second',
+  },
+  {
+    name: 'free per-second',
+    other: { billing_mode: 'per_second', model_price: 0, seconds: 5 },
+    expected: 'Per-second · $0/second',
+  },
+  {
+    name: 'per-second without a recorded price',
+    other: { billing_mode: 'per_second' },
+    expected: 'Per-second',
+  },
+  {
     name: 'standard',
     other: { model_ratio: 1, completion_ratio: 2 },
     expected: 'Standard · $2 / $4/M',
@@ -176,6 +196,30 @@ test.each([
   })
   expect(preview.textContent).toBe(expected)
 })
+
+test.each([true, false])(
+  'per-second details show the recorded unit price and duration for admin=%s',
+  async (isAdmin) => {
+    const preview = renderPreview(
+      {
+        is_task: true,
+        billing_mode: 'per_second',
+        model_price: 0.4,
+        seconds: 5,
+        group_ratio: 1,
+      },
+      isAdmin
+    )
+    fireEvent.click(preview)
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(dialog.getByText('Per-second')).toBeVisible()
+    expect(dialog.getByText('Price per second')).toBeVisible()
+    expect(dialog.getByText('$0.4/second')).toBeVisible()
+    expect(dialog.getByText('Billable duration')).toBeVisible()
+    expect(dialog.getByText('5 second')).toBeVisible()
+    expect(dialog.queryByText('Per-call')).not.toBeInTheDocument()
+  }
+)
 
 test('quota saturation remains first and only billing adds to the counter', () => {
   const preview = renderPreview({

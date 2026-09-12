@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -12,9 +13,11 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -343,6 +346,48 @@ func TestLogTaskConsumptionIncludesTieredSnapshotUsageFacts(t *testing.T) {
 	assert.Contains(t, log.Content, "计算参数：")
 	assert.Contains(t, log.Content, "resolution: 720P")
 	assert.Contains(t, log.Content, "seconds: 5")
+}
+
+func TestLogTaskConsumptionPreservesPerSecondBilling(t *testing.T) {
+	for _, price := range []float64{0.4, 0} {
+		t.Run(fmt.Sprint(price), func(t *testing.T) {
+			truncate(t)
+			const userID, channelID = 42, 42
+			seedUser(t, userID, 10_000)
+			seedChannel(t, channelID)
+			previousPatches := constant.TaskPricePatches
+			constant.TaskPricePatches = []string{"test-model"}
+			t.Cleanup(func() { constant.TaskPricePatches = previousPatches })
+			task := makeTask(userID, channelID, 100, 0, BillingSourceWallet, 0)
+			task.PrivateData.BillingContext.BillingMode = billing_setting.BillingModePerSecond
+			task.PrivateData.BillingContext.ModelPrice = price
+			task.PrivateData.BillingContext.OtherRatios = map[string]float64{"seconds": 5}
+			info := &relaycommon.RelayInfo{
+				UserId:          userID,
+				OriginModelName: "test-model",
+				UsingGroup:      "default",
+				ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: channelID},
+				TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "GENERATE"},
+				PriceData: types.PriceData{
+					ModelPrice:     price,
+					Quota:          100,
+					GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+				},
+			}
+			info.PriceData.AddOtherRatio("seconds", 5)
+			log := callLogTaskConsumption(t, info, task)
+			var submitted map[string]any
+			require.NoError(t, common.UnmarshalJsonStr(log.Other, &submitted))
+			for _, other := range []map[string]any{submitted, taskBillingOther(task).Snapshot()} {
+				assert.Equal(t, billing_setting.BillingModePerSecond, other["billing_mode"])
+				assert.Equal(t, price, other["model_price"])
+				assert.Equal(t, float64(5), other["seconds"])
+			}
+			assert.NotContains(t, log.Content, "按次计费")
+			assert.Contains(t, log.Content, "seconds: 5.00")
+			assert.Equal(t, 100, log.Quota)
+		})
+	}
 }
 
 func TestLogTaskConsumptionWithoutSnapshotKeepsRatioMode(t *testing.T) {

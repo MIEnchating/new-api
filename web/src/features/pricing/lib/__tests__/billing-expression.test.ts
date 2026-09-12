@@ -303,6 +303,9 @@ describe('local billing expression evaluation', () => {
 
 describe('visual billing document', () => {
   test.each([
+    'tier("image", fixed(0.08)) * image_count',
+    "v1: image_count * (tier('image', fixed(0.0800)))  ",
+    '(len < 100 ? tier("short", fixed(0)) : tier("long", fixed(0.08))) * image_count',
     deepSeekExpression,
     `v1:  (hour('Asia/Shanghai') >= 9 ? tier('peak', cr * 0 + p * 3e0 + c * 9) : tier('off', c * 4.5 + p * 1.5))  `,
     '!(weekday("UTC") == 0 || month("UTC") != 9) ? (len < 100 ? tier("short", p * 2 + c * 4) : tier("long", p * 3 + c * 6)) : tier("off", p * 1)',
@@ -314,6 +317,60 @@ describe('visual billing document', () => {
       ok: true,
       source,
     })
+  })
+
+  test.each([
+    'tier("image", fixed(0.08)) * image_count',
+    '(len < 100 ? tier("short", fixed(0)) : tier("image", fixed(0.08))) * image_count',
+  ])(
+    'keeps image count applied when adding or replacing a pricing branch: %s',
+    (source) => {
+      const document = parseVisualBillingDocument(source)
+      assert(document)
+      if (document.root.kind === 'branch') document.root = document.root.no
+      assert(document.root.kind === 'tier')
+      document.root = {
+        id: visualNodeId(),
+        kind: 'branch',
+        condition: {
+          id: visualNodeId(),
+          kind: 'comparison',
+          probe: 'len',
+          timezone: '',
+          operator: '<',
+          value: '100',
+        },
+        yes: {
+          ...document.root,
+          id: visualNodeId(),
+          origin: undefined,
+          fixedPrice: '0.04',
+        },
+        no: document.root,
+      }
+      const result = serializeVisualBillingDocument(document)
+      assert(result.ok)
+      expect(
+        evaluateBillingExpression(result.source, {
+          tokens: { len: 99 },
+          imageCount: 3,
+        })
+      ).toMatchObject({ status: 'success', cost: 120000 })
+      expect(
+        evaluateBillingExpression(result.source, {
+          tokens: { len: 100 },
+          imageCount: 3,
+        })
+      ).toMatchObject({ status: 'success', cost: 240000 })
+      expect(parseVisualBillingDocument(result.source)).not.toBeNull()
+    }
+  )
+
+  test.each([
+    'tier("image", fixed(0.08)) * image_count * image_count',
+    'tier("image", p * 2) * (image_count + 1)',
+  ])('keeps unsupported count formulas in raw mode: %s', (source) => {
+    expect(parseVisualBillingDocument(source)).toBeNull()
   })
 
   test('changes only the edited price span, keeping zero cache price, order and escaped labels', () => {
