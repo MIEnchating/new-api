@@ -13,6 +13,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPluralVideoGenerationRouteIsRegistered(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	SetVideoRouter(engine)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/videos/generations", nil)
+	engine.ServeHTTP(recorder, request)
+
+	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+}
+
 func TestGetOpenAIVideoRouteRendersJimengTask(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
