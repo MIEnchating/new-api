@@ -20,6 +20,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   act,
   render as testingRender,
+  cleanup,
   screen,
   waitFor,
   within,
@@ -32,6 +33,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { OAUTH_POPUP_CALLBACK_MESSAGE } from '@/features/auth/constants'
 import type { UserProfile } from '@/features/profile/types'
 import { api } from '@/lib/api'
+import { STATUS_QUERY_KEY } from '@/lib/status-query'
 
 import { AccountBindings } from '../components/account-bindings'
 import { PasskeyCard } from '../components/passkey-card'
@@ -57,15 +59,17 @@ const credential = {
 }
 
 function render(ui: ReactElement) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
   return testingRender(
     <QueryClientProvider client={client}>{ui}</QueryClientProvider>
   )
 }
 
+let client: QueryClient
 beforeEach(() => {
+  client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  client.setQueryData(STATUS_QUERY_KEY, { passkey_rp_ids: ['localhost'] })
   vi.stubGlobal(
     'PublicKeyCredential',
     class {
@@ -84,6 +88,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  cleanup()
+  client.clear()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   if (credentialsDescriptor) {
@@ -352,7 +358,12 @@ it('consumes Passkey authorization at setup and activates using only the dedicat
   })
   const success = vi.spyOn(toast, 'success')
   const user = userEvent.setup()
-  render(<TwoFACard loading={false} />)
+  client.setQueryData(STATUS_QUERY_KEY, { passkey_rp_ids: ['localhost'] })
+  render(
+    <QueryClientProvider client={client}>
+      <TwoFACard loading={false} />
+    </QueryClientProvider>
+  )
   await user.click(await screen.findByRole('button', { name: 'Enable' }))
   await screen.findByText(
     'We will prompt your device to confirm using biometrics or your hardware key.'

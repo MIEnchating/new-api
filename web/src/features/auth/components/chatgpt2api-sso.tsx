@@ -41,20 +41,37 @@ export function ChatGPT2APISSO(props: { request?: string }) {
           )
         )
       : Promise.reject(new Error('Missing single sign-on request'))
-    void pending.current.then((result) => {
-      if (!active) return
-      const destination = new URL(result.url)
-      if (destination.protocol !== 'https:' || destination.username || destination.password) {
-        setFailed(true)
-        return
-      }
-      window.location.replace(destination.href)
-    }).catch(() => { if (active) setFailed(true) })
-    return () => { active = false }
+    void pending.current
+      .then((result) => {
+        if (!active) return
+        const destination = new URL(result.url)
+        if (
+          destination.protocol !== 'https:' ||
+          destination.username ||
+          destination.password
+        ) {
+          setFailed(true)
+          return
+        }
+        window.location.replace(destination.href)
+      })
+      .catch(() => {
+        if (active) setFailed(true)
+      })
+    return () => {
+      active = false
+    }
   }, [props.request])
 
   if (failed) {
-    return <ErrorState description={t('Single sign-on failed. Please return to the platform and try again.')} onRetry={() => window.location.replace('/sso/chatgpt2api')} />
+    return (
+      <ErrorState
+        description={t(
+          'Single sign-on failed. Please return to the platform and try again.'
+        )}
+        onRetry={() => window.location.replace('/sso/chatgpt2api')}
+      />
+    )
   }
   return <LoadingState message={t('Signing in to chatgpt2api...')} />
 }
