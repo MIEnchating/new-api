@@ -103,9 +103,10 @@ export function Pricing() {
         .filter(([g]) => !EXCLUDED_GROUPS.includes(g))
         .sort(
           ([left, leftInfo], [right, rightInfo]) =>
-            ((leftInfo as { order?: number }).order ?? Number.MAX_SAFE_INTEGER) -
-              ((rightInfo as { order?: number }).order ?? Number.MAX_SAFE_INTEGER) ||
-            left.localeCompare(right)
+            ((leftInfo as { order?: number }).order ??
+              Number.MAX_SAFE_INTEGER) -
+              ((rightInfo as { order?: number }).order ??
+                Number.MAX_SAFE_INTEGER) || left.localeCompare(right)
         )
         .map(([group]) => group),
     [usableGroup]

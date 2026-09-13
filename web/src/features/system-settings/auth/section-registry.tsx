@@ -88,6 +88,7 @@ const AUTH_SECTIONS = [
           'passkey.enabled': settings['passkey.enabled'],
           'passkey.rp_display_name': settings['passkey.rp_display_name'],
           'passkey.rp_id': settings['passkey.rp_id'],
+          'passkey.legacy_rp_ids': settings['passkey.legacy_rp_ids'],
           'passkey.origins': settings['passkey.origins'],
           'passkey.allow_insecure_origin':
             settings['passkey.allow_insecure_origin'],
@@ -123,7 +124,7 @@ const AUTH_SECTIONS = [
   },
 ] as const
 
-type AuthSectionId = (typeof AUTH_SECTIONS)[number]['id']
+export type AuthSectionId = (typeof AUTH_SECTIONS)[number]['id']
 
 const authRegistry = createSectionRegistry<AuthSectionId, AuthSettings>({
   sections: AUTH_SECTIONS,
