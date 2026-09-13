@@ -66,13 +66,21 @@ func GetPricing(c *gin.Context) {
 			delete(groupRatio, group)
 		}
 	}
+	orderedUsableGroup := make(map[string]map[string]any, len(usableGroup))
+	usableGroupNames := make([]string, 0, len(usableGroup))
+	for name := range usableGroup {
+		usableGroupNames = append(usableGroupNames, name)
+	}
+	for order, name := range service.OrderGroupNames(usableGroupNames) {
+		orderedUsableGroup[name] = map[string]any{"desc": usableGroup[name], "order": order}
+	}
 
 	c.JSON(200, gin.H{
 		"success":            true,
 		"data":               pricing,
 		"vendors":            model.GetVendors(),
 		"group_ratio":        groupRatio,
-		"usable_group":       usableGroup,
+		"usable_group":       orderedUsableGroup,
 		"supported_endpoint": model.GetSupportedEndpointMap(),
 		"auto_groups":        service.GetUserAutoGroup(group),
 		"pricing_version":    "a42d372ccf0b5dd13ecf71203521f9d2",

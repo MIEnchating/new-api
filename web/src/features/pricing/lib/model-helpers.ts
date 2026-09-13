@@ -28,15 +28,22 @@ import type { PricingModel } from '../types'
  */
 export function getAvailableGroups(
   model: PricingModel,
-  usableGroup: Record<string, { desc: string; ratio: number }>
+  usableGroup: Record<string, { desc: string; ratio?: number; order?: number }>
 ): string[] {
   const modelEnableGroups = Array.isArray(model.enable_groups)
     ? model.enable_groups
     : []
 
-  return Object.keys(usableGroup)
-    .filter((g) => !EXCLUDED_GROUPS.includes(g))
-    .filter((g) => modelEnableGroups.includes(g))
+  return Object.entries(usableGroup)
+    .filter(([g]) => !EXCLUDED_GROUPS.includes(g))
+    .filter(([g]) => modelEnableGroups.includes(g))
+    .sort(
+      ([left, leftInfo], [right, rightInfo]) =>
+        (leftInfo.order ?? Number.MAX_SAFE_INTEGER) -
+          (rightInfo.order ?? Number.MAX_SAFE_INTEGER) ||
+        left.localeCompare(right)
+    )
+    .map(([group]) => group)
 }
 
 /**

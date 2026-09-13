@@ -3,13 +3,13 @@ package controller
 import (
 	"fmt"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/perf_metrics_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
@@ -100,8 +100,11 @@ func hideCacheMetricCounts(result *perfmetrics.CacheQueryResult) {
 func getAvailableCacheGroups() []string {
 	groups := append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto")
 	groups = lo.Uniq(groups)
-	sort.Strings(groups)
-	return groups
+	ordered := service.OrderGroupNames(groups)
+	if !lo.Contains(ordered, "auto") {
+		ordered = append(ordered, "auto")
+	}
+	return ordered
 }
 
 func resolveCacheMonitorGroups(availableGroups []string, configuredGroups []string) []string {

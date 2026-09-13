@@ -8,6 +8,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -328,7 +329,7 @@ func enrichModels(models []*model.Model) error {
 		for quota := range quotas {
 			metadata.QuotaTypes = append(metadata.QuotaTypes, quota)
 		}
-		sort.Strings(metadata.EnableGroups)
+		metadata.EnableGroups = service.OrderGroupNames(metadata.EnableGroups)
 		sort.Strings(metadata.SupportedEndpoints)
 		sort.Ints(metadata.QuotaTypes)
 		if metadata.NameRule != model.NameRuleExact {

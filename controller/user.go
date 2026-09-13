@@ -354,6 +354,8 @@ func GetUserGroupNames(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	// Keep this endpoint consistent with the global group pricing order.
+	groups = service.OrderGroupNames(groups)
 	common.ApiSuccess(c, groups)
 }
 
