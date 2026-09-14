@@ -20,6 +20,7 @@ import { memo, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 
+import { EmptyState } from '@/components/empty-state'
 import {
   ChartContainer,
   ChartLegend,
@@ -63,91 +64,103 @@ export const ChannelTrend = memo(function ChannelTrend(props: {
     }),
     [t]
   )
+  const hasData = data.some((point) =>
+    [point.success, point.cache, point.score, point.ttft].some(
+      (value) => value != null && Number.isFinite(value)
+    )
+  )
   return (
     <div
       role='region'
       aria-label={t('Overall channel trend')}
       className='h-full min-h-56 min-w-0 overflow-hidden'
     >
-      <ChartContainer
-        config={config}
-        className='aspect-auto h-full min-h-56 w-full'
-      >
-        <LineChart
-          data={data}
-          margin={{ top: 16, right: 4, left: 0, bottom: 4 }}
+      {!hasData ? (
+        <EmptyState
+          title={t('No data or insufficient samples')}
+          className='h-full min-h-56'
+        />
+      ) : (
+        <ChartContainer
+          config={config}
+          className='aspect-auto h-full min-h-56 w-full'
         >
-          <CartesianGrid vertical={false} strokeDasharray='3 3' />
-          <XAxis
-            dataKey='ts'
-            tickLine={false}
-            axisLine={false}
-            minTickGap={40}
-            tickFormatter={(value) =>
-              new Date(Number(value) * 1000).toLocaleTimeString(undefined, {
-                hour: '2-digit',
-                minute: '2-digit',
-                hourCycle: 'h23',
-              })
-            }
-          />
-          <YAxis
-            yAxisId='rate'
-            domain={[0, 100]}
-            width={36}
-            tickLine={false}
-            axisLine={false}
-          />
-          <YAxis
-            yAxisId='latency'
-            orientation='right'
-            width={48}
-            tickLine={false}
-            axisLine={false}
-            tickFormatter={(value) => `${value} s`}
-          />
-          <ChartTooltip
-            content={
-              <ChartTooltipContent
-                labelFormatter={(value) =>
-                  new Date(Number(value) * 1000).toLocaleString()
-                }
-                formatter={(value, name) => {
-                  const key = String(name) as keyof typeof config
-                  let unit = '%'
-                  if (key === 'ttft') unit = ' s'
-                  if (key === 'score') unit = ''
-                  return (
-                    <span>
-                      {config[key]?.label}: {Number(value).toFixed(1)}
-                      {unit}
-                    </span>
-                  )
-                }}
-              />
-            }
-          />
-          <ChartLegend
-            content={
-              <ChartLegendContent className='flex-wrap gap-x-4 gap-y-1 text-[10px] sm:text-xs' />
-            }
-          />
-          {(['success', 'cache', 'score', 'ttft'] as const).map((key) => (
-            <Line
-              key={key}
-              dataKey={key}
-              yAxisId={key === 'ttft' ? 'latency' : 'rate'}
-              stroke={`var(--color-${key})`}
-              type='linear'
-              strokeWidth={2}
-              dot={{ r: 2 }}
-              activeDot={{ r: 4 }}
-              connectNulls={false}
-              isAnimationActive={false}
+          <LineChart
+            data={data}
+            margin={{ top: 16, right: 4, left: 0, bottom: 4 }}
+          >
+            <CartesianGrid vertical={false} strokeDasharray='3 3' />
+            <XAxis
+              dataKey='ts'
+              tickLine={false}
+              axisLine={false}
+              minTickGap={40}
+              tickFormatter={(value) =>
+                new Date(Number(value) * 1000).toLocaleTimeString(undefined, {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hourCycle: 'h23',
+                })
+              }
             />
-          ))}
-        </LineChart>
-      </ChartContainer>
+            <YAxis
+              yAxisId='rate'
+              domain={[0, 100]}
+              width={36}
+              tickLine={false}
+              axisLine={false}
+            />
+            <YAxis
+              yAxisId='latency'
+              orientation='right'
+              width={48}
+              tickLine={false}
+              axisLine={false}
+              tickFormatter={(value) => `${value} s`}
+            />
+            <ChartTooltip
+              content={
+                <ChartTooltipContent
+                  labelFormatter={(value) =>
+                    new Date(Number(value) * 1000).toLocaleString()
+                  }
+                  formatter={(value, name) => {
+                    const key = String(name) as keyof typeof config
+                    let unit = '%'
+                    if (key === 'ttft') unit = ' s'
+                    if (key === 'score') unit = ''
+                    return (
+                      <span>
+                        {config[key]?.label}: {Number(value).toFixed(1)}
+                        {unit}
+                      </span>
+                    )
+                  }}
+                />
+              }
+            />
+            <ChartLegend
+              content={
+                <ChartLegendContent className='flex-wrap gap-x-4 gap-y-1 text-[10px] sm:text-xs' />
+              }
+            />
+            {(['success', 'cache', 'score', 'ttft'] as const).map((key) => (
+              <Line
+                key={key}
+                dataKey={key}
+                yAxisId={key === 'ttft' ? 'latency' : 'rate'}
+                stroke={`var(--color-${key})`}
+                type='linear'
+                strokeWidth={2}
+                dot={{ r: 2 }}
+                activeDot={{ r: 4 }}
+                connectNulls={false}
+                isAnimationActive={false}
+              />
+            ))}
+          </LineChart>
+        </ChartContainer>
+      )}
     </div>
   )
 })

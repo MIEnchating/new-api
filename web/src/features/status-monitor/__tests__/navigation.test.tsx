@@ -150,7 +150,8 @@ describe('status page separation', () => {
     ).not.toBeInTheDocument()
     expect(screen.getByRole('main')).toHaveClass('overflow-hidden', 'h-full')
     expect(screen.getByRole('main').parentElement).toHaveClass(
-      'h-dvh',
+      'fixed',
+      'inset-0',
       'overflow-hidden',
       'pt-16'
     )
@@ -258,7 +259,12 @@ describe('status page separation', () => {
     await user.click(screen.getByRole('tab', { name: 'Official status' }))
     expect(await screen.findByText('No active incidents')).toBeVisible()
     const panel = screen.getByRole('tabpanel', { name: 'Official status' })
-    expect(panel).toHaveClass('overflow-y-auto')
+    expect(panel).toHaveClass('min-w-0', 'overflow-x-hidden', 'overflow-y-auto')
+    expect(screen.getByRole('main').parentElement).toHaveClass(
+      'fixed',
+      'inset-0',
+      'overflow-hidden'
+    )
     expect(within(panel).getByRole('article').parentElement).not.toHaveClass(
       'xl:grid-cols-3'
     )
@@ -389,6 +395,189 @@ describe('status page separation', () => {
     expect(within(main).queryByRole('status')).not.toBeInTheDocument()
   })
 
+  it('refreshing an open monitor updates its details without replacing the service card', async () => {
+    let refreshed = false
+    vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+      data: {
+        success: true,
+        data:
+          url === '/api/notice'
+            ? ''
+            : [
+                {
+                  categoryName: 'Primary',
+                  monitors: [
+                    {
+                      id: 7,
+                      name: refreshed ? 'Renamed API' : 'Primary API',
+                      group: 'default',
+                      status: refreshed ? 0 : 1,
+                      uptime: 1,
+                      lastChecked: refreshed
+                        ? '2026-09-14T11:00:00Z'
+                        : '2026-09-14T10:00:00Z',
+                    },
+                  ],
+                },
+              ],
+      },
+    }))
+    const user = userEvent.setup()
+    await renderSiteStatus()
+    const card = await screen.findByRole('button', { name: /Primary API/ })
+    await user.click(card)
+    expect(await screen.findByRole('dialog')).toHaveTextContent('Primary API')
+    refreshed = true
+    // Exercise the toolbar's refresh callback while the drawer is open, as the timer does.
+    fireEvent.click(
+      screen.getByRole('button', { name: /Refresh/, hidden: true })
+    )
+    await waitFor(() =>
+      expect(screen.getByRole('dialog')).toHaveTextContent('Renamed API')
+    )
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' })
+    )
+    const renamed = await screen.findByRole('button', { name: /Renamed API/ })
+    expect(renamed).toBe(card)
+    expect(renamed).toHaveTextContent('Down')
+  })
+
+  it('removing an open monitor closes its drawer and later restoration does not reopen it', async () => {
+    let available = true
+    vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+      data: {
+        success: true,
+        data:
+          url === '/api/notice'
+            ? ''
+            : [
+                {
+                  categoryName: 'Primary',
+                  monitors: available
+                    ? [{ id: 7, name: 'Primary API', status: 1, uptime: 1 }]
+                    : [],
+                },
+              ],
+      },
+    }))
+    const user = userEvent.setup()
+    await renderSiteStatus()
+    await user.click(await screen.findByRole('button', { name: /Primary API/ }))
+    await screen.findByRole('dialog')
+    available = false
+    fireEvent.click(
+      screen.getByRole('button', { name: /Refresh/, hidden: true })
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    )
+    available = true
+    await user.click(screen.getByRole('button', { name: /Refresh/ }))
+    await screen.findByRole('button', { name: /Primary API/ })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('failed refresh keeps the last monitors visible with an error and supports recovery', async () => {
+    let fail = false
+    vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+      data:
+        url === '/api/notice'
+          ? { success: true, data: '' }
+          : {
+              success: !fail,
+              data: [
+                {
+                  categoryName: 'Primary',
+                  monitors: [
+                    {
+                      name: 'Primary API',
+                      group: 'default',
+                      status: 1,
+                      uptime: 1,
+                    },
+                  ],
+                },
+              ],
+            },
+    }))
+    const user = userEvent.setup()
+    await renderSiteStatus()
+    await screen.findByRole('button', { name: /Primary API/ })
+    fail = true
+    await user.click(screen.getByRole('button', { name: /Refresh/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Refresh failed')
+    expect(screen.getByRole('button', { name: /Primary API/ })).toBeVisible()
+    fail = false
+    await user.click(screen.getByRole('button', { name: /Refresh/ }))
+    await waitFor(() =>
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    )
+  })
+
+  it('a degraded uptime response shows a load error instead of claiming no monitors are configured', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+      data: {
+        success: true,
+        data: url === '/api/notice' ? '' : [],
+        degraded: true,
+      },
+    }))
+    await renderSiteStatus()
+    expect(
+      await screen.findByText('Failed to load status monitoring data')
+    ).toBeVisible()
+    expect(
+      screen.queryByText('No uptime monitoring configured')
+    ).not.toBeInTheDocument()
+  })
+
+  it('search filters monitors within the selected group and empty results can be cleared', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+      data: {
+        success: true,
+        data:
+          url === '/api/notice'
+            ? ''
+            : [
+                {
+                  categoryName: 'Primary',
+                  monitors: [
+                    {
+                      id: 1,
+                      name: 'Text API',
+                      group: 'Core',
+                      status: 1,
+                      uptime: 1,
+                    },
+                    {
+                      id: 2,
+                      name: 'Image API',
+                      group: 'Media',
+                      status: 1,
+                      uptime: 1,
+                    },
+                  ],
+                },
+              ],
+      },
+    }))
+    const user = userEvent.setup()
+    await renderSiteStatus()
+    const search = await screen.findByRole('searchbox', {
+      name: 'Search monitors',
+    })
+    await user.type(search, 'image')
+    expect(screen.getByRole('button', { name: /Image API/ })).toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: /Text API/ })
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Core 1' }))
+    expect(screen.getByText('No matching results')).toBeVisible()
+    await user.clear(search)
+    expect(screen.getByRole('button', { name: /Text API/ })).toBeVisible()
+  })
+
   it('failed uptime responses show a retryable error without a healthy service banner', async () => {
     const get = vi.spyOn(api, 'get').mockImplementation(async (url) => ({
       data:
@@ -507,8 +696,7 @@ describe('user channel monitor', () => {
     )
     expect(screen.getAllByRole('article')).toHaveLength(3)
     expect(screen.getAllByRole('article')[0].parentElement).toHaveClass(
-      'grid-cols-1',
-      'sm:grid-cols-3'
+      'grid-cols-3'
     )
     expect(screen.getByText('60 min intervals')).toBeVisible()
     expect(
@@ -584,7 +772,7 @@ describe('user channel monitor', () => {
     fireEvent.wheel(pulses, { deltaY: -100, ctrlKey: true })
     expect(within(pulses).getAllByRole('img')).toHaveLength(3)
     fireEvent.wheel(pulses, { deltaY: -100, clientX: 0 })
-    expect(within(pulses).getAllByRole('img')).toHaveLength(2)
+    expect(within(pulses).getAllByRole('img')).toHaveLength(3)
     await user.click(screen.getByRole('button', { name: 'Reset zoom' }))
     expect(screen.getByRole('button', { name: 'Reset zoom' })).toBeDisabled()
     rendered.rerender(

@@ -40,7 +40,10 @@ export function getMonitorRequestStats(
     .map((name) => name?.trim())
     .filter((name): name is string => Boolean(name))
   for (const name of names) {
-    const matched = stats?.by_group?.[name]
+    const matched =
+      stats?.by_group && Object.hasOwn(stats.by_group, name)
+        ? stats.by_group[name]
+        : null
     if (matched) return matched
   }
   return null

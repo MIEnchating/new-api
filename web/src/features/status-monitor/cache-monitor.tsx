@@ -21,6 +21,7 @@ import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
@@ -52,25 +53,25 @@ function MonitorMetric(props: {
       data-card-hover='false'
       role='article'
       aria-label={props.label}
-      className='min-w-0 gap-2 rounded-xl py-3 shadow-none ring-inset sm:rounded-2xl sm:py-5'
+      className='min-w-0 gap-1.5 rounded-xl py-3 shadow-none ring-inset sm:gap-2 sm:py-4'
     >
-      <CardHeader className='relative px-3 pl-6 sm:pl-10'>
+      <CardHeader className='relative px-2.5 pl-5 sm:pl-8'>
         <span
           aria-label={statusLabel}
           role='img'
           className={cn(
-            'absolute left-3 top-0.5 size-1.5 sm:left-4 sm:size-2 rounded-full',
+            'absolute left-2.5 top-1 size-1.5 rounded-full sm:left-4',
             status === 'healthy' && 'bg-success',
             status === 'warning' && 'bg-warning',
             status === 'critical' && 'bg-destructive',
             status === 'unknown' && 'bg-muted-foreground/40'
           )}
         />
-        <CardTitle className='text-muted-foreground min-h-7 text-[10px] font-semibold sm:min-h-0 sm:text-[11px]'>
+        <CardTitle className='text-muted-foreground min-h-8 text-[11px] leading-4 font-medium min-[360px]:min-h-0 sm:text-xs'>
           {props.label}
         </CardTitle>
       </CardHeader>
-      <CardContent className='space-y-1 px-3 sm:pl-10'>
+      <CardContent className='space-y-1 px-2.5 sm:pl-8'>
         <p
           className={cn(
             'text-lg font-semibold tracking-tight tabular-nums sm:text-2xl',
@@ -82,7 +83,7 @@ function MonitorMetric(props: {
         >
           {props.value}
         </p>
-        <p className='text-muted-foreground min-h-7 text-[10px] sm:min-h-0 sm:text-[11px]'>
+        <p className='text-muted-foreground sr-only text-[10px] leading-4 sm:not-sr-only sm:text-xs'>
           {props.description}
         </p>
       </CardContent>
@@ -121,9 +122,9 @@ export function CacheMonitor(props: {
         className='flex h-full min-h-0 flex-col gap-5 overflow-hidden'
         aria-busy='true'
       >
-        <div className='grid shrink-0 grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3'>
+        <div className='grid shrink-0 grid-cols-3 gap-2 sm:gap-3'>
           {['success', 'ttft', 'cache'].map((key) => (
-            <Skeleton key={key} className='h-28 rounded-2xl' />
+            <Skeleton key={key} className='h-24 rounded-xl' />
           ))}
         </div>
         <Skeleton className='min-h-0 flex-1 rounded-2xl' />
@@ -140,8 +141,15 @@ export function CacheMonitor(props: {
   }
   if (groups.length === 0) return <EmptyState title={t('No data')} />
   return (
-    <section className='flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-hidden py-1 sm:gap-5'>
-      <div className='grid shrink-0 grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3'>
+    <section className='flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-hidden py-1 max-[359px]:gap-2'>
+      {props.failed ? (
+        <Alert className='shrink-0' variant='destructive'>
+          <AlertDescription>
+            {t('Refresh failed. Showing the last available data.')}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      <div className='grid shrink-0 grid-cols-3 gap-2 sm:gap-3'>
         <MonitorMetric
           label={t('Success rate')}
           value={formatMonitorPercent(

@@ -25,15 +25,24 @@ import {
   ChevronRight,
   CircleDashed,
   Wrench,
+  Search,
   type LucideIcon,
 } from 'lucide-react'
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
+import { ErrorState } from '@/components/error-state'
 import { PublicLayout } from '@/components/layout'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from '@/components/ui/input-group'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
@@ -44,7 +53,6 @@ import {
 } from '@/components/ui/tooltip'
 import { getUptimeStatus } from '@/features/dashboard/api'
 import type {
-  RecentRequestStats,
   UptimeGroupResult,
   UptimeHeartbeat,
   UptimeMonitor,
@@ -106,7 +114,6 @@ const UNKNOWN_STATUS_META: MonitorStatusMeta = {
 }
 
 const ALL_GROUP_KEY = 'all'
-type FetchMode = 'initial' | 'refresh'
 
 function getStatusMeta(status: number) {
   return STATUS_META[status] ?? UNKNOWN_STATUS_META
@@ -118,9 +125,8 @@ function formatPing(value: number | null | undefined) {
 }
 
 function formatUptime(value: number | null | undefined) {
-  const numeric = Number(value ?? 0)
-  if (!Number.isFinite(numeric)) return '0.00%'
-  return `${(Math.max(0, numeric) * 100).toFixed(2)}%`
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '--'
+  return `${(Math.max(0, Math.min(1, value)) * 100).toFixed(2)}%`
 }
 
 function formatOptionalUptime(value: number | null | undefined) {
@@ -173,25 +179,12 @@ function getRelativeTime(
 }
 
 function getSourceKey(group: UptimeGroupResult, index: number) {
-  return `${group.categoryName || 'uptime-kuma'}-${index}`
+  return group.categoryName || `uptime-kuma-${index}`
 }
 
 function getUptimeGroupKey(group: string | undefined) {
   const name = group?.trim()
   return name ? `uptime-group:${name}` : 'uptime-group:__ungrouped__'
-}
-
-function getMonitorKey(sourceKey: string, monitor: UptimeMonitor) {
-  return [
-    sourceKey,
-    monitor.group,
-    monitor.name,
-    monitor.lastChecked,
-    monitor.heartbeats?.[0]?.time,
-    monitor.status,
-  ]
-    .filter((part) => part !== undefined && part !== null && part !== '')
-    .join('-')
 }
 
 function MonitorStatusBadge(props: { status: number }) {
@@ -202,7 +195,8 @@ function MonitorStatusBadge(props: { status: number }) {
   return (
     <StatusBadge
       variant={meta.variant}
-      className='sm:min-w-24'
+      type='text'
+      className='text-xs'
       copyable={false}
     >
       <Icon data-icon='inline-start' />
@@ -232,9 +226,9 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
     <>
       <TooltipProvider delay={0}>
         <div
-          className='grid h-10 min-w-0 items-end gap-px sm:h-12 sm:gap-1'
+          className='grid h-8 min-w-0 items-end gap-px sm:gap-0.5'
           style={{
-            gridTemplateColumns: `repeat(${heartbeats.length}, minmax(4px, 1fr))`,
+            gridTemplateColumns: `repeat(${heartbeats.length}, minmax(0, 1fr))`,
           }}
           aria-label={t('Heartbeat timeline')}
         >
@@ -265,9 +259,10 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
                   render={
                     <span
                       aria-label={label}
+                      tabIndex={0}
                       className={cn(
-                        'block min-h-3 cursor-default rounded-full transition-[transform,filter,box-shadow] duration-150 ease-out hover:z-10 hover:-translate-y-1 hover:brightness-110 hover:shadow-sm',
-                        heartbeat.status === 1 ? 'h-10 sm:h-12' : 'h-7 sm:h-8',
+                        'block min-h-3 cursor-default rounded-full transition-[transform,filter,box-shadow] duration-150 ease-out focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none hover:z-10 hover:-translate-y-1 hover:brightness-110 hover:shadow-sm',
+                        heartbeat.status === 1 ? 'h-8' : 'h-5',
                         meta.dotClassName
                       )}
                     />
@@ -314,8 +309,8 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
 
 function MetricItem(props: { label: string; value: string }) {
   return (
-    <div className='bg-card min-w-0 px-3 py-2.5 sm:px-3.5 sm:py-3'>
-      <div className='text-muted-foreground truncate text-xs'>
+    <div className='min-w-0 py-1'>
+      <div className='text-muted-foreground text-xs leading-5 [overflow-wrap:anywhere]'>
         {props.label}
       </div>
       <div className='mt-1 truncate text-sm font-semibold tabular-nums'>
@@ -327,18 +322,20 @@ function MetricItem(props: { label: string; value: string }) {
 
 const MonitorRow = memo(function MonitorRow(props: {
   monitor: UptimeMonitor
-  onSelect: (monitor: UptimeMonitor) => void
+  monitorKey: string
+  onSelect: (key: string) => void
 }) {
   const { t } = useTranslation()
   const meta = getStatusMeta(props.monitor.status)
 
   return (
-    <article className='bg-card hover:border-foreground/20 min-w-0 overflow-hidden rounded-2xl border shadow-xs transition-[box-shadow,border-color] duration-200 hover:shadow-md'>
-      <button
+    <article className='bg-card hover:border-foreground/20 @container min-w-0 overflow-hidden rounded-xl border shadow-xs transition-[box-shadow,border-color] duration-200 hover:shadow-md'>
+      <Button
+        variant='ghost'
         type='button'
         data-press-animation='none'
-        onClick={() => props.onSelect(props.monitor)}
-        className='hover:bg-muted/20 active:bg-muted/40 focus-visible:ring-ring w-full cursor-pointer p-4 text-left transition-colors duration-150 ease-out outline-none focus-visible:ring-2 focus-visible:ring-inset sm:p-6'
+        onClick={() => props.onSelect(props.monitorKey)}
+        className='block h-auto w-full min-w-0 rounded-none p-4 text-left whitespace-normal focus-visible:ring-inset'
       >
         <div className='flex min-w-0 items-start justify-between gap-3'>
           <div className='flex min-w-0 flex-1 items-center gap-3'>
@@ -367,7 +364,7 @@ const MonitorRow = memo(function MonitorRow(props: {
           </div>
         </div>
 
-        <div className='bg-muted/40 mt-5 grid min-w-0 grid-cols-2 gap-px overflow-hidden rounded-xl sm:grid-cols-3'>
+        <div className='mt-4 grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 border-t pt-3 @min-[23rem]:grid-cols-3'>
           <MetricItem
             label={t('30-minute uptime')}
             value={formatOptionalUptime(props.monitor.uptime30m)}
@@ -393,9 +390,9 @@ const MonitorRow = memo(function MonitorRow(props: {
             value={getRelativeTime(props.monitor.lastChecked, t)}
           />
         </div>
-      </button>
+      </Button>
 
-      <div className='px-4 pt-0 pb-4 sm:px-6 sm:pb-6'>
+      <div className='px-4 pb-4'>
         <HeartbeatTimeline heartbeats={props.monitor.heartbeats} />
       </div>
     </article>
@@ -455,44 +452,24 @@ export function SiteStatus() {
     meta: { errorToast: false },
   })
   const { refetch: refetchOfficialStatus } = officialQuery
-  const [groups, setGroups] = useState<UptimeGroupResult[]>([])
-  const [requestStats, setRequestStats] = useState<RecentRequestStats | null>(
-    null
-  )
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [failed, setFailed] = useState(false)
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const uptimeQuery = useQuery({
+    queryKey: ['site-uptime-status'],
+    queryFn: async () => requireServerSuccess(await getUptimeStatus()),
+    staleTime: 15_000,
+    retry: false,
+    meta: { errorToast: false },
+  })
+  const { refetch: refetchUptime } = uptimeQuery
+  const groups = useMemo(() => uptimeQuery.data?.data ?? [], [uptimeQuery.data])
+  const requestStats = uptimeQuery.data?.request_stats ?? null
+  const loading = uptimeQuery.isPending
+  const failed = uptimeQuery.isError
+  const degraded = uptimeQuery.data?.degraded ?? false
+  const [search, setSearch] = useState('')
   const [activeGroupKey, setActiveGroupKey] = useState(ALL_GROUP_KEY)
-  const [selectedMonitor, setSelectedMonitor] = useState<UptimeMonitor | null>(
+  const [selectedMonitorKey, setSelectedMonitorKey] = useState<string | null>(
     null
   )
-  const [monitorDetailsOpen, setMonitorDetailsOpen] = useState(false)
-  const fetchSiteStatus = useCallback(async (mode: FetchMode) => {
-    if (mode === 'initial') {
-      setLoading(true)
-    } else {
-      setRefreshing(true)
-    }
-    setFailed(false)
-    try {
-      const uptimeResult = requireServerSuccess(await getUptimeStatus())
-      setGroups(uptimeResult?.data ?? [])
-      setRequestStats(uptimeResult?.request_stats ?? null)
-      setLastUpdated(new Date())
-    } catch {
-      setGroups([])
-      setRequestStats(null)
-      setFailed(true)
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void fetchSiteStatus('initial')
-  }, [fetchSiteStatus])
 
   const monitors = useMemo(
     () => groups.flatMap((group) => group.monitors ?? []),
@@ -502,8 +479,11 @@ export function SiteStatus() {
     () =>
       groups.flatMap((group, sourceIndex) => {
         const sourceKey = getSourceKey(group, sourceIndex)
-        return (group.monitors ?? []).map((monitor) => ({
-          key: getMonitorKey(sourceKey, monitor),
+        return (group.monitors ?? []).map((monitor, index) => ({
+          key: JSON.stringify([
+            sourceKey,
+            monitor.id ?? [monitor.group, monitor.name, index],
+          ]),
           groupKey: getUptimeGroupKey(monitor.group),
           groupLabel: monitor.group?.trim() || t('Ungrouped'),
           monitor,
@@ -542,79 +522,103 @@ export function SiteStatus() {
     () => new Map(groupOptions.map((group) => [group.key, group])),
     [groupOptions]
   )
+  const selectedGroupKey = groupOptionMap.has(activeGroupKey)
+    ? activeGroupKey
+    : ALL_GROUP_KEY
   const visibleMonitorItems = useMemo(() => {
-    if (activeGroupKey === ALL_GROUP_KEY) return monitorItems
-
-    return groupOptionMap.get(activeGroupKey)?.monitorItems ?? []
-  }, [activeGroupKey, groupOptionMap, monitorItems])
-  useEffect(() => {
-    if (
-      activeGroupKey !== ALL_GROUP_KEY &&
-      !groupOptions.some((group) => group.key === activeGroupKey)
-    ) {
-      setActiveGroupKey(ALL_GROUP_KEY)
-    }
-  }, [activeGroupKey, groupOptions])
+    const items =
+      selectedGroupKey === ALL_GROUP_KEY
+        ? monitorItems
+        : (groupOptionMap.get(selectedGroupKey)?.monitorItems ?? [])
+    const query = search.trim().toLowerCase()
+    return items.filter(
+      ({ monitor }) =>
+        !query ||
+        `${monitor.name} ${monitor.group ?? ''}`.toLowerCase().includes(query)
+    )
+  }, [selectedGroupKey, groupOptionMap, monitorItems, search])
+  const selectedMonitor =
+    monitorItems.find((item) => item.key === selectedMonitorKey)?.monitor ??
+    null
 
   const handleManualRefresh = useCallback(() => {
-    if (activeTab === 'official-status') {
-      void refetchOfficialStatus()
-    } else {
-      void fetchSiteStatus('refresh')
-    }
-  }, [activeTab, fetchSiteStatus, refetchOfficialStatus])
+    if (activeTab === 'official-status') void refetchOfficialStatus()
+    else void refetchUptime()
+  }, [activeTab, refetchUptime, refetchOfficialStatus])
 
-  const handleMonitorSelect = useCallback((monitor: UptimeMonitor) => {
-    setSelectedMonitor(monitor)
-    setMonitorDetailsOpen(true)
+  const handleMonitorSelect = useCallback((key: string) => {
+    setSelectedMonitorKey(key)
   }, [])
+
+  if (selectedMonitorKey !== null && selectedMonitor === null) {
+    setSelectedMonitorKey(null)
+  }
 
   let content = null
   if (loading) {
     content = <LoadingState />
-  } else if (failed) {
-    content = <EmptyState title={t('Failed to load status monitoring data')} />
+  } else if ((failed || degraded) && monitors.length === 0) {
+    content = (
+      <ErrorState
+        title={t('Failed to load status monitoring data')}
+        onRetry={handleManualRefresh}
+      />
+    )
   } else if (!groups.length || monitors.length === 0) {
     content = <EmptyState title={t('No uptime monitoring configured')} />
   } else {
     content = (
       <Tabs
-        className='min-h-0 flex-1 gap-5 overflow-hidden'
-        value={activeGroupKey}
+        className='min-h-0 min-w-0 flex-1 gap-3 overflow-hidden'
+        value={selectedGroupKey}
         onValueChange={(value) => {
           setActiveGroupKey(value || ALL_GROUP_KEY)
         }}
       >
-        <TabsList className='w-full max-w-full shrink-0 [scrollbar-width:none] flex-nowrap justify-start gap-1.5 overflow-x-auto rounded-none border-b bg-transparent p-1 pb-3 group-data-horizontal/tabs:h-auto [&::-webkit-scrollbar]:hidden'>
-          {[
-            { key: ALL_GROUP_KEY, label: t('All'), monitorItems },
-            ...groupOptions,
-          ].map((group) => (
-            <TabsTrigger
-              key={group.key}
-              value={group.key}
-              aria-label={`${group.label} ${group.monitorItems.length}`}
-              className='group/group-tab hover:bg-muted/60 data-active:border-primary/20 data-active:bg-primary/10 data-active:text-primary dark:data-active:border-primary/25 dark:data-active:bg-primary/15 dark:data-active:text-primary h-9 flex-none gap-2 rounded-lg px-3 py-1.5 group-data-[variant=default]/tabs-list:data-active:shadow-none'
-            >
-              <span
-                className='max-w-32 truncate sm:max-w-48'
-                title={group.label}
+        <div className='flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center'>
+          <InputGroup className='shrink-0 lg:w-64'>
+            <InputGroupAddon>
+              <Search aria-hidden='true' />
+            </InputGroupAddon>
+            <InputGroupInput
+              type='search'
+              aria-label={t('Search monitors')}
+              placeholder={t('Search monitors')}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+          </InputGroup>
+          <TabsList className='w-full max-w-full min-w-0 shrink-0 [scrollbar-width:none] flex-nowrap justify-start gap-1.5 overflow-x-auto rounded-none border-b bg-transparent p-1 pb-3 group-data-horizontal/tabs:h-auto lg:w-auto lg:flex-1 [&::-webkit-scrollbar]:hidden'>
+            {[
+              { key: ALL_GROUP_KEY, label: t('All'), monitorItems },
+              ...groupOptions,
+            ].map((group) => (
+              <TabsTrigger
+                key={group.key}
+                value={group.key}
+                aria-label={`${group.label} ${group.monitorItems.length}`}
+                className='group/group-tab hover:bg-muted/60 data-active:border-primary/20 data-active:bg-primary/10 data-active:text-primary dark:data-active:border-primary/25 dark:data-active:bg-primary/15 dark:data-active:text-primary h-9 flex-none gap-2 rounded-lg px-3 py-1.5 group-data-[variant=default]/tabs-list:data-active:shadow-none'
               >
-                {group.label}
-              </span>
-              <Badge
-                variant='secondary'
-                className='bg-muted text-muted-foreground group-data-active/group-tab:bg-primary/15 group-data-active/group-tab:text-primary h-5 min-w-5 rounded-md px-1.5 text-[11px] tabular-nums'
-              >
-                {group.monitorItems.length}
-              </Badge>
-            </TabsTrigger>
-          ))}
-        </TabsList>
+                <span
+                  className='max-w-32 truncate sm:max-w-48'
+                  title={group.label}
+                >
+                  {group.label}
+                </span>
+                <Badge
+                  variant='secondary'
+                  className='bg-muted text-muted-foreground group-data-active/group-tab:bg-primary/15 group-data-active/group-tab:text-primary h-5 min-w-5 rounded-md px-1.5 text-[11px] tabular-nums'
+                >
+                  {group.monitorItems.length}
+                </Badge>
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
         <TabsContent
-          key={activeGroupKey}
-          value={activeGroupKey}
-          className='min-h-0 overflow-y-auto overscroll-contain pb-2'
+          key={selectedGroupKey}
+          value={selectedGroupKey}
+          className='min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain pb-2'
         >
           {visibleMonitorItems.length > 0 ? (
             <div className='grid min-w-0 gap-5 md:grid-cols-2 xl:grid-cols-3'>
@@ -622,14 +626,20 @@ export function SiteStatus() {
                 <MonitorRow
                   key={item.key}
                   monitor={item.monitor}
+                  monitorKey={item.key}
                   onSelect={handleMonitorSelect}
                 />
               ))}
             </div>
           ) : (
-            <div className='text-muted-foreground rounded-lg border border-dashed p-6 text-sm'>
-              {t('No uptime data available')}
-            </div>
+            <EmptyState
+              title={
+                search
+                  ? t('No matching results')
+                  : t('No uptime data available')
+              }
+              bordered
+            />
           )}
         </TabsContent>
       </Tabs>
@@ -637,8 +647,10 @@ export function SiteStatus() {
   }
 
   let refreshLoading = loading
-  let refreshInProgress = refreshing
-  let refreshedAt = lastUpdated
+  let refreshInProgress = uptimeQuery.isFetching && !loading
+  let refreshedAt = uptimeQuery.dataUpdatedAt
+    ? new Date(uptimeQuery.dataUpdatedAt)
+    : null
   if (activeTab === 'official-status') {
     refreshLoading = officialQuery.isPending
     refreshInProgress = officialQuery.isFetching && !officialQuery.isPending
@@ -650,7 +662,7 @@ export function SiteStatus() {
   return (
     <>
       <PublicLayout showMainContainer={false}>
-        <div className='h-dvh overflow-hidden pt-16'>
+        <div className='fixed inset-0 overflow-hidden pt-16'>
           <main
             aria-label={t('Site status')}
             aria-busy={refreshLoading}
@@ -687,9 +699,19 @@ export function SiteStatus() {
               </div>
               <TabsContent
                 value='site-status'
-                className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
+                className='flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden'
               >
-                {loading || failed || monitors.length === 0 ? (
+                {!loading && monitors.length > 0 && (failed || degraded) ? (
+                  <Alert className='shrink-0' variant='destructive'>
+                    <AlertTriangle aria-hidden='true' />
+                    <AlertDescription>
+                      {failed
+                        ? t('Refresh failed. Showing the last available data.')
+                        : t('Some monitors could not be loaded.')}
+                    </AlertDescription>
+                  </Alert>
+                ) : null}
+                {loading || monitors.length === 0 ? (
                   <div
                     className={cn(
                       'min-h-0 flex-1',
@@ -705,7 +727,7 @@ export function SiteStatus() {
               <TabsContent
                 value='official-status'
                 className={cn(
-                  'min-h-0 overscroll-contain pb-2',
+                  'min-h-0 min-w-0 overscroll-contain overflow-x-hidden pb-2',
                   officialQuery.isPending ? 'overflow-clip' : 'overflow-y-auto'
                 )}
               >
@@ -713,6 +735,7 @@ export function SiteStatus() {
                   response={officialQuery.data ?? null}
                   loading={officialQuery.isPending}
                   failed={officialQuery.isError}
+                  onRetry={handleManualRefresh}
                   compact
                 />
               </TabsContent>
@@ -721,14 +744,17 @@ export function SiteStatus() {
         </div>
       </PublicLayout>
       <MonitorDetailsDrawer
-        open={monitorDetailsOpen}
+        open={selectedMonitor !== null}
         monitor={selectedMonitor}
         requestStats={getMonitorRequestStats(
           requestStats,
           selectedMonitor?.name,
           selectedMonitor?.group
         )}
-        onOpenChange={setMonitorDetailsOpen}
+        onOpenChange={(open) => {
+          if (!open) setSelectedMonitorKey(null)
+        }}
+        requestStatsUnavailable={uptimeQuery.data?.request_stats_unavailable}
       />
     </>
   )

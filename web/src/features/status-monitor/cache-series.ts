@@ -61,11 +61,11 @@ export function buildCacheChartSeries(
   const points = new Map(series.map((point) => [point.ts, point]))
   const timestamps = [...points.keys()].sort((left, right) => left - right)
   const firstTimestamp =
-    timestamps[0] ?? Math.floor(Number(rangeStart) / interval) * interval
+    timestamps[0] ?? Math.ceil(Number(rangeStart) / interval) * interval
   const lastTimestamp =
     timestamps.at(-1) ?? Math.floor(Number(rangeEnd) / interval) * interval
   const normalizedStart = Number.isFinite(rangeStart)
-    ? Math.floor(Number(rangeStart) / interval) * interval
+    ? Math.ceil(Number(rangeStart) / interval) * interval
     : firstTimestamp
   const normalizedEnd = Number.isFinite(rangeEnd)
     ? Math.floor(Number(rangeEnd) / interval) * interval

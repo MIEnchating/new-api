@@ -30,6 +30,7 @@ import {
 } from 'recharts'
 
 import { sideDrawerContentClassName } from '@/components/drawer-layout'
+import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
 import {
   ChartContainer,
@@ -59,6 +60,7 @@ type MonitorDetailsDrawerProps = {
   open: boolean
   monitor: UptimeMonitor | null
   requestStats: RecentRequestStats | null
+  requestStatsUnavailable?: boolean
   onOpenChange: (open: boolean) => void
 }
 
@@ -95,7 +97,10 @@ function buildChartData(heartbeats: UptimeHeartbeat[]): MonitorChartPoint[] {
   }))
 }
 
-function RealRequestChart(props: { stats: RecentRequestStats | null }) {
+function RealRequestChart(props: {
+  stats: RecentRequestStats | null
+  unavailable?: boolean
+}) {
   const { t } = useTranslation()
   const data = [
     { window: t('5 minutes'), stats: props.stats?.['5m'] },
@@ -103,11 +108,21 @@ function RealRequestChart(props: { stats: RecentRequestStats | null }) {
     { window: t('1 hour'), stats: props.stats?.['1h'] },
   ].map(({ window, stats }) => ({
     window,
-    successRate: stats?.has_data ? stats.success_rate : 0,
-    failureRate: stats?.has_data ? Math.max(0, 100 - stats.success_rate) : 0,
+    successRate: stats?.has_data
+      ? Math.max(0, Math.min(100, stats.success_rate))
+      : null,
+    failureRate: stats?.has_data
+      ? Math.max(0, Math.min(100, 100 - stats.success_rate))
+      : null,
     hasData: stats?.has_data ?? false,
   }))
   const hasData = data.some((item) => item.hasData)
+  let emptyDescription: string | undefined
+  if (!props.unavailable) {
+    emptyDescription = props.stats
+      ? t('No requests recorded in the past hour.')
+      : t('No request group matches this monitor.')
+  }
   const config = {
     successRate: {
       label: t('Success'),
@@ -124,7 +139,7 @@ function RealRequestChart(props: { stats: RecentRequestStats | null }) {
       <h3 className='mb-3 text-sm font-medium'>
         {t('Real request statistics')}
       </h3>
-      {hasData ? (
+      {hasData && !props.unavailable ? (
         <ChartContainer
           config={config}
           className='aspect-auto h-52 w-full sm:h-60'
@@ -180,9 +195,15 @@ function RealRequestChart(props: { stats: RecentRequestStats | null }) {
           </BarChart>
         </ChartContainer>
       ) : (
-        <div className='text-muted-foreground flex h-52 items-center justify-center border border-dashed text-sm'>
-          {t('No data')}
-        </div>
+        <EmptyState
+          className='min-h-52'
+          title={
+            props.unavailable
+              ? t('Request statistics unavailable')
+              : t('No data')
+          }
+          description={emptyDescription}
+        />
       )}
     </section>
   )
@@ -315,14 +336,17 @@ export function MonitorDetailsDrawer(props: MonitorDetailsDrawerProps) {
         <div className='min-h-0 flex-1 overflow-y-auto px-4 pb-6 sm:px-6'>
           <div className='space-y-6 pt-4'>
             <TrendChart
-              title={t('Latency trend (last 24h)')}
+              title={t('Latency trend')}
               data={chartData}
               dataKey='latency'
               color='var(--chart-1)'
               domain={[0, 'auto']}
               unit=' ms'
             />
-            <RealRequestChart stats={props.requestStats} />
+            <RealRequestChart
+              stats={props.requestStats}
+              unavailable={props.requestStatsUnavailable}
+            />
           </div>
         </div>
       </SheetContent>

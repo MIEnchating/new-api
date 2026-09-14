@@ -32,7 +32,9 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
+import { ErrorState } from '@/components/error-state'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -54,8 +56,8 @@ import {
   formatComponentStatus,
   formatOfficialTime,
   getActiveOfficialIncidents,
-  getAffectedOfficialComponents,
   getEffectiveOfficialIndicator,
+  getRelayOfficialComponents,
   isOfficialProviderAffected,
 } from './official-provider-status-utils'
 import type {
@@ -290,21 +292,8 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const activeIncidents = getActiveOfficialIncidents(provider)
-  const affectedComponents = getAffectedOfficialComponents(provider).filter(
-    (component) => !component.group
-  )
   const effectiveIndicator = getEffectiveOfficialIndicator(provider)
-  const affectedComponentKeys = new Set(
-    affectedComponents.map((component) => component.id || component.name)
-  )
-  const serviceComponents = [
-    ...affectedComponents,
-    ...provider.components.filter(
-      (component) =>
-        !component.group &&
-        !affectedComponentKeys.has(component.id || component.name)
-    ),
-  ]
+  const serviceComponents = getRelayOfficialComponents(provider)
   const [componentsOpen, setComponentsOpen] = useState(true)
   const meta = provider.available
     ? (INDICATOR_META[effectiveIndicator] ?? UNKNOWN_META)
@@ -577,6 +566,7 @@ export function OfficialProviderStatuses(props: {
   loading: boolean
   failed: boolean
   compact?: boolean
+  onRetry?: () => void
 }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
@@ -606,15 +596,12 @@ export function OfficialProviderStatuses(props: {
       )}
     >
       {providers.map((provider) => (
-        <ProviderCard
-          key={`${provider.provider}-${provider.available}-${getEffectiveOfficialIndicator(provider)}`}
-          provider={provider}
-        />
+        <ProviderCard key={provider.provider} provider={provider} />
       ))}
     </div>
   )
 
-  if (props.loading) {
+  if (props.loading && providers.length === 0) {
     content = (
       <div
         className={cn(
@@ -650,7 +637,14 @@ export function OfficialProviderStatuses(props: {
         ))}
       </div>
     )
-  } else if (props.failed || providers.length === 0) {
+  } else if (props.failed && providers.length === 0) {
+    content = (
+      <ErrorState
+        title={t('Official status unavailable')}
+        onRetry={props.onRetry}
+      />
+    )
+  } else if (providers.length === 0) {
     content = (
       <EmptyState
         icon={CircleDashed}
@@ -717,6 +711,13 @@ export function OfficialProviderStatuses(props: {
           </div>
         )}
 
+        {props.failed && providers.length > 0 ? (
+          <Alert variant='destructive'>
+            <AlertDescription>
+              {t('Refresh failed. Showing the last available data.')}
+            </AlertDescription>
+          </Alert>
+        ) : null}
         {content}
       </section>
     </TooltipProvider>

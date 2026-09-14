@@ -75,6 +75,12 @@ describe('cache chart series', () => {
     assert.equal(result[0]?.ts, 3_600)
     assert.equal(result[0]?.missing, false)
   })
+
+  test('does not invent an empty bucket before the requested window begins', () => {
+    expect(
+      buildCacheChartSeries([], 3600, 900, 8100).map((point) => point.ts)
+    ).toEqual([3600, 7200])
+  })
 })
 
 test('empty groups retain missing buckets across the requested window', () => {

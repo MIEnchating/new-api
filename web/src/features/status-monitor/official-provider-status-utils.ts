@@ -49,6 +49,41 @@ const COMPONENT_STATUS_LABELS: Record<string, string> = {
   under_maintenance: 'Under maintenance',
 }
 
+// Status pages also publish consumer products and administrative APIs.
+const OPENAI_RELAY_COMPONENTS = new Set([
+  'chat completions',
+  'completions',
+  'responses',
+  'embeddings',
+  'images',
+  'audio',
+  'realtime',
+  'files',
+  'batch',
+  'moderations',
+  'codex api',
+])
+
+export function getRelayOfficialComponents(
+  provider: OfficialProviderStatus
+): OfficialProviderComponent[] {
+  return provider.components
+    .filter((component) => {
+      if (component.group) return false
+      const name = component.name.trim().toLowerCase()
+      if (/^(?:(?:openai|anthropic|claude)\s+)?apis?\b/.test(name)) return true
+      return (
+        provider.provider.trim().toLowerCase() === 'openai' &&
+        OPENAI_RELAY_COMPONENTS.has(name)
+      )
+    })
+    .sort(
+      (left, right) =>
+        Number(isOfficialComponentAffected(right)) -
+        Number(isOfficialComponentAffected(left))
+    )
+}
+
 function normalizeStatus(value: string) {
   return value
     .trim()

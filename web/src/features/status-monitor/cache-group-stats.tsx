@@ -16,10 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Grid2X2, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Grid2X2,
+  RotateCcw,
+  Search,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { EmptyState } from '@/components/empty-state'
 import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
 import {
@@ -29,6 +38,11 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupInput,
+} from '@/components/ui/input-group'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Tooltip,
@@ -66,7 +80,7 @@ export function CacheGroupStats(props: {
   const { t } = useTranslation()
   const [view, setView] = useState('pulse')
   const [viewport, setViewport] = useState({ zoom: 1, anchor: 1 })
-  const matrixRef = useRef<HTMLDivElement>(null)
+  const [search, setSearch] = useState('')
   const rows = useMemo(() => {
     const timeline = buildCacheChartSeries(
       props.groups.flatMap((group) => group.series),
@@ -110,54 +124,10 @@ export function CacheGroupStats(props: {
     critical: t('Critical'),
     unknown: t('No data or insufficient samples'),
   }
-  useEffect(() => {
-    const matrix = matrixRef.current
-    if (!matrix) return
-    const onWheel = (event: WheelEvent) => {
-      const target =
-        event.target instanceof Element
-          ? event.target.closest<HTMLElement>('[data-monitor-pulses]')
-          : null
-      if (
-        !target ||
-        event.deltaY === 0 ||
-        length < 2 ||
-        event.ctrlKey ||
-        event.metaKey
-      ) {
-        return
-      }
-      event.preventDefault()
-      const bounds = target.getBoundingClientRect()
-      const fraction = Math.max(
-        0,
-        Math.min(1, (event.clientX - bounds.left) / Math.max(1, bounds.width))
-      )
-      setViewport((previous) => {
-        const zoom = Math.max(
-          1,
-          Math.min(4, previous.zoom + (event.deltaY < 0 ? 1 : -1))
-        )
-        const previousCount = Math.ceil(length / previous.zoom)
-        const nextCount = Math.ceil(length / zoom)
-        const focus =
-          (length - previousCount) * previous.anchor + fraction * previousCount
-        const anchor =
-          nextCount < length
-            ? Math.max(
-                0,
-                Math.min(
-                  1,
-                  (focus - fraction * nextCount) / (length - nextCount)
-                )
-              )
-            : 1
-        return { zoom, anchor }
-      })
-    }
-    matrix.addEventListener('wheel', onWheel, { passive: false })
-    return () => matrix.removeEventListener('wheel', onWheel)
-  }, [length, view])
+  const query = search.trim().toLocaleLowerCase()
+  const visibleRows = rows.filter(({ group }) =>
+    group.group.toLocaleLowerCase().includes(query)
+  )
   return (
     <Tabs
       value={view}
@@ -166,15 +136,25 @@ export function CacheGroupStats(props: {
     >
       <Card
         data-card-hover='false'
-        className='min-h-0 min-w-0 flex-1 gap-3 overflow-hidden rounded-2xl py-3 shadow-none ring-inset sm:gap-4 sm:py-5'
+        className='@container/trends min-h-0 min-w-0 flex-1 gap-3 overflow-hidden rounded-xl py-3 shadow-none ring-inset max-[359px]:gap-2 sm:py-4'
       >
-        <CardHeader className='flex shrink-0 flex-col justify-between gap-3 px-4 sm:px-6 xl:flex-row xl:items-center'>
+        <CardHeader className='flex shrink-0 flex-row flex-wrap items-center justify-between gap-3 px-3 sm:px-4'>
           <div className='space-y-1'>
             <CardTitle className='flex items-center gap-2 text-sm'>
-              <Grid2X2 className='text-success size-4' />
-              {t('Availability trends')}
+              <Grid2X2
+                className='text-muted-foreground size-4 max-[359px]:hidden'
+                aria-hidden='true'
+              />
+              <span className='max-[359px]:sr-only'>
+                {t('Availability trends')}
+              </span>
+              <span className='bg-muted text-muted-foreground rounded-full px-2 py-1 text-[10px] font-normal sm:text-[11px]'>
+                {t('{{minutes}} min intervals', {
+                  minutes: props.bucketSeconds / 60,
+                })}
+              </span>
             </CardTitle>
-            <CardDescription className='text-xs'>
+            <CardDescription className='hidden text-xs @min-[60rem]/trends:block'>
               {view === 'pulse'
                 ? t(
                     'Each row is a monitored group. Each block is a time interval; hover or focus for details.'
@@ -189,17 +169,67 @@ export function CacheGroupStats(props: {
               <TabsTrigger value='pulse'>{t('Pulse matrix')}</TabsTrigger>
               <TabsTrigger value='line'>{t('Line chart')}</TabsTrigger>
             </TabsList>
-            <span className='bg-muted text-muted-foreground rounded-full px-2 py-1 text-[11px]'>
-              {t('{{minutes}} min intervals', {
-                minutes: props.bucketSeconds / 60,
-              })}
-            </span>
-            {view === 'pulse' ? (
-              <>
-                <span className='text-muted-foreground hidden text-[11px] 2xl:inline'>
-                  {t('Scroll over blocks to zoom')}
-                </span>
+          </div>
+        </CardHeader>
+        <CardContent className='@container flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden px-3 sm:px-4'>
+          <TabsContent
+            value='pulse'
+            className='flex min-h-0 flex-1 flex-col gap-3 overflow-hidden max-[359px]:gap-2'
+          >
+            <div className='flex shrink-0 items-center gap-3'>
+              <InputGroup className='min-w-0 flex-1 sm:max-w-64'>
+                <InputGroupAddon>
+                  <Search aria-hidden='true' />
+                </InputGroupAddon>
+                <InputGroupInput
+                  type='search'
+                  aria-label={t('Search groups...')}
+                  placeholder={t('Search groups...')}
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                />
+              </InputGroup>
+              <span className='text-muted-foreground hidden shrink-0 text-xs tabular-nums @min-[30rem]/trends:inline'>
+                {visibleRows.length} / {rows.length}
+              </span>
+              <div className='ml-auto shrink-0'>
                 <ButtonGroup aria-label={t('Zoom')}>
+                  <Button
+                    size='icon-sm'
+                    variant='outline'
+                    aria-label={t('Earlier intervals')}
+                    disabled={startIndex === 0}
+                    onClick={() =>
+                      setViewport((current) => ({
+                        ...current,
+                        anchor: Math.max(
+                          0,
+                          (startIndex - visibleCount) /
+                            Math.max(1, length - visibleCount)
+                        ),
+                      }))
+                    }
+                  >
+                    <ChevronLeft />
+                  </Button>
+                  <Button
+                    size='icon-sm'
+                    variant='outline'
+                    aria-label={t('Later intervals')}
+                    disabled={startIndex + visibleCount >= length}
+                    onClick={() =>
+                      setViewport((current) => ({
+                        ...current,
+                        anchor: Math.min(
+                          1,
+                          (startIndex + visibleCount) /
+                            Math.max(1, length - visibleCount)
+                        ),
+                      }))
+                    }
+                  >
+                    <ChevronRight />
+                  </Button>
                   <Button
                     size='icon-sm'
                     variant='outline'
@@ -235,170 +265,179 @@ export function CacheGroupStats(props: {
                     onClick={() => setViewport({ zoom: 1, anchor: 1 })}
                   >
                     <RotateCcw className='size-3' />
-                    {t('Reset zoom')}
+                    <span className='sr-only @min-[60rem]/trends:not-sr-only'>
+                      {t('Reset zoom')}
+                    </span>
                   </Button>
                 </ButtonGroup>
-              </>
-            ) : null}
-          </div>
-        </CardHeader>
-        <CardContent className='flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden px-3 sm:gap-4 sm:px-6'>
-          <TabsContent
-            value='pulse'
-            className='flex min-h-0 flex-1 flex-col overflow-hidden'
-          >
+              </div>
+            </div>
             <div
-              ref={matrixRef}
               className='min-h-0 flex-1 [scrollbar-width:thin] overflow-auto overscroll-contain rounded-xl'
               role='region'
               aria-label={t('Availability trends')}
               tabIndex={0}
             >
-              <div
-                role='table'
-                aria-label={t('Channel health')}
-                className='grid min-w-0 grid-cols-3 text-xs lg:min-w-[800px] lg:grid-cols-[minmax(160px,1.4fr)_90px_130px_90px_minmax(280px,3.5fr)]'
-              >
+              {visibleRows.length === 0 ? (
+                <EmptyState
+                  title={t('No results found')}
+                  className='min-h-40'
+                />
+              ) : (
                 <div
-                  role='row'
-                  className='bg-muted text-muted-foreground sticky top-0 z-20 col-span-3 grid grid-cols-subgrid items-center gap-x-3 px-3 py-3 text-[11px] font-medium lg:col-span-5'
+                  role='table'
+                  aria-label={t('Channel health')}
+                  className='grid min-w-0 grid-cols-3 text-xs @min-[48rem]:grid-cols-[minmax(130px,1.2fr)_80px_95px_75px_minmax(180px,3fr)]'
                 >
-                  <span role='columnheader' className='hidden lg:block'>
-                    {t('Channel dimension')}
-                  </span>
-                  <span role='columnheader' className='whitespace-nowrap'>
-                    {t('Success rate')}
-                  </span>
-                  <span role='columnheader' className='whitespace-nowrap'>
-                    {t('Average TTFT')}
-                  </span>
-                  <span role='columnheader' className='whitespace-nowrap'>
-                    {t('Cache rate')}
-                  </span>
-                  <span
-                    role='columnheader'
-                    className='col-span-3 mt-2 flex justify-between gap-3 text-[10px] tabular-nums lg:col-span-1 lg:mt-0'
-                    aria-live='polite'
-                  >
-                    <span>
-                      {visibleTimeline[0]
-                        ? formatTime(visibleTimeline[0].ts)
-                        : '--'}
-                    </span>
-                    <span>
-                      {visibleTimeline.at(-1)
-                        ? formatTime(visibleTimeline.at(-1)?.ts ?? 0)
-                        : '--'}
-                    </span>
-                  </span>
-                </div>
-                {rows.map(({ group, points }) => (
                   <div
-                    key={group.group}
                     role='row'
-                    className='border-border/40 odd:bg-muted/15 hover:bg-muted/30 col-span-3 grid grid-cols-subgrid items-center gap-x-3 gap-y-2 border-b px-3 py-3 last:border-b-0 lg:col-span-5 lg:py-2'
+                    className='bg-muted text-muted-foreground z-20 col-span-3 grid grid-cols-subgrid items-center gap-x-3 px-3 py-3 text-[11px] font-medium max-[359px]:py-2 @min-[48rem]:sticky @min-[48rem]:top-0 @min-[48rem]:col-span-5'
                   >
-                    <div
-                      role='cell'
-                      className='col-span-3 flex min-w-0 items-center gap-2 font-semibold lg:col-span-1'
+                    <span
+                      role='columnheader'
+                      className='hidden @min-[48rem]:block'
                     >
-                      <span
-                        role='img'
-                        aria-label={
-                          statusLabels[group.health?.overall ?? 'unknown']
-                        }
-                        className='size-2 shrink-0 rounded-full'
-                        style={{
-                          backgroundColor: monitorScoreColor(
-                            group.health?.score
-                          ),
-                        }}
-                      />
-                      <span className='truncate' title={group.group}>
-                        {group.group}
+                      {t('Group')}
+                    </span>
+                    <span
+                      role='columnheader'
+                      className='whitespace-nowrap max-[359px]:sr-only'
+                    >
+                      {t('Success rate')}
+                    </span>
+                    <span
+                      role='columnheader'
+                      className='whitespace-nowrap max-[359px]:sr-only'
+                    >
+                      {t('Average TTFT')}
+                    </span>
+                    <span
+                      role='columnheader'
+                      className='whitespace-nowrap max-[359px]:sr-only'
+                    >
+                      {t('Cache rate')}
+                    </span>
+                    <span
+                      role='columnheader'
+                      className='col-span-3 mt-2 flex justify-between gap-3 text-[10px] tabular-nums max-[359px]:mt-0 @min-[48rem]:col-span-1 @min-[48rem]:mt-0'
+                      aria-live='polite'
+                    >
+                      <span>
+                        {visibleTimeline[0]
+                          ? formatTime(visibleTimeline[0].ts)
+                          : '--'}
                       </span>
-                    </div>
-                    <span role='cell' className='tabular-nums'>
-                      {formatMonitorPercent(
-                        group.health?.error_rate_percent == null
-                          ? null
-                          : 100 - group.health.error_rate_percent
-                      )}
+                      <span>
+                        {visibleTimeline.at(-1)
+                          ? formatTime(visibleTimeline.at(-1)?.ts ?? 0)
+                          : '--'}
+                      </span>
                     </span>
-                    <span role='cell' className='tabular-nums'>
-                      {formatMonitorLatency(group.health?.avg_ttft_ms)}
-                    </span>
-                    <span role='cell' className='tabular-nums'>
-                      {formatMonitorPercent(
-                        group.has_data ? group.cache_hit_rate : null
-                      )}
-                    </span>
-                    <div
-                      role='cell'
-                      data-monitor-pulses
-                      className='col-span-3 grid gap-[2px] lg:col-span-1'
-                      style={{
-                        gridTemplateColumns: `repeat(${Math.max(1, visibleTimeline.length)}, minmax(0, 1fr))`,
-                      }}
-                    >
-                      {points
-                        .slice(startIndex, startIndex + visibleCount)
-                        .map((point) => {
-                          const health = point.health
-                          const status = health?.overall ?? 'unknown'
-                          const score = health?.score
-                          const success =
-                            health?.error_rate_percent == null
-                              ? null
-                              : 100 - health.error_rate_percent
-                          const details = [
-                            formatTime(point.ts),
-                            statusLabels[status],
-                            `${t('Health score')}: ${score == null ? '--' : score.toFixed(1)}`,
-                            `${t('Success rate')}: ${formatMonitorPercent(success)}`,
-                            `${t('Average TTFT')}: ${formatMonitorLatency(health?.avg_ttft_ms)}`,
-                            `${t('Cache rate')}: ${formatMonitorPercent(point.has_data ? point.cache_hit_rate : null)}`,
-                          ]
-                          if (props.countsVisible && !point.missing) {
-                            details.push(
-                              `${t('Hits / Requests')}: ${point.hit_count ?? 0} / ${point.request_count ?? 0}`
-                            )
-                          }
-                          return (
-                            <Tooltip key={point.ts}>
-                              <TooltipTrigger
-                                render={<span role='img' tabIndex={0} />}
-                                aria-label={details.join('\n')}
-                                className='focus-visible:outline-ring h-4 min-w-0 rounded-[2px] outline-offset-2 focus-visible:outline-2'
-                                style={{
-                                  backgroundColor: monitorScoreColor(score),
-                                }}
-                              />
-                              <TooltipContent className='whitespace-pre-line'>
-                                {details.join('\n')}
-                              </TooltipContent>
-                            </Tooltip>
-                          )
-                        })}
-                    </div>
                   </div>
-                ))}
-              </div>
+                  {visibleRows.map(({ group, points }) => (
+                    <div
+                      key={group.group}
+                      role='row'
+                      className='border-border/40 odd:bg-muted/15 hover:bg-muted/30 col-span-3 grid grid-cols-subgrid items-center gap-x-3 gap-y-2 border-b px-3 py-3 last:border-b-0 max-[359px]:py-2 @min-[48rem]:col-span-5 @min-[48rem]:py-2'
+                    >
+                      <div
+                        role='cell'
+                        className='col-span-3 flex min-w-0 items-center gap-2 font-semibold @min-[48rem]:col-span-1'
+                      >
+                        <span
+                          role='img'
+                          aria-label={
+                            statusLabels[group.health?.overall ?? 'unknown']
+                          }
+                          className='size-2 shrink-0 rounded-full'
+                          style={{
+                            backgroundColor: monitorScoreColor(
+                              group.health?.score
+                            ),
+                          }}
+                        />
+                        <span className='truncate' title={group.group}>
+                          {group.group}
+                        </span>
+                      </div>
+                      <span role='cell' className='tabular-nums'>
+                        {formatMonitorPercent(
+                          group.health?.error_rate_percent == null
+                            ? null
+                            : 100 - group.health.error_rate_percent
+                        )}
+                      </span>
+                      <span role='cell' className='tabular-nums'>
+                        {formatMonitorLatency(group.health?.avg_ttft_ms)}
+                      </span>
+                      <span role='cell' className='tabular-nums'>
+                        {formatMonitorPercent(
+                          group.has_data ? group.cache_hit_rate : null
+                        )}
+                      </span>
+                      <div
+                        role='cell'
+                        data-monitor-pulses
+                        className='col-span-3 grid min-w-0 @min-[48rem]:col-span-1'
+                        style={{
+                          gridTemplateColumns: `repeat(${Math.max(1, visibleTimeline.length)}, minmax(0, 1fr))`,
+                          columnGap: `min(2px, ${25 / Math.max(1, visibleTimeline.length)}%)`,
+                        }}
+                      >
+                        {points
+                          .slice(startIndex, startIndex + visibleCount)
+                          .map((point) => {
+                            const health = point.health
+                            const status = health?.overall ?? 'unknown'
+                            const score = health?.score
+                            const success =
+                              health?.error_rate_percent == null
+                                ? null
+                                : 100 - health.error_rate_percent
+                            const details = [
+                              formatTime(point.ts),
+                              statusLabels[status],
+                              `${t('Health score')}: ${score == null ? '--' : score.toFixed(1)}`,
+                              `${t('Success rate')}: ${formatMonitorPercent(success)}`,
+                              `${t('Average TTFT')}: ${formatMonitorLatency(health?.avg_ttft_ms)}`,
+                              `${t('Cache rate')}: ${formatMonitorPercent(point.has_data ? point.cache_hit_rate : null)}`,
+                            ]
+                            if (props.countsVisible && !point.missing) {
+                              details.push(
+                                `${t('Hits / Requests')}: ${point.hit_count ?? 0} / ${point.request_count ?? 0}`
+                              )
+                            }
+                            return (
+                              <Tooltip key={point.ts}>
+                                <TooltipTrigger
+                                  render={<span role='img' tabIndex={0} />}
+                                  aria-label={details.join('\n')}
+                                  className='focus-visible:outline-ring h-4 min-w-0 rounded-[2px] outline-offset-2 focus-visible:outline-2'
+                                  style={{
+                                    backgroundColor: monitorScoreColor(score),
+                                  }}
+                                />
+                                <TooltipContent className='whitespace-pre-line'>
+                                  {details.join('\n')}
+                                </TooltipContent>
+                              </Tooltip>
+                            )
+                          })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </TabsContent>
           <TabsContent
             value='line'
-            className='min-h-0 flex-1 overflow-hidden overscroll-contain'
+            className='min-h-0 flex-1 overflow-auto overscroll-contain'
           >
             <ChannelTrend points={summaryPoints} />
           </TabsContent>
           {view === 'pulse' ? (
             <div className='text-muted-foreground shrink-0 space-y-2 text-[10px] sm:text-[11px]'>
-              <div className='flex items-center gap-2' aria-hidden='true'>
-                <span>{t('Poor')}</span>
-                <div className='h-2 flex-1 rounded-full bg-[linear-gradient(to_right,var(--destructive),var(--warning)_50%,var(--success)_80%)]' />
-                <span>{t('Good')}</span>
-              </div>
               <div className='flex flex-wrap gap-x-4 gap-y-2'>
                 <span className='flex items-center gap-1.5'>
                   <i className='bg-success size-2 rounded-full' />

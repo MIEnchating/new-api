@@ -176,6 +176,7 @@ export interface UptimeHeartbeat {
 }
 
 export interface UptimeMonitor {
+  id?: number
   name: string
   uptime: number
   uptime30m?: number
@@ -215,6 +216,8 @@ export interface UptimeStatusResponse {
   success: boolean
   data: UptimeGroupResult[]
   request_stats?: RecentRequestStats
+  degraded?: boolean
+  request_stats_unavailable?: boolean
 }
 
 // ============================================================================

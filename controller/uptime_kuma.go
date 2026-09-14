@@ -3,7 +3,6 @@ package controller
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -75,6 +74,7 @@ type requestStatsLoader struct {
 var defaultRequestStatsLoader requestStatsLoader
 
 type Monitor struct {
+	ID          int         `json:"id"`
 	Name        string      `json:"name"`
 	Uptime      float64     `json:"uptime"`
 	Uptime30m   *float64    `json:"uptime30m,omitempty"`
@@ -148,22 +148,14 @@ func getAndDecode(ctx context.Context, client *http.Client, url string, dest any
 	}
 
 	limited := &io.LimitedReader{R: resp.Body, N: uptimeResponseMaxBytes + 1}
-	decoder := json.NewDecoder(limited)
-	err = decoder.Decode(dest)
-	if err == nil {
-		var trailing interface{}
-		trailingErr := decoder.Decode(&trailing)
-		if trailingErr == nil {
-			return errors.New("response contains trailing JSON data")
-		}
-		if trailingErr != io.EOF {
-			err = trailingErr
-		}
-	}
+	data, err := io.ReadAll(limited)
 	if limited.N <= 0 {
 		return errUptimeResponseTooLarge
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return common.Unmarshal(data, dest)
 }
 
 func parseUptimeBadge(reader io.Reader) (float64, error) {
@@ -284,8 +276,10 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 
 		for _, m := range pg.MonitorList {
 			monitor := Monitor{
-				Name:  m.Name,
-				Group: pg.Name,
+				ID:     m.ID,
+				Name:   m.Name,
+				Group:  pg.Name,
+				Status: -1,
 			}
 
 			monitorID := strconv.Itoa(m.ID)
@@ -329,7 +323,6 @@ func fetchGroupData(ctx context.Context, client *http.Client, groupConfig map[st
 	metricsGroup.SetLimit(uptimeMetricWorkers)
 	for _, reference := range monitorReferences {
 		for _, duration := range []string{"30m", "1h", "7d"} {
-			reference, duration := reference, duration
 			metricsGroup.Go(func() error {
 				uptime, err := fetchBadgeUptime(metricsCtx, client, baseURL, reference.id, duration)
 				if err == nil {
@@ -372,7 +365,7 @@ func resolveSevenDayUptime(uptimeList map[string]float64, monitorID string) (flo
 	return 0, false
 }
 
-func fetchUptimeStatusSnapshot(ctx context.Context, groups []map[string]interface{}) uptimeStatusSnapshot {
+func fetchUptimeStatusSnapshot(ctx context.Context, groups []map[string]any) uptimeStatusSnapshot {
 	client := &http.Client{Timeout: httpTimeout}
 	results := make([]UptimeGroupResult, len(groups))
 	errorsByGroup := make([]error, len(groups))
@@ -436,8 +429,8 @@ func cloneUptimeStatusSnapshot(snapshot uptimeStatusSnapshot) uptimeStatusSnapsh
 	return cloned
 }
 
-func uptimeStatusCacheKey(groups []map[string]interface{}) string {
-	encoded, err := json.Marshal(groups)
+func uptimeStatusCacheKey(groups []map[string]any) string {
+	encoded, err := common.Marshal(groups)
 	if err != nil {
 		return ""
 	}
@@ -463,15 +456,15 @@ func (loader *uptimeStatusLoader) cached(key string, now time.Time) (uptimeStatu
 
 func (loader *uptimeStatusLoader) load(
 	ctx context.Context,
-	groups []map[string]interface{},
-	fetch func(context.Context, []map[string]interface{}) uptimeStatusSnapshot,
+	groups []map[string]any,
+	fetch func(context.Context, []map[string]any) uptimeStatusSnapshot,
 ) (uptimeStatusSnapshot, error) {
 	key := uptimeStatusCacheKey(groups)
 	if snapshot, ok := loader.cached(key, loader.currentTime()); ok {
 		return snapshot, nil
 	}
 
-	result := loader.requests.DoChan(key, func() (interface{}, error) {
+	result := loader.requests.DoChan(key, func() (any, error) {
 		if snapshot, ok := loader.cached(key, loader.currentTime()); ok {
 			return snapshot, nil
 		}
@@ -544,7 +537,7 @@ func (loader *requestStatsLoader) load(
 		return stats, nil
 	}
 
-	result := loader.requests.DoChan("recent-request-stats", func() (interface{}, error) {
+	result := loader.requests.DoChan("recent-request-stats", func() (any, error) {
 		if stats, ok := loader.cached(loader.currentTime()); ok {
 			return stats, nil
 		}
@@ -587,10 +580,12 @@ func GetUptimeKumaStatus(c *gin.Context) {
 	groups := console_setting.GetUptimeKumaGroups()
 	if len(groups) == 0 {
 		c.JSON(http.StatusOK, gin.H{
-			"success":       true,
-			"message":       "",
-			"data":          []UptimeGroupResult{},
-			"request_stats": requestStats,
+			"success":                   true,
+			"message":                   "",
+			"data":                      []UptimeGroupResult{},
+			"request_stats":             requestStats,
+			"request_stats_unavailable": statsErr != nil,
+			"degraded":                  false,
 		})
 		return
 	}
@@ -599,18 +594,21 @@ func GetUptimeKumaStatus(c *gin.Context) {
 	if err != nil {
 		common.SysError("failed to load uptime monitor catalog: " + err.Error())
 		c.JSON(http.StatusOK, gin.H{
-			"success":       true,
-			"message":       "",
-			"data":          []UptimeGroupResult{},
-			"request_stats": requestStats,
-			"degraded":      true,
+			"success":                   true,
+			"message":                   "",
+			"data":                      []UptimeGroupResult{},
+			"request_stats":             requestStats,
+			"request_stats_unavailable": statsErr != nil,
+			"degraded":                  true,
 		})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"success":       true,
-		"message":       "",
-		"data":          snapshot.Results,
-		"request_stats": requestStats,
+		"success":                   true,
+		"message":                   "",
+		"data":                      snapshot.Results,
+		"request_stats":             requestStats,
+		"request_stats_unavailable": statsErr != nil,
+		"degraded":                  snapshot.Degraded,
 	})
 }

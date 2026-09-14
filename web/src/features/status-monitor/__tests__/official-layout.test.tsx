@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { OfficialProviderStatuses } from '../official-provider-status'
 import type { OfficialProviderStatus } from '../types'
@@ -47,6 +47,91 @@ function renderProviders(providers: OfficialProviderStatus[]) {
 }
 
 describe('official status card layout', () => {
+  it('keeps the last official status visible during a failed refresh and clears the warning on recovery', () => {
+    const response = { success: true, data: { providers: [provider] } }
+    const rendered = renderProviders([provider])
+    const card = screen.getByRole('article')
+    rendered.rerender(
+      <OfficialProviderStatuses
+        response={response}
+        loading
+        failed={false}
+        compact
+      />
+    )
+    expect(screen.getByRole('article')).toBe(card)
+    rendered.rerender(
+      <OfficialProviderStatuses
+        response={response}
+        loading={false}
+        failed
+        compact
+      />
+    )
+    expect(screen.getByRole('article')).toBe(card)
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Refresh failed. Showing the last available data.'
+    )
+    rendered.rerender(
+      <OfficialProviderStatuses
+        response={response}
+        loading={false}
+        failed={false}
+        compact
+      />
+    )
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.getByRole('article')).toBe(card)
+  })
+
+  it('preserves the collapsed component list when provider status changes', async () => {
+    const monitoredProvider = {
+      ...provider,
+      components: [
+        { id: 'api', name: 'API', status: 'operational', updated_at: '' },
+      ],
+    }
+    const user = userEvent.setup()
+    const rendered = renderProviders([monitoredProvider])
+    await user.click(
+      screen.getByRole('button', { name: 'Service components 1' })
+    )
+    rendered.rerender(
+      <OfficialProviderStatuses
+        response={{
+          success: true,
+          data: { providers: [{ ...monitoredProvider, indicator: 'major' }] },
+        }}
+        loading={false}
+        failed={false}
+        compact
+      />
+    )
+    expect(screen.getByText('Major outage')).toBeVisible()
+    expect(
+      screen.getByRole('button', { name: 'Service components 1' })
+    ).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('offers retry after the first official status request fails', async () => {
+    const onRetry = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <OfficialProviderStatuses
+        response={null}
+        loading={false}
+        failed
+        onRetry={onRetry}
+        compact
+      />
+    )
+    await waitFor(() =>
+      expect(screen.getByText('Official status unavailable')).toBeVisible()
+    )
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRetry).toHaveBeenCalledOnce()
+  })
+
   it('separates provider identity from footer actions without reserving unused columns', () => {
     renderProviders([provider])
     const card = screen.getByRole('article')
@@ -95,6 +180,18 @@ describe('official status card layout', () => {
         ...provider,
         components: [
           {
+            id: 'ads',
+            name: 'Ads API',
+            status: 'degraded_performance',
+            updated_at: '',
+          },
+          {
+            id: 'voice',
+            name: 'Voice mode',
+            status: 'operational',
+            updated_at: '',
+          },
+          {
             id: 'group',
             name: 'API group',
             group: true,
@@ -129,6 +226,125 @@ describe('official status card layout', () => {
         Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy()
     expect(screen.queryByText('API group')).not.toBeInTheDocument()
+    expect(screen.queryByText('Ads API')).not.toBeInTheDocument()
+    expect(screen.queryByText('Voice mode')).not.toBeInTheDocument()
+    expect(screen.queryByText('No active incidents')).not.toBeInTheDocument()
+  })
+
+  it('shows Claude API availability without web, console, or desktop components', () => {
+    renderProviders([
+      {
+        ...provider,
+        provider: 'Claude',
+        components: [
+          'claude.ai',
+          'Claude Console (platform.claude.com)',
+          'Claude API (api.anthropic.com)',
+          'Claude Code',
+          'Claude Cowork',
+          'Claude for Government',
+        ].map((name) => ({
+          id: name,
+          name,
+          status: 'operational',
+          updated_at: '',
+        })),
+      },
+    ])
+    expect(
+      screen.getByRole('button', { name: 'Service components 1' })
+    ).toBeVisible()
+    expect(screen.getByText('Claude API (api.anthropic.com)')).toBeVisible()
+    expect(screen.queryByText('claude.ai')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Claude Console (platform.claude.com)')
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText('Claude Code')).not.toBeInTheDocument()
+    expect(screen.queryByText('Claude Cowork')).not.toBeInTheDocument()
+    expect(screen.queryByText('Claude for Government')).not.toBeInTheDocument()
+  })
+
+  it('keeps core OpenAI relay endpoints while excluding unrelated API products', () => {
+    const relayComponents = [
+      'API',
+      'Chat Completions',
+      'Responses',
+      'Embeddings',
+      'Images',
+      'Audio',
+      'Realtime',
+      'Files',
+      'Batch',
+      'Moderations',
+      'Codex API',
+    ]
+    renderProviders([
+      {
+        ...provider,
+        components: [
+          ...relayComponents,
+          'Compliance API',
+          'Ads API',
+          'Codex Web',
+          'Login',
+          'Fine-tuning',
+        ].map((name) => ({
+          id: name,
+          name,
+          status: 'operational',
+          updated_at: '',
+        })),
+      },
+    ])
+    expect(
+      screen.getByRole('button', { name: 'Service components 11' })
+    ).toBeVisible()
+    for (const name of relayComponents) {
+      expect(screen.getByText(name)).toBeVisible()
+    }
+    for (const name of [
+      'Compliance API',
+      'Ads API',
+      'Codex Web',
+      'Login',
+      'Fine-tuning',
+    ]) {
+      expect(screen.queryByText(name)).not.toBeInTheDocument()
+    }
+  })
+
+  it('keeps official incident warnings when no relevant service components are listed', () => {
+    renderProviders([
+      {
+        ...provider,
+        components: [
+          {
+            id: 'web',
+            name: 'ChatGPT',
+            status: 'major_outage',
+            updated_at: '',
+          },
+        ],
+        incidents: [
+          {
+            name: 'Elevated errors',
+            status: 'investigating',
+            impact: 'major',
+            message: '',
+            updated_at: '',
+            url: '',
+            components: [],
+          },
+        ],
+      },
+    ])
+    expect(
+      screen.queryByRole('button', { name: /Service components/ })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: 'Elevated errors' })
+    ).toBeVisible()
+    expect(screen.getByText('Major outage')).toBeVisible()
     expect(screen.queryByText('No active incidents')).not.toBeInTheDocument()
   })
 

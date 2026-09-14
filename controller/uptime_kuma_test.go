@@ -5,13 +5,17 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/setting/console_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -134,7 +138,156 @@ func TestGetAndDecodeRejectsTrailingJSON(t *testing.T) {
 	var response map[string]string
 	err := getAndDecode(context.Background(), client, "http://uptime.invalid", &response)
 
-	require.ErrorContains(t, err, "trailing JSON")
+	require.Error(t, err)
+}
+
+func TestFetchGroupDataPreservesMonitorIdentityAndUnknownStatus(t *testing.T) {
+	client := &http.Client{Transport: uptimeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body string
+		switch request.URL.Path {
+		case "/api/status-page/public":
+			body = `{"publicGroupList":[{"name":"relay","monitorList":[{"id":42,"name":"api"},{"id":43,"name":"api"}]}]}`
+		case "/api/status-page/heartbeat/public":
+			body = `{"heartbeatList":{"43":[{"status":1,"time":"2026-09-14 10:00:00","ping":25}]},"uptimeList":{"43_24":1}}`
+		default:
+			return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader(""))}, nil
+		}
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			ContentLength: int64(len(body)),
+			Body:          io.NopCloser(strings.NewReader(body)),
+		}, nil
+	})}
+
+	result, err := fetchGroupData(context.Background(), client, map[string]any{
+		"url": "https://uptime.invalid", "slug": "public", "categoryName": "primary",
+	})
+
+	require.NoError(t, err)
+	require.Len(t, result.Monitors, 2)
+	assert.Equal(t, "primary", result.CategoryName)
+	assert.Equal(t, 42, result.Monitors[0].ID)
+	assert.Equal(t, -1, result.Monitors[0].Status)
+	assert.Empty(t, result.Monitors[0].LastChecked)
+	assert.Nil(t, result.Monitors[0].Ping)
+	assert.Equal(t, 43, result.Monitors[1].ID)
+	assert.Equal(t, 1, result.Monitors[1].Status)
+	assert.Equal(t, "2026-09-14T10:00:00Z", result.Monitors[1].LastChecked)
+	assert.Equal(t, float64(1), result.Monitors[1].Uptime24)
+}
+
+func TestGetUptimeKumaStatusReportsDataAvailability(t *testing.T) {
+	settings := console_setting.GetConsoleSetting()
+	originalGroups := settings.UptimeKumaGroups
+	defaultUptimeStatusLoader.mu.Lock()
+	originalUptimeEntry := defaultUptimeStatusLoader.entry
+	defaultUptimeStatusLoader.mu.Unlock()
+	defaultRequestStatsLoader.mu.Lock()
+	originalStatsEntry := defaultRequestStatsLoader.entry
+	defaultRequestStatsLoader.mu.Unlock()
+	t.Cleanup(func() {
+		settings.UptimeKumaGroups = originalGroups
+		defaultUptimeStatusLoader.mu.Lock()
+		defaultUptimeStatusLoader.entry = originalUptimeEntry
+		defaultUptimeStatusLoader.mu.Unlock()
+		defaultRequestStatsLoader.mu.Lock()
+		defaultRequestStatsLoader.entry = originalStatsEntry
+		defaultRequestStatsLoader.mu.Unlock()
+	})
+
+	for _, testCase := range []struct {
+		name              string
+		configured        bool
+		degraded          bool
+		statsUnavailable  bool
+		uptimeUnavailable bool
+	}{
+		{name: "unconfigured"},
+		{name: "healthy", configured: true},
+		{name: "partial upstream failure", configured: true, degraded: true},
+		{name: "statistics unavailable", configured: true, statsUnavailable: true},
+		{name: "unconfigured with statistics unavailable", statsUnavailable: true},
+		{name: "catalog unavailable", configured: true, statsUnavailable: true, uptimeUnavailable: true, degraded: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			settings.UptimeKumaGroups = "[]"
+			if testCase.configured {
+				settings.UptimeKumaGroups = `[{"url":"https://uptime.invalid","slug":"public","categoryName":"primary"}]`
+			}
+			key := uptimeStatusCacheKey(console_setting.GetUptimeKumaGroups())
+			snapshot := uptimeLoaderTestSnapshot(testCase.degraded)
+			snapshot.Results[0].Monitors[0].ID = 42
+			defaultUptimeStatusLoader.mu.Lock()
+			defaultUptimeStatusLoader.entry = uptimeStatusCacheEntry{
+				key: key, expiresAt: time.Now().Add(time.Hour), snapshot: snapshot,
+			}
+			if testCase.uptimeUnavailable {
+				defaultUptimeStatusLoader.entry = uptimeStatusCacheEntry{}
+			}
+			defaultUptimeStatusLoader.mu.Unlock()
+			defaultRequestStatsLoader.mu.Lock()
+			defaultRequestStatsLoader.entry = requestStatsCacheEntry{
+				expiresAt: time.Now().Add(time.Hour),
+				stats: perfmetrics.RecentRequestStats{
+					FiveMinutes: perfmetrics.RequestWindowStats{SuccessRate: 100, HasData: true},
+				},
+			}
+			if testCase.statsUnavailable {
+				defaultRequestStatsLoader.entry = requestStatsCacheEntry{}
+			}
+			defaultRequestStatsLoader.mu.Unlock()
+
+			requestContext := context.Background()
+			if testCase.statsUnavailable {
+				// A pending shared fetch lets the canceled request exit without querying a database.
+				releaseStats := make(chan struct{})
+				pendingStats := defaultRequestStatsLoader.requests.DoChan("recent-request-stats", func() (any, error) {
+					<-releaseStats
+					return nil, errors.New("statistics unavailable")
+				})
+				t.Cleanup(func() { close(releaseStats); <-pendingStats })
+				var cancel context.CancelFunc
+				requestContext, cancel = context.WithCancel(requestContext)
+				cancel()
+			}
+			if testCase.uptimeUnavailable {
+				releaseUptime := make(chan struct{})
+				pendingUptime := defaultUptimeStatusLoader.requests.DoChan(key, func() (any, error) {
+					<-releaseUptime
+					return nil, errors.New("catalog unavailable")
+				})
+				t.Cleanup(func() { close(releaseUptime); <-pendingUptime })
+			}
+
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequestWithContext(requestContext, http.MethodGet, "/api/uptime/status", nil)
+			GetUptimeKumaStatus(c)
+
+			assert.Equal(t, http.StatusOK, recorder.Code)
+			var response struct {
+				Success                 bool                           `json:"success"`
+				Data                    []UptimeGroupResult            `json:"data"`
+				Degraded                *bool                          `json:"degraded"`
+				RequestStatsUnavailable *bool                          `json:"request_stats_unavailable"`
+				RequestStats            perfmetrics.RecentRequestStats `json:"request_stats"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			assert.True(t, response.Success)
+			require.NotNil(t, response.Degraded)
+			require.NotNil(t, response.RequestStatsUnavailable)
+			assert.Equal(t, testCase.degraded, *response.Degraded)
+			assert.Equal(t, testCase.statsUnavailable, *response.RequestStatsUnavailable)
+			assert.Equal(t, !testCase.statsUnavailable, response.RequestStats.FiveMinutes.HasData)
+			if testCase.configured && !testCase.uptimeUnavailable {
+				require.Len(t, response.Data, 1)
+				require.Len(t, response.Data[0].Monitors, 1)
+				assert.Equal(t, 42, response.Data[0].Monitors[0].ID)
+			} else {
+				assert.Empty(t, response.Data)
+			}
+		})
+	}
 }
 
 func TestParseUptimeBadge(t *testing.T) {
