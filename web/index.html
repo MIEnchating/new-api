@@ -27,11 +27,16 @@
       }
 
       #app-bootstrap {
+        --bootstrap-background: oklch(1 0 0);
+        --bootstrap-foreground: oklch(0.49 0 0);
+        --bootstrap-track: oklch(0.93 0 0);
+        --bootstrap-primary: oklch(0.692 0.141 243.716);
         position: fixed;
         inset: 0;
         display: grid;
         place-items: center;
-        background: #fafafa;
+        background: var(--background, var(--bootstrap-background));
+        color: var(--muted-foreground, var(--bootstrap-foreground));
       }
 
       #app-bootstrap-progress {
@@ -40,202 +45,151 @@
         top: 0;
         left: 0;
         width: 100%;
-        height: 3px;
+        height: 2px;
         overflow: hidden;
-        background: rgba(37, 99, 235, 0.12);
+        background: var(--border, var(--bootstrap-track));
       }
 
       #app-bootstrap-progress-bar {
         width: 32%;
         height: 100%;
-        background: #2563eb;
-        animation: app-bootstrap-progress 1.35s ease-in-out infinite;
+        background: currentColor;
+        animation: app-bootstrap-progress 1.6s ease-in-out infinite;
       }
 
       #app-bootstrap-mark {
-        position: relative;
-        width: 116px;
-        height: 116px;
+        box-sizing: border-box;
+        width: min(280px, calc(100vw - 48px));
+        aspect-ratio: 2;
       }
 
-      .app-bootstrap-track,
-      .app-bootstrap-orbit {
-        position: absolute;
-        border-radius: 50%;
+      #app-bootstrap-mark svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
       }
 
-      .app-bootstrap-track-outer {
-        inset: 7px;
-        border: 1px solid rgba(37, 99, 235, 0.16);
+      .app-bootstrap-route {
+        stroke: var(--border, var(--bootstrap-track));
+        stroke-width: 1.25;
       }
 
-      .app-bootstrap-track-inner {
-        inset: 25px;
-        border: 1px solid rgba(15, 118, 110, 0.15);
+      .app-bootstrap-packet {
+        stroke: var(--primary, var(--bootstrap-primary));
+        stroke-width: 1.75;
+        stroke-dasharray: 8 100;
+        animation: app-bootstrap-flow 2.8s linear infinite;
       }
 
-      .app-bootstrap-orbit-outer {
-        inset: 7px;
-        border: 1px solid transparent;
-        border-top-color: rgba(37, 99, 235, 0.72);
-        border-right-color: rgba(37, 99, 235, 0.24);
-        animation: app-bootstrap-orbit 3.2s linear infinite;
+      .app-bootstrap-lane-middle {
+        animation-delay: -0.4s;
       }
 
-      .app-bootstrap-orbit-inner {
-        inset: 25px;
-        border: 1px solid transparent;
-        border-bottom-color: rgba(15, 118, 110, 0.72);
-        border-left-color: rgba(15, 118, 110, 0.24);
-        animation: app-bootstrap-orbit-reverse 2.4s linear infinite;
+      .app-bootstrap-lane-bottom {
+        animation-delay: -0.8s;
       }
 
-      .app-bootstrap-orbit::before,
-      .app-bootstrap-orbit::after {
-        position: absolute;
-        border: 2px solid #fafafa;
-        border-radius: 50%;
-        content: '';
+      .app-bootstrap-outgoing .app-bootstrap-packet {
+        animation-delay: -1.4s;
       }
 
-      .app-bootstrap-orbit-outer::before {
-        top: 10px;
-        right: 7px;
-        width: 8px;
-        height: 8px;
-        background: #2563eb;
-        box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+      .app-bootstrap-outgoing .app-bootstrap-lane-middle {
+        animation-delay: -1.8s;
       }
 
-      .app-bootstrap-orbit-outer::after {
-        bottom: 8px;
-        left: 12px;
-        width: 6px;
-        height: 6px;
-        background: #d97706;
-        box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.1);
+      .app-bootstrap-outgoing .app-bootstrap-lane-bottom {
+        animation-delay: -2.2s;
       }
 
-      .app-bootstrap-orbit-inner::before {
-        top: 2px;
-        left: 12px;
-        width: 7px;
-        height: 7px;
-        background: #0f766e;
-        box-shadow: 0 0 0 4px rgba(15, 118, 110, 0.1);
+      .app-bootstrap-node {
+        fill: var(--muted, var(--bootstrap-track));
+        fill-opacity: 0.5;
+        stroke: var(--border, var(--bootstrap-track));
+        stroke-width: 1.25;
       }
 
-      .app-bootstrap-orbit-inner::after {
-        right: 4px;
-        bottom: 9px;
-        width: 5px;
-        height: 5px;
-        background: #60a5fa;
-        box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
+      .app-bootstrap-gateway {
+        fill: var(--primary, var(--bootstrap-primary));
+        stroke: var(--primary, var(--bootstrap-primary));
+        stroke-width: 1.25;
+        animation: app-bootstrap-gateway 2.8s ease-in-out infinite;
       }
 
-      .app-bootstrap-core {
-        position: absolute;
-        top: 43px;
-        left: 43px;
-        width: 26px;
-        height: 26px;
-        border: 2px solid #2563eb;
-        border-radius: 8px;
-        background: #fafafa;
-        box-shadow:
-          0 0 0 7px rgba(37, 99, 235, 0.09),
-          0 0 22px rgba(37, 99, 235, 0.24);
-        animation: app-bootstrap-core-pulse 1.6s ease-in-out infinite;
+      .app-bootstrap-symbol {
+        stroke: var(--primary, var(--bootstrap-primary));
+        stroke-width: 1.75;
       }
 
-      .app-bootstrap-core::after {
-        position: absolute;
-        inset: 8px;
-        border-radius: 2px;
-        background: #2563eb;
-        content: '';
-      }
+      @keyframes app-bootstrap-flow {
+        from {
+          stroke-dashoffset: 108;
+        }
 
-      @keyframes app-bootstrap-orbit {
         to {
-          transform: rotate(360deg);
+          stroke-dashoffset: 0;
         }
       }
 
-      @keyframes app-bootstrap-orbit-reverse {
-        to {
-          transform: rotate(-360deg);
-        }
-      }
-
-      @keyframes app-bootstrap-core-pulse {
+      @keyframes app-bootstrap-gateway {
         0%,
         100% {
-          opacity: 0.72;
-          transform: scale(0.86);
+          fill-opacity: 0.04;
+          stroke-opacity: 0.45;
         }
 
-        50% {
-          opacity: 1;
-          transform: scale(1);
+        45%,
+        65% {
+          fill-opacity: 0.12;
+          stroke-opacity: 0.9;
         }
       }
 
       @keyframes app-bootstrap-progress {
         0% {
-          transform: translateX(-125%);
-        }
-
-        50% {
-          transform: translateX(185%);
+          transform: translateX(-100%);
         }
 
         100% {
-          transform: translateX(340%);
+          transform: translateX(312.5%);
         }
       }
 
+      :root.dark #app-bootstrap {
+        --bootstrap-background: oklch(0.235 0 0);
+        --bootstrap-foreground: oklch(0.78 0 0);
+        --bootstrap-track: oklch(1 0 0 / 10%);
+        --bootstrap-primary: oklch(0.54 0.142 248.516);
+      }
+
       @media (prefers-color-scheme: dark) {
-        #app-bootstrap {
-          background: #09090b;
-        }
-
-        #app-bootstrap-progress {
-          background: rgba(96, 165, 250, 0.18);
-        }
-
-        #app-bootstrap-progress-bar {
-          background: #60a5fa;
-        }
-
-        .app-bootstrap-track-outer {
-          border-color: rgba(96, 165, 250, 0.2);
-        }
-
-        .app-bootstrap-track-inner {
-          border-color: rgba(94, 234, 212, 0.17);
-        }
-
-        .app-bootstrap-orbit::before,
-        .app-bootstrap-orbit::after {
-          border-color: #09090b;
-        }
-
-        .app-bootstrap-core {
-          background: #09090b;
+        :root:not(.light) #app-bootstrap {
+          --bootstrap-background: oklch(0.235 0 0);
+          --bootstrap-foreground: oklch(0.78 0 0);
+          --bootstrap-track: oklch(1 0 0 / 10%);
+          --bootstrap-primary: oklch(0.54 0.142 248.516);
         }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        .app-bootstrap-orbit,
-        .app-bootstrap-core {
+        #app-bootstrap-mark *,
+        #app-bootstrap-progress-bar {
           animation: none;
         }
 
+        .app-bootstrap-packet {
+          stroke-dashoffset: -46;
+        }
+
+        .app-bootstrap-gateway {
+          fill-opacity: 0.08;
+          stroke-opacity: 0.65;
+        }
+
         #app-bootstrap-progress-bar {
-          animation: none;
-          width: 55%;
           transform: translateX(0);
         }
       }
@@ -245,8 +199,46 @@
   </head>
 
   <body>
+    <script id="app-bootstrap-theme">
+      // Match the saved appearance before the application bundle loads.
+      ;(function () {
+        var theme = window.matchMedia('(prefers-color-scheme: dark)').matches
+          ? 'dark'
+          : 'light'
+        try {
+          var cookies = document.cookie
+          var savedTheme = cookies.match(/(?:^|;\s*)vite-ui-theme=([^;]*)/)
+          if (savedTheme) {
+            var mode = decodeURIComponent(savedTheme[1])
+            if (mode === 'light' || mode === 'dark') theme = mode
+          }
+          var savedPreset = cookies.match(/(?:^|;\s*)theme_preset=([^;]*)/)
+          if (savedPreset) {
+            var preset = decodeURIComponent(savedPreset[1])
+            // Keep aligned with THEME_PRESETS in src/lib/theme-customization.ts.
+            var presets = [
+              'anthropic',
+              'simple-large',
+              'underground',
+              'rose-garden',
+              'lake-view',
+              'sunset-glow',
+              'forest-whisper',
+              'ocean-breeze',
+              'lavender-dream',
+            ]
+            if (presets.includes(preset)) {
+              document.body.setAttribute('data-theme-preset', preset)
+            }
+          }
+        } catch {
+          // System appearance remains available when cookies cannot be read.
+        }
+        document.documentElement.classList.add(theme)
+      })()
+    </script>
     <div id="root" translate="no" class="notranslate">
-      <div id="app-bootstrap" aria-hidden="true">
+      <div id="app-bootstrap">
         <div
           id="app-bootstrap-progress"
           role="progressbar"
@@ -254,12 +246,91 @@
         >
           <div id="app-bootstrap-progress-bar"></div>
         </div>
-        <div id="app-bootstrap-mark">
-          <span class="app-bootstrap-track app-bootstrap-track-outer"></span>
-          <span class="app-bootstrap-track app-bootstrap-track-inner"></span>
-          <span class="app-bootstrap-orbit app-bootstrap-orbit-outer"></span>
-          <span class="app-bootstrap-orbit app-bootstrap-orbit-inner"></span>
-          <span class="app-bootstrap-core"></span>
+        <div id="app-bootstrap-mark" aria-hidden="true">
+          <svg viewBox="0 0 240 120" focusable="false">
+            <defs>
+              <path
+                id="app-bootstrap-in-top"
+                pathLength="100"
+                d="M24 24H60Q72 24 72 36V48Q72 60 84 60H96"
+              />
+              <path
+                id="app-bootstrap-in-middle"
+                pathLength="100"
+                d="M24 60H96"
+              />
+              <path
+                id="app-bootstrap-in-bottom"
+                pathLength="100"
+                d="M24 96H60Q72 96 72 84V72Q72 60 84 60H96"
+              />
+              <path
+                id="app-bootstrap-out-top"
+                pathLength="100"
+                d="M144 60H156Q168 60 168 48V36Q168 24 180 24H216"
+              />
+              <path
+                id="app-bootstrap-out-middle"
+                pathLength="100"
+                d="M144 60H216"
+              />
+              <path
+                id="app-bootstrap-out-bottom"
+                pathLength="100"
+                d="M144 60H156Q168 60 168 72V84Q168 96 180 96H216"
+              />
+            </defs>
+            <g class="app-bootstrap-route">
+              <use href="#app-bootstrap-in-top" />
+              <use href="#app-bootstrap-in-middle" />
+              <use href="#app-bootstrap-in-bottom" />
+              <use href="#app-bootstrap-out-top" />
+              <use href="#app-bootstrap-out-middle" />
+              <use href="#app-bootstrap-out-bottom" />
+            </g>
+            <g>
+              <use class="app-bootstrap-packet" href="#app-bootstrap-in-top" />
+              <use
+                class="app-bootstrap-packet app-bootstrap-lane-middle"
+                href="#app-bootstrap-in-middle"
+              />
+              <use
+                class="app-bootstrap-packet app-bootstrap-lane-bottom"
+                href="#app-bootstrap-in-bottom"
+              />
+            </g>
+            <g class="app-bootstrap-outgoing">
+              <use class="app-bootstrap-packet" href="#app-bootstrap-out-top" />
+              <use
+                class="app-bootstrap-packet app-bootstrap-lane-middle"
+                href="#app-bootstrap-out-middle"
+              />
+              <use
+                class="app-bootstrap-packet app-bootstrap-lane-bottom"
+                href="#app-bootstrap-out-bottom"
+              />
+            </g>
+            <g class="app-bootstrap-node">
+              <rect x="12" y="18" width="12" height="12" rx="3" />
+              <rect x="12" y="54" width="12" height="12" rx="3" />
+              <rect x="12" y="90" width="12" height="12" rx="3" />
+              <rect x="216" y="18" width="12" height="12" rx="3" />
+              <rect x="216" y="54" width="12" height="12" rx="3" />
+              <rect x="216" y="90" width="12" height="12" rx="3" />
+            </g>
+            <rect
+              class="app-bootstrap-gateway"
+              x="96"
+              y="36"
+              width="48"
+              height="48"
+              rx="8"
+            />
+            <path
+              class="app-bootstrap-symbol"
+              d="m113 53-7 7 7 7m14-14 7 7-7 7m-5-17-4 20"
+            />
+          </svg>
         </div>
       </div>
     </div>
