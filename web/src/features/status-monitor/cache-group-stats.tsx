@@ -257,7 +257,7 @@ export function CacheGroupStats(props: {
               <div
                 role='table'
                 aria-label={t('Channel health')}
-                className='grid min-w-0 grid-cols-3 text-xs lg:min-w-[760px] lg:grid-cols-[minmax(160px,1.4fr)_90px_90px_90px_minmax(280px,3.5fr)]'
+                className='grid min-w-0 grid-cols-3 text-xs lg:min-w-[800px] lg:grid-cols-[minmax(160px,1.4fr)_90px_130px_90px_minmax(280px,3.5fr)]'
               >
                 <div
                   role='row'
@@ -266,9 +266,15 @@ export function CacheGroupStats(props: {
                   <span role='columnheader' className='hidden lg:block'>
                     {t('Channel dimension')}
                   </span>
-                  <span role='columnheader'>{t('Success rate')}</span>
-                  <span role='columnheader'>{t('Average TTFT')}</span>
-                  <span role='columnheader'>{t('Cache rate')}</span>
+                  <span role='columnheader' className='whitespace-nowrap'>
+                    {t('Success rate')}
+                  </span>
+                  <span role='columnheader' className='whitespace-nowrap'>
+                    {t('Average TTFT')}
+                  </span>
+                  <span role='columnheader' className='whitespace-nowrap'>
+                    {t('Cache rate')}
+                  </span>
                   <span
                     role='columnheader'
                     className='col-span-3 mt-2 flex justify-between gap-3 text-[10px] tabular-nums lg:col-span-1 lg:mt-0'
@@ -382,7 +388,7 @@ export function CacheGroupStats(props: {
           </TabsContent>
           <TabsContent
             value='line'
-            className='min-h-0 flex-1 overflow-auto overscroll-contain'
+            className='min-h-0 flex-1 overflow-hidden overscroll-contain'
           >
             <ChannelTrend points={summaryPoints} />
           </TabsContent>

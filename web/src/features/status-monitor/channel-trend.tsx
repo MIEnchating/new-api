@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo } from 'react'
+import { memo, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 
@@ -30,7 +30,7 @@ import {
 
 import type { CacheChartPoint } from './cache-series'
 
-export function ChannelTrend(props: {
+export const ChannelTrend = memo(function ChannelTrend(props: {
   points: Pick<
     CacheChartPoint,
     'ts' | 'health' | 'cache_hit_rate' | 'has_data'
@@ -54,17 +54,20 @@ export function ChannelTrend(props: {
       })),
     [props.points]
   )
-  const config = {
-    success: { label: t('Success rate'), color: 'var(--success)' },
-    cache: { label: t('Cache rate'), color: 'var(--primary)' },
-    score: { label: t('Health score'), color: 'var(--warning)' },
-    ttft: { label: t('Average TTFT'), color: 'var(--chart-4)' },
-  }
+  const config = useMemo(
+    () => ({
+      success: { label: t('Success rate'), color: 'var(--success)' },
+      cache: { label: t('Cache rate'), color: 'var(--primary)' },
+      score: { label: t('Health score'), color: 'var(--warning)' },
+      ttft: { label: t('Average TTFT'), color: 'var(--chart-4)' },
+    }),
+    [t]
+  )
   return (
     <div
       role='region'
       aria-label={t('Overall channel trend')}
-      className='h-full min-h-56 min-w-0'
+      className='h-full min-h-56 min-w-0 overflow-hidden'
     >
       <ChartContainer
         config={config}
@@ -147,4 +150,4 @@ export function ChannelTrend(props: {
       </ChartContainer>
     </div>
   )
-}
+})

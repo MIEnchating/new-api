@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	common2 "github.com/QuantumNous/new-api/common"
+	rootconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
@@ -449,7 +450,14 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		))
 	}
 
+	// Sub2API uses X-Request-ID for its own access-log correlation. Its
+	// response may contain a provider X-Request-ID, which must not replace the
+	// ID that was used to identify the request in Sub2API.
+	localRequestID := c.GetString(common2.RequestIdKey)
 	service.CaptureUpstreamRequestId(c, resp.Header)
+	if info.ChannelType == rootconstant.ChannelTypeSub2API && localRequestID != "" {
+		c.Set(common2.UpstreamRequestIdKey, localRequestID)
+	}
 	if info.IsStream && info.RelayMode == constant.RelayModeResponses {
 		logger.LogInfo(c, fmt.Sprintf(
 			"stream trace: stage=upstream_headers elapsed_ms=%d status=%d proto=%q content_type=%q content_length=%d transfer_encoding=%q content_encoding=%q server=%q via=%q cf_ray=%q upstream_request_id=%q provider_request_id=%q",

@@ -121,7 +121,7 @@ export function CacheMonitor(props: {
         className='flex h-full min-h-0 flex-col gap-5 overflow-hidden'
         aria-busy='true'
       >
-        <div className='grid shrink-0 grid-cols-3 gap-2 sm:gap-3 xl:max-w-[1200px]'>
+        <div className='grid shrink-0 grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3'>
           {['success', 'ttft', 'cache'].map((key) => (
             <Skeleton key={key} className='h-28 rounded-2xl' />
           ))}
@@ -130,7 +130,7 @@ export function CacheMonitor(props: {
       </section>
     )
   }
-  if (props.failed) {
+  if (props.failed && props.response == null) {
     return (
       <ErrorState
         title={t('Cache monitoring unavailable')}
@@ -141,7 +141,7 @@ export function CacheMonitor(props: {
   if (groups.length === 0) return <EmptyState title={t('No data')} />
   return (
     <section className='flex h-full min-h-0 min-w-0 flex-col gap-4 overflow-hidden py-1 sm:gap-5'>
-      <div className='grid shrink-0 grid-cols-3 gap-2 sm:gap-3 xl:max-w-[1200px]'>
+      <div className='grid shrink-0 grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3'>
         <MonitorMetric
           label={t('Success rate')}
           value={formatMonitorPercent(

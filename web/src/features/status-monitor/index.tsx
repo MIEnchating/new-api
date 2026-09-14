@@ -42,14 +42,14 @@ export function StatusMonitor() {
     try {
       const response = await getCacheMetrics()
       if (!response.success) {
-        setMetrics(null)
+        if (mode === 'initial') setMetrics(null)
         setFailed(true)
         return
       }
       setMetrics(response)
       setLastUpdated(new Date())
     } catch {
-      setMetrics(null)
+      if (mode === 'initial') setMetrics(null)
       setFailed(true)
     } finally {
       setLoading(false)
@@ -65,8 +65,12 @@ export function StatusMonitor() {
   }, [fetchCacheStatus])
 
   return (
-    <SectionPageLayout fixedContent>
-      <SectionPageLayout.Title>{t('Channel Monitor')}</SectionPageLayout.Title>
+    <SectionPageLayout fixedContent stackActionsOnMobile>
+      <SectionPageLayout.Title>
+        <span className='text-lg font-bold sm:text-2xl'>
+          {t('Channel Monitor')}
+        </span>
+      </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
         <RefreshControl
           loading={loading}

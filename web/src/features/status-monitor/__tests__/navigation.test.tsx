@@ -507,7 +507,8 @@ describe('user channel monitor', () => {
     )
     expect(screen.getAllByRole('article')).toHaveLength(3)
     expect(screen.getAllByRole('article')[0].parentElement).toHaveClass(
-      'grid-cols-3'
+      'grid-cols-1',
+      'sm:grid-cols-3'
     )
     expect(screen.getByText('60 min intervals')).toBeVisible()
     expect(
