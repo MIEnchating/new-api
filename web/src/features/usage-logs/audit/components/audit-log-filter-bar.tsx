@@ -44,7 +44,7 @@ function AuditFilterSelect(props: {
           if (value !== null) props.onChange(value)
         }}
         aria-label={props.label}
-        className='w-full'
+        className='h-8 w-full'
       />
     </LogsFilterField>
   )
