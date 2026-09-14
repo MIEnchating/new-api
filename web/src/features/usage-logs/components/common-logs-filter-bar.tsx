@@ -407,11 +407,11 @@ export function CommonLogsFilterBar<TData>(
     </LogsFilterField>
   )
   const groupFilter = (
-    <LogsFilterField>
+    <LogsFilterField className='w-full'>
       <DataTableFacetedFilter
         title={t('Group')}
         options={groupItems}
-        className='min-w-0 justify-start overflow-hidden'
+        className='w-full min-w-0 justify-start overflow-hidden'
         singleSelect
         selectedValues={filters.group ? [filters.group] : []}
         onSelectedValuesChange={(values) =>
@@ -425,7 +425,7 @@ export function CommonLogsFilterBar<TData>(
       <DataTableFacetedFilter
         title={t('Type')}
         options={logTypeItems}
-        className='min-w-0 justify-start overflow-hidden'
+        className='w-full min-w-0 justify-start overflow-hidden'
         singleSelect
         selectedValues={logType === LOG_TYPE_ALL_VALUE ? [] : [logType]}
         onSelectedValuesChange={(values) => {
