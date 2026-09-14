@@ -46,6 +46,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
 import { useCustomMenuPages } from '@/hooks/use-custom-menu-pages'
+import { resolveCustomMenuPageUrl } from '@/lib/custom-menu-pages'
 import { ROLE } from '@/lib/roles'
 
 /**
@@ -60,7 +61,10 @@ export function useSidebarData(): SidebarData {
   const customPages = allCustomPages.filter((page) => page.enabled !== false)
   const toNavItem = (page: (typeof customPages)[number]) => ({
     title: page.name,
-    url: page.openMode === 'external' ? page.url : `/pages/${page.id}`,
+    url:
+      page.openMode === 'external'
+        ? resolveCustomMenuPageUrl(page.url)
+        : `/pages/${page.id}`,
     external: page.openMode === 'external',
     icon: page.icon ? undefined : PanelsTopLeft,
     iconSrc: page.icon,

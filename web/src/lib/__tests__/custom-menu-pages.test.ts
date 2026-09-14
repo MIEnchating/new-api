@@ -23,6 +23,7 @@ import { describe, test } from 'vitest'
 import {
   createCustomMenuPageId,
   parseCustomMenuPages,
+  resolveCustomMenuPageUrl,
 } from '../custom-menu-pages'
 
 describe('custom menu pages', () => {
@@ -75,6 +76,19 @@ describe('custom menu pages', () => {
     ])
 
     assert.equal(pages[0]?.openMode, 'external')
+  })
+
+  test('resolves the current origin placeholder in external URLs', () => {
+    const url = 'https://image.example.com/auth/sso/start?issuer={origin}'
+
+    assert.equal(
+      resolveCustomMenuPageUrl(url, 'https://example.com'),
+      'https://image.example.com/auth/sso/start?issuer=https://example.com'
+    )
+    assert.equal(
+      resolveCustomMenuPageUrl(url, 'https://www.example.com'),
+      'https://image.example.com/auth/sso/start?issuer=https://www.example.com'
+    )
   })
 
   test('preserves an explicitly disabled menu page', () => {

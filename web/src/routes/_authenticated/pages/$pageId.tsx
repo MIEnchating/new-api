@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next'
 import { Main } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { customMenuPagesQueryOptions } from '@/hooks/use-custom-menu-pages'
+import { resolveCustomMenuPageUrl } from '@/lib/custom-menu-pages'
 import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/pages/$pageId')({
@@ -54,6 +55,8 @@ function CustomMenuPageRoute() {
 
   if (!page) return null
 
+  const pageUrl = resolveCustomMenuPageUrl(page.url)
+
   return (
     <Main>
       <div className='border-border flex h-12 shrink-0 items-center justify-between gap-3 border-b px-4'>
@@ -71,7 +74,7 @@ function CustomMenuPageRoute() {
           aria-label={t('Open in new tab')}
           title={t('Open in new tab')}
           render={
-            <a href={page.url} target='_blank' rel='noreferrer noopener' />
+            <a href={pageUrl} target='_blank' rel='noreferrer noopener' />
           }
         >
           <ExternalLink data-icon='inline-start' aria-hidden='true' />
@@ -79,7 +82,7 @@ function CustomMenuPageRoute() {
         </Button>
       </div>
       <iframe
-        src={page.url}
+        src={pageUrl}
         title={page.name}
         className='min-h-0 flex-1 border-0'
         sandbox='allow-downloads allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-presentation allow-same-origin allow-scripts'

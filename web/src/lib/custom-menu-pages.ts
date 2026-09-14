@@ -33,6 +33,12 @@ export type CustomMenuPage = {
 
 const VALID_ID = /^[a-zA-Z0-9_-]{8,64}$/
 
+export function resolveCustomMenuPageUrl(url: string, origin?: string) {
+  const currentOrigin =
+    origin ?? (typeof window === 'undefined' ? '' : window.location.origin)
+  return currentOrigin ? url.replaceAll('{origin}', currentOrigin) : url
+}
+
 function isValidPageURL(value: unknown) {
   if (typeof value !== 'string') return false
   try {
