@@ -236,7 +236,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     </LogsFilterField>
   )
   const taskIdFilter = (
-    <LogsFilterField className='w-full sm:min-w-[220px] sm:flex-[2_1_0%]'>
+    <LogsFilterField className='w-full sm:min-w-[220px] sm:flex-1 lg:max-w-[360px]'>
       <LogsFilterInput
         aria-label={t('Task ID')}
         placeholder={placeholder}
@@ -247,7 +247,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
     </LogsFilterField>
   )
   const channelFilter = isAdmin ? (
-    <LogsFilterField className='w-full sm:min-w-[170px] sm:flex-[1_1_0%]'>
+    <LogsFilterField className='w-full sm:min-w-[170px] sm:flex-1 lg:max-w-[240px]'>
       <LogsFilterInput
         placeholder={t('Channel ID')}
         value={filters.channel || ''}
