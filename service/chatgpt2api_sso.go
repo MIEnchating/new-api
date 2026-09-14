@@ -17,6 +17,7 @@ import (
 )
 
 var ErrSSOInvalid = errors.New("single sign-on is unavailable or the request has expired")
+var ErrSSOTokenRequestInvalid = errors.New("invalid single sign-on token request")
 
 // ChatGPT2APISSOConfig is an explicit trust relationship, separate from dashboard credentials.
 type ChatGPT2APISSOConfig struct {
@@ -176,12 +177,48 @@ func (cfg ChatGPT2APISSOConfig) Exchange(code, verifier, issuer string) (*SSOUse
 }
 
 func (cfg ChatGPT2APISSOConfig) Validate(reference, issuer string) (*SSOUser, error) {
+	session, err := cfg.session(reference, issuer)
+	if err != nil {
+		return nil, err
+	}
+	return ssoUser(session.Identity)
+}
+
+func (cfg ChatGPT2APISSOConfig) session(reference, issuer string) (*ssoSession, error) {
 	var session ssoSession
 	if openSSO(reference, []byte(cfg.Secret), "session", &session) != nil ||
 		session.Issuer != issuer || !cfg.AcceptsIssuer(issuer) || session.Audience != cfg.Origin || session.ExpiresAt <= time.Now().Unix() {
 		return nil, ErrSSOInvalid
 	}
-	return ssoUser(session.Identity)
+	return &session, nil
+}
+
+type SSOToken struct {
+	UserID    int    `json:"user_id"`
+	ID        int    `json:"id"`
+	Name      string `json:"name"`
+	Group     string `json:"group"`
+	Created   bool   `json:"created"`
+	ActorRole int    `json:"-"`
+}
+
+func (cfg ChatGPT2APISSOConfig) EnsureToken(reference, issuer, group, name string) (*SSOToken, error) {
+	session, err := cfg.session(reference, issuer)
+	if err != nil {
+		return nil, err
+	}
+	group, name = strings.TrimSpace(group), strings.TrimSpace(name)
+	if group == "" || group == "auto" || name == "" || len(name) > 50 {
+		return nil, ErrSSOTokenRequestInvalid
+	}
+	token, created, actorRole, err := model.EnsureSessionGroupToken(session.Identity, group, name, IsUserSelectableGroup)
+	if err != nil {
+		if errors.Is(err, model.ErrUserSessionInactive) || errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSSOInvalid
+		}
+		return nil, err
+	}
+	return &SSOToken{UserID: token.UserId, ID: token.Id, Name: strings.TrimSpace(token.Name), Group: group, Created: created, ActorRole: actorRole}, nil
 }
 
 // Read the authoritative rows on every exchange/introspection. Dashboard cache

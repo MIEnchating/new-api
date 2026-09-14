@@ -55,6 +55,7 @@ func SetApiRouter(router *gin.Engine) {
 		sso.POST("/authorize", middleware.UserAuth(), middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.AuthorizeChatGPT2APISSO)
 		sso.POST("/exchange", middleware.CriticalRateLimit(), anonymousRequestBodyLimit, controller.ExchangeChatGPT2APISSO)
 		sso.POST("/session", anonymousRequestBodyLimit, controller.ValidateChatGPT2APISSO)
+		sso.POST("/tokens", anonymousRequestBodyLimit, controller.EnsureChatGPT2APISSOToken)
 		// OAuth routes - specific routes must come before :provider wildcard
 		apiRouter.POST("/oauth/state", middleware.CriticalRateLimit(), middleware.DisableCache(), middleware.TryUserAuth(), anonymousRequestBodyLimit, controller.GenerateOAuthCode)
 		apiRouter.POST("/oauth/email/bind/start", middleware.UserAuth(), middleware.CriticalRateLimit(), middleware.UserCriticalRateLimit("account-security"), middleware.EmailVerificationRateLimit(), middleware.DisableCache(), controller.EmailBindStart)
