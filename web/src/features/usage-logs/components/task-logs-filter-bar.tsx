@@ -220,10 +220,7 @@ export function TaskLogsFilterBar<TData>(props: TaskLogsFilterBarProps<TData>) {
       : t('Filter by task ID')
   const hasAdditionalFilters = !!filterValue || !!filters.channel
   const dateRangeFilter = (
-    <LogsFilterField
-      wide
-      className='w-full'
-    >
+    <LogsFilterField wide className='w-full'>
       <CompactDateTimeRangePicker
         start={filters.startTime}
         end={filters.endTime}

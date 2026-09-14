@@ -20,12 +20,25 @@ For commercial licensing, please contact support@quantumnous.com
 import { toc as lobeIconToc } from '@lobehub/icons/es/toc.js'
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react'
 
+import sglangLogo from '@/assets/brand-icons/sglang.svg'
 import { IconSub2api } from '@/assets/custom/icon-sub2api'
+import { IconWan } from '@/assets/custom/icon-wan'
 
 type LobeIconComponent = ComponentType<Record<string, unknown>>
 
 const CUSTOM_ICONS: Record<string, ComponentType<{ size?: number }>> = {
+  SGLang: (props) => (
+    <img
+      src={sglangLogo}
+      alt=''
+      aria-hidden='true'
+      width={props.size ?? 20}
+      height={props.size ?? 20}
+      className='object-contain'
+    />
+  ),
   Sub2API: IconSub2api,
+  Wan: IconWan,
 }
 
 type LoadedIcon = {

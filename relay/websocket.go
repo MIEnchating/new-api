@@ -2,7 +2,11 @@ package relay
 
 import (
 	"fmt"
+	"net/http"
+	"sync"
+	"time"
 
+	"github.com/QuantumNous/new-api/pkg/wsmanager"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -29,6 +33,21 @@ func WssHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.
 	if resp != nil {
 		info.TargetWs = resp.(*websocket.Conn)
 		defer info.TargetWs.Close()
+		var closeOnce sync.Once
+		unregister := wsmanager.Register(info.ChannelId, wsmanager.KindRealtime, func(reason string) {
+			closeOnce.Do(func() {
+				deadline := time.Now().Add(time.Second)
+				closeMessage := websocket.FormatCloseMessage(websocket.ClosePolicyViolation, reason)
+				_ = info.ClientWs.WriteControl(websocket.CloseMessage, closeMessage, deadline)
+				_ = info.TargetWs.WriteControl(websocket.CloseMessage, closeMessage, deadline)
+				_ = info.ClientWs.Close()
+				_ = info.TargetWs.Close()
+			})
+		})
+		defer unregister()
+		if _, err := service.ValidateWebSocketChannel(info.ChannelId, info.ApiKey, info.ChannelMultiKeyIndex); err != nil {
+			return types.NewErrorWithStatusCode(err, types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		}
 	}
 
 	usage, newAPIError := adaptor.DoResponse(c, nil, info)

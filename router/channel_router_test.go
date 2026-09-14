@@ -24,15 +24,31 @@ func TestChannelDefaultBaseURLsRequireReadPermission(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, recorder.Code)
 }
 
-func TestChannelStatusRoutesUseOperatePermission(t *testing.T) {
+func TestChannelStatusRoutesUseExpectedPermissions(t *testing.T) {
 	assertChannelRoutePermission(t, http.MethodGet, "/route/channels", authz.ChannelRead, controller.GetChannelExecutionOptions)
 	assertChannelRoutePermission(t, http.MethodGet, "/route/plan", authz.ChannelRead, controller.GetChannelExecutionPlan)
 	assertChannelRoutePermission(t, http.MethodGet, "/route/traces", authz.ChannelRead, controller.GetRecentChannelExecutionTraces)
 	assertChannelRoutePermission(t, http.MethodGet, "/route/trace/:request_id", authz.ChannelRead, controller.GetChannelExecutionTrace)
+	assertChannelRoutePermission(t, http.MethodGet, "/:id/vllm/status", authz.ChannelRead, controller.GetVLLMChannelStatus)
+	assertChannelRoutePermission(t, http.MethodGet, "/:id/sglang/status", authz.ChannelRead, controller.GetSGLangChannelStatus)
 	assertChannelRoutePermission(t, http.MethodPost, "/:id/status", authz.ChannelOperate, controller.UpdateChannelStatus)
 	assertChannelRoutePermission(t, http.MethodPost, "/status/batch", authz.ChannelOperate, controller.BatchUpdateChannelStatus)
 	assertChannelRoutePermission(t, http.MethodPost, "/:id/route/cooldown/clear", authz.ChannelOperate, controller.ClearChannelRouteCooldown)
 	assertChannelRoutePermission(t, http.MethodPut, "/", authz.ChannelWrite, controller.UpdateChannel)
+}
+
+func TestChannelInferenceStatusRequiresAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	registerChannelRoutes(engine.Group("/api"))
+
+	for _, path := range []string{"/api/channel/1/vllm/status", "/api/channel/1/sglang/status"} {
+		t.Run(path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			engine.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+			assert.Equal(t, http.StatusUnauthorized, recorder.Code)
+		})
+	}
 }
 
 func TestChannelDeleteRoutesUseSensitiveWritePermission(t *testing.T) {

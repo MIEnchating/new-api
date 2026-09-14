@@ -1,7 +1,9 @@
 package dto
 
 import (
+	"bytes"
 	"encoding/json"
+	"math"
 	"strconv"
 
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
@@ -33,8 +35,23 @@ type IntValue int
 
 func (i *IntValue) UnmarshalJSON(b []byte) error {
 	var n int
-	if err := kitutil.Unmarshal(b, &n); err == nil {
+	intErr := kitutil.Unmarshal(b, &n)
+	if intErr == nil {
 		*i = IntValue(n)
+		return nil
+	}
+	var f float64
+	if err := kitutil.Unmarshal(b, &f); err == nil {
+		// Only decimal/exponent forms need the fallback; overflowing integers
+		// must not be rounded back into range by float64 decoding.
+		if !bytes.ContainsAny(b, ".eE") {
+			return intErr
+		}
+		limit := math.Ldexp(1, strconv.IntSize-1)
+		if math.IsNaN(f) || f < -limit || f >= limit {
+			return strconv.ErrRange
+		}
+		*i = IntValue(int(f))
 		return nil
 	}
 	var s string

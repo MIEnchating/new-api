@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -67,8 +66,8 @@ func sidebarLotteryEnabled(raw string) bool {
 	if strings.TrimSpace(raw) == "" {
 		return true
 	}
-	var config map[string]map[string]interface{}
-	if err := json.Unmarshal([]byte(raw), &config); err != nil {
+	var config map[string]map[string]any
+	if err := common.UnmarshalJsonStr(raw, &config); err != nil {
 		// Match the frontend's fail-open behavior for malformed/legacy values.
 		return true
 	}
@@ -420,20 +419,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 func TokenAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
 		// 先检测是否为ws
-		if c.Request.Header.Get("Sec-WebSocket-Protocol") != "" {
-			// Sec-WebSocket-Protocol: realtime, openai-insecure-api-key.sk-xxx, openai-beta.realtime-v1
-			// read sk from Sec-WebSocket-Protocol
-			key := c.Request.Header.Get("Sec-WebSocket-Protocol")
-			parts := strings.SplitSeq(key, ",")
-			for part := range parts {
-				part = strings.TrimSpace(part)
-				if strings.HasPrefix(part, "openai-insecure-api-key") {
-					key = strings.TrimPrefix(part, "openai-insecure-api-key.")
-					break
-				}
-			}
-			c.Request.Header.Set("Authorization", "Bearer "+key)
-		}
+		applyWebSocketSubprotocolAuthorization(c.Request.Header)
 		// 检查path包含/v1/messages 或 /v1/models
 		if strings.Contains(c.Request.URL.Path, "/v1/messages") || strings.Contains(c.Request.URL.Path, "/v1/models") {
 			anthropicKey := c.Request.Header.Get("x-api-key")
@@ -573,6 +559,30 @@ func resolveTokenUsingGroup(token *model.Token, userGroup string) (string, error
 		return "", fmt.Errorf("分组 %s 已被弃用", tokenGroup)
 	}
 	return tokenGroup, nil
+}
+
+func applyWebSocketSubprotocolAuthorization(header http.Header) bool {
+	key, ok := apiKeyFromWebSocketSubprotocol(strings.Join(header.Values("Sec-WebSocket-Protocol"), ","))
+	if !ok {
+		return false
+	}
+	header.Set("Authorization", "Bearer "+key)
+	return true
+}
+
+func apiKeyFromWebSocketSubprotocol(protocols string) (string, bool) {
+	if protocols == "" {
+		return "", false
+	}
+	const insecureAPIKeyPrefix = "openai-insecure-api-key."
+	for part := range strings.SplitSeq(protocols, ",") {
+		part = strings.TrimSpace(part)
+		if strings.HasPrefix(part, insecureAPIKeyPrefix) {
+			key := strings.TrimPrefix(part, insecureAPIKeyPrefix)
+			return key, key != ""
+		}
+	}
+	return "", false
 }
 
 func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) error {

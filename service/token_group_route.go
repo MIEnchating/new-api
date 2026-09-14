@@ -56,6 +56,18 @@ func HasTokenGroupRoutes(c *gin.Context) bool {
 	return len(getTokenGroupRoutes(c)) > 0
 }
 
+// RestoreTokenGroupRoute binds an existing upstream connection to a route that
+// is still authorized by the freshly authenticated token.
+func RestoreTokenGroupRoute(c *gin.Context, group, modelName, requestPath string) bool {
+	for index, route := range getTokenGroupRoutes(c) {
+		if route.Group == group {
+			setTokenGroupRouteContext(c, index, route, modelName, requestPath)
+			return true
+		}
+	}
+	return false
+}
+
 func getTokenGroupRoutes(c *gin.Context) []model.TokenGroupRoute {
 	if c == nil {
 		return nil
