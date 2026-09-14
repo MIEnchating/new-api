@@ -36,7 +36,11 @@ import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import type { TaskPluginOption } from '../../api'
-import { CHANNEL_TYPE_SGLANG, CHANNEL_TYPE_VLLM } from '../../constants'
+import {
+  CHANNEL_TYPE_OLLAMA,
+  CHANNEL_TYPE_SGLANG,
+  CHANNEL_TYPE_VLLM,
+} from '../../constants'
 import { channelSchema, type Channel } from '../../types'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelsProvider } from '../channels-provider'
@@ -1354,14 +1358,18 @@ test.each([1, 57])(
   }
 )
 
-test('configuration from fields unsupported by the selected provider stays unmarked', async () => {
+test('configuration from fields unsupported by the selected provider stays unmarked and drops the Ollama chat setting on save', async () => {
   editingChannel = {
     ...editingChannel,
     type: 2,
     setting: '{"force_format":true,"responses_websocket_enabled":true}',
     settings:
-      '{"allow_speed":true,"allow_service_tier":true,"upstream_model_update_check_enabled":true}',
+      '{"allow_speed":true,"allow_service_tier":true,"upstream_model_update_check_enabled":true,"ollama_openai_chat":true}',
   }
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
   render(<ConfigurationHarness currentRow={editingChannel} />)
   await screen.findByDisplayValue('Existing channel')
   expect(
@@ -1370,7 +1378,70 @@ test('configuration from fields unsupported by the selected provider stays unmar
   expect(
     screen.getByRole('tab', { name: /Other Settings/ })
   ).not.toHaveAccessibleName(/Configured/)
+  await user.click(screen.getByRole('tab', { name: /Request & Response/ }))
+  expect(
+    screen.queryByRole('switch', {
+      name: 'Use OpenAI-compatible Ollama chat API',
+    })
+  ).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+  await waitFor(() => expect(put).toHaveBeenCalled())
+  const payload = put.mock.calls[0]?.[1] as { settings: string }
+  expect(JSON.parse(payload.settings)).not.toHaveProperty('ollama_openai_chat')
 })
+
+test.each([undefined, false, true])(
+  'an Ollama channel with chat setting %s shows the saved state and saves the toggled value while preserving other settings',
+  async (savedValue) => {
+    editingChannel = {
+      ...editingChannel,
+      type: CHANNEL_TYPE_OLLAMA,
+      settings: JSON.stringify({
+        ollama_openai_chat: savedValue,
+        claude_code_client_spoofing: true,
+        disable_task_polling_sleep: true,
+      }),
+    }
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true } })
+    const user = userEvent.setup()
+    render(<ConfigurationHarness currentRow={editingChannel} />)
+    await screen.findByDisplayValue('Existing channel')
+    const requestTab = screen.getByRole('tab', { name: /Request & Response/ })
+    if (savedValue) {
+      expect(requestTab).toHaveAccessibleName(/Configured/)
+    } else {
+      expect(requestTab).not.toHaveAccessibleName(/Configured/)
+    }
+    await user.click(requestTab)
+    const toggle = screen.getByRole('switch', {
+      name: 'Use OpenAI-compatible Ollama chat API',
+    })
+    if (savedValue) {
+      expect(toggle).toBeChecked()
+    } else {
+      expect(toggle).not.toBeChecked()
+    }
+    await user.click(toggle)
+    if (savedValue) {
+      expect(toggle).not.toBeChecked()
+      expect(requestTab).not.toHaveAccessibleName(/Configured/)
+    } else {
+      expect(toggle).toBeChecked()
+      expect(requestTab).toHaveAccessibleName(/Configured/)
+    }
+    await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    const payload = put.mock.calls[0]?.[1] as { settings: string }
+    const settings = JSON.parse(payload.settings)
+    expect(settings).toMatchObject({
+      ollama_openai_chat: !savedValue,
+      disable_task_polling_sleep: true,
+    })
+    expect(settings).not.toHaveProperty('claude_code_client_spoofing')
+  }
+)
 
 test('an invalid edit switches categories and replaces configured styling with the field error', async () => {
   const user = userEvent.setup()
@@ -1701,51 +1772,69 @@ test('advanced custom edits preview draft connection settings with the saved key
   )
 })
 
-test('an operator without sensitive write permission can discover saved models and update routing', async () => {
-  useAuthStore.setState({
-    auth: {
-      ...originalAuth,
-      user: {
-        id: 10,
-        username: 'operator',
-        role: ROLE.ADMIN,
-        permissions: {
-          admin_permissions: {
-            channel: { read: true, write: true, operate: true },
+test.each([1, CHANNEL_TYPE_OLLAMA])(
+  'an operator without sensitive write permission can discover saved models and update routing for channel type %s',
+  async (type) => {
+    editingChannel.type = type
+    editingChannel.settings = '{"ollama_openai_chat":true}'
+    useAuthStore.setState({
+      auth: {
+        ...originalAuth,
+        user: {
+          id: 10,
+          username: 'operator',
+          role: ROLE.ADMIN,
+          permissions: {
+            admin_permissions: {
+              channel: { read: true, write: true, operate: true },
+            },
           },
         },
       },
-    },
-  })
-  const put = vi
-    .spyOn(api, 'put')
-    .mockResolvedValue({ data: { success: true } })
-  const user = userEvent.setup()
-  render(<ConfigurationHarness currentRow={editingChannel} />)
-  await screen.findByDisplayValue('Existing channel')
-  expect(screen.getByRole('button', { name: 'Change provider' })).toBeDisabled()
-  expect(screen.getByLabelText('API Key *')).toBeDisabled()
-  await user.click(screen.getByRole('button', { name: 'Fetch from Upstream' }))
-  expect(
-    await screen.findByRole('checkbox', { name: 'upstream-model' })
-  ).toBeVisible()
-  await user.click(screen.getByRole('tab', { name: /Request & Response/ }))
-  const thinking = screen.getByRole('switch', { name: 'Thinking to Content' })
-  expect(thinking).toHaveAttribute('aria-disabled', 'true')
-  await user.click(thinking)
-  expect(thinking).not.toBeChecked()
-  await user.click(screen.getByRole('tab', { name: /Other Settings/ }))
-  expect(screen.getByLabelText('Proxy Address')).toBeDisabled()
-  await user.click(screen.getByRole('tab', { name: /Routing & Mapping/ }))
-  fireEvent.change(screen.getByLabelText('Priority'), {
-    target: { value: '8' },
-  })
-  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
-  await waitFor(() => expect(put).toHaveBeenCalled())
-  expect(put.mock.calls[0]?.[1]).toMatchObject({ id: 42, priority: 8 })
-  expect(put.mock.calls[0]?.[1]).not.toHaveProperty('setting')
-  expect(put.mock.calls[0]?.[1]).not.toHaveProperty('key')
-})
+    })
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true } })
+    const user = userEvent.setup()
+    render(<ConfigurationHarness currentRow={editingChannel} />)
+    await screen.findByDisplayValue('Existing channel')
+    expect(
+      screen.getByRole('button', { name: 'Change provider' })
+    ).toBeDisabled()
+    expect(screen.getByLabelText('API Key *')).toBeDisabled()
+    await user.click(
+      screen.getByRole('button', { name: 'Fetch from Upstream' })
+    )
+    expect(
+      await screen.findByRole('checkbox', { name: 'upstream-model' })
+    ).toBeVisible()
+    await user.click(screen.getByRole('tab', { name: /Request & Response/ }))
+    const thinking = screen.getByRole('switch', { name: 'Thinking to Content' })
+    expect(thinking).toHaveAttribute('aria-disabled', 'true')
+    await user.click(thinking)
+    expect(thinking).not.toBeChecked()
+    if (type === CHANNEL_TYPE_OLLAMA) {
+      const chatAPI = screen.getByRole('switch', {
+        name: 'Use OpenAI-compatible Ollama chat API',
+      })
+      expect(chatAPI).toHaveAttribute('aria-disabled', 'true')
+      await user.click(chatAPI)
+      expect(chatAPI).toBeChecked()
+    }
+    await user.click(screen.getByRole('tab', { name: /Other Settings/ }))
+    expect(screen.getByLabelText('Proxy Address')).toBeDisabled()
+    await user.click(screen.getByRole('tab', { name: /Routing & Mapping/ }))
+    fireEvent.change(screen.getByLabelText('Priority'), {
+      target: { value: '8' },
+    })
+    await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    expect(put.mock.calls[0]?.[1]).toMatchObject({ id: 42, priority: 8 })
+    expect(put.mock.calls[0]?.[1]).not.toHaveProperty('setting')
+    expect(put.mock.calls[0]?.[1]).not.toHaveProperty('settings')
+    expect(put.mock.calls[0]?.[1]).not.toHaveProperty('key')
+  }
+)
 
 test.each([
   ['random', 'Random', 'polling', 'Polling'],
