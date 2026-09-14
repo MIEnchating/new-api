@@ -508,8 +508,8 @@ export function CommonLogsFilterBar<TData>(
         <div
           className={
             isAdmin
-              ? 'grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-[minmax(18rem,20rem)_minmax(10rem,1fr)_minmax(8rem,0.8fr)] xl:grid-cols-[20rem_minmax(9.5rem,1fr)_minmax(7rem,0.8fr)_minmax(7rem,0.8fr)_minmax(8rem,0.85fr)_minmax(6.5rem,0.65fr)]'
-              : 'grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-[minmax(18rem,20rem)_minmax(10rem,1fr)] xl:grid-cols-[20rem_minmax(10rem,1fr)_minmax(8rem,0.8fr)_minmax(8rem,0.8fr)]'
+              ? 'grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-[minmax(18rem,1.4fr)_minmax(10rem,1fr)_minmax(8rem,0.8fr)] xl:grid-cols-[minmax(18rem,1.5fr)_minmax(12rem,1.2fr)_minmax(9rem,0.9fr)_minmax(9rem,0.9fr)_minmax(10rem,1fr)_minmax(8rem,0.8fr)]'
+              : 'grid w-full min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3 lg:grid-cols-[minmax(18rem,1.4fr)_minmax(10rem,1fr)] xl:grid-cols-[minmax(18rem,1.5fr)_minmax(12rem,1.2fr)_minmax(9rem,0.9fr)_minmax(9rem,0.9fr)]'
           }
         >
           {dateRangeFilter}
