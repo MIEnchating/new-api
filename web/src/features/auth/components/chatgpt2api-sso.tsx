@@ -20,10 +20,11 @@ import { Loader2, ShieldCheck } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { AuthLayout } from '../auth-layout'
 import { ErrorState } from '@/components/error-state'
 import { api } from '@/lib/http-client'
 import { authRequestOptions, authResult } from '@/lib/secure-verification'
+
+import { AuthLayout } from '../auth-layout'
 
 export function ChatGPT2APISSO(props: { request?: string }) {
   const { t } = useTranslation()

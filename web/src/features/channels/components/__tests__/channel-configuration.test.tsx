@@ -1724,6 +1724,44 @@ test('model configuration is available for a plugin channel with upstream discov
   expect(trigger).toBeDisabled()
 })
 
+test('legacy advanced custom pass-through stays editable until explicitly disabled', async () => {
+  editingChannel = {
+    ...editingChannel,
+    type: 58,
+    setting: '{"pass_through_body_enabled":true}',
+    settings: JSON.stringify({
+      advanced_custom: {
+        advanced_routes: [
+          {
+            incoming_path: '/v1/chat/completions',
+            upstream_path: '/v1/chat/completions',
+            converter: 'none',
+          },
+        ],
+      },
+    }),
+  }
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  await user.click(screen.getByRole('tab', { name: /Request & Response/ }))
+  const toggle = screen.getByRole('switch', { name: 'Pass Through Body' })
+  expect(toggle).toBeChecked()
+  await user.click(toggle)
+  expect(toggle).not.toBeChecked()
+  expect(toggle).toBeVisible()
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+
+  await waitFor(() => expect(put).toHaveBeenCalled())
+  const payload = put.mock.calls[0][1] as { setting: string }
+  expect(JSON.parse(payload.setting)).toMatchObject({
+    pass_through_body_enabled: false,
+  })
+})
+
 test('advanced custom edits preview draft connection settings with the saved key', async () => {
   editingChannel = {
     ...editingChannel,

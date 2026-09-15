@@ -89,6 +89,39 @@ func TestListModelsSupportsOpenAIAndGeminiAuthentication(t *testing.T) {
 	}
 }
 
+func TestGeminiCountTokensReturnsNotFoundBeforeChannelSelection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	SetRelayRouter(engine)
+
+	for _, path := range []string{
+		"/v1beta/models/gemini-test:countTokens",
+		"/v1beta/models/gemini-test:countTokens?alt=json",
+		"/v1/models/gemini-test:countTokens",
+		"/v1/models/gemini-test:countTokens?alt=json",
+	} {
+		t.Run(path, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"contents":[{"parts":[{"text":"hello"}]}]}`))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+
+			engine.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusNotFound, recorder.Code)
+			var payload struct {
+				Error struct {
+					Type    string `json:"type"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &payload))
+			assert.Equal(t, "invalid_request_error", payload.Error.Type)
+			assert.Equal(t, "Invalid URL (POST "+request.URL.Path+")", payload.Error.Message)
+			assert.Contains(t, recorder.Header().Get("Cache-Control"), "no-store")
+		})
+	}
+}
+
 func setupRelayRouterTestDB(t *testing.T) {
 	t.Helper()
 

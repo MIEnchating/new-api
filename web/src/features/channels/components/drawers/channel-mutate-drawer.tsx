@@ -4188,7 +4188,10 @@ export function ChannelMutateDrawer({
                 {formatFields}
                 {ollamaOpenAIChatFields}
                 {thinkingFields}
-                {passthroughFields}
+                {(currentType !== CHANNEL_TYPE_ADVANCED_CUSTOM ||
+                  formValues.pass_through_body_enabled ||
+                  form.formState.defaultValues?.pass_through_body_enabled) &&
+                  passthroughFields}
                 {systemPromptFields}
                 {systemPromptOverrideFields}
               </fieldset>
