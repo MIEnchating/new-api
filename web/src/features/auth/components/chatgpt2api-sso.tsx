@@ -16,11 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Loader2, ShieldCheck } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { AuthLayout } from '../auth-layout'
 import { ErrorState } from '@/components/error-state'
-import { LoadingState } from '@/components/loading-state'
 import { api } from '@/lib/http-client'
 import { authRequestOptions, authResult } from '@/lib/secure-verification'
 
@@ -73,5 +74,31 @@ export function ChatGPT2APISSO(props: { request?: string }) {
       />
     )
   }
-  return <LoadingState message={t('Signing in to chatgpt2api...')} />
+  return (
+    <AuthLayout>
+      <div className='w-full space-y-8'>
+        <div className='flex flex-col items-center space-y-4 text-center'>
+          <div className='bg-muted flex h-16 w-16 items-center justify-center rounded-2xl'>
+            <ShieldCheck className='h-8 w-8' aria-hidden='true' />
+          </div>
+          <div className='space-y-2'>
+            <h1 className='text-2xl font-semibold tracking-tight'>
+              {t('Signing in to chatgpt2api...')}
+            </h1>
+            <p className='text-muted-foreground text-sm sm:text-base'>
+              {t('Processing OAuth response...')}
+            </p>
+          </div>
+        </div>
+        <div className='text-muted-foreground flex flex-col items-center gap-3 text-center text-sm'>
+          <Loader2 className='h-5 w-5 animate-spin' aria-hidden='true' />
+          <p>
+            {t(
+              "You'll be redirected automatically. You can return to the previous page if nothing happens after a few seconds."
+            )}
+          </p>
+        </div>
+      </div>
+    </AuthLayout>
+  )
 }
