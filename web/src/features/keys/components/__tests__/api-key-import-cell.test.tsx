@@ -16,14 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { Row } from '@tanstack/react-table'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, test } from 'vitest'
+import userEvent from '@testing-library/user-event'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
+import { statusQueryOptions } from '@/lib/status-query'
 
 import type { ApiKey } from '../../types'
 import { ApiKeyCell } from '../api-keys-cells'
 import { ApiKeysProvider, useApiKeys } from '../api-keys-provider'
+import { DataTableRowActions } from '../data-table-row-actions'
 
 type ApiMethod = (url: string) => Promise<{ data: unknown }>
 type MockableApi = { post: ApiMethod }
@@ -66,6 +71,61 @@ afterEach(() => {
 })
 
 describe('API key table import action', () => {
+  test.each([
+    ['CC Switch', 'ccswitch'],
+    ['Web Chat', 'https://chat.example.com/?key={key}'],
+  ])(
+    'opens the configured %s destination from the Chat submenu',
+    async (name, url) => {
+      const user = userEvent.setup()
+      const openWindow = vi.spyOn(window, 'open').mockReturnValue(null)
+      apiClient.post = async (requestUrl) => {
+        expect(requestUrl).toBe('/api/token/7/key')
+        return { data: { success: true, data: { key: 'resolved-key' } } }
+      }
+      const queryClient = new QueryClient()
+      queryClient.setQueryData(statusQueryOptions.queryKey, () => ({
+        chats: [{ [name]: url }],
+        server_address: 'https://api.example.com',
+      }))
+
+      try {
+        render(
+          <QueryClientProvider client={queryClient}>
+            <ApiKeysProvider>
+              <DataTableRowActions row={{ original: apiKey } as Row<ApiKey>} />
+              <StateProbe />
+            </ApiKeysProvider>
+          </QueryClientProvider>
+        )
+
+        await user.click(screen.getByRole('button', { name: 'Open menu' }))
+        await user.click(screen.getByRole('menuitem', { name: 'Chat' }))
+        fireEvent.click(await screen.findByRole('menuitem', { name }))
+
+        if (name === 'CC Switch') {
+          await waitFor(() =>
+            expect(screen.getByTestId('import-state')).toHaveTextContent(
+              'cc-switch|7|sk-resolved-key'
+            )
+          )
+          expect(openWindow).not.toHaveBeenCalled()
+        } else {
+          await waitFor(() =>
+            expect(openWindow).toHaveBeenCalledWith(
+              'https://chat.example.com/?key=sk-resolved-key',
+              '_blank',
+              'noopener'
+            )
+          )
+          expect(screen.getByTestId('import-state')).toHaveTextContent('||')
+        }
+      } finally {
+        queryClient.clear()
+      }
+    }
+  )
+
   test('resolves the key and opens CC Switch from the key cell', async () => {
     apiClient.post = async (url) => {
       expect(url).toBe('/api/token/7/key')

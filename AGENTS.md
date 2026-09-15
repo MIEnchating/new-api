@@ -30,6 +30,11 @@ This is an AI API gateway/proxy built with Go. It aggregates 40+ upstream AI pro
 - Docker Compose、Dockerfile 和本地镜像只用于明确的部署、发布前镜像验证或用户明确要求的容器集成测试。
 - 未经明确要求，不得启动、重建、替换或重启生产容器；容器验证前必须检查端口、网络和数据卷，避免影响开发服务。
 - 开发验证应优先覆盖宿主机进程的编译、测试和接口检查；容器能启动不能替代本机开发验证。
+- 启动开发或验证服务前，必须先检查本项目已有进程、监听端口、systemd 服务和 Docker 容器，并确认工作目录与服务用途。
+- 已有配置匹配且可用的服务必须直接复用；同一项目、同一服务类型和同一端口只允许一个实例，禁止重复启动前端或后端服务。
+- 不得仅为绕过端口冲突而随意更换端口；确需隔离环境时须明确记录用途、使用未占用端口，并在任务结束后停止临时服务。
+- 测试、E2E 和手工验证优先使用现有开发服务。临时服务、浏览器、worker 和编译进程必须由当前任务可追踪并在结束时清理，禁止留下孤儿进程。
+- 重启或停止服务前必须核对 PID、工作目录、监听端口及所属 systemd/cgroup，避免误操作正式服务；前端优先依赖 HMR，不得无故重启已有服务。
 - `web/` is the React frontend (see `web/AGENTS.md`); `electron/` is the desktop wrapper.
 
 ## Internationalization (i18n)

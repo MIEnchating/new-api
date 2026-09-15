@@ -75,6 +75,9 @@ type SSOUser struct {
 	Username    string `json:"username"`
 	DisplayName string `json:"display_name"`
 	Email       string `json:"email"`
+	// IsAdmin is propagated so relying applications can preserve the user's
+	// platform administration permissions when creating their local session.
+	IsAdmin bool `json:"is_admin"`
 	// Access to the image application's administration is managed there, independently.
 	Reference string `json:"reference,omitempty"`
 	ExpiresAt int64  `json:"expires_at"`
@@ -234,5 +237,5 @@ func ssoUser(identity AuthIdentity) (*SSOUser, error) {
 		session.Status != model.UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= time.Now().Unix() {
 		return nil, ErrSSOInvalid
 	}
-	return &SSOUser{ID: user.Id, Username: user.Username, DisplayName: user.DisplayName, Email: user.Email, ExpiresAt: session.ExpiresAt}, nil
+	return &SSOUser{ID: user.Id, Username: user.Username, DisplayName: user.DisplayName, Email: user.Email, IsAdmin: user.Role >= common.RoleAdminUser, ExpiresAt: session.ExpiresAt}, nil
 }

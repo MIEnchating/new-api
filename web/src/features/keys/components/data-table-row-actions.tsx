@@ -83,6 +83,7 @@ export function DataTableRowActions<TData>({
   const {
     setOpen,
     setCurrentRow,
+    setResolvedKey,
     triggerRefresh,
     resolveRealKey,
     loadingKeys,
@@ -99,6 +100,13 @@ export function DataTableRowActions<TData>({
     async (preset: ChatPreset) => {
       const realKey = await resolveRealKey(apiKey.id)
       if (!realKey) return
+
+      if (preset.url === 'ccswitch') {
+        setResolvedKey(realKey)
+        setCurrentRow(apiKey)
+        setOpen('cc-switch')
+        return
+      }
 
       if (preset.type === 'fluent') {
         const success = sendToFluent(realKey, serverAddress)
@@ -133,7 +141,15 @@ export function DataTableRowActions<TData>({
         window.location.href = resolvedUrl
       }
     },
-    [resolveRealKey, apiKey.id, serverAddress, t]
+    [
+      resolveRealKey,
+      apiKey,
+      serverAddress,
+      setResolvedKey,
+      setCurrentRow,
+      setOpen,
+      t,
+    ]
   )
 
   const handleToggleStatus = async (
