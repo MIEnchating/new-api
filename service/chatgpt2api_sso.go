@@ -77,8 +77,7 @@ type SSOUser struct {
 	Email       string `json:"email"`
 	// IsAdmin is propagated so relying applications can preserve the user's
 	// platform administration permissions when creating their local session.
-	IsAdmin bool `json:"is_admin"`
-	// Access to the image application's administration is managed there, independently.
+	IsAdmin   bool   `json:"is_admin"`
 	Reference string `json:"reference,omitempty"`
 	ExpiresAt int64  `json:"expires_at"`
 }
