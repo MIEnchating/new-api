@@ -2,11 +2,12 @@ package model
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/QuantumNous/new-api/common"
 )
 
 const CustomMenuPagesOptionKey = "CustomMenuPages"
@@ -47,7 +48,7 @@ func ParseCustomMenuPages(raw string) ([]CustomMenuPage, error) {
 	}
 
 	var pages []CustomMenuPage
-	if err := json.Unmarshal([]byte(raw), &pages); err != nil {
+	if err := common.Unmarshal([]byte(raw), &pages); err != nil {
 		return nil, fmt.Errorf("自定义菜单页面配置格式无效")
 	}
 	if len(pages) > maxCustomMenuPages {
@@ -102,14 +103,15 @@ func ParseCustomMenuPages(raw string) ([]CustomMenuPage, error) {
 		if len(page.Icon) > maxCustomMenuIconLength {
 			return nil, fmt.Errorf("第 %d 个菜单项图标过大", i+1)
 		}
-		if page.Icon != "" && !strings.HasPrefix(page.Icon, "data:image/svg+xml;base64,") {
-			return nil, fmt.Errorf("第 %d 个菜单项图标格式无效", i+1)
-		}
-		if page.Icon != "" {
-			encoded := strings.TrimPrefix(page.Icon, "data:image/svg+xml;base64,")
+		if encoded, isSVG := strings.CutPrefix(page.Icon, "data:image/svg+xml;base64,"); isSVG {
 			decoded, decodeErr := base64.StdEncoding.DecodeString(encoded)
 			if decodeErr != nil || !strings.Contains(strings.ToLower(string(decoded)), "<svg") || unsafeCustomMenuSVGPattern.Match(decoded) {
 				return nil, fmt.Errorf("第 %d 个菜单项图标包含不安全内容", i+1)
+			}
+		} else if page.Icon != "" {
+			iconURL, err := url.ParseRequestURI(page.Icon)
+			if err != nil || iconURL.Host == "" || (iconURL.Scheme != "https" && iconURL.Scheme != "http") {
+				return nil, fmt.Errorf("第 %d 个菜单项图标必须为 SVG 上传文件或有效的 HTTP 或 HTTPS 地址", i+1)
 			}
 		}
 	}

@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 
-import { describe, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 
 import {
   createCustomMenuPageId,
@@ -112,5 +112,49 @@ describe('custom menu pages', () => {
       ]),
       []
     )
+  })
+})
+
+describe('custom menu icon parsing', () => {
+  test.each([
+    'https://api.iconify.design/lucide/image-plus.svg?color=%23a1a1aa',
+    'http://example.com/icon.png',
+    'data:image/svg+xml;base64,PHN2Zy8+',
+    '',
+    undefined,
+  ])('preserves a menu with supported icon %s', (icon) => {
+    const pages = parseCustomMenuPages([
+      {
+        id: 'page_icons01',
+        name: 'Help',
+        url: 'https://example.com/help',
+        visibility: 'public',
+        icon,
+      },
+    ])
+    expect(pages).toHaveLength(1)
+    expect(pages[0].icon).toBe(icon)
+  })
+
+  test.each([
+    '/icon.svg',
+    '//example.com/icon.svg',
+    'https:///icon.svg',
+    'javascript:alert(1)',
+    'file:///icon.svg',
+    'data:text/html;base64,PHNjcmlwdD4=',
+    `https://example.com/${'a'.repeat(32 * 1024)}`,
+  ])('rejects a menu with unsupported icon %s', (icon) => {
+    expect(
+      parseCustomMenuPages([
+        {
+          id: 'page_icons01',
+          name: 'Help',
+          url: 'https://example.com/help',
+          visibility: 'public',
+          icon,
+        },
+      ])
+    ).toEqual([])
   })
 })

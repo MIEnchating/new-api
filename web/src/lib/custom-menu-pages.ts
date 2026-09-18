@@ -49,6 +49,12 @@ function isValidPageURL(value: unknown) {
   }
 }
 
+export function isValidCustomMenuIcon(value: string) {
+  if (value.length > 32 * 1024) return false
+  if (!value || value.startsWith('data:image/svg+xml;base64,')) return true
+  return /^https?:\/\/[^/\\]/.test(value) && isValidPageURL(value)
+}
+
 export function parseCustomMenuPages(value: unknown): CustomMenuPage[] {
   if (!value) return []
   try {
@@ -73,7 +79,7 @@ export function parseCustomMenuPages(value: unknown): CustomMenuPage[] {
           page.section === 'personal') &&
         (page.icon === undefined ||
           (typeof page.icon === 'string' &&
-            page.icon.startsWith('data:image/svg+xml;base64,'))) &&
+            isValidCustomMenuIcon(page.icon))) &&
         (page.enabled === undefined || typeof page.enabled === 'boolean')
       if (!valid) return []
 

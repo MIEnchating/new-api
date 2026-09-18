@@ -24,6 +24,12 @@ import { toast } from 'sonner'
 
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -36,6 +42,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import {
   createCustomMenuPageId,
+  isValidCustomMenuIcon,
   parseCustomMenuPages,
   type CustomMenuPage,
   type CustomMenuPageOpenMode,
@@ -84,6 +91,9 @@ function validatePages(pages: CustomMenuPage[]) {
       }
     } catch {
       return 'Please enter a valid page URL'
+    }
+    if (!isValidCustomMenuIcon(page.icon?.trim() ?? '')) {
+      return 'Icon URL must be a valid HTTP or HTTPS address'
     }
   }
   return null
@@ -144,6 +154,7 @@ export function CustomMenuPagesSection(props: CustomMenuPagesSectionProps) {
           ...page,
           name: page.name.trim(),
           url: page.url.trim(),
+          icon: page.icon?.trim() || undefined,
           enabled: page.enabled !== false,
         }))
       ),
@@ -202,6 +213,9 @@ export function MenuPageEditor(props: {
 }) {
   const { t } = useTranslation()
   const inputRef = useRef<HTMLInputElement>(null)
+  const icon = props.page.icon?.trim() ?? ''
+  const isUploadedIcon = icon.startsWith('data:image/svg+xml;base64,')
+  const isIconValid = isValidCustomMenuIcon(icon)
 
   const uploadIcon = async (file?: File) => {
     if (!file) return
@@ -356,11 +370,36 @@ export function MenuPageEditor(props: {
       </div>
 
       <div className='space-y-2'>
-        <Label>{t('SVG icon')}</Label>
+        <FieldGroup>
+          <Field data-invalid={!isIconValid}>
+            <FieldLabel htmlFor={`${props.page.id}-icon-url`}>
+              {t('Icon URL')}
+            </FieldLabel>
+            <Input
+              id={`${props.page.id}-icon-url`}
+              type='url'
+              value={isUploadedIcon ? '' : (props.page.icon ?? '')}
+              placeholder='https://example.com/icon.svg'
+              maxLength={32 * 1024}
+              aria-invalid={!isIconValid}
+              aria-describedby={
+                !isIconValid ? `${props.page.id}-icon-error` : undefined
+              }
+              onChange={(event) =>
+                props.onChange({ icon: event.target.value || undefined })
+              }
+            />
+            {!isIconValid && (
+              <FieldError id={`${props.page.id}-icon-error`}>
+                {t('Icon URL must be a valid HTTP or HTTPS address')}
+              </FieldError>
+            )}
+          </Field>
+        </FieldGroup>
         <div className='flex flex-wrap items-center gap-3'>
           <div className='bg-background flex size-11 items-center justify-center rounded-md border border-dashed'>
-            {props.page.icon ? (
-              <img src={props.page.icon} alt='' className='size-5' />
+            {icon && isIconValid ? (
+              <img src={icon} alt={t('Icon preview')} className='size-5' />
             ) : (
               <Image className='text-muted-foreground size-5' />
             )}
@@ -368,6 +407,7 @@ export function MenuPageEditor(props: {
           <input
             ref={inputRef}
             type='file'
+            aria-label={t('Upload SVG')}
             accept='image/svg+xml,.svg'
             className='sr-only'
             onChange={(event) => uploadIcon(event.target.files?.[0])}
