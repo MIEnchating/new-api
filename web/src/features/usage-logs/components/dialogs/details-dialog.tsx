@@ -975,7 +975,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
     )
   const upstreamRequestIds = getUpstreamRequestIds(
     other?.admin_info?.upstream_request_ids,
-    props.log.upstream_request_id
+    props.log.upstream_request_id,
+    props.log.request_id
   )
   const upstreamRequestIdSources =
     other?.admin_info?.upstream_request_id_sources ?? {}

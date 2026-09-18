@@ -856,7 +856,8 @@ export function useCommonLogsColumns(
           Boolean(other?.admin_info?.channel_execution_trace)
         const upstreamRequestIds = getUpstreamRequestIds(
           other?.admin_info?.upstream_request_ids,
-          log.upstream_request_id
+          log.upstream_request_id,
+          log.request_id
         )
 
         const pricingData = usePricingData(

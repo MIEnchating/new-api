@@ -212,13 +212,18 @@ export function uniqueLogDiagnosticMessages(
 
 export function getUpstreamRequestIds(
   requestIds: string[] | undefined,
-  latestRequestId: string | undefined
+  latestRequestId: string | undefined,
+  localRequestId?: string
 ): string[] {
+  const excludedRequestId = localRequestId?.trim()
   return [
     ...new Set(
       [...(requestIds ?? []), latestRequestId]
         .map((requestId) => requestId?.trim())
-        .filter((requestId): requestId is string => Boolean(requestId))
+        .filter(
+          (requestId): requestId is string =>
+            Boolean(requestId) && requestId !== excludedRequestId
+        )
     ),
   ]
 }

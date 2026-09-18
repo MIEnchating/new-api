@@ -152,6 +152,22 @@ describe('usage log diagnostic formatting', () => {
     assert.deepEqual(getUpstreamRequestIds(undefined, 'legacy-upstream'), [
       'legacy-upstream',
     ])
+    assert.deepEqual(
+      getUpstreamRequestIds(
+        ['upstream-request-id'],
+        'local-request-id',
+        'local-request-id'
+      ),
+      ['upstream-request-id']
+    )
+    assert.deepEqual(
+      getUpstreamRequestIds(
+        ['local-request-id', 'upstream-request-id'],
+        'local-request-id',
+        'local-request-id'
+      ),
+      ['upstream-request-id']
+    )
   })
 
   test('matches the same error with and without a status-code prefix', () => {
