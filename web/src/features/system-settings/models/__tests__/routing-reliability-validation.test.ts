@@ -99,10 +99,12 @@ describe('routing reliability view validation', () => {
       false
     )
     assert.equal(
-      optionShouldBeSaved('request_error_routing_setting.rules', 'routing', {
-        ...enabled,
-      }),
-      false
+      optionShouldBeSaved(
+        'request_error_routing_setting.rules',
+        'routing',
+        enabled
+      ),
+      true
     )
   })
 
@@ -134,7 +136,7 @@ describe('routing reliability view validation', () => {
     )
   })
 
-  test('ignores legacy request routing rules and validates custom responses', () => {
+  test('rejects invalid enabled routing rules and validates custom responses', () => {
     assert.equal(
       createRoutingReliabilitySchema('routing', translate).safeParse({
         ...values(),
@@ -143,7 +145,7 @@ describe('routing reliability view validation', () => {
           rules: '{invalid json',
         },
       }).success,
-      true
+      false
     )
     assert.equal(
       createRoutingReliabilitySchema('custom-errors', translate).safeParse({

@@ -17,7 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ChannelAffinitySettings } from '../general/channel-affinity/types'
-import type { SecuritySettings } from '../types'
+import { DEFAULT_REQUEST_ERROR_ROUTING_RULES_JSON } from '../models/request-error-routing-rules'
+import type { ModelSettings, SecuritySettings } from '../types'
 
 export type RetrySettings = {
   RetryTimes: number
@@ -44,10 +45,34 @@ export type FilteringSettings = Pick<
 export type RequestPolicySettings = RetrySettings &
   HealthSettings &
   FilteringSettings &
+  Pick<
+    ModelSettings,
+    | 'ChannelRouteCooldownEnabled'
+    | 'ChannelRouteCooldownSeconds'
+    | 'ChannelRouteCooldownExcludedGroups'
+    | 'ChannelRouteSameChannelRetries'
+    | 'ChannelRouteGroupExclusionsEnabled'
+    | 'ChannelRouteGroupExclusions'
+    | 'error_response_setting.enabled'
+    | 'error_response_setting.rules'
+    | 'request_error_routing_setting.enabled'
+    | 'request_error_routing_setting.rules'
+  > &
   Pick<ChannelAffinitySettings, keyof ChannelAffinitySettings>
 
 export const defaultRequestPolicySettings: RequestPolicySettings = {
   RetryTimes: 0,
+  ChannelRouteCooldownEnabled: false,
+  ChannelRouteCooldownSeconds: 60,
+  ChannelRouteCooldownExcludedGroups: '[]',
+  ChannelRouteSameChannelRetries: 0,
+  ChannelRouteGroupExclusionsEnabled: true,
+  ChannelRouteGroupExclusions: '{}',
+  'error_response_setting.enabled': false,
+  'error_response_setting.rules': '[]',
+  'request_error_routing_setting.enabled': true,
+  'request_error_routing_setting.rules':
+    DEFAULT_REQUEST_ERROR_ROUTING_RULES_JSON,
   AutomaticRetryStatusCodes:
     '100-199,300-399,401-407,409-499,500-503,505-523,525-599',
   ChannelDisableThreshold: '',

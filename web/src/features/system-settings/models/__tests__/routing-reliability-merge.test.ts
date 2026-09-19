@@ -16,87 +16,26 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
+import i18next from 'i18next'
+import { describe, expect, it } from 'vitest'
 
-import type { ReactElement } from 'react'
-import { describe, test } from 'vitest'
+import { getPolicySectionNavItems } from '../../request-policies/section-registry'
+import { getModelsSectionNavItems } from '../section-registry'
 
-import type { ModelSettings } from '../../types'
-import { RoutingReliabilitySection } from '../routing-reliability-section'
-import {
-  MODELS_SECTION_IDS,
-  getModelsSectionContent,
-} from '../section-registry'
-
-describe('routing reliability menu merge', () => {
-  test('keeps routing reliability as the only routing settings menu', () => {
-    assert.equal(MODELS_SECTION_IDS.includes('routing-reliability'), true)
-    assert.equal(
-      (MODELS_SECTION_IDS as readonly string[]).includes('channel-routing'),
-      false
+describe('routing settings navigation', () => {
+  it('offers routing and health only under request policies while keeping custom error responses', () => {
+    const models = getModelsSectionNavItems(i18next.t)
+    const policies = getPolicySectionNavItems(i18next.t)
+    expect(JSON.stringify(models)).not.toContain('routing-reliability')
+    expect(JSON.stringify(models)).toContain('custom-error-responses')
+    expect(JSON.stringify(policies)).toContain(
+      '/system-settings/request-policies/routing'
     )
-  })
-
-  test('passes channel routing settings to routing reliability', () => {
-    const settings = {
-      RetryTimes: 3,
-      ChannelRouteCooldownEnabled: true,
-      ChannelRouteCooldownSeconds: 60,
-      ChannelRouteCooldownExcludedGroups: '["batch"]',
-      ChannelRouteSameChannelRetries: 2,
-      ChannelRouteGroupExclusionsEnabled: true,
-      ChannelRouteGroupExclusions: '{"batch":{"mode":"all"}}',
-      'request_error_routing_setting.enabled': true,
-      'request_error_routing_setting.rules': '[]',
-    } as ModelSettings
-
-    const section = getModelsSectionContent(
-      'routing-reliability',
-      settings
-    ) as ReactElement<{
-      view: string
-      defaultValues: {
-        ChannelRouteCooldownEnabled: boolean
-        ChannelRouteCooldownExcludedGroups: string
-        ChannelRouteSameChannelRetries: number
-        ChannelRouteGroupExclusionsEnabled: boolean
-        ChannelRouteGroupExclusions: string
-        'request_error_routing_setting.enabled': boolean
-        'request_error_routing_setting.rules': string
-      }
-    }>
-
-    assert.equal(section.type, RoutingReliabilitySection)
-    assert.equal(section.props.view, 'routing')
-    assert.equal(section.props.defaultValues.ChannelRouteCooldownEnabled, true)
-    assert.equal(
-      section.props.defaultValues.ChannelRouteCooldownExcludedGroups,
-      '["batch"]'
+    expect(JSON.stringify(policies)).toContain(
+      '/system-settings/request-policies/sessions'
     )
-    assert.equal(section.props.defaultValues.ChannelRouteSameChannelRetries, 2)
-    assert.equal(
-      section.props.defaultValues.ChannelRouteGroupExclusionsEnabled,
-      true
+    expect(JSON.stringify(policies)).toContain(
+      '/system-settings/request-policies/health'
     )
-    assert.equal(
-      section.props.defaultValues.ChannelRouteGroupExclusions,
-      '{"batch":{"mode":"all"}}'
-    )
-    assert.equal(
-      section.props.defaultValues['request_error_routing_setting.enabled'],
-      true
-    )
-    assert.equal(
-      section.props.defaultValues['request_error_routing_setting.rules'],
-      '[]'
-    )
-
-    const customErrorSection = getModelsSectionContent(
-      'custom-error-responses',
-      settings
-    ) as ReactElement
-    assert.equal(section.key, 'routing-reliability')
-    assert.equal(customErrorSection.key, 'custom-error-responses')
-    assert.notEqual(section.key, customErrorSection.key)
   })
 })

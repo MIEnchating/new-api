@@ -21,7 +21,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { handleServerError } from '@/lib/handle-server-error'
-import { parseHttpStatusCodeRules } from '@/lib/http-status-code-rules'
 
 import { SettingsAccordion } from '../components/settings-accordion'
 import { SettingsCard } from '../components/settings-card'
@@ -34,7 +33,6 @@ import { ChannelAffinitySection } from '../general/channel-affinity'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import { getPolicyConfig, type PolicyConfig } from './api'
 import { policyLabel } from './policy-label'
-import { RetrySection } from './retry-section'
 import {
   createRoutingPolicySchema,
   routingPolicyFormValues,
@@ -86,9 +84,6 @@ function RoutingPolicyEditor(props: { config: PolicyConfig }) {
 
   const save = async (submitted: RoutingPolicyFormValues) => {
     const next = routingPolicyOptions(submitted)
-    next.AutomaticRetryStatusCodes = parseHttpStatusCodeRules(
-      next.AutomaticRetryStatusCodes
-    ).normalized
     const delta = Object.fromEntries(
       Object.entries(next).filter(([key, value]) => {
         const previous = props.config.options[key]
@@ -97,9 +92,6 @@ function RoutingPolicyEditor(props: { config: PolicyConfig }) {
             JSON.stringify(JSON.parse(value)) !==
             JSON.stringify(JSON.parse(previous || '[]'))
           )
-        }
-        if (key === 'AutomaticRetryStatusCodes') {
-          return value !== parseHttpStatusCodeRules(previous).normalized
         }
         return value !== previous
       })
@@ -117,8 +109,6 @@ function RoutingPolicyEditor(props: { config: PolicyConfig }) {
   }
   const submit = form.handleSubmit((submitted) => save(submitted))
 
-  // The session rules stay in the main column, between the defaults they
-  // inherit and the retry budget.
   return (
     <Form {...form}>
       <div className='min-w-0 space-y-5'>
@@ -145,7 +135,6 @@ function RoutingPolicyEditor(props: { config: PolicyConfig }) {
               </FormItem>
             )}
           />
-          <RetrySection />
           {mutation.isError ? (
             <p role='alert' className='text-destructive text-sm'>
               {mutation.error.message}

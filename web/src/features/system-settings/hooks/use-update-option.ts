@@ -141,6 +141,8 @@ export function useUpdateOptionsBulk() {
       requireSuccessfulOptionUpdate(await updateSystemOptionsBulk(request)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      queryClient.invalidateQueries({ queryKey: ['request-policy'] })
+      queryClient.invalidateQueries({ queryKey: ['channel-ops'] })
     },
   })
 }

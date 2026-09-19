@@ -31,11 +31,11 @@ import { Input } from '@/components/ui/input'
 
 import { SettingsCard } from '../components/settings-card'
 import { safeNumberFieldProps } from '../utils/numeric-field'
-import type { RoutingPolicyFormValues } from './routing-form'
+import type { RetrySettings } from './defaults'
 
-export function RetrySection() {
+export function RetrySection(props: { channelRouting: boolean }) {
   const { t } = useTranslation()
-  const form = useFormContext<RoutingPolicyFormValues>()
+  const form = useFormContext<RetrySettings>()
   return (
     <SettingsCard title={t('Retry budget')} className='shadow-none'>
       <div className='space-y-4'>
@@ -51,11 +51,17 @@ export function RetrySection() {
                   min={0}
                   max={99}
                   step={1}
+                  disabled={props.channelRouting}
                   {...safeNumberFieldProps(field)}
+                  value={props.channelRouting ? 0 : field.value}
                 />
               </FormControl>
               <FormDescription>
-                {t('Excludes the first attempt. Counted per group.')}
+                {props.channelRouting
+                  ? t(
+                      'Request retry is disabled while channel routing is enabled'
+                    )
+                  : t('Excludes the first attempt. Counted per group.')}
               </FormDescription>
               <FormMessage />
             </FormItem>

@@ -25,6 +25,15 @@ export const Route = createFileRoute(
   '/_authenticated/system-settings/request-policies/$section'
 )({
   beforeLoad: ({ params }) => {
+    if (params.section === 'affinity' || params.section === 'retry') {
+      throw redirect({
+        to: '/system-settings/request-policies/$section',
+        params: {
+          section: params.section === 'affinity' ? 'sessions' : 'routing',
+        },
+        replace: true,
+      })
+    }
     if (!(POLICY_SECTION_IDS as readonly string[]).includes(params.section)) {
       throw redirect({
         to: '/system-settings/request-policies/$section',

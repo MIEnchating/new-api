@@ -66,51 +66,6 @@ const MODELS_SECTIONS = [
     ),
   },
   {
-    id: 'routing-reliability',
-    titleKey: 'Routing Reliability',
-    build: (settings: ModelSettings) => (
-      <RoutingReliabilitySection
-        key='routing-reliability'
-        view='routing'
-        defaultValues={{
-          RetryTimes: settings.RetryTimes,
-          ChannelRouteCooldownEnabled: settings.ChannelRouteCooldownEnabled,
-          ChannelRouteCooldownSeconds: settings.ChannelRouteCooldownSeconds,
-          ChannelRouteCooldownExcludedGroups:
-            settings.ChannelRouteCooldownExcludedGroups,
-          ChannelRouteSameChannelRetries:
-            settings.ChannelRouteSameChannelRetries,
-          ChannelRouteGroupExclusionsEnabled:
-            settings.ChannelRouteGroupExclusionsEnabled,
-          ChannelRouteGroupExclusions: settings.ChannelRouteGroupExclusions,
-          ChannelDisableThreshold: settings.ChannelDisableThreshold,
-          AutomaticDisableChannelEnabled:
-            settings.AutomaticDisableChannelEnabled,
-          AutomaticEnableChannelEnabled: settings.AutomaticEnableChannelEnabled,
-          AutomaticDisableKeywords: settings.AutomaticDisableKeywords,
-          AutomaticDisableStatusCodes: settings.AutomaticDisableStatusCodes,
-          AutomaticRetryStatusCodes: settings.AutomaticRetryStatusCodes,
-          'monitor_setting.auto_test_channel_enabled':
-            settings['monitor_setting.auto_test_channel_enabled'],
-          'monitor_setting.auto_test_channel_minutes':
-            settings['monitor_setting.auto_test_channel_minutes'],
-          'monitor_setting.channel_test_concurrency':
-            settings['monitor_setting.channel_test_concurrency'],
-          'monitor_setting.channel_test_mode':
-            settings['monitor_setting.channel_test_mode'],
-          'error_response_setting.enabled':
-            settings['error_response_setting.enabled'],
-          'error_response_setting.rules':
-            settings['error_response_setting.rules'],
-          'request_error_routing_setting.enabled':
-            settings['request_error_routing_setting.enabled'],
-          'request_error_routing_setting.rules':
-            settings['request_error_routing_setting.rules'],
-        }}
-      />
-    ),
-  },
-  {
     id: 'smart-routing',
     titleKey: 'Smart Routing',
     build: (settings: ModelSettings) => (
@@ -142,21 +97,7 @@ const MODELS_SECTIONS = [
           ChannelRouteGroupExclusionsEnabled:
             settings.ChannelRouteGroupExclusionsEnabled,
           ChannelRouteGroupExclusions: settings.ChannelRouteGroupExclusions,
-          ChannelDisableThreshold: settings.ChannelDisableThreshold,
-          AutomaticDisableChannelEnabled:
-            settings.AutomaticDisableChannelEnabled,
-          AutomaticEnableChannelEnabled: settings.AutomaticEnableChannelEnabled,
-          AutomaticDisableKeywords: settings.AutomaticDisableKeywords,
-          AutomaticDisableStatusCodes: settings.AutomaticDisableStatusCodes,
           AutomaticRetryStatusCodes: settings.AutomaticRetryStatusCodes,
-          'monitor_setting.auto_test_channel_enabled':
-            settings['monitor_setting.auto_test_channel_enabled'],
-          'monitor_setting.auto_test_channel_minutes':
-            settings['monitor_setting.auto_test_channel_minutes'],
-          'monitor_setting.channel_test_concurrency':
-            settings['monitor_setting.channel_test_concurrency'],
-          'monitor_setting.channel_test_mode':
-            settings['monitor_setting.channel_test_mode'],
           'error_response_setting.enabled':
             settings['error_response_setting.enabled'],
           'error_response_setting.rules':

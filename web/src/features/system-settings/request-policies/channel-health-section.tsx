@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMemo, useRef, useEffect } from 'react'
+import { useMemo, useRef, useEffect, type ComponentProps } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -46,6 +46,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { handleServerError } from '@/lib/handle-server-error'
 import { parseHttpStatusCodeRules } from '@/lib/http-status-code-rules'
+import { cn } from '@/lib/utils'
 
 import {
   SettingsControlChildren,
@@ -74,6 +75,66 @@ const channelTestModes = [
   'passive_recovery',
 ] as const
 type ChannelTestMode = (typeof channelTestModes)[number]
+type ChannelTestModeSelectProps = Omit<
+  ComponentProps<typeof SelectTrigger>,
+  'value' | 'onValueChange'
+> & {
+  value: ChannelTestMode
+  onValueChange: (value: ChannelTestMode) => void
+}
+
+export function ChannelTestModeSelect({
+  value,
+  onValueChange,
+  className,
+  ...triggerProps
+}: ChannelTestModeSelectProps) {
+  const { t } = useTranslation()
+
+  return (
+    <Select
+      items={[
+        {
+          value: 'scheduled_all',
+          label: t('Actively check all channels'),
+        },
+        {
+          value: 'auto_ban_only',
+          label: t('Actively check auto-disable-enabled channels'),
+        },
+        {
+          value: 'passive_recovery',
+          label: t('Check channels awaiting recovery only'),
+        },
+      ]}
+      value={value}
+      onValueChange={(nextValue) => {
+        if (nextValue) onValueChange(nextValue)
+      }}
+    >
+      <SelectTrigger
+        className={cn('w-full min-w-0', className)}
+        {...triggerProps}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent alignItemWithTrigger={false} align='start'>
+        <SelectGroup>
+          <SelectItem value='scheduled_all'>
+            {t('Actively check all channels')}
+          </SelectItem>
+          <SelectItem value='auto_ban_only'>
+            {t('Actively check auto-disable-enabled channels')}
+          </SelectItem>
+          <SelectItem value='passive_recovery'>
+            {t('Check channels awaiting recovery only')}
+          </SelectItem>
+        </SelectGroup>
+      </SelectContent>
+    </Select>
+  )
+}
+
 const MAX_CHANNEL_TEST_CONCURRENCY = 32
 
 const createChannelHealthSchema = (
@@ -359,47 +420,12 @@ export function ChannelHealthSection({
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>{t('Channel test mode')}</FormLabel>
-                        <Select
-                          items={[
-                            {
-                              value: 'scheduled_all',
-                              label: t('Actively check all channels'),
-                            },
-                            {
-                              value: 'auto_ban_only',
-                              label: t(
-                                'Actively check auto-disable-enabled channels'
-                              ),
-                            },
-                            {
-                              value: 'passive_recovery',
-                              label: t('Check channels awaiting recovery only'),
-                            },
-                          ]}
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
-                          <FormControl>
-                            <SelectTrigger className='w-full'>
-                              <SelectValue />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent alignItemWithTrigger={false}>
-                            <SelectGroup>
-                              <SelectItem value='scheduled_all'>
-                                {t('Actively check all channels')}
-                              </SelectItem>
-                              <SelectItem value='auto_ban_only'>
-                                {t(
-                                  'Actively check auto-disable-enabled channels'
-                                )}
-                              </SelectItem>
-                              <SelectItem value='passive_recovery'>
-                                {t('Check channels awaiting recovery only')}
-                              </SelectItem>
-                            </SelectGroup>
-                          </SelectContent>
-                        </Select>
+                        <FormControl>
+                          <ChannelTestModeSelect
+                            value={field.value}
+                            onValueChange={field.onChange}
+                          />
+                        </FormControl>
                         <FormDescription>
                           {channelTestModeDescription}
                         </FormDescription>

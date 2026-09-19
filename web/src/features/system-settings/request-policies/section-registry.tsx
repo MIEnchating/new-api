@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { RoutingReliabilitySection } from '../models/routing-reliability-section'
 import { createSectionRegistry } from '../utils/section-registry'
 import { ChannelHealthSection } from './channel-health-section'
 import type { RequestPolicySettings } from './defaults'
@@ -38,7 +39,18 @@ const POLICY_SECTIONS = [
   },
   {
     id: 'routing',
-    titleKey: 'Sessions and retries',
+    titleKey: 'Routing and retries',
+    build: (settings: RequestPolicySettings) => (
+      <RoutingReliabilitySection
+        key='routing'
+        view='routing'
+        defaultValues={settings}
+      />
+    ),
+  },
+  {
+    id: 'sessions',
+    titleKey: 'Channel affinity',
     build: () => <RoutingPolicySection />,
   },
   {

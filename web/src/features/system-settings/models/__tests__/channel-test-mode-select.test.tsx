@@ -21,7 +21,7 @@ import assert from 'node:assert/strict'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, test } from 'vitest'
 
-import { ChannelTestModeSelect } from '../routing-reliability-section'
+import { ChannelTestModeSelect } from '../../request-policies/channel-health-section'
 
 describe('channel test mode select layout', () => {
   test('uses the full form-column width so long mode labels remain visible', () => {

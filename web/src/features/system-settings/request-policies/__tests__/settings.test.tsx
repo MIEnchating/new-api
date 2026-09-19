@@ -148,6 +148,9 @@ beforeEach(() => {
     },
   })
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/group/') {
+      return { data: { success: true, data: ['default'] } }
+    }
     if (url === '/api/option/') return { data: optionsResponse() }
     if (url === '/api/option/request_policy') {
       return {
@@ -179,6 +182,7 @@ beforeEach(() => {
     }
   })
   vi.spyOn(api, 'put').mockResolvedValue({ data: { success: true } })
+  vi.spyOn(api, 'post').mockResolvedValue({ data: { success: true } })
 })
 
 afterEach(() => {
@@ -187,6 +191,157 @@ afterEach(() => {
 })
 
 describe('request policy settings', () => {
+  it('editing same-channel retries preserves stored cooldowns and group exclusions', async () => {
+    Object.assign(settings, {
+      RetryTimes: 0,
+      ChannelRouteCooldownEnabled: true,
+      ChannelRouteCooldownSeconds: 120,
+      ChannelRouteSameChannelRetries: 2,
+      ChannelRouteCooldownExcludedGroups: '["batch"]',
+      ChannelRouteGroupExclusions: '{"batch":{"mode":"all"}}',
+    })
+    await renderPolicies('/system-settings/request-policies/routing')
+    const retries = await screen.findByRole('spinbutton', {
+      name: 'Same-channel retries',
+    })
+    expect(retries).toHaveValue(2)
+    fireEvent.change(retries, { target: { value: '3' } })
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledExactlyOnceWith('/api/option/bulk', {
+        options: [{ key: 'ChannelRouteSameChannelRetries', value: 3 }],
+      })
+    )
+  })
+
+  it.each([0, 99])(
+    'the unified retry form saves %s without overwriting channel settings',
+    async (value) => {
+      await renderPolicies('/system-settings/request-policies/routing')
+      fireEvent.change(
+        await screen.findByRole('spinbutton', { name: 'Maximum retries' }),
+        { target: { value: String(value) } }
+      )
+      await userEvent.click(
+        screen.getByRole('button', { name: 'Save Changes' })
+      )
+      await waitFor(() =>
+        expect(api.post).toHaveBeenCalledExactlyOnceWith('/api/option/bulk', {
+          options: [{ key: 'RetryTimes', value }],
+        })
+      )
+    }
+  )
+
+  it('request routing rules retain their actions when edited and do not change retry or health settings', async () => {
+    await renderPolicies('/system-settings/request-policies/routing')
+    await userEvent.click(
+      await screen.findByRole('tab', { name: /Error decisions/ })
+    )
+    const editor = await screen.findByRole('textbox', {
+      name: 'Request error routing rules',
+    })
+    const rules = JSON.parse(settings['request_error_routing_setting.rules'])
+    rules[0].name = 'Context failure'
+    fireEvent.input(editor, { target: { value: JSON.stringify(rules) } })
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1))
+    const request = vi.mocked(api.post).mock.calls[0][1] as {
+      options: { key: string; value: string }[]
+    }
+    expect(request.options).toHaveLength(1)
+    expect(request.options[0].key).toBe('request_error_routing_setting.rules')
+    expect(JSON.parse(request.options[0].value)).toEqual(rules)
+  })
+
+  it('invalid enabled routing rules cannot be saved, and disabling them preserves the stored rules', async () => {
+    await renderPolicies('/system-settings/request-policies/routing')
+    await userEvent.click(
+      await screen.findByRole('tab', { name: /Error decisions/ })
+    )
+    const editor = await screen.findByRole('textbox', {
+      name: 'Request error routing rules',
+    })
+    fireEvent.input(editor, { target: { value: '[' } })
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    expect(
+      await screen.findByText(
+        'Request error routing rules must be a JSON array'
+      )
+    ).toBeVisible()
+    expect(api.post).not.toHaveBeenCalled()
+    await userEvent.click(
+      screen.getByRole('switch', { name: 'Enable request error routing rules' })
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledExactlyOnceWith('/api/option/bulk', {
+        options: [
+          { key: 'request_error_routing_setting.enabled', value: false },
+        ],
+      })
+    )
+  })
+
+  it('a refresh keeps the routing draft and saving does not overwrite newly loaded health settings', async () => {
+    await renderPolicies('/system-settings/request-policies/routing')
+    const retries = await screen.findByRole('spinbutton', {
+      name: 'Maximum retries',
+    })
+    fireEvent.change(retries, { target: { value: '7' } })
+    settings.AutomaticDisableKeywords = 'updated elsewhere'
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['system-options'] })
+    })
+    expect(retries).toHaveValue(7)
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledExactlyOnceWith('/api/option/bulk', {
+        options: [{ key: 'RetryTimes', value: 7 }],
+      })
+    )
+  })
+
+  it('the legacy reliability link opens the unified routing form without a second health editor', async () => {
+    const router = await renderPolicies(
+      '/system-settings/models/routing-reliability'
+    )
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(
+        '/system-settings/request-policies/routing'
+      )
+    )
+    expect(
+      await screen.findByRole('spinbutton', { name: 'Maximum retries' })
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('tab', { name: /Channel health/ })
+    ).not.toBeInTheDocument()
+  })
+
+  it('channel routing saves the cooldown and zero ordinary retries together without changing health settings', async () => {
+    vi.spyOn(api, 'post').mockResolvedValue({ data: { success: true } })
+    await renderPolicies('/system-settings/request-policies/routing')
+    await userEvent.click(
+      await screen.findByRole('tab', { name: /Channel routing/ })
+    )
+    expect(
+      screen.getByRole('spinbutton', { name: 'Maximum retries' })
+    ).toBeDisabled()
+    expect(
+      screen.getByRole('spinbutton', { name: 'Same-channel retries' })
+    ).toBeVisible()
+    await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledExactlyOnceWith('/api/option/bulk', {
+        options: [
+          { key: 'RetryTimes', value: 0 },
+          { key: 'ChannelRouteCooldownEnabled', value: true },
+        ],
+      })
+    )
+  })
+
   it.each([
     ['retry', 'Save Changes'],
     ['health', 'Save Changes'],
@@ -278,11 +433,11 @@ describe('request policy settings', () => {
     fireEvent.change(codes, { target: { value: '599-500' } })
     await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
     expect(codes).toHaveAttribute('aria-invalid', 'true')
-    expect(api.put).not.toHaveBeenCalled()
+    expect(api.post).not.toHaveBeenCalled()
   })
 
   it('a rejected save keeps the edited retry value and allows another save', async () => {
-    vi.mocked(api.patch).mockResolvedValue({
+    vi.mocked(api.post).mockResolvedValue({
       data: { success: false, message: 'Save rejected' },
     })
     await renderPolicies('/system-settings/request-policies/retry')
@@ -296,7 +451,7 @@ describe('request policy settings', () => {
     )
     expect(retries).toHaveValue(4)
     await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
-    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(2))
   })
 
   it('failed initial loading shows a retry action instead of editable fallback values', async () => {
@@ -350,7 +505,7 @@ describe('request policy settings', () => {
   })
 
   it.each([
-    ['/system-settings/models/channel-affinity', 'routing'],
+    ['/system-settings/models/channel-affinity', 'sessions'],
     ['/system-settings/security/sensitive-words', 'filtering'],
     ['/system-settings/operations/monitoring', 'health'],
     ['/system-settings/request-policies/', 'routing'],
