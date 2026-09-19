@@ -56,6 +56,8 @@ type DataTableFacetedFilterProps<TData, TValue> = {
   title?: string
   /** Optional trigger styling for layouts that need a stable filter width. */
   className?: string
+  /** Mask sensitive values in the trigger and portalled option surfaces. */
+  maskValues?: boolean
   options: {
     label: string
     value: string
@@ -75,6 +77,7 @@ function DataTableFacetedFilterInner<TData, TValue>({
   column,
   title,
   className,
+  maskValues = false,
   options,
   singleSelect = false,
   selectedValues: controlledSelectedValues,
@@ -119,7 +122,11 @@ function DataTableFacetedFilterInner<TData, TValue>({
     <Button
       variant='outline'
       size='sm'
-      className={cn('h-8 border-solid', className)}
+      className={cn(
+        'h-8 border-solid',
+        maskValues && '[-webkit-text-security:disc]',
+        className
+      )}
     >
       <PlusCircledIcon className='size-4' />
       <span className='min-w-0 truncate'>{title}</span>
@@ -173,7 +180,12 @@ function DataTableFacetedFilterInner<TData, TValue>({
     return (
       <Drawer open={open} onOpenChange={handleOpenChange}>
         <DrawerTrigger asChild>{trigger}</DrawerTrigger>
-        <DrawerContent className='max-h-[80dvh] p-0'>
+        <DrawerContent
+          className={cn(
+            'max-h-[80dvh] p-0',
+            maskValues && '[-webkit-text-security:disc]'
+          )}
+        >
           <div className='mx-auto flex min-h-0 w-full max-w-md flex-1 flex-col'>
             <DrawerHeader className='border-border/70 border-b px-4 pt-3 pb-3 text-left'>
               <DrawerTitle>{title}</DrawerTitle>
@@ -270,7 +282,13 @@ function DataTableFacetedFilterInner<TData, TValue>({
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger render={trigger}>{trigger.props.children}</PopoverTrigger>
-      <PopoverContent className='max-w-[360px] min-w-[200px] p-0' align='start'>
+      <PopoverContent
+        className={cn(
+          'max-w-[360px] min-w-[200px] p-0',
+          maskValues && '[-webkit-text-security:disc]'
+        )}
+        align='start'
+      >
         <Command
           filter={(value, search, keywords) => {
             const query = search.trim().toLowerCase()
@@ -335,7 +353,7 @@ function DataTableFacetedFilterInner<TData, TValue>({
                     {optionIcon}
                     <span
                       className='min-w-0 flex-1 truncate'
-                      title={t(option.label)}
+                      title={maskValues ? undefined : t(option.label)}
                     >
                       {t(option.label)}
                     </span>

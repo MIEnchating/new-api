@@ -326,7 +326,6 @@ it('opens the mismatch evidence with the keyboard and shows all three models', a
         requested_model: 'requested-model',
         upstream_model: 'mapped-model',
         returned_model: returned,
-        mismatch: true,
       }}
     />
   )
@@ -362,7 +361,6 @@ it.each([false, true])(
                 requested_model: 'requested-model',
                 upstream_model: 'requested-model',
                 returned_model: 'requested-model',
-                mismatch: false,
               }
             : undefined
         }
@@ -385,7 +383,6 @@ it('keeps mapped model details available when the response matches the upstream 
         requested_model: 'requested-model',
         upstream_model: 'mapped-model',
         returned_model: 'mapped-model',
-        mismatch: false,
       }}
     />
   )
@@ -401,6 +398,8 @@ it.each([
   'REQUESTED-MODEL',
   'mapped-model-2026-09-17',
   'MAPPED-MODEL',
+  'deepseek/requested-model',
+  'accounts/vendor/models/MAPPED-MODEL',
 ])(
   'keeps the compatible response %s in the popover without a list annotation',
   async (returned) => {
@@ -412,7 +411,6 @@ it.each([
           requested_model: 'requested-model',
           upstream_model: 'mapped-model',
           returned_model: returned,
-          mismatch: false,
         }}
       />
     )

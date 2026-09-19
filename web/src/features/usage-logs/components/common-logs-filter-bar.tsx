@@ -413,6 +413,7 @@ export function CommonLogsFilterBar<TData>(
         options={groupItems}
         className='w-full min-w-0 justify-start overflow-hidden'
         singleSelect
+        maskValues={!sensitiveVisible}
         selectedValues={filters.group ? [filters.group] : []}
         onSelectedValuesChange={(values) =>
           handleChange('group', values[0] ?? '')

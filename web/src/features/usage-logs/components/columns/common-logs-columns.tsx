@@ -369,7 +369,7 @@ function buildTypeDetailSegments(
 export function useCommonLogsColumns(
   isAdmin: boolean,
   isRoot: boolean,
-  showWalletSource = false
+  showBillingSource = false
 ): ColumnDef<UsageLog>[] {
   const { t } = useTranslation()
   const columns: ColumnDef<UsageLog>[] = [
@@ -695,9 +695,6 @@ export function useCommonLogsColumns(
                 requested_model: log.model_name,
                 upstream_model: modelInfo.actualModel || log.model_name,
                 returned_model: legacyResponseModel,
-                mismatch:
-                  legacyResponseModel !==
-                  (modelInfo.actualModel || log.model_name),
               }
             : undefined)
 
@@ -798,7 +795,7 @@ export function useCommonLogsColumns(
           <LogCostDisplay
             quota={quota}
             other={other}
-            showWalletSource={showWalletSource}
+            showBillingSource={showBillingSource}
           />
         )
       },
