@@ -16,30 +16,49 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func ShouldRetryRelayError(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
-	if openaiErr == nil || retryTimes <= 0 {
-		return false
+// DecideRelayRetry is the single retry decision for relay attempts. The reason
+// is recorded in the request policy decision events of the log details.
+func DecideRelayRetry(c *gin.Context, err *types.NewAPIError, retryTimes int) PolicyDecision {
+	if err == nil {
+		return PolicyDecision{Action: "stop", Reason: "request_completed", Source: "system"}
 	}
-	if ShouldSkipRetryAfterChannelAffinityFailure(c) || GetChannelConstraints(c).SuppressesRetry() {
-		return false
+	if ShouldSkipRetryAfterChannelAffinityFailure(c) {
+		source := RequestPolicy(c).SessionModeSource
+		if source == "" {
+			source = "session_rule"
+		}
+		return PolicyDecision{Action: "stop", Reason: "strict_session", Source: source}
 	}
-	if _, pinned := c.Get("specific_channel_id"); pinned {
-		return false
+	if GetChannelConstraints(c).SuppressesRetry() {
+		return PolicyDecision{Action: "stop", Reason: "pinned_channel", Source: "channel_constraint"}
 	}
-	if types.IsSkipRetryError(openaiErr) || operation_setting.IsAlwaysSkipRetryError(openaiErr) {
-		return false
+	if types.IsChannelError(err) {
+		return PolicyDecision{Action: "retry", Reason: "channel_error", Source: "system"}
 	}
-	if types.IsChannelError(openaiErr) {
-		return true
+	if types.IsSkipRetryError(err) {
+		return PolicyDecision{Action: "stop", Reason: "non_retryable_error", Source: "system"}
 	}
-	code := openaiErr.StatusCode
+	if retryTimes <= 0 {
+		return PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"}
+	}
+	code := err.StatusCode
 	if code >= 200 && code < 300 {
-		return false
+		return PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}
 	}
-	if types.IsStreamEventError(openaiErr) || code < 100 || code > 599 {
-		return true
+	if code < 100 || code > 599 {
+		return PolicyDecision{Action: "retry", Reason: "unrecognized_status", Source: "system"}
 	}
-	return operation_setting.ShouldRetryByStatusCode(code)
+	if operation_setting.IsAlwaysSkipRetryCode(err.GetErrorCode()) || operation_setting.IsAlwaysSkipRetryStatusCode(code) {
+		return PolicyDecision{Action: "stop", Reason: "system_retry_exclusion", Source: "system"}
+	}
+	if operation_setting.ShouldRetryByStatusCode(code) {
+		return PolicyDecision{Action: "retry", Reason: "retry_status_matched", Source: "global"}
+	}
+	return PolicyDecision{Action: "stop", Reason: "status_not_retryable", Source: "global"}
+}
+
+func ShouldRetryRelayError(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
+	return DecideRelayRetry(c, openaiErr, retryTimes).Action == "retry"
 }
 
 // HandleChannelFailure advances managed routes and applies channel cooldown or
@@ -96,6 +115,7 @@ func RecordRelayErrorLog(c *gin.Context, channelID int, err *types.NewAPIError, 
 	AppendRelayLogAdminInfo(c, relayInfo, other)
 	AppendChannelExecutionTraceErrorAdminInfoToLogOther(c, other)
 	AppendStreamStatusForLog(relayInfo, other)
+	AppendResponseModelLogInfo(relayInfo, other)
 	AppendTaskPluginContextAuditInfo(c, other)
 	if adminOnly {
 		other.SetAdmin("retry_intermediate", true)

@@ -9,7 +9,6 @@ import (
 
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
@@ -62,12 +61,9 @@ func TestOaiResponsesStreamHandlerReturnsMatchingFailedEventWithoutApplyingCusto
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-test"}}
 	_, apiErr := OaiResponsesStreamHandler(c, info, resp)
 
-	require.NotNil(t, apiErr)
-	require.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
-	require.Equal(t, "context limit exceeded", apiErr.Error())
-	require.True(t, types.IsStreamEventError(apiErr))
-	require.True(t, types.IsSkipRetryError(apiErr))
-	require.Empty(t, recorder.Body.String())
+	require.Nil(t, apiErr)
+	require.NotEmpty(t, recorder.Body.String())
+	require.NotContains(t, recorder.Body.String(), "上下文长度超限")
 }
 
 func TestOaiResponsesStreamHandlerReturnsUnmatchedFailedEvent(t *testing.T) {
@@ -98,12 +94,9 @@ func TestOaiResponsesStreamHandlerReturnsUnmatchedFailedEvent(t *testing.T) {
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-test"}}
 	_, apiErr := OaiResponsesStreamHandler(c, info, resp)
 
-	require.NotNil(t, apiErr)
-	require.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
-	require.Equal(t, "context limit exceeded", apiErr.Error())
-	require.True(t, types.IsStreamEventError(apiErr))
-	require.True(t, types.IsSkipRetryError(apiErr))
-	require.Empty(t, recorder.Body.String())
+	require.Nil(t, apiErr)
+	require.NotEmpty(t, recorder.Body.String())
+	require.NotContains(t, recorder.Body.String(), "上下文长度超限")
 }
 
 func TestOaiResponsesStreamHandlerReturnsCompatibleErrorEvents(t *testing.T) {
@@ -127,16 +120,14 @@ func TestOaiResponsesStreamHandlerReturnsCompatibleErrorEvents(t *testing.T) {
 			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-test"}}
 			_, apiErr := OaiResponsesStreamHandler(c, info, resp)
 
-			require.NotNil(t, apiErr)
-			require.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
-			require.Equal(t, "stream read failed", apiErr.Error())
-			require.True(t, types.IsStreamEventError(apiErr))
-			require.Empty(t, recorder.Body.String())
+			require.Nil(t, apiErr)
+			require.NotEmpty(t, recorder.Body.String())
+			require.NotContains(t, recorder.Body.String(), "上下文长度超限")
 		})
 	}
 }
 
-func TestOaiResponsesStreamHandlerMarksTransientFailedEventForFailover(t *testing.T) {
+func TestOaiResponsesStreamHandlerForwardsTransientFailedEventWithoutRetry(t *testing.T) {
 	oldStreamingTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30
 	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
@@ -156,14 +147,12 @@ func TestOaiResponsesStreamHandlerMarksTransientFailedEventForFailover(t *testin
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-test"}}
 	_, apiErr := OaiResponsesStreamHandler(c, info, resp)
 
-	require.NotNil(t, apiErr)
-	require.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
-	require.True(t, types.IsStreamEventError(apiErr))
-	require.False(t, types.IsSkipRetryError(apiErr))
-	require.Empty(t, recorder.Body.String())
+	require.Nil(t, apiErr)
+	require.Contains(t, recorder.Body.String(), `"type":"response.failed"`)
+	require.Equal(t, "failed", info.StreamStatus.ResponseOutcome())
 }
 
-func TestOaiResponsesStreamHandlerRejectsPreambleOnlyStream(t *testing.T) {
+func TestOaiResponsesStreamHandlerMarksPreambleOnlyStreamIncomplete(t *testing.T) {
 	oldStreamingTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30
 	t.Cleanup(func() { constant.StreamingTimeout = oldStreamingTimeout })
@@ -183,8 +172,7 @@ func TestOaiResponsesStreamHandlerRejectsPreambleOnlyStream(t *testing.T) {
 	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{UpstreamModelName: "gpt-test"}}
 	_, apiErr := OaiResponsesStreamHandler(c, info, resp)
 
-	require.NotNil(t, apiErr)
-	require.Equal(t, http.StatusBadGateway, apiErr.StatusCode)
-	require.True(t, types.IsStreamEventError(apiErr))
-	require.Empty(t, recorder.Body.String())
+	require.Nil(t, apiErr)
+	require.Contains(t, recorder.Body.String(), `"type":"response.created"`)
+	require.Equal(t, "", info.StreamStatus.ResponseOutcome())
 }

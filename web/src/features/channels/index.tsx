@@ -22,6 +22,7 @@ import { RefreshCw, Route, Settings2, TimerOff, TimerReset } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
+import { Badge } from '@/components/ui/badge'
 import {
   Tooltip,
   TooltipContent,
@@ -146,11 +147,16 @@ export function Channels() {
       <Tooltip>
         <TooltipTrigger
           render={
-            <Link
-              className='group focus-visible:ring-ring shrink-0 cursor-pointer rounded-md outline-none focus-visible:ring-2 focus-visible:ring-offset-2'
+            <Badge
+              variant='outline'
+              className='shrink-0 cursor-pointer'
               aria-label={summaryAriaLabel}
-              to='/system-settings/models/$section'
-              params={{ section: 'routing-reliability' }}
+              render={
+                <Link
+                  to='/system-settings/request-policies/$section'
+                  params={{ section: 'routing' }}
+                />
+              }
             />
           }
         >

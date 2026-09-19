@@ -40,6 +40,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
+	info.ObserveResponseModel(responsesResponse.Model)
 	responseBody = rewriteSGLangResponsesCreatedAt(info, responseBody, "created_at", responsesResponse.CreatedAt)
 
 	// 写入新的 response body
@@ -81,66 +82,27 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	defer service.CloseResponseBodyGracefully(resp)
 
 	accumulator := service.NewResponsesUsageAccumulator(info)
-	var streamError *types.NewAPIError
-	type pendingStreamEvent struct {
-		response dto.ResponsesStreamResponse
-		data     string
-	}
-	pendingPreamble := make([]pendingStreamEvent, 0, 2)
-	flushPreamble := func() error {
-		for _, event := range pendingPreamble {
-			if err := sendResponsesStreamData(c, event.response, event.data); err != nil {
-				return err
-			}
-		}
-		pendingPreamble = pendingPreamble[:0]
-		return nil
-	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		info.ObserveActualResponseModel(common.StringToByteSlice(data))
+
+		// 检查当前数据是否包含 completed 状态和 usage 信息
 		var streamResponse dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
 			logger.LogError(c, "failed to unmarshal stream response: "+err.Error())
 			sr.Error(err)
 			return
 		}
-		accumulator.Observe(&streamResponse)
-		if streamErr := newResponsesStreamError(streamResponse); streamErr != nil {
-			streamError = streamErr
-			sr.Stop(streamErr)
-			return
-		}
 		if streamResponse.Response != nil {
 			data = string(rewriteSGLangResponsesCreatedAt(info, []byte(data), "response.created_at", streamResponse.Response.CreatedAt))
 		}
-		if streamResponse.Type == "response.created" || streamResponse.Type == "response.in_progress" {
-			pendingPreamble = append(pendingPreamble, pendingStreamEvent{response: streamResponse, data: data})
-			return
-		}
-		if err := flushPreamble(); err != nil {
-			streamError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
-			sr.Stop(streamError)
-			return
-		}
-		if err := sendResponsesStreamData(c, streamResponse, data); err != nil {
-			streamError = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusBadGateway)
-			sr.Stop(streamError)
-		}
+		sendResponsesStreamData(c, streamResponse, data)
+		accumulator.Observe(&streamResponse)
 	})
-	usage := accumulator.Finish()
-	if streamError != nil {
-		return usage, streamError
-	}
-	if len(pendingPreamble) > 0 {
-		return usage, types.NewOpenAIError(
-			errors.New("upstream response stream ended before a terminal event"),
-			types.ErrorCodeBadResponse,
-			http.StatusBadGateway,
-			types.ErrOptionWithStreamEvent(),
-		)
-	}
-	return usage, nil
+
+	common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, info.StreamStatus)
+	info.StreamStatus.RequireTerminal()
+	return accumulator.Finish(), nil
 }
 
 func rewriteSGLangResponsesCreatedAt(info *relaycommon.RelayInfo, payload []byte, path string, createdAt dto.IntValue) []byte {

@@ -92,6 +92,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { RelatedPolicyLink } from '@/features/system-settings/request-policies/related-policy-link'
 import { useStatus } from '@/hooks/use-status'
 import { getUserModels, getUserGroups } from '@/lib/api'
 import { getCurrencyDisplay, getCurrencyLabel } from '@/lib/currency'
@@ -1141,6 +1142,7 @@ export function ApiKeysMutateDrawer({
                               {t(
                                 'When enabled, if channels in the current group fail, it will try channels in the next group in order.'
                               )}
+                              <RelatedPolicyLink section='routing' />
                             </FormDescription>
                           </div>
                           <FormControl>

@@ -379,7 +379,8 @@ func TestGetChannelOpsIncludesChannelRouteSettings(t *testing.T) {
 			"retry_times": 0,
 			"channel_route_enabled": true,
 			"channel_route_cooldown_seconds": 90,
-			"channel_route_same_channel_retries": 2
+			"channel_route_same_channel_retries": 2,
+			"request_policy": {"automatic_disable": false, "source": "global"}
 		}
 	}`, recorder.Body.String())
 }

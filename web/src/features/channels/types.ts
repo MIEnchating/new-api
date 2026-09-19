@@ -177,6 +177,10 @@ export interface ChannelOpsResponse {
     channel_route_enabled: boolean
     channel_route_cooldown_seconds: number
     channel_route_same_channel_retries: number
+    request_policy?: {
+      automatic_disable: boolean
+      source: string
+    }
   }
 }
 

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { ArrowRight, CircleCheck, KeyRound, Sparkles } from 'lucide-react'
+import { KeyRound, Sparkles } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -368,7 +368,8 @@ function buildTypeDetailSegments(
 
 export function useCommonLogsColumns(
   isAdmin: boolean,
-  isRoot: boolean
+  isRoot: boolean,
+  showWalletSource = false
 ): ColumnDef<UsageLog>[] {
   const { t } = useTranslation()
   const columns: ColumnDef<UsageLog>[] = [
@@ -684,52 +685,29 @@ export function useCommonLogsColumns(
         if (!isDisplayableLogType(log.type)) return null
 
         const modelInfo = formatModelName(log)
-        const responseModel = log.actual_response_model?.trim()
-        const responseMatchesRequest = responseModel === log.model_name.trim()
+        const legacyResponseModel = isAdmin
+          ? log.actual_response_model?.trim()
+          : undefined
+        const responseModel =
+          modelInfo.responseModel ??
+          (legacyResponseModel
+            ? {
+                requested_model: log.model_name,
+                upstream_model: modelInfo.actualModel || log.model_name,
+                returned_model: legacyResponseModel,
+                mismatch:
+                  legacyResponseModel !==
+                  (modelInfo.actualModel || log.model_name),
+              }
+            : undefined)
 
         return (
-          <div className='flex max-w-[240px] flex-col gap-1'>
-            <div className='flex min-w-0 items-center gap-1.5'>
-              <ModelBadge
-                modelName={modelInfo.name}
-                actualModel={modelInfo.actualModel}
-              />
-              {isAdmin && responseModel && responseMatchesRequest && (
-                <TooltipProvider delay={150}>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span className='inline-flex shrink-0 text-emerald-600 dark:text-emerald-400' />
-                      }
-                    >
-                      <CircleCheck className='size-3.5' />
-                    </TooltipTrigger>
-                    <TooltipContent side='top'>
-                      {t('Response Model')}: {responseModel}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-            </div>
-            {isAdmin && responseModel && !responseMatchesRequest && (
-              <TooltipProvider delay={200}>
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <span className='flex min-w-0 items-center gap-1 text-amber-600 dark:text-amber-400' />
-                    }
-                  >
-                    <ArrowRight className='size-3 shrink-0' />
-                    <span className='truncate font-mono text-[11px] font-medium'>
-                      {responseModel}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side='top' className='max-w-sm break-all'>
-                    {t('Response Model')}: {responseModel}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
+          <div className='flex w-fit flex-col gap-0.5'>
+            <ModelBadge
+              modelName={modelInfo.name}
+              actualModel={modelInfo.actualModel}
+              responseModel={responseModel}
+            />
           </div>
         )
       },
@@ -816,7 +794,13 @@ export function useCommonLogsColumns(
 
         const quota = row.getValue('quota') as number
         const other = parseLogOther(log.other)
-        return <LogCostDisplay quota={quota} other={other} />
+        return (
+          <LogCostDisplay
+            quota={quota}
+            other={other}
+            showWalletSource={showWalletSource}
+          />
+        )
       },
     },
 

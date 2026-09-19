@@ -65,7 +65,11 @@ function makeLog(other: LogOtherData): UsageLog {
   }
 }
 
-function renderDetails(other: LogOtherData, promptTokens = 0): QueryClient {
+function renderDetails(
+  other: LogOtherData,
+  promptTokens = 0,
+  options: { isAdmin?: boolean; actualResponseModel?: string } = {}
+): QueryClient {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -80,8 +84,12 @@ function renderDetails(other: LogOtherData, promptTokens = 0): QueryClient {
   render(
     <QueryClientProvider client={queryClient}>
       <DetailsDialog
-        log={{ ...makeLog(other), prompt_tokens: promptTokens }}
-        isAdmin={false}
+        log={{
+          ...makeLog(other),
+          prompt_tokens: promptTokens,
+          actual_response_model: options.actualResponseModel || '',
+        }}
+        isAdmin={options.isAdmin ?? false}
         isRoot={false}
         open
         onOpenChange={() => undefined}
@@ -94,6 +102,40 @@ function renderDetails(other: LogOtherData, promptTokens = 0): QueryClient {
 function rowValue(label: string): string | null {
   return screen.getByText(label).nextElementSibling?.textContent ?? null
 }
+
+test.each([true, false])(
+  'legacy response model remains visible only to administrators: %s',
+  (isAdmin) => {
+    const queryClient = renderDetails({}, 0, {
+      isAdmin,
+      actualResponseModel: 'legacy-returned-model',
+    })
+    if (isAdmin) {
+      expect(screen.getByText('legacy-returned-model')).toBeVisible()
+    } else {
+      expect(
+        screen.queryByText('legacy-returned-model')
+      ).not.toBeInTheDocument()
+    }
+    queryClient.clear()
+  }
+)
+
+test('shows the recorded request and response models in log details', () => {
+  const queryClient = renderDetails({
+    response_model: {
+      requested_model: 'requested-model',
+      upstream_model: 'mapped-model',
+      returned_model: 'unexpected-model',
+      mismatch: true,
+    },
+  })
+  expect(screen.getByText('Response model: unexpected-model')).toBeVisible()
+  expect(rowValue('Request Model')).toBe('requested-model')
+  expect(rowValue('Upstream Model')).toBe('mapped-model')
+  expect(screen.getByText('unexpected-model')).toBeVisible()
+  queryClient.clear()
+})
 
 describe('usage facts billing details', () => {
   test('shows the settled image count and a per-image price', () => {

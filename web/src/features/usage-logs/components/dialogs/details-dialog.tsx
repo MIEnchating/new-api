@@ -50,6 +50,7 @@ import { DynamicPricingBreakdown } from '@/features/pricing/components/dynamic-p
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { BILLING_PRICING_VARS } from '@/features/pricing/lib/billing-expr'
 import { pluginUsageSchema } from '@/features/pricing/lib/plugin-pricing'
+import { PolicyDecisionRecord } from '@/features/system-settings/request-policies/decision-record'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import {
@@ -89,9 +90,10 @@ import {
 } from '../../lib/utils'
 import {
   USAGE_BILLING_PATH,
-  type ChannelExecutionTraceInfo,
   type LogOtherData,
+  type ChannelExecutionTraceInfo,
 } from '../../types'
+import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
 
 function timingTextColorClass(
@@ -1271,6 +1273,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
         )}
 
         {/* Quota saturation marker (admin only) */}
+        {props.isAdmin && adminInfo?.request_policy?.length ? (
+          <DetailSection
+            label={t('Request policy decisions')}
+            icon={<Route className='size-4' />}
+          >
+            <PolicyDecisionRecord events={adminInfo.request_policy} />
+          </DetailSection>
+        ) : null}
         {props.isAdmin && other?.admin_info?.quota_saturation && (
           <DetailSection
             icon={<AlertTriangle className='size-3.5' aria-hidden='true' />}
@@ -1615,31 +1625,44 @@ export function DetailsDialog(props: DetailsDialogProps) {
           />
         )}
 
-        {/* Model mapping and upstream response audit */}
-        {((other?.is_model_mapped && other?.upstream_model_name) ||
-          (props.isAdmin && props.log.actual_response_model)) && (
-          <DetailSection label={t('Model Audit')}>
-            <DetailRow
-              label={t('Request Model')}
-              value={props.log.model_name}
-              mono
-            />
-            {other?.is_model_mapped && other?.upstream_model_name && (
+        {other?.response_model && (
+          <DetailSection label={t('Response Model')}>
+            <ResponseModelDetails observation={other.response_model} />
+          </DetailSection>
+        )}
+        {!other?.response_model &&
+          props.isAdmin &&
+          props.log.actual_response_model && (
+            <DetailSection label={t('Model Audit')}>
               <DetailRow
-                label={t('Upstream Request Model')}
-                value={other.upstream_model_name}
+                label={t('Request Model')}
+                value={props.log.model_name}
                 mono
               />
-            )}
-            {props.isAdmin && props.log.actual_response_model && (
               <DetailRow
                 label={t('Response Model')}
                 value={props.log.actual_response_model}
                 mono
               />
-            )}
-          </DetailSection>
-        )}
+            </DetailSection>
+          )}
+        {/* Model mapping for logs without response observations */}
+        {!other?.response_model &&
+          other?.is_model_mapped &&
+          other?.upstream_model_name && (
+            <DetailSection label={t('Model Mapping')}>
+              <DetailRow
+                label={t('Request Model')}
+                value={props.log.model_name}
+                mono
+              />
+              <DetailRow
+                label={t('Actual Model')}
+                value={other.upstream_model_name}
+                mono
+              />
+            </DetailSection>
+          )}
 
         {/* Token breakdown (for consume/error types with token data) */}
         {isDisplayableType(props.log.type) && other && (
