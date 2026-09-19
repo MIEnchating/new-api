@@ -49,25 +49,43 @@ type LoadedIcon = {
 const LOBE_ICON_CACHE = new Map<string, Promise<unknown>>()
 const LOADED_LOBE_ICONS = new Map<string, unknown>()
 
-function loadLobeIcon(baseKey: string): Promise<unknown> {
-  const cached = LOBE_ICON_CACHE.get(baseKey)
+function loadLobeIcon(baseKey: string, variant: string): Promise<unknown> {
+  const cacheKey = `${baseKey}/${variant}`
+  const cached = LOBE_ICON_CACHE.get(cacheKey)
   if (cached) return cached
 
-  const request = import(
-    /* webpackInclude: /@lobehub[\\/]icons[\\/]es[\\/][A-Za-z][A-Za-z0-9]*[\\/]index\.js$/ */
-    `@lobehub/icons/es/${baseKey}/index.js`
-  )
+  // Provider indexes also import Avatar/Combine and their UI dependencies.
+  // Ordinary logos only need the selected SVG component.
+  let request: Promise<{ default: unknown }>
+  if (variant === 'Color') {
+    request = import(
+      /* webpackInclude: /[\\/]components[\\/]Color\.js$/ */
+      `@lobehub/icons/es/${baseKey}/components/Color.js`
+    )
+  } else if (variant === '') {
+    request = import(
+      /* webpackInclude: /[\\/]components[\\/]Mono\.js$/ */
+      `@lobehub/icons/es/${baseKey}/components/Mono.js`
+    )
+  } else {
+    request = import(
+      /* webpackInclude: /@lobehub[\\/]icons[\\/]es[\\/][A-Za-z][A-Za-z0-9]*[\\/]index\.js$/ */
+      `@lobehub/icons/es/${baseKey}/index.js`
+    )
+  }
+  const pending = request
     .then((module) => {
-      const component = module.default as unknown
-      LOADED_LOBE_ICONS.set(baseKey, component)
+      const component =
+        variant === 'Color' ? { Color: module.default } : module.default
+      LOADED_LOBE_ICONS.set(cacheKey, component)
       return component
     })
     .catch((error: unknown) => {
-      LOBE_ICON_CACHE.delete(baseKey)
+      LOBE_ICON_CACHE.delete(cacheKey)
       throw error
     })
-  LOBE_ICON_CACHE.set(baseKey, request)
-  return request
+  LOBE_ICON_CACHE.set(cacheKey, pending)
+  return pending
 }
 
 function getLoadedIcon(baseKey: string): LoadedIcon | null {
@@ -155,9 +173,18 @@ function LobeIcon({
   const segments = trimmedName.split('.')
   const baseKey = segments[0] ?? ''
   const CustomIcon = CUSTOM_ICONS[baseKey]
+  const requestedVariant = segments[1] ?? ''
+  let variant = /^[A-Z]/.test(requestedVariant) ? requestedVariant : ''
+  if (
+    variant === 'Color' &&
+    !lobeIconToc.some((icon) => icon.id === baseKey && icon.param.hasColor)
+  ) {
+    variant = ''
+  }
+  const cacheKey = `${baseKey}/${variant}`
   const validBaseKey = /^[A-Za-z][A-Za-z0-9]*$/.test(baseKey)
   const [loadedIcon, setLoadedIcon] = useState<LoadedIcon | null>(() =>
-    validBaseKey && !CustomIcon ? getLoadedIcon(baseKey) : null
+    validBaseKey && !CustomIcon ? getLoadedIcon(cacheKey) : null
   )
   const [failedBaseKey, setFailedBaseKey] = useState<string | null>(null)
 
@@ -165,28 +192,28 @@ function LobeIcon({
     let cancelled = false
     if (!validBaseKey || CustomIcon) return
 
-    const cachedIcon = getLoadedIcon(baseKey)
+    const cachedIcon = getLoadedIcon(cacheKey)
     if (cachedIcon) {
       setLoadedIcon(cachedIcon)
       setFailedBaseKey(null)
       return
     }
 
-    void loadLobeIcon(baseKey)
+    void loadLobeIcon(baseKey, variant)
       .then((component) => {
         if (!cancelled) {
-          setLoadedIcon({ baseKey, component })
+          setLoadedIcon({ baseKey: cacheKey, component })
           setFailedBaseKey(null)
         }
       })
       .catch(() => {
-        if (!cancelled) setFailedBaseKey(baseKey)
+        if (!cancelled) setFailedBaseKey(cacheKey)
       })
 
     return () => {
       cancelled = true
     }
-  }, [baseKey, CustomIcon, validBaseKey])
+  }, [baseKey, cacheKey, variant, CustomIcon, validBaseKey])
 
   if (!iconName || typeof iconName !== 'string') {
     return <IconFallback size={size} />
@@ -200,12 +227,12 @@ function LobeIcon({
     return <CustomIcon size={size} />
   }
 
-  if (failedBaseKey === baseKey) {
+  if (failedBaseKey === cacheKey) {
     return <IconFallback iconName={trimmedName} size={size} />
   }
 
   const activeIcon =
-    loadedIcon?.baseKey === baseKey ? loadedIcon : getLoadedIcon(baseKey)
+    loadedIcon?.baseKey === cacheKey ? loadedIcon : getLoadedIcon(cacheKey)
 
   if (!activeIcon) {
     return <IconFallback iconName={trimmedName} pending size={size} />

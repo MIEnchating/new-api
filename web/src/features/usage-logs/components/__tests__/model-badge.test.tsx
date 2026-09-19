@@ -24,7 +24,7 @@ import {
   categorizeModels,
   getModelCategory,
 } from '@/features/channels/lib/model-categories'
-import { getLobeIconNames } from '@/lib/lobe-icon'
+import { getLobeIcon, getLobeIconNames } from '@/lib/lobe-icon'
 
 import { ModelBadge } from '../model-badge'
 
@@ -428,3 +428,29 @@ it.each([
     ).not.toBeInTheDocument()
   }
 )
+
+it('keeps monochrome and color icons distinct when switching the same provider', async () => {
+  const { container, rerender } = render(getLobeIcon('Perplexity', 18))
+  await waitFor(() => expect(container.querySelector('svg')).not.toBeNull())
+  const monochrome = container.querySelector('svg')?.outerHTML
+
+  rerender(<>{getLobeIcon('Perplexity.Color', 24)}</>)
+  await waitFor(() => {
+    const icon = container.querySelector('svg')
+    expect(icon).not.toBeNull()
+    expect(icon).toHaveAttribute('width', '24')
+    expect(icon?.outerHTML).not.toBe(monochrome)
+  })
+
+  rerender(<>{getLobeIcon('Perplexity', 18)}</>)
+  await waitFor(() =>
+    expect(container.querySelector('svg')?.outerHTML).toBe(monochrome)
+  )
+})
+
+it('falls back to the base icon when a provider has no color variant', async () => {
+  const { container } = render(getLobeIcon('OpenAI.Color', 22))
+  await waitFor(() =>
+    expect(container.querySelector('svg')).toHaveAttribute('width', '22')
+  )
+})
