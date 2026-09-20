@@ -35,9 +35,9 @@ type PolicyEvent struct {
 	Health      string         `json:"health,omitempty"`
 }
 
-// RequestPolicyState records how one request was routed so administrators can
-// read the decision flow in the log details. Channel selection and the retry
-// decision stay in the relay flows; this state only records them.
+// RequestPolicyState records the policy decisions made while routing one
+// request. Execution facts such as channel selection and failures belong to
+// the channel execution trace and are intentionally not duplicated here.
 type RequestPolicyState struct {
 	FinalLogged       bool
 	StartedAt         time.Time
@@ -86,17 +86,17 @@ func (s *RequestPolicyState) Events() []PolicyEvent {
 	return slices.Clone(s.events)
 }
 
-func (s *RequestPolicyState) BeginAttempt(channel *model.Channel, group string) {
+func (s *RequestPolicyState) BeginAttempt(_ *model.Channel, group string) {
 	s.Attempts++
 	s.Successful = false
 	s.OutcomeRecorded = false
 	s.SelectedGroup = group
-	s.AddEvent(PolicyEvent{ChannelID: channel.Id, Decision: PolicyDecision{Action: "attempt", Reason: "channel_selected", Source: "routing"}})
 }
 
-// RecordPolicyFailure appends the failed attempt and the retry decision made
-// for it. The health entry mirrors the check in ProcessChannelError, which
-// performs the actual disable.
+// RecordPolicyFailure appends the retry or stop decision made for a failed
+// attempt. The health entry mirrors the check in ProcessChannelError, which
+// performs the actual disable; execution details remain in the execution
+// trace.
 func RecordPolicyFailure(c *gin.Context, channelID int, err *types.NewAPIError, decision PolicyDecision) {
 	if c == nil || err == nil {
 		return
@@ -111,12 +111,14 @@ func RecordPolicyFailure(c *gin.Context, channelID int, err *types.NewAPIError, 
 		source = "local"
 	}
 	state := RequestPolicy(c)
-	event := PolicyEvent{ChannelID: channelID, Status: err.StatusCode, ErrorCode: string(err.GetErrorCode()), ErrorSource: source, Decision: PolicyDecision{Action: "failure", Reason: "upstream_failure", Source: source}}
-	if source == "local" {
-		event.Decision.Reason = "local_rejection"
+	event := PolicyEvent{
+		ChannelID:   channelID,
+		Status:      err.StatusCode,
+		ErrorCode:   string(err.GetErrorCode()),
+		ErrorSource: source,
+		Decision:    decision,
+		Health:      "unchanged",
 	}
-	state.AddEvent(event)
-	event.Decision, event.Health = decision, "unchanged"
 	if source != "local" && c.GetBool("auto_ban") && ShouldDisableChannel(err) {
 		event.Health = "channel_disable_requested"
 		if common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey) {
