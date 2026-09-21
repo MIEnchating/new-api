@@ -27,6 +27,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@lobehub/icons/es': path.resolve(
+        __dirname,
+        './node_modules/@lobehub/icons/es'
+      ),
     },
   },
   test: {

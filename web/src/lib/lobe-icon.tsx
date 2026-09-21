@@ -16,15 +16,27 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-/* eslint-disable react-refresh/only-export-components */
-import { toc as lobeIconToc } from '@lobehub/icons/es/toc.js'
-import { useEffect, useState, type ComponentType, type ReactNode } from 'react'
+/**
+ * LobeHub Icon Loader
+ * Dynamically load and render icons from @lobehub/icons
+ *
+ * Supports:
+ * - Basic: "OpenAI", "OpenAI.Color"
+ * - Chained properties: "OpenAI.Avatar.type={'platform'}"
+ * - Size parameter: getLobeIcon("OpenAI", 20)
+ */
+import { toc } from '@lobehub/icons/es/toc.js'
+import {
+  lazy,
+  Suspense,
+  type ComponentType,
+  type LazyExoticComponent,
+  type ReactNode,
+} from 'react'
 
 import sglangLogo from '@/assets/brand-icons/sglang.svg'
 import { IconSub2api } from '@/assets/custom/icon-sub2api'
 import { IconWan } from '@/assets/custom/icon-wan'
-
-type LobeIconComponent = ComponentType<Record<string, unknown>>
 
 const CUSTOM_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   SGLang: (props) => (
@@ -41,57 +53,34 @@ const CUSTOM_ICONS: Record<string, ComponentType<{ size?: number }>> = {
   Wan: IconWan,
 }
 
-type LoadedIcon = {
-  baseKey: string
-  component: unknown
-}
+const ICON_METADATA = new Map(toc.map((icon) => [icon.id, icon]))
+const ICON_VARIANTS = {
+  Avatar: 'hasAvatar',
+  Brand: 'hasBrand',
+  BrandColor: 'hasBrandColor',
+  Color: 'hasColor',
+  Combine: 'hasCombine',
+  Text: 'hasText',
+  TextCn: 'hasTextCn',
+  TextColor: 'hasTextColor',
+} as const
+const LAZY_ICONS = new Map<
+  string,
+  LazyExoticComponent<ComponentType<Record<string, unknown>>>
+>()
 
-const LOBE_ICON_CACHE = new Map<string, Promise<unknown>>()
-const LOADED_LOBE_ICONS = new Map<string, unknown>()
-
-function loadLobeIcon(baseKey: string, variant: string): Promise<unknown> {
-  const cacheKey = `${baseKey}/${variant}`
-  const cached = LOBE_ICON_CACHE.get(cacheKey)
-  if (cached) return cached
-
-  // Provider indexes also import Avatar/Combine and their UI dependencies.
-  // Ordinary logos only need the selected SVG component.
-  let request: Promise<{ default: unknown }>
-  if (variant === 'Color') {
-    request = import(
-      /* webpackInclude: /[\\/]components[\\/]Color\.js$/ */
-      `@lobehub/icons/es/${baseKey}/components/Color.js`
-    )
-  } else if (variant === '') {
-    request = import(
-      /* webpackInclude: /[\\/]components[\\/]Mono\.js$/ */
-      `@lobehub/icons/es/${baseKey}/components/Mono.js`
-    )
-  } else {
-    request = import(
-      /* webpackInclude: /@lobehub[\\/]icons[\\/]es[\\/][A-Za-z][A-Za-z0-9]*[\\/]index\.js$/ */
-      `@lobehub/icons/es/${baseKey}/index.js`
-    )
-  }
-  const pending = request
-    .then((module) => {
-      const component =
-        variant === 'Color' ? { Color: module.default } : module.default
-      LOADED_LOBE_ICONS.set(cacheKey, component)
-      return component
-    })
-    .catch((error: unknown) => {
-      LOBE_ICON_CACHE.delete(cacheKey)
-      throw error
-    })
-  LOBE_ICON_CACHE.set(cacheKey, pending)
-  return pending
-}
-
-function getLoadedIcon(baseKey: string): LoadedIcon | null {
-  return LOADED_LOBE_ICONS.has(baseKey)
-    ? { baseKey, component: LOADED_LOBE_ICONS.get(baseKey) }
-    : null
+function renderLobeIconFallback(
+  name: string,
+  size: number | string
+): ReactNode {
+  return (
+    <div
+      className='bg-muted text-muted-foreground flex shrink-0 items-center justify-center rounded-full text-xs font-medium'
+      style={{ width: size, height: size }}
+    >
+      {name.charAt(0).toUpperCase() || '?'}
+    </div>
+  )
 }
 
 /**
@@ -139,127 +128,58 @@ function parseValue(raw: string | undefined | null): string | number | boolean {
  * getLobeIcon("OpenAI.Color", 20)
  * getLobeIcon("Claude.Avatar.type={'platform'}", 32)
  */
-function IconFallback(props: {
-  iconName?: string | null
-  pending?: boolean
-  size: number
-}) {
-  const firstLetter = props.iconName?.trim().charAt(0).toUpperCase() || '?'
-  return (
-    <div
-      aria-hidden={props.pending || undefined}
-      className='bg-muted text-muted-foreground flex shrink-0 items-center justify-center rounded-full text-xs font-medium'
-      style={{ width: props.size, height: props.size }}
-    >
-      {!props.pending && firstLetter}
-    </div>
-  )
-}
+export function getLobeIcon(
+  iconName: string | undefined | null,
+  size: number = 20
+): ReactNode {
+  const trimmedName = typeof iconName === 'string' ? iconName.trim() : ''
+  const fallback = renderLobeIconFallback(trimmedName, size)
+  if (!trimmedName) return fallback
 
-function isIconComponent(value: unknown): boolean {
-  return (
-    typeof value === 'function' || (typeof value === 'object' && value !== null)
-  )
-}
-
-function LobeIcon({
-  iconName,
-  size,
-}: {
-  iconName: string | undefined | null
-  size: number
-}) {
-  const trimmedName = iconName?.trim() ?? ''
   const segments = trimmedName.split('.')
-  const baseKey = segments[0] ?? ''
+  const baseKey = segments[0]
   const CustomIcon = CUSTOM_ICONS[baseKey]
-  const requestedVariant = segments[1] ?? ''
-  let variant = /^[A-Z]/.test(requestedVariant) ? requestedVariant : ''
+  if (CustomIcon) return <CustomIcon size={size} />
+
+  const metadata = ICON_METADATA.get(baseKey)
+  if (!metadata) return fallback
+
+  const variantKey = segments[1] as keyof typeof ICON_VARIANTS
+  const variantFlag = ICON_VARIANTS[variantKey]
+  let variant: string =
+    variantFlag && metadata.param[variantFlag] ? variantKey : 'Mono'
+  // These published variants are not represented by the package's toc flags.
   if (
-    variant === 'Color' &&
-    !lobeIconToc.some((icon) => icon.id === baseKey && icon.param.hasColor)
+    (baseKey === 'Gemma' && segments[1] === 'Simple') ||
+    (baseKey === 'LobeHub' && segments[1] === 'Morden')
   ) {
-    variant = ''
+    variant = segments[1]
   }
-  const cacheKey = `${baseKey}/${variant}`
-  const validBaseKey = /^[A-Za-z][A-Za-z0-9]*$/.test(baseKey)
-  const [loadedIcon, setLoadedIcon] = useState<LoadedIcon | null>(() =>
-    validBaseKey && !CustomIcon ? getLoadedIcon(cacheKey) : null
-  )
-  const [failedBaseKey, setFailedBaseKey] = useState<string | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    if (!validBaseKey || CustomIcon) return
-
-    const cachedIcon = getLoadedIcon(cacheKey)
-    if (cachedIcon) {
-      setLoadedIcon(cachedIcon)
-      setFailedBaseKey(null)
-      return
-    }
-
-    void loadLobeIcon(baseKey, variant)
-      .then((component) => {
-        if (!cancelled) {
-          setLoadedIcon({ baseKey: cacheKey, component })
-          setFailedBaseKey(null)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setFailedBaseKey(cacheKey)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [baseKey, cacheKey, variant, CustomIcon, validBaseKey])
-
-  if (!iconName || typeof iconName !== 'string') {
-    return <IconFallback size={size} />
-  }
-
-  if (!trimmedName || !validBaseKey) {
-    return <IconFallback iconName={trimmedName} size={size} />
-  }
-
-  if (CustomIcon) {
-    return <CustomIcon size={size} />
-  }
-
-  if (failedBaseKey === cacheKey) {
-    return <IconFallback iconName={trimmedName} size={size} />
-  }
-
-  const activeIcon =
-    loadedIcon?.baseKey === cacheKey ? loadedIcon : getLoadedIcon(cacheKey)
-
-  if (!activeIcon) {
-    return <IconFallback iconName={trimmedName} pending size={size} />
-  }
-
-  const BaseIcon = activeIcon.component as Record<string, unknown>
-
-  let IconComponent: LobeIconComponent | undefined
-  let propStartIndex: number
-
-  if (segments.length > 1 && isIconComponent(BaseIcon[segments[1] ?? ''])) {
-    IconComponent = BaseIcon[segments[1] ?? ''] as LobeIconComponent
-    propStartIndex = 2
-  } else {
-    IconComponent = isIconComponent(activeIcon.component)
-      ? (activeIcon.component as LobeIconComponent)
-      : undefined
-    propStartIndex =
-      segments.length > 1 && /^[A-Z]/.test(segments[1] ?? '') ? 2 : 1
-  }
-
+  const propStartIndex =
+    segments.length > 1 && /^[A-Z]/.test(segments[1]) ? 2 : 1
+  const cacheKey = `${baseKey}.${variant}`
+  let IconComponent = LAZY_ICONS.get(cacheKey)
   if (!IconComponent) {
-    return <IconFallback iconName={trimmedName} size={size} />
+    // Load the selected SVG variant, avoiding the brand index's Avatar/UI dependencies.
+    IconComponent = lazy(() =>
+      import(
+        /* webpackInclude: /\/components\/(Mono|Avatar|Brand|BrandColor|Color|Combine|Text|TextCn|TextColor|Simple|Morden)\.js$/ */
+        `@lobehub/icons/es/${baseKey}/components/${variant}.js`
+      ).catch(() => ({
+        default: (props: Record<string, unknown>) =>
+          renderLobeIconFallback(
+            baseKey,
+            typeof props.size === 'number' || typeof props.size === 'string'
+              ? props.size
+              : 20
+          ),
+      }))
+    )
+    LAZY_ICONS.set(cacheKey, IconComponent)
   }
 
   // Parse chained properties (e.g., "type={'platform'}", "shape='square'")
-  const iconProps: Record<string, string | number | boolean> = {}
+  const props: Record<string, string | number | boolean> = {}
 
   for (let i = propStartIndex; i < segments.length; i++) {
     const seg = segments[i]
@@ -267,38 +187,37 @@ function LobeIcon({
 
     const eqIdx = seg.indexOf('=')
     if (eqIdx === -1) {
-      iconProps[seg.trim()] = true
+      props[seg.trim()] = true
       continue
     }
 
     const key = seg.slice(0, eqIdx).trim()
     const valRaw = seg.slice(eqIdx + 1).trim()
-    iconProps[key] = parseValue(valRaw)
+    props[key] = parseValue(valRaw)
   }
 
   // Set size if not explicitly specified in the string
-  if (iconProps.size == null) {
-    iconProps.size = size
+  if (props.size == null && size != null) {
+    props.size = size
   }
 
-  return <IconComponent {...iconProps} />
-}
-
-/**
- * Render one LobeHub icon without bundling the complete icon catalog.
- * Supports basic, variant and chained-property definitions such as
- * `OpenAI`, `Claude.Color` and `OpenAI.Avatar.type={'platform'}`.
- */
-export function getLobeIcon(
-  iconName: string | undefined | null,
-  size: number = 20
-): ReactNode {
-  return <LobeIcon iconName={iconName} size={size} />
+  return (
+    <Suspense
+      fallback={renderLobeIconFallback(
+        baseKey,
+        typeof props.size === 'number' || typeof props.size === 'string'
+          ? props.size
+          : size
+      )}
+    >
+      <IconComponent {...props} />
+    </Suspense>
+  )
 }
 
 // The selector uses the same installed icon registry as the renderer.
 export function getLobeIconNames(): string[] {
-  const names = lobeIconToc.flatMap((icon) =>
+  const names = toc.flatMap((icon) =>
     icon.param.hasColor ? [icon.id, `${icon.id}.Color`] : [icon.id]
   )
   return [...new Set([...names, ...Object.keys(CUSTOM_ICONS)])].sort()

@@ -4,17 +4,110 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+// Task JSON changes must preserve historical results and frozen billing facts
+// across every supported database, including deliberately discarded results.
+func TestTaskPluginPersistenceAcrossDatabases(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			dsn := os.Getenv("TEST_MYSQL_DSN")
+			if dialect == "postgres" {
+				dsn = os.Getenv("TEST_POSTGRES_DSN")
+			}
+			if dialect == "sqlite" {
+				dsn = "local"
+				previousPath := common.SQLitePath
+				common.SQLitePath = filepath.Join(t.TempDir(), "tasks.db")
+				t.Cleanup(func() { common.SQLitePath = previousPath })
+			}
+			if dsn == "" {
+				t.Skip("test database DSN is not configured")
+			}
+			t.Setenv("TASK_COMPAT_TEST_DSN", dsn)
+			db, databaseType, err := chooseDB("TASK_COMPAT_TEST_DSN", false)
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			previousDB, previousType := DB, common.MainDatabaseType()
+			DB = db
+			common.SetMainDatabaseType(databaseType)
+			initCol()
+			t.Cleanup(func() {
+				assert.NoError(t, db.Migrator().DropTable(&Task{}, &Channel{}))
+				assert.NoError(t, sqlDB.Close())
+				DB = previousDB
+				common.SetMainDatabaseType(previousType)
+				initCol()
+			})
+			require.NoError(t, db.AutoMigrate(&Task{}, &Channel{}))
+			var version string
+			versionSQL := "SELECT version()"
+			if dialect == "sqlite" {
+				versionSQL = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(versionSQL).Scan(&version).Error)
+			t.Logf("%s: %s", dialect, version)
+			legacy := Task{TaskID: "historical-task", Platform: "alibaba", UserId: 7, Status: TaskStatusSuccess}
+			legacy.SetData(map[string]any{"url": "https://example.invalid/legacy.png"})
+			require.NoError(t, legacy.Insert())
+			for range 2 {
+				require.NoError(t, db.AutoMigrate(&Task{}, &Channel{}))
+			}
+			var loaded Task
+			require.NoError(t, db.First(&loaded, legacy.ID).Error)
+			assert.True(t, loaded.ResultRetrievable(), "historical rows without the flag remain accessible")
+			assert.JSONEq(t, string(legacy.Data), string(loaded.Data))
+			inline := Task{TaskID: "inline-image", Platform: "alibaba", UserId: 7, Status: TaskStatusSuccess,
+				PrivateData: TaskPrivateData{ResultDiscarded: true, Key: "test-gateway-key", BillingContext: &TaskBillingContext{
+					TieredSnapshot: &billingexpr.BillingSnapshot{TaskUsageBilling: true, ExprString: `tier("image", u("image_count") * 0.05)`, UsageFacts: map[string]any{"image_count": float64(2)}},
+				}},
+			}
+			inline.SetData(map[string]any{"url": "https://example.invalid/inline.png"})
+			require.NoError(t, inline.InsertWithContext(context.Background(), "data"))
+			require.NotEmpty(t, inline.Data, "the submit presenter still receives the result")
+			loaded = Task{}
+			require.NoError(t, db.First(&loaded, inline.ID).Error)
+			assert.Empty(t, loaded.Data)
+			assert.False(t, loaded.ResultRetrievable())
+			assert.Equal(t, inline.PrivateData, loaded.PrivateData)
+			for _, rows := range [][]*Task{TaskGetAllTasks(0, 10, SyncTaskQueryParams{}), TaskGetAllUserTask(7, 0, 10, SyncTaskQueryParams{})} {
+				require.Len(t, rows, 2)
+				for _, row := range rows {
+					assert.Empty(t, row.Data, "list responses omit upstream snapshots")
+				}
+			}
+			setting := `{"task_extend_plugin_keys":["alibaba","sora"]}`
+			channel := Channel{Name: "gateway", Key: "test-key", Type: constant.ChannelTypeNewAPI, Status: common.ChannelStatusEnabled, Setting: &setting}
+			require.NoError(t, db.Create(&channel).Error)
+			refs, inFlight, err := GetTaskPluginUsage("alibaba")
+			require.NoError(t, err)
+			require.Len(t, refs, 1)
+			assert.Equal(t, constant.ChannelTypeNewAPI, refs[0].Type)
+			assert.Zero(t, inFlight)
+			changed, err := UnbindTaskPlugin(channel.Id, "alibaba")
+			require.NoError(t, err)
+			assert.True(t, changed)
+			got, err := GetChannelById(channel.Id, true)
+			require.NoError(t, err)
+			assert.Equal(t, "test-key", got.Key)
+			assert.False(t, got.GetSetting().BindsTaskPlugin("alibaba"))
+			assert.True(t, got.GetSetting().BindsTaskPlugin("sora"))
+		})
+	}
+}
 
 func TestMain(m *testing.M) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

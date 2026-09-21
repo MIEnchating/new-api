@@ -241,6 +241,9 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if err := operation_setting.ValidateQuotaOption(key, value); err != nil {
+		return err
+	}
 	if key == CustomMenuPagesOptionKey {
 		return validateCustomMenuPagesJSON(value)
 	}

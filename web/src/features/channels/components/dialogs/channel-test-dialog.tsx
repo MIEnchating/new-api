@@ -970,8 +970,8 @@ function ChannelTestDialogContent({
             <span className='min-w-0 truncate'>{currentRow.name}</span>
           </span>
         }
-        contentClassName='max-h-[90vh] overflow-hidden sm:max-w-4xl'
-        contentHeight='min(70vh, 44rem)'
+        contentClassName='max-h-[min(90dvh,var(--dialog-available-height))] overflow-hidden sm:max-w-4xl'
+        contentHeight='min(70dvh, 44rem)'
         bodyClassName='h-full min-h-0'
         footer={
           <Button variant='outline' onClick={handleClose}>

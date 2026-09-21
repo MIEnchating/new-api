@@ -160,10 +160,10 @@ export type SiteSettings = {
   ServerAddress: string
   TrustedSiteOrigins: string
   TaskPublicAddress: string
+  'general_setting.docs_link': string
   'legal.user_agreement': string
   'legal.privacy_policy': string
   HeaderNavModules: string
-  'general_setting.docs_link': string
   SidebarModulesAdmin: string
   CustomMenuPages: string
 }
@@ -319,12 +319,13 @@ export type ModelSettings = {
 
 export type BillingSettings = {
   QuotaForNewUser: number
-  PreConsumedQuota: number
   QuotaForInviter: number
   QuotaForInvitee: number
   InviteRechargeRebateRatio: number
   TopUpLink: string
   'quota_setting.enable_free_model_pre_consume': boolean
+  'quota_setting.trust_quota_usd': number
+  'quota_setting.pre_consume_multiplier': number
   QuotaPerUnit: number
   USDExchangeRate: number
   'general_setting.quota_display_type': string

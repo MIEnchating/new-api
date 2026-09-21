@@ -125,6 +125,8 @@ interface SelectOption {
 }
 
 interface CCSwitchComboboxFieldProps {
+  id?: string
+  label?: string
   value: string
   options: SelectOption[]
   onValueChange: (value: string) => void
@@ -134,6 +136,8 @@ interface CCSwitchComboboxFieldProps {
 }
 
 function CCSwitchComboboxField({
+  id,
+  label,
   value,
   options,
   onValueChange,
@@ -165,21 +169,23 @@ function CCSwitchComboboxField({
       onValueChange={(nextValue) => {
         if (typeof nextValue === 'string') onValueChange(nextValue)
       }}
-      {...(allowCustomValue
-        ? {
-            inputValue: value,
-            onInputValueChange: onValueChange,
-          }
-        : {})}
+      inputValue={allowCustomValue ? value : undefined}
+      onInputValueChange={(nextValue, details) => {
+        if (allowCustomValue && details.reason === 'input-change') {
+          onValueChange(nextValue)
+        }
+      }}
     >
       <ComboboxInput
+        id={id}
+        triggerAriaLabel={label ?? placeholder}
         className={cn(
           'bg-background h-9 w-full',
           hasDetailedOptions &&
             'hover:border-ring/60 hover:bg-muted/20 [&>input]:cursor-pointer [&>input]:pl-8'
         )}
         placeholder={placeholder}
-        aria-label={placeholder}
+        aria-label={label ?? placeholder}
         readOnly={!allowCustomValue}
       >
         {hasDetailedOptions && selectedOption?.icon ? (
@@ -190,7 +196,7 @@ function CCSwitchComboboxField({
       </ComboboxInput>
       <ComboboxContent>
         <ComboboxList className='max-h-64'>
-          {optionValues.map((optionValue) => {
+          {(optionValue: string) => {
             const option = optionMap.get(optionValue)
             if (!option) return null
 
@@ -227,7 +233,7 @@ function CCSwitchComboboxField({
                 </span>
               </ComboboxItem>
             )
-          })}
+          }}
         </ComboboxList>
         <ComboboxEmpty>{emptyText}</ComboboxEmpty>
       </ComboboxContent>
@@ -404,17 +410,22 @@ export function CCSwitchDialog(props: Props) {
               key={field.key}
               className='grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 sm:grid-cols-[7rem_minmax(0,1fr)]'
             >
-              <Label className='text-muted-foreground'>
+              <Label
+                htmlFor={`cc-switch-${field.key}`}
+                className='text-muted-foreground'
+              >
                 {t(field.labelKey)}
                 {field.required && (
                   <span className='text-destructive ml-0.5'>*</span>
                 )}
               </Label>
               <CCSwitchComboboxField
+                id={`cc-switch-${field.key}`}
+                label={t(field.labelKey)}
                 options={modelOptions}
                 value={models[field.key] || ''}
                 onValueChange={(v) =>
-                  setModels((prev) => ({ ...prev, [field.key]: v }))
+                  setModels((prev) => ({ ...prev, [field.key]: v ?? '' }))
                 }
                 placeholder={t('Select or enter model name')}
                 emptyText={t('No models found')}
