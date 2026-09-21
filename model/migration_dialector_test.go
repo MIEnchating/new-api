@@ -194,7 +194,7 @@ func TestMigrationSchemaStability(t *testing.T) {
 					row := TaskPlugin{Key: "icon-migration", APIVersion: 1, Version: "1.0.0", Source: "plugin source", SourceHash: "source hash", Enabled: true, Active: true, CreatedAt: 1700000000, Remark: "operator note"}
 					if upgrade {
 						require.NoError(t, db.Table(table).AutoMigrate(&taskPluginBeforeIcon{}))
-						legacy := taskPluginBeforeIcon{Key: row.Key, APIVersion: row.APIVersion, Version: row.Version, Source: row.Source, SourceHash: row.SourceHash, Enabled: row.Enabled, Active: row.Active, CreatedAt: row.CreatedAt, Remark: row.Remark}
+						legacy := taskPluginBeforeIcon{Key: row.Key, APIVersion: row.APIVersion, Version: row.Version, Source: string(row.Source), SourceHash: row.SourceHash, Enabled: row.Enabled, Active: row.Active, CreatedAt: row.CreatedAt, Remark: row.Remark}
 						require.NoError(t, db.Table(table).Create(&legacy).Error)
 						row.Id = legacy.Id
 					}
@@ -209,7 +209,7 @@ func TestMigrationSchemaStability(t *testing.T) {
 					const prefix = "data:image/svg+xml;base64,"
 					const svgStart, svgEnd = `<svg xmlns="http://www.w3.org/2000/svg"><!--`, `--></svg>`
 					rawSize := ((524288 - len(prefix)) / 4) * 3
-					row.Icon = prefix + base64.StdEncoding.EncodeToString([]byte(svgStart+strings.Repeat("x", rawSize-len(svgStart)-len(svgEnd))+svgEnd))
+					row.Icon = LongText(prefix + base64.StdEncoding.EncodeToString([]byte(svgStart+strings.Repeat("x", rawSize-len(svgStart)-len(svgEnd))+svgEnd)))
 					require.NoError(t, db.Table(table).Where("id = ?", row.Id).Update("icon", row.Icon).Error)
 					recorder.reset()
 					require.NoError(t, db.Table(table).AutoMigrate(&TaskPlugin{}))

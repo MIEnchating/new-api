@@ -41,6 +41,10 @@ func TestTaskPluginPersistenceAcrossDatabases(t *testing.T) {
 			require.NoError(t, err)
 			sqlDB, err := db.DB()
 			require.NoError(t, err)
+			// The configured compatibility databases may be reused after an
+			// interrupted validation run. Start from a fresh pair of tables so
+			// historical rows cannot affect the list assertions below.
+			require.NoError(t, db.Migrator().DropTable(&Task{}, &Channel{}))
 			previousDB, previousType := DB, common.MainDatabaseType()
 			DB = db
 			common.SetMainDatabaseType(databaseType)
