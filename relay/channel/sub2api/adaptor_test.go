@@ -11,10 +11,61 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestChatReasoningEffortLog(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	settings := model_setting.GetGlobalSettings()
+	original := settings.PassThroughRequestEnabled
+	t.Cleanup(func() { settings.PassThroughRequestEnabled = original })
+	settings.PassThroughRequestEnabled = false
+
+	for _, effort := range []string{"high", "none", ""} {
+		t.Run("effort="+effort, func(t *testing.T) {
+			var request dto.GeneralOpenAIRequest
+			require.NoError(t, common.UnmarshalJsonStr(`{"model":"deepseek-v4.1-flash","messages":[{"role":"user","content":"Hello"}],"reasoning_effort":"high","stream":false}`, &request))
+			request.ReasoningEffort = effort
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			common.SetContextKey(c, constant.ContextKeyOriginalModel, request.Model)
+			common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeSub2API)
+			common.SetContextKey(c, constant.ContextKeyChannelSetting, dto.ChannelSettings{})
+			info, err := relaycommon.GenRelayInfo(c, types.RelayFormatOpenAI, &request, nil)
+			require.NoError(t, err)
+
+			// A previous attempt's converted effort must not leak into this log.
+			info.SetReasoningEffort("low")
+			info.ReasoningConversion = &dto.ReasoningConversionState{Effort: "low"}
+			info.InitChannelMeta(c)
+			assert.Nil(t, info.ReasoningConversion)
+			adaptor := &Adaptor{}
+			adaptor.Init(info)
+			converted, err := adaptor.ConvertOpenAIRequest(c, info, &request)
+			require.NoError(t, err)
+			encoded, err := common.Marshal(converted)
+			require.NoError(t, err)
+			var outbound dto.GeneralOpenAIRequest
+			require.NoError(t, common.Unmarshal(encoded, &outbound))
+			assert.Equal(t, effort, outbound.ReasoningEffort)
+
+			other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 0, 0, 1)
+			var stored map[string]any
+			require.NoError(t, common.UnmarshalJsonStr(other.JSONString(), &stored))
+			if effort == "" {
+				assert.NotContains(t, stored, "reasoning_effort")
+			} else {
+				assert.Equal(t, effort, stored["reasoning_effort"])
+			}
+			assert.Equal(t, effort, request.ReasoningEffort)
+		})
+	}
+}
 
 func TestSetupRequestHeaderPropagatesNewAPIRequestID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
