@@ -35,6 +35,7 @@ import {
 } from '@/features/model-pricing/pricing'
 import { api } from '@/lib/api'
 
+import { SyncPriceCell } from '../models/upstream-price-cells'
 import { UpstreamRatioSync } from '../models/upstream-ratio-sync'
 import {
   getSyncPriceLines,
@@ -194,6 +195,93 @@ describe('pricing synchronization', () => {
     expect(screen.getByText('$0.4')).toBeVisible()
     expect(screen.getByText(custom)).toBeVisible()
   })
+
+  it('highlights changed source expression values while preserving whitespace and copied text', async () => {
+    const current = 'tier("custom", p * 2 + c * 8) *\nmax(1, param("factor"))'
+    const source = 'tier("custom", p * 3 + c * 8) *\nmax(1, param("factor"))'
+    const { container } = render(
+      <TableFixture
+        prices={{
+          m: {
+            current: { billing_mode: 'tiered_expr', billing_expr: current },
+            upstreams: {
+              upstream: { billing_mode: 'tiered_expr', billing_expr: source },
+            },
+          },
+        }}
+      />
+    )
+
+    const expressions = container.querySelectorAll('code')
+    expect(expressions).toHaveLength(2)
+    expect(expressions[0].textContent).toBe(current)
+    expect(expressions[0].querySelector('mark')).toBeNull()
+    expect(expressions[1].textContent).toBe(source)
+    const highlights = expressions[1].querySelectorAll('mark')
+    expect(highlights).toHaveLength(1)
+    expect(highlights[0]).toHaveTextContent('3')
+
+    const user = userEvent.setup()
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    await user.click(
+      screen.getAllByRole('button', { name: 'Copy billing expression' })[1]
+    )
+    expect(copy).toHaveBeenCalledWith(source)
+  })
+
+  it.each([
+    undefined,
+    '',
+    'tier("custom", p * 2 + c * 8) * max(1, param("factor"))',
+    'tier("custom", p * 2 + c * 8) * max(1, param("factor")) + 1',
+  ])(
+    'keeps raw expressions intact without highlights for comparison %s',
+    (base) => {
+      const source = 'tier("custom", p * 2 + c * 8) * max(1, param("factor"))'
+      const { container } = render(
+        <SyncPriceCell
+          values={{ billing_mode: 'tiered_expr', billing_expr: source }}
+          compareTo={{ billing_expr: base }}
+        />
+      )
+
+      expect(screen.getByText(source)).toBeVisible()
+      expect(container.querySelector('mark')).toBeNull()
+    }
+  )
+
+  it.each([
+    { sources: ['upstream'] },
+    { sources: ['upstream', 'alternative'] },
+  ])(
+    'gives current and source prices equal column widths for $sources',
+    ({ sources }) => {
+      const { container } = render(
+        <TableFixture
+          prices={{
+            m: {
+              current: { model_ratio: 0.5 },
+              upstreams: Object.fromEntries(
+                sources.map((source) => [source, { model_ratio: 1 }])
+              ),
+            },
+          }}
+        />
+      )
+
+      const columnGroups = container.querySelectorAll('colgroup')
+      expect(columnGroups.length).toBeGreaterThan(0)
+      for (const group of columnGroups) {
+        const columns = group.querySelectorAll('col')
+        expect(columns).toHaveLength(sources.length + 2)
+        const currentWidth = columns[1].style.width
+        expect(currentWidth).not.toBe('')
+        for (const sourceColumn of [...columns].slice(2)) {
+          expect(sourceColumn.style.width).toBe(currentWidth)
+        }
+      }
+    }
+  )
 
   it('shows a mobile comparison list and preserves source-wide selection', async () => {
     const original = window.matchMedia
