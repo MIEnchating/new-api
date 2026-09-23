@@ -112,6 +112,8 @@ type ColumnWithSizing<TData> = ColumnDef<TData, unknown> & {
 }
 
 const COLUMN_SIZING_PERSIST_DELAY_MS = 250
+// A new filter array invalidates TanStack's row model and queues a page reset.
+const EMPTY_COLUMN_FILTERS: ColumnFiltersState = []
 
 function resolveUpdater<TValue>(
   updater: Updater<TValue>,
@@ -388,7 +390,7 @@ export function useDataTable<TData>(options: UseDataTableOptions<TData>) {
       columnSizing,
       rowSelection,
       expanded,
-      columnFilters: options.columnFilters ?? [],
+      columnFilters: options.columnFilters ?? EMPTY_COLUMN_FILTERS,
       globalFilter: options.globalFilter ?? '',
       pagination,
     },
