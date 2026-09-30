@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useState, useEffect, useRef, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { cn } from '@/lib/utils'
 
@@ -169,6 +170,7 @@ interface HeroTerminalDemoProps {
 }
 
 export function HeroTerminalDemo(props: HeroTerminalDemoProps) {
+  const { t } = useTranslation()
   const [activeIndex, setActiveIndex] = useState(0)
   const [transitioning, setTransitioning] = useState(false)
   const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined)
@@ -298,11 +300,11 @@ export function HeroTerminalDemo(props: HeroTerminalDemoProps) {
             <span className='bg-foreground/15 size-1 rounded-full' />
             <span className='flex items-center gap-1'>
               <span className='font-mono'>{demo.tokens}</span>
-              <span className='tracking-wider uppercase'>tokens</span>
+              <span className='tracking-wider uppercase'>{t('tokens')}</span>
             </span>
             <span className='bg-foreground/15 size-1 rounded-full' />
             <span className='flex items-center gap-1'>
-              <span className='tracking-wider uppercase'>cost</span>
+              <span className='tracking-wider uppercase'>{t('Cost')}</span>
               <span className='font-mono'>
                 ${(demo.tokens * 0.00003).toFixed(5)}
               </span>
@@ -319,10 +321,11 @@ export function HeroTerminalDemo(props: HeroTerminalDemoProps) {
 
 function RequestBlock(props: { demo: ApiDemoConfig; transitioning: boolean }) {
   const { demo, transitioning } = props
+  const { t } = useTranslation()
 
   return (
     <div className='relative px-5 py-4'>
-      <SectionLabel>Request</SectionLabel>
+      <SectionLabel>{t('Request')}</SectionLabel>
       <div
         className={cn(
           'mt-2 transition-opacity duration-200',
@@ -358,6 +361,7 @@ function RequestBlock(props: { demo: ApiDemoConfig; transitioning: boolean }) {
 
 function ResponseBlock(props: { demo: ApiDemoConfig; transitioning: boolean }) {
   const { demo, transitioning } = props
+  const { t } = useTranslation()
 
   return (
     <div
@@ -366,7 +370,7 @@ function ResponseBlock(props: { demo: ApiDemoConfig; transitioning: boolean }) {
         'border-border/40 bg-muted/20 dark:border-white/[0.05] dark:bg-white/[0.015]'
       )}
     >
-      <SectionLabel>Response</SectionLabel>
+      <SectionLabel>{t('Response')}</SectionLabel>
       <div
         className={cn(
           'mt-2 transition-opacity duration-200',
