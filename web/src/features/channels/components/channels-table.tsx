@@ -24,7 +24,7 @@ import type {
   SortingState,
   Row,
 } from '@tanstack/react-table'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, RefreshCw } from 'lucide-react'
 import { useState, useMemo, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -47,6 +47,7 @@ import {
 import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { requireServerSuccess } from '@/lib/server-error-message'
+import { cn } from '@/lib/utils'
 
 import { getChannels, searchChannels, getChannelFilterGroups } from '../api'
 import {
@@ -242,7 +243,7 @@ export function ChannelsTable() {
 
   // Fetch channels data
   // eslint-disable-next-line @tanstack/query/exhaustive-deps
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: channelsQueryKeys.list({
       keyword: globalFilter,
       model: modelFilter,
@@ -522,41 +523,62 @@ export function ChannelsTable() {
             singleSelect: true,
           },
         ],
-        preActions: isMobile ? undefined : (
-          <div className='hidden items-center gap-1.5 sm:contents'>
-            <div className='border-input flex h-8 items-center gap-2 rounded-md border px-2'>
-              <Label
-                htmlFor='channels-show-user-groups'
-                className='text-muted-foreground cursor-pointer text-xs whitespace-nowrap'
-              >
-                {t('Show user groups')}
-              </Label>
-              <Switch
-                id='channels-show-user-groups'
-                size='sm'
-                checked={showUserGroups}
-                onCheckedChange={handleShowUserGroupsChange}
-              />
-            </div>
+        preActions: (
+          <>
+            {!isMobile && (
+              <div className='hidden items-center gap-1.5 sm:contents'>
+                <div className='border-input flex h-8 items-center gap-2 rounded-md border px-2'>
+                  <Label
+                    htmlFor='channels-show-user-groups'
+                    className='text-muted-foreground cursor-pointer text-xs whitespace-nowrap'
+                  >
+                    {t('Show user groups')}
+                  </Label>
+                  <Switch
+                    id='channels-show-user-groups'
+                    size='sm'
+                    checked={showUserGroups}
+                    onCheckedChange={handleShowUserGroupsChange}
+                  />
+                </div>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant='ghost'
+                        size='icon'
+                        onClick={() => setSensitiveVisible(!sensitiveVisible)}
+                        aria-label={sensitiveVisible ? t('Hide') : t('Show')}
+                        className='text-muted-foreground hover:text-foreground size-8'
+                      />
+                    }
+                  >
+                    {sensitiveVisible ? <Eye /> : <EyeOff />}
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {sensitiveVisible ? t('Hide') : t('Show')}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
                     variant='ghost'
                     size='icon'
-                    onClick={() => setSensitiveVisible(!sensitiveVisible)}
-                    aria-label={sensitiveVisible ? t('Hide') : t('Show')}
+                    onClick={() => void refetch()}
+                    aria-label={t('Refresh')}
+                    aria-busy={isFetching}
                     className='text-muted-foreground hover:text-foreground size-8'
                   />
                 }
               >
-                {sensitiveVisible ? <Eye /> : <EyeOff />}
+                <RefreshCw className={cn(isFetching && 'animate-spin')} />
               </TooltipTrigger>
-              <TooltipContent>
-                {sensitiveVisible ? t('Hide') : t('Show')}
-              </TooltipContent>
+              <TooltipContent>{t('Refresh')}</TooltipContent>
             </Tooltip>
-          </div>
+          </>
         ),
         hideViewOptions: isMobile,
       }}

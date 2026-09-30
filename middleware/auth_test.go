@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/alicebob/miniredis/v2"
@@ -35,12 +37,13 @@ func setupDashboardAuthMiddlewareTest(t *testing.T) {
 	previousSecret := common.SessionSecret
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.Token{}, &model.AuditLog{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.Token{}, &model.AuditLog{}, &model.UserAccessToken{}, &model.Option{}))
 	model.DB = db
 	model.LOG_DB = db
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
 	common.RedisEnabled = false
 	common.SessionSecret = "middleware-auth-test-secret"
+	require.NoError(t, model.EnsureLegacyAccessTokenRetireAt(time.Now().Unix()))
 	t.Cleanup(func() {
 		model.DB = previousDB
 		model.LOG_DB = previousLogDB
@@ -305,6 +308,7 @@ func TestTryUserAuthCredentialClassification(t *testing.T) {
 
 	patUser := createMiddlewarePATUser(t, "optional-pat-user", "optional.pat.with-dots")
 	internalUser := createMiddlewarePATUser(t, "optional-session-user", "unrelated-pat")
+	scopedPAT, _ := createMiddlewareScopedToken(t, patUser.Id, 0, "profile:read")
 	now := time.Now().Unix()
 	session := &model.UserSession{
 		SID:             "optional-auth-session",
@@ -359,6 +363,7 @@ func TestTryUserAuthCredentialClassification(t *testing.T) {
 		{name: "dotted unmatched credential", token: "ordinary.key.with-dots", wantStatus: http.StatusOK},
 		{name: "third party jwt", token: externalToken, wantStatus: http.StatusOK},
 		{name: "valid pat", token: "optional.pat.with-dots", wantStatus: http.StatusOK, wantUserID: patUser.Id, wantPAT: true},
+		{name: "scoped pat outside its grant stays anonymous", token: scopedPAT, wantStatus: http.StatusOK},
 		{name: "valid internal access jwt", token: accessToken, wantStatus: http.StatusOK, wantUserID: internalUser.Id},
 		{name: "expired internal access jwt", token: issueExpiredDashboardAccessToken(t, identity), wantStatus: http.StatusUnauthorized, wantErrorCode: "AUTH_TOKEN_EXPIRED"},
 		{name: "tampered internal access jwt", token: tamperDashboardToken(accessToken), wantStatus: http.StatusUnauthorized, wantErrorCode: "AUTH_UNAUTHORIZED"},
@@ -424,6 +429,215 @@ func TestTryUserAuthCredentialClassification(t *testing.T) {
 	router.ServeHTTP(databaseFailureResponse, databaseFailureRequest)
 	assert.Equal(t, http.StatusInternalServerError, databaseFailureResponse.Code)
 	assert.Contains(t, databaseFailureResponse.Body.String(), "AUTH_INTERNAL_ERROR")
+}
+
+func createMiddlewareScopedToken(t *testing.T, userID int, expiresAt int64, scopes ...string) (string, *model.UserAccessToken) {
+	t.Helper()
+	suffix, err := common.GenerateRandomCharsKey(43)
+	require.NoError(t, err)
+	raw := model.AccessTokenPrefix + suffix
+	token := &model.UserAccessToken{Name: "middleware token", TokenHash: model.AccessTokenFingerprint(raw), TokenHint: model.AccessTokenHint(raw), ExpiresAt: expiresAt}
+	require.NoError(t, token.SetScopes(scopes))
+	require.NoError(t, model.CreateUserAccessToken(userID, token, service.AccessTokenMaxPerUser))
+	return raw, token
+}
+
+func middlewareBearerRequest(router *gin.Engine, path, token string) *httptest.ResponseRecorder {
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	return response
+}
+
+func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	gin.SetMode(gin.TestMode)
+	wasMaster := common.IsMasterNode
+	common.IsMasterNode = true
+	t.Cleanup(func() { common.IsMasterNode = wasMaster })
+	require.NoError(t, model.DB.AutoMigrate(&model.CasbinRule{}, &model.AuthzRole{}))
+	require.NoError(t, authz.Init(model.DB))
+	// The channel router declares this rule when it registers the route.
+	DeclareAccessTokenPermissionRoute(http.MethodGet, "/api/channel/", authz.ChannelRead)
+
+	legacy := "middleware-legacy-token"
+	admin := createMiddlewarePATUser(t, "route-rule-admin", legacy)
+	require.NoError(t, model.DB.Model(admin).Update("role", common.RoleAdminUser).Error)
+	profile, _ := createMiddlewareScopedToken(t, admin.Id, 0, "profile:read")
+	channel, _ := createMiddlewareScopedToken(t, admin.Id, time.Now().Unix()+3600, "channel:read")
+	expired, _ := createMiddlewareScopedToken(t, admin.Id, time.Now().Unix()-1, "profile:read")
+	keyReader, _ := createMiddlewareScopedToken(t, admin.Id, 0, "api_key:read")
+	keyWriter, _ := createMiddlewareScopedToken(t, admin.Id, 0, "api_key:write")
+	monitor, _ := createMiddlewareScopedToken(t, admin.Id, 0, "monitor:write")
+	wallet, _ := createMiddlewareScopedToken(t, admin.Id, 0, "wallet:read")
+	_, err := service.NormalizeAccessTokenScopes(admin.Id, common.RoleAdminUser, []string{"monitor:write"})
+	require.NoError(t, err)
+	_, err = service.NormalizeAccessTokenScopes(admin.Id, common.RoleCommonUser, []string{"monitor:write"})
+	require.ErrorIs(t, err, service.ErrAccessTokenScopeForbidden)
+
+	ok := func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"id": c.GetInt("id")}) }
+	router := gin.New()
+	router.GET("/api/user/self", UserAuth(), ok)
+	router.GET("/api/user/access_tokens", UserAuth(), ok)
+	router.GET("/api/undeclared", UserAuth(), ok)
+	router.GET("/api/channel/", AdminAuth(), RequirePermission(authz.ChannelRead), ok)
+	router.GET("/api/pricing", TryUserAuth(), ok)
+	router.GET("/api/token/:id/route/status", UserAuth(), ok)
+	router.PUT("/api/token/:id/route", UserAuth(), ok)
+	router.PUT("/api/status-monitor/cache/baseline", AdminAuth(), ok)
+	router.GET("/api/user/billing/self", UserAuth(), ok)
+	router.POST("/api/user/lottery/draw", UserAuth(), ok)
+	router.POST("/api/sso/chatgpt2api/authorize", UserAuth(), ok)
+
+	for _, test := range []struct {
+		name, method, path, token, code, reason string
+		status                                  int
+	}{
+		{name: "granted scope on a never expiring token", path: "/api/user/self", token: profile, status: http.StatusOK},
+		{name: "missing scope", path: "/api/user/self", token: channel, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "undeclared route", path: "/api/undeclared", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_ROUTE_UNDECLARED", reason: "route_undeclared"},
+		{name: "session route", path: "/api/user/access_tokens", token: profile, status: http.StatusForbidden, code: "AUTH_SESSION_REQUIRED", reason: "session_required"},
+		{name: "permission route with its scope", path: "/api/channel/", token: channel, status: http.StatusOK},
+		{name: "permission route without its scope", path: "/api/channel/", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "expired token", path: "/api/user/self", token: expired, status: http.StatusUnauthorized, code: "ACCESS_TOKEN_EXPIRED", reason: "expired"},
+		{name: "legacy token before the deadline", path: "/api/user/self", token: legacy, status: http.StatusOK},
+		{name: "legacy token on a session route", path: "/api/user/access_tokens", token: legacy, status: http.StatusForbidden, code: "AUTH_SESSION_REQUIRED", reason: "session_required"},
+		{name: "read token routing status", path: "/api/token/1/route/status", token: keyReader, status: http.StatusOK},
+		{name: "read scope cannot change routing", method: http.MethodPut, path: "/api/token/1/route", token: keyReader, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "write token routing", method: http.MethodPut, path: "/api/token/1/route", token: keyWriter, status: http.StatusOK},
+		{name: "admin changes monitoring baseline", method: http.MethodPut, path: "/api/status-monitor/cache/baseline", token: monitor, status: http.StatusOK},
+		{name: "unrelated scope cannot change monitoring", method: http.MethodPut, path: "/api/status-monitor/cache/baseline", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "read personal billing", path: "/api/user/billing/self", token: wallet, status: http.StatusOK},
+		{name: "read wallet cannot draw lottery", method: http.MethodPost, path: "/api/user/lottery/draw", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "PAT cannot authorize browser SSO", method: http.MethodPost, path: "/api/sso/chatgpt2api/authorize", token: profile, status: http.StatusForbidden, code: "AUTH_SESSION_REQUIRED", reason: "session_required"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			method := test.method
+			if method == "" {
+				method = http.MethodGet
+			}
+			request := httptest.NewRequest(method, test.path, nil)
+			request.Header.Set("Authorization", "Bearer "+test.token)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			assert.Equal(t, test.status, response.Code, response.Body.String())
+			if test.code != "" {
+				assert.Contains(t, response.Body.String(), `"code":"`+test.code+`"`)
+			}
+			var audit model.AuditLog
+			require.NoError(t, model.LOG_DB.Where("category = ?", model.AuditCategoryAccessToken).Order("id desc").First(&audit).Error)
+			assert.Equal(t, model.AccessTokenFingerprint(test.token), audit.TokenRef)
+			assert.Equal(t, test.status, audit.Status)
+			if test.reason == "" {
+				return
+			}
+			require.NotNil(t, audit.Other.Op)
+			params, err := common.Marshal(audit.Other.Op.Params)
+			require.NoError(t, err)
+			assert.Contains(t, string(params), `"failure_reason":"`+test.reason+`"`)
+			if test.code == "ACCESS_TOKEN_SCOPE_DENIED" {
+				assert.Contains(t, string(params), `"required_scope":"`)
+			}
+		})
+	}
+
+	// A retained monitoring grant cannot bypass a subsequent role demotion.
+	require.NoError(t, model.DB.Model(admin).Update("role", common.RoleCommonUser).Error)
+	request := httptest.NewRequest(http.MethodPut, "/api/status-monitor/cache/baseline", nil)
+	request.Header.Set("Authorization", "Bearer "+monitor)
+	denied := httptest.NewRecorder()
+	router.ServeHTTP(denied, request)
+	assert.Equal(t, http.StatusForbidden, denied.Code)
+	require.NoError(t, model.DB.Model(admin).Update("role", common.RoleAdminUser).Error)
+
+	// The token grant never widens the account: revoking the Casbin permission
+	// rejects a token that still carries the scope.
+	require.NoError(t, authz.SetUserPermissions(admin.Id, authz.PermissionsMap{authz.ResourceChannel: {authz.ActionRead: false}}))
+	response := middlewareBearerRequest(router, "/api/channel/", channel)
+	assert.Equal(t, http.StatusForbidden, response.Code)
+	assert.NotContains(t, response.Body.String(), "ACCESS_TOKEN_SCOPE_DENIED")
+
+	require.NoError(t, model.DB.Model(admin).Update("status", common.UserStatusDisabled).Error)
+	response = middlewareBearerRequest(router, "/api/user/self", profile)
+	assert.Equal(t, http.StatusUnauthorized, response.Code)
+	assert.Contains(t, response.Body.String(), `"code":"AUTH_USER_DISABLED"`)
+	require.NoError(t, model.DB.Model(admin).Update("status", common.UserStatusEnabled).Error)
+	assert.Equal(t, http.StatusOK, middlewareBearerRequest(router, "/api/user/self", profile).Code, "disabling a user keeps the token")
+
+	require.NoError(t, model.DB.Model(&model.Option{}).Where(&model.Option{Key: "LegacyAccessTokenRetireAt"}).Update("value", fmt.Sprint(time.Now().Unix()-1)).Error)
+	require.NoError(t, model.EnsureLegacyAccessTokenRetireAt(time.Now().Unix()))
+	response = middlewareBearerRequest(router, "/api/user/self", legacy)
+	assert.Equal(t, http.StatusUnauthorized, response.Code)
+	assert.Contains(t, response.Body.String(), `"code":"ACCESS_TOKEN_LEGACY_RETIRED"`)
+	response = middlewareBearerRequest(router, "/api/pricing", legacy)
+	assert.Equal(t, http.StatusOK, response.Code)
+	assert.JSONEq(t, `{"id":0}`, response.Body.String(), "optional authentication treats a retired token as anonymous")
+	assert.Equal(t, http.StatusOK, middlewareBearerRequest(router, "/api/user/self", profile).Code, "the deadline only retires legacy tokens")
+}
+
+func TestAccessTokenIdentityAndSingleLookup(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	gin.SetMode(gin.TestMode)
+	legacy := "middleware-identity-legacy"
+	user := createMiddlewarePATUser(t, "identity-user", legacy)
+	scoped, token := createMiddlewareScopedToken(t, user.Id, 0, "profile:read")
+
+	router := gin.New()
+	router.Use(AccessTokenAudit())
+	router.GET("/api/user/self", UserAuth(), func(c *gin.Context) {
+		_, session := GetSessionAuthIdentity(c)
+		identity, stepUp := GetStepUpIdentity(c)
+		c.JSON(http.StatusOK, gin.H{"session": session, "step_up": stepUp, "identity": identity})
+	})
+
+	var queries []string
+	const callbackName = "test:access-token-lookup-count"
+	require.NoError(t, model.DB.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		queries = append(queries, tx.Statement.Table+" "+tx.Statement.SQL.String())
+	}))
+	t.Cleanup(func() { model.DB.Callback().Query().Remove(callbackName) })
+	countQueries := func(table, fragment string) int {
+		count := 0
+		for _, query := range queries {
+			if strings.HasPrefix(query, table+" ") && strings.Contains(query, fragment) {
+				count++
+			}
+		}
+		return count
+	}
+
+	for _, test := range []struct {
+		name, token string
+		stepUp      bool
+		tokenTable  int
+		legacyQuery int
+	}{
+		{name: "scoped token", token: scoped, stepUp: true, tokenTable: 1},
+		{name: "legacy token", token: legacy, legacyQuery: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			queries = nil
+			response := middlewareBearerRequest(router, "/api/user/self", test.token)
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+			var body struct {
+				Session  bool                 `json:"session"`
+				StepUp   bool                 `json:"step_up"`
+				Identity service.AuthIdentity `json:"identity"`
+			}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+			assert.False(t, body.Session, "an access token is never a browser session")
+			assert.Equal(t, test.stepUp, body.StepUp)
+			if test.stepUp {
+				assert.Equal(t, service.AuthIdentity{UserID: user.Id, SessionID: model.AccessTokenSessionID(token.Id), UserAuthVersion: user.AuthVersion, SessionVersion: model.AccessTokenSessionVersion}, body.Identity)
+			}
+			// The access audit and authentication share one lookup: the
+			// credential query plus the owner's user row.
+			assert.Len(t, queries, 2)
+			assert.Equal(t, test.tokenTable, countQueries("user_access_tokens", "token_hash"))
+			assert.Equal(t, test.legacyQuery, countQueries("users", "access_token = "))
+		})
+	}
 }
 
 func TestAPIKeyFromWebSocketSubprotocol(t *testing.T) {

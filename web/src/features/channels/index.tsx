@@ -149,7 +149,7 @@ export function Channels() {
             <Link
               to='/system-settings/request-policies/$section'
               params={{ section: 'routing' }}
-              className='group shrink-0 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+              className='group focus-visible:ring-ring/50 shrink-0 rounded-md focus-visible:ring-2 focus-visible:outline-none'
               aria-label={summaryAriaLabel}
             />
           }

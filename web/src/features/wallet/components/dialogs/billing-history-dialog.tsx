@@ -356,7 +356,7 @@ export function BillingHistoryDialog({
                         </div>
                         {record.type === 'online_topup' && (
                           <StatusBadge
-                            label={statusConfig.label}
+                            label={t(statusConfig.label)}
                             variant={statusConfig.variant}
                             showDot
                             copyable={false}
