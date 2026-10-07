@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/tokenkit"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -166,6 +167,57 @@ func TestOaiResponsesToChatStreamHandlerReturnsBareErrorEvent(t *testing.T) {
 	assert.Equal(t, "stream failed", apiErr.Error())
 	assert.True(t, types.IsStreamEventError(apiErr))
 	assert.Empty(t, recorder.Body.String())
+}
+
+func TestOaiResponsesToChatStreamHandlerSettlesDeliveredOutputOnFailure(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	cases := []struct {
+		name     string
+		terminal string
+		reported bool
+	}{
+		{
+			name:     "failed with reported usage",
+			terminal: `data: {"type":"response.failed","response":{"model":"gpt-actual","error":{"type":"upstream_error","message":"stream failed"},"usage":{"input_tokens":2,"output_tokens":3,"total_tokens":5}}}`,
+			reported: true,
+		},
+		{
+			name:     "bare error with estimated usage",
+			terminal: `data: {"type":"error","error":{"type":"upstream_error","message":"stream failed"}}`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.Join([]string{
+				`data: {"type":"response.created","response":{"id":"resp_error","model":"gpt-actual"}}`,
+				`data: {"type":"response.output_text.delta","delta":"hello"}`,
+				tc.terminal,
+				``,
+			}, "\n")
+			c, recorder, resp, info := newResponsesChatTestContext(t, body, true)
+			info.SetEstimatePromptTokens(2)
+
+			usage, apiErr := OaiResponsesToChatStreamHandler(c, info, resp)
+			require.Nil(t, apiErr)
+			require.NotNil(t, usage)
+			assert.Equal(t, 2, usage.PromptTokens)
+			if tc.reported {
+				assert.Equal(t, 3, usage.CompletionTokens)
+				assert.Equal(t, 5, usage.TotalTokens)
+			} else {
+				assert.Equal(t, tokenkit.Estimate("gpt-test", "hello"), usage.CompletionTokens)
+				assert.Equal(t, usage.PromptTokens+usage.CompletionTokens, usage.TotalTokens)
+			}
+			assert.Equal(t, "gpt-actual", info.ActualResponseModel())
+			assert.True(t, info.StreamStatus.HasErrors())
+			assert.Contains(t, recorder.Body.String(), `"content":"hello"`)
+			assert.Contains(t, recorder.Body.String(), "stream failed")
+			assert.NotContains(t, recorder.Body.String(), "data: [DONE]")
+		})
+	}
 }
 
 func TestOaiResponsesToChatBufferedStreamHandlerReturnsJSONFromSSE(t *testing.T) {

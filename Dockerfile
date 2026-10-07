@@ -18,9 +18,10 @@ ENV GOEXPERIMENT=greenteagc
 WORKDIR /build
 
 ADD go.mod go.sum ./
-# relaykit is a local submodule referenced via replace; its go.mod must be
-# present for go mod download to resolve the main module graph.
+# relaykit and tokenkit are local submodules referenced via replace; their
+# go.mod files must be present for go mod download to resolve the main module graph.
 ADD relaykit/go.mod ./relaykit/go.mod
+ADD tokenkit/go.mod ./tokenkit/go.mod
 # Registry and module proxies can transiently fail during a release. Retry the
 # dependency download so a single network blip cannot publish an incomplete
 # architecture image or leave the release workflow in a partial state.

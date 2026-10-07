@@ -27,6 +27,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Field, FieldError } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { useUpdateOption } from '../hooks/use-update-option'
 
@@ -42,6 +43,32 @@ const DEFAULT_PRICES: Record<string, number> = {
   file_search: 2.5,
   google_search: 14.0,
   image_generation: 150.0,
+  bing_web_search: 14.0,
+  'web_search:grok*': 5.0,
+  x_search_posts: 5.0,
+  x_search_profiles: 10.0,
+}
+
+const VENDOR_CNY_PRICES: Record<string, number> = {
+  search_std: 10.0,
+  search_pro: 30.0,
+  search_pro_sogou: 50.0,
+  search_pro_quark: 50.0,
+  search_strategy_turbo: 3.0,
+  search_strategy_max: 4.0,
+  search_strategy_agent: 4.0,
+  search_strategy_agent_max: 4.0,
+}
+
+function buildDefaultPrices(usdExchangeRate: number) {
+  const rate =
+    Number.isFinite(usdExchangeRate) && usdExchangeRate > 0
+      ? usdExchangeRate
+      : 1
+  const convertedVendorPrices = Object.fromEntries(
+    Object.entries(VENDOR_CNY_PRICES).map(([key, price]) => [key, price / rate])
+  )
+  return { ...DEFAULT_PRICES, ...convertedVendorPrices }
 }
 
 type ToolPriceRow = {
@@ -78,9 +105,10 @@ function objectToRows(prices: Record<string, number>): ToolPriceRow[] {
 }
 
 function parseInitialPrices(
-  rawValue: string | undefined
+  rawValue: string | undefined,
+  defaults: Record<string, number>
 ): Record<string, number> {
-  if (!rawValue) return { ...DEFAULT_PRICES }
+  if (!rawValue) return { ...defaults }
   try {
     const parsed = JSON.parse(rawValue) as unknown
     if (
@@ -98,14 +126,14 @@ function parseInitialPrices(
       // Merge defaults first so newly introduced tools appear for old stored
       // configs, while explicit stored values (including 0) still win.
       return {
-        ...DEFAULT_PRICES,
+        ...defaults,
         ...validPrices,
       }
     }
   } catch {
     // fall through to defaults
   }
-  return { ...DEFAULT_PRICES }
+  return { ...defaults }
 }
 
 type ToolPriceSettingsProps = {
@@ -117,6 +145,13 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
 }: ToolPriceSettingsProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const usdExchangeRate = useSystemConfigStore(
+    (state) => state.config.currency.usdExchangeRate
+  )
+  const defaultPrices = useMemo(
+    () => buildDefaultPrices(usdExchangeRate),
+    [usdExchangeRate]
+  )
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
   const [rows, setRows] = useState<ToolPriceRow[]>([])
   const [jsonText, setJsonText] = useState('')
@@ -124,13 +159,13 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
   const [nextRowId, setNextRowId] = useState(1)
 
   useEffect(() => {
-    const prices = parseInitialPrices(defaultValue)
+    const prices = parseInitialPrices(defaultValue, defaultPrices)
     const initialRows = objectToRows(prices)
     setRows(initialRows)
     setJsonText(JSON.stringify(prices, null, 2))
     setJsonError('')
     setNextRowId(initialRows.length + 1)
-  }, [defaultValue])
+  }, [defaultPrices, defaultValue])
 
   const currentPrices = useMemo(() => rowsToObject(rows), [rows])
   const invalidRowIds = useMemo(
@@ -204,12 +239,12 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
   )
 
   const resetToDefault = useCallback(() => {
-    const initialRows = objectToRows(DEFAULT_PRICES)
+    const initialRows = objectToRows(defaultPrices)
     setRows(initialRows)
-    setJsonText(JSON.stringify(DEFAULT_PRICES, null, 2))
+    setJsonText(JSON.stringify(defaultPrices, null, 2))
     setJsonError('')
     setNextRowId(initialRows.length + 1)
-  }, [])
+  }, [defaultPrices])
 
   const handleCopyJson = useCallback(async () => {
     try {

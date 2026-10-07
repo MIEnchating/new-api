@@ -30,7 +30,10 @@ import {
 } from '@/components/data-table'
 import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
-import { createServerError } from '@/lib/server-error-message'
+import {
+  createServerError,
+  requireServerSuccess,
+} from '@/lib/server-error-message'
 
 import { getUserGroupNames, getUsers, searchUsers } from '../api'
 import {
@@ -88,8 +91,10 @@ export function UsersTable() {
         type: 'array',
         serialize: (value) =>
           Array.isArray(value) ? (value[0] as string | undefined) : undefined,
-        deserialize: (value) =>
-          typeof value === 'string' && value ? [value] : [],
+        deserialize: (value) => {
+          if (Array.isArray(value)) return value.slice(0, 1)
+          return typeof value === 'string' && value ? [value] : []
+        },
       },
     ],
   })
@@ -110,7 +115,8 @@ export function UsersTable() {
 
   const { data: groupsData } = useQuery({
     queryKey: ['user-group-names'],
-    queryFn: getUserGroupNames,
+    queryFn: async () => requireServerSuccess(await getUserGroupNames()),
+    staleTime: 5 * 60 * 1000,
   })
   const groupOptions = useMemo(
     () =>
@@ -159,7 +165,9 @@ export function UsersTable() {
     queryFn: async () => {
       const hasFilter = globalFilter?.trim()
       const hasColumnFilter =
-        statusFilter.length > 0 || roleFilter.length > 0 || Boolean(groupFilter)
+        statusFilter.length > 0 ||
+        roleFilter.length > 0 ||
+        groupFilter.length > 0
       const params = {
         p: pagination.pageIndex + 1,
         page_size: pagination.pageSize,
@@ -257,7 +265,7 @@ export function UsersTable() {
           },
           {
             columnId: 'group',
-            title: t('Group'),
+            title: t('User Group'),
             options: groupOptions,
             singleSelect: true,
           },

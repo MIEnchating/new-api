@@ -73,6 +73,7 @@ jobs:
           cache-dependency-path: |
             go.sum
             relaykit/go.sum
+            tokenkit/go.sum
       - name: Download Go dependencies with retry
         run: |
           for attempt in 1 2 3; do
@@ -88,10 +89,16 @@ jobs:
       - name: relaykit tests
         working-directory: relaykit
         run: go test ./...
+      - name: tokenkit tests
+        working-directory: tokenkit
+        run: go test ./...
       - name: Go vet
         run: go vet ./...
       - name: relaykit vet
         working-directory: relaykit
+        run: go vet ./...
+      - name: tokenkit vet
+        working-directory: tokenkit
         run: go vet ./...
       - name: Docker build preflight
         run: docker build --pull=false --tag "new-api-release-preflight:${GITHUB_REF_NAME}" .
@@ -128,7 +135,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: ">=1.25.1"
+          go-version: '>=1.26'
       - name: Build Backend (amd64)
         run: |
           for attempt in 1 2 3; do
@@ -183,7 +190,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: ">=1.25.1"
+          go-version: '>=1.26'
       - name: Build Backend
         run: |
           for attempt in 1 2 3; do
@@ -235,7 +242,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: ">=1.25.1"
+          go-version: '>=1.26'
       - name: Build Backend
         run: |
           for attempt in 1 2 3; do
