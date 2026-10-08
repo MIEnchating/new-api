@@ -39,6 +39,11 @@ func TestToolPriceHardcodedFallbacksSurviveMissingOperatorConfig(t *testing.T) {
 		{"image_generation", "", 150},
 		{"web_search_preview", "gpt-4o-2024-11-20", 25},
 		{"web_search_preview", "gpt-4.1-mini", 25},
+		// Gemini 3 bills each search query; 2.5 and older bill the grounded prompt.
+		{"google_search", "gemini-3.7-flash", 14},
+		{"google_search_grounded_prompt", "gemini-3.7-flash", 0},
+		{"google_search", "gemini-2.5-flash", 0},
+		{"google_search_grounded_prompt", "gemini-2.5-flash", 35},
 		// Vendor search tiers are listed in CNY and converted to USD for billing.
 		{"search_std", "", 10 / 7.3},
 		{"search_pro", "", 30 / 7.3},
@@ -57,6 +62,7 @@ func TestToolPriceHardcodedFallbacksSurviveMissingOperatorConfig(t *testing.T) {
 		assert.InDelta(t, tt.want, GetToolPriceForModel(tt.tool, tt.model), 1e-12, "%s for %q", tt.tool, tt.model)
 	}
 	assert.True(t, IsBuiltInToolPriceKey("bing_web_search"))
+	assert.True(t, IsBuiltInToolPriceKey("google_search_grounded_prompt"), "seeded only for model prefixes")
 }
 
 func TestToolPriceCurrencyConversionAndOverrides(t *testing.T) {

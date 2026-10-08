@@ -144,12 +144,12 @@ jobs:
             if [[ "$attempt" == 3 ]]; then exit 1; fi
             sleep $((attempt * 10))
           done
-          go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION' -extldflags '-static'" -o "new-api-linux-amd64-$VERSION"
+          go build -pgo="$(go list -m -f '{{.Dir}}' github.com/Calcium-Ion/moejs)/default.pgo" -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION' -extldflags '-static'" -o "new-api-linux-amd64-$VERSION"
       - name: Build Backend (arm64)
         run: |
           sudo apt-get update
           DEBIAN_FRONTEND=noninteractive sudo apt-get install -y gcc-aarch64-linux-gnu
-          CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION' -extldflags '-static'" -o "new-api-linux-arm64-$VERSION"
+          CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -pgo="$(go list -m -f '{{.Dir}}' github.com/Calcium-Ion/moejs)/default.pgo" -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION' -extldflags '-static'" -o "new-api-linux-arm64-$VERSION"
       - name: Upload Linux builds
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -199,7 +199,7 @@ jobs:
             if [[ "$attempt" == 3 ]]; then exit 1; fi
             sleep $((attempt * 10))
           done
-          go build -ldflags "-X 'github.com/QuantumNous/new-api/common.Version=$VERSION'" -o "new-api-macos-amd64-$VERSION"
+          go build -pgo="$(go list -m -f '{{.Dir}}' github.com/Calcium-Ion/moejs)/default.pgo" -ldflags "-X 'github.com/QuantumNous/new-api/common.Version=$VERSION'" -o "new-api-macos-amd64-$VERSION"
       - name: Upload macOS build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -251,7 +251,7 @@ jobs:
             if [[ "$attempt" == 3 ]]; then exit 1; fi
             sleep $((attempt * 10))
           done
-          go build -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION'" -o "new-api-windows-amd64-$VERSION.exe"
+          go build -pgo="$(go list -m -f '{{.Dir}}' github.com/Calcium-Ion/moejs)/default.pgo" -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$VERSION'" -o "new-api-windows-amd64-$VERSION.exe"
       - name: Upload Windows build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -274,6 +274,11 @@ jobs:
         with:
           path: release-assets
           merge-multiple: true
+      - name: Generate checksums
+        run: |
+          sha256sum release-assets/new-api-linux-* > release-assets/checksums-linux.txt
+          sha256sum release-assets/new-api-macos-* > release-assets/checksums-macos.txt
+          sha256sum release-assets/new-api-windows-*.exe > release-assets/checksums-windows.txt
       - name: Require complete release artifacts
         run: |
           expected=(
@@ -281,8 +286,11 @@ jobs:
             "new-api-linux-arm64-${GITHUB_REF_NAME}"
             "new-api-macos-amd64-${GITHUB_REF_NAME}"
             "new-api-windows-amd64-${GITHUB_REF_NAME}.exe"
+            "checksums-linux.txt"
+            "checksums-macos.txt"
+            "checksums-windows.txt"
           )
-          actual_count=$(find release-assets -maxdepth 1 -type f | wc -l)
+          actual_count=$(find release-assets -maxdepth 1 -type f | wc -l | tr -d '[:space:]')
           if [[ "$actual_count" != "${#expected[@]}" ]]; then
             echo "Expected ${#expected[@]} release artifacts, found ${actual_count}" >&2
             find release-assets -maxdepth 1 -type f -print >&2
