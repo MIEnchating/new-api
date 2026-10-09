@@ -60,6 +60,7 @@ import {
   formatUseTime,
 } from '@/lib/format'
 import { getRoleLabelKey } from '@/lib/roles'
+import { translateServerText } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
 import { AuditDetailFields } from '../../audit/components/audit-detail-fields'
@@ -75,12 +76,14 @@ import {
   getFirstResponseTimeColor,
   getResponseTimeColor,
   getReasoningEffortVariant,
+  logTokenName,
   renderAuditContent,
   getAuditAuthMethodLabel,
   getAuditParamEntries,
   getLoginMethodLabel,
   getSecondFactorMethodLabel,
   getUpstreamRequestIds,
+  renderLogContent,
 } from '../../lib/format'
 import { buildQuotaAuditOperation } from '../../lib/quota-audit-operation'
 import {
@@ -864,13 +867,17 @@ export function DetailsDialog(props: DetailsDialogProps) {
       )
     : null
   const operationText = renderAuditContent(other, t)
-  const details = (isTopup ? operationText : null) ?? props.log.content ?? ''
+  const details =
+    (isTopup ? operationText : null) ??
+    renderLogContent(other, t) ??
+    props.log.content ??
+    ''
   const contentText =
     (isManage || isLogin) && operationText ? operationText : details
   const operationIdentifier = other?.op?.action ?? ''
   const auditParamEntries =
     isManage || isLogin ? getAuditParamEntries(other, t) : []
-  const auditRoute = isManage ? other?.audit_info : undefined
+  const auditRoute = isManage && props.isAdmin ? other?.audit_info : undefined
   const routeParams = Object.entries(auditRoute?.params ?? {})
   const routeParamsText = routeParams
     .map(([key, value]) => `${key}=${value}`)
@@ -1173,7 +1180,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
           )}
 
           {props.log.token_name && (
-            <DetailRow label={t('Token')} value={props.log.token_name} mono />
+            <DetailRow
+              label={t('Token')}
+              value={logTokenName(props.log, t)}
+              mono
+            />
           )}
 
           {groupDetails}
@@ -1361,7 +1372,10 @@ export function DetailsDialog(props: DetailsDialogProps) {
               <DetailRow label={t('Task ID')} value={other.task_id} mono />
             )}
             {other.reason && (
-              <DetailRow label={t('Reason')} value={other.reason} />
+              <DetailRow
+                label={t('Reason')}
+                value={translateServerText(t, other.reason)}
+              />
             )}
           </DetailSection>
         )}

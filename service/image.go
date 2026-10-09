@@ -30,7 +30,7 @@ func DecodeBase64ImageData(base64String string) (image.Config, string, string, e
 	// 将base64字符串解码为字节切片
 	decodedData, err := base64.StdEncoding.DecodeString(base64String)
 	if err != nil {
-		fmt.Println("Error: Failed to decode base64 string")
+		fmt.Println(common.LogText("Error: Failed to decode base64 string"))
 		return image.Config{}, "", "", fmt.Errorf("failed to decode base64 string: %s", err.Error())
 	}
 
@@ -128,13 +128,13 @@ func getImageConfig(reader io.Reader) (image.Config, string, error) {
 	if err == nil {
 		return config, format, nil
 	}
-	common.SysLog(fmt.Sprintf("fail to decode image config(gif, jpg, png): %s", err.Error()))
+	common.SysLog(common.LogText("fail to decode image config(gif, jpg, png): %s", err.Error()))
 
 	config, err = webp.DecodeConfig(bytes.NewReader(data))
 	if err == nil {
 		return config, "webp", nil
 	}
-	common.SysLog(fmt.Sprintf("fail to decode image config(webp): %s", err.Error()))
+	common.SysLog(common.LogText("fail to decode image config(webp): %s", err.Error()))
 
 	// Try HEIF/HEIC: parse ISOBMFF ispe box for dimensions
 	if heifMime := detectHEIF(data); heifMime != "" {

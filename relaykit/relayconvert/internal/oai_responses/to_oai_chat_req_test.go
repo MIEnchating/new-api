@@ -19,6 +19,53 @@ import (
 	"github.com/tidwall/gjson"
 )
 
+func TestResponsesRequestTrailingAssistantTextOnClaudeAndGemini(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		input       string
+		wantText    string
+		wantTool    bool
+		wantOmitted bool
+	}{
+		{"user then assistant", `[{"role":"user","content":"question"},{"role":"assistant","content":"stale answer"}]`, "question", false, true},
+		{"multiple trailing answers", `[{"role":"user","content":"question"},{"role":"assistant","content":"stale answer"},{"role":"assistant","content":"stale suffix"}]`, "question", false, true},
+		{"tool result then assistant", `[{"type":"function_call","name":"lookup","call_id":"call-1","arguments":"{}"},{"type":"function_call_output","call_id":"call-1","output":"result"},{"role":"assistant","content":"stale answer"}]`, "result", true, true},
+		{"trailing function call", `[{"role":"user","content":"question"},{"role":"assistant","content":"tool explanation"},{"type":"function_call","name":"lookup","call_id":"call-1","arguments":"{}"}]`, "tool explanation", true, false},
+		{"assistant without user anchor", `[{"role":"assistant","content":"history"}]`, "history", false, false},
+		{"history before latest user", `[{"role":"user","content":"earlier"},{"role":"assistant","content":"history"},{"role":"user","content":"question"}]`, "history", false, false},
+	} {
+		for _, target := range []string{"claude", "gemini"} {
+			t.Run(tc.name+"/"+target, func(t *testing.T) {
+				ctx, collector := convdiag.WithCollector(context.Background())
+				request := &dto.OpenAIResponsesRequest{Model: "test-model", Input: []byte(tc.input), MaxOutputTokens: kitutil.GetPointer(uint(128))}
+				var converted any
+				var err error
+				if target == "claude" {
+					converted, err = OpenAIResponsesRequestToClaudeMessages(ctx, nil, request)
+				} else {
+					converted, err = OpenAIResponsesRequestToGeminiChat(ctx, request, nil)
+				}
+				require.NoError(t, err)
+				raw, err := kitutil.Marshal(converted)
+				require.NoError(t, err)
+				assert.Contains(t, string(raw), tc.wantText)
+				assert.NotContains(t, string(raw), "stale answer")
+				assert.NotContains(t, string(raw), "stale suffix")
+				if tc.wantTool {
+					assert.Contains(t, string(raw), "lookup")
+				}
+				if tc.wantOmitted {
+					require.Len(t, collector.Diagnostics(), 1)
+					assert.Equal(t, "trailing_assistant_omitted", collector.Diagnostics()[0].Code)
+					assert.Equal(t, types.ConversionDiagnosticWarning, collector.Diagnostics()[0].Severity)
+				} else {
+					assert.Empty(t, collector.Diagnostics())
+				}
+			})
+		}
+	}
+}
+
 func TestResponsesRequestToChatCompletionsRequestInstructionsAndScalarInput(t *testing.T) {
 	stream := true
 	temperature := 0.0

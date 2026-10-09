@@ -94,9 +94,13 @@ func TestRecordConsumeLogPersistsNullableActualResponseModel(t *testing.T) {
 
 	c, _ := gin.CreateTestContext(nil)
 	c.Set("username", "audit-user")
+	c.Set(common.UpstreamRequestIdsKey, []string{"upstream-private"})
 	RecordConsumeLog(c, 1, RecordConsumeLogParams{
 		ModelName:           "gpt-5.6-sol",
 		ActualResponseModel: "gpt-5.6-terra",
+		Content: []*common.Message{common.NewMessage("Image generation {{quality}}", map[string]any{
+			"quality": "high",
+		})},
 	})
 	RecordConsumeLog(c, 1, RecordConsumeLogParams{ModelName: "gpt-5.6-sol"})
 
@@ -106,6 +110,20 @@ func TestRecordConsumeLogPersistsNullableActualResponseModel(t *testing.T) {
 	require.NotNil(t, logs[0].ActualResponseModel)
 	assert.Equal(t, "gpt-5.6-terra", *logs[0].ActualResponseModel)
 	assert.Nil(t, logs[1].ActualResponseModel)
+	assert.Equal(t, "Image generation high", logs[0].Content)
+	other, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	assert.Equal(t, []any{map[string]any{
+		"key": "Image generation {{quality}}", "params": map[string]any{"quality": "high"},
+	}}, other["content_parts"])
+	adminInfo, ok := other["admin_info"].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, []any{"upstream-private"}, adminInfo["upstream_request_ids"])
+	formatUserLogs([]*Log{&logs[0]}, 0)
+	userOther, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	assert.NotContains(t, userOther, "admin_info")
+	assert.Equal(t, other["content_parts"], userOther["content_parts"])
 }
 
 func TestAppendUpstreamRequestIdsAdminInfo(t *testing.T) {

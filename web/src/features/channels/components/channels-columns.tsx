@@ -55,7 +55,10 @@ import {
 } from '@/lib/currency'
 import { formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
-import { createServerError } from '@/lib/server-error-message'
+import {
+  createServerError,
+  translateServerText,
+} from '@/lib/server-error-message'
 import { cn, truncateText } from '@/lib/utils'
 
 import { getCodexUsage, updateChannelBalance } from '../api'
@@ -1082,7 +1085,8 @@ export function useChannelsColumns(
                       <div className='space-y-1 text-xs'>
                         {statusReason && (
                           <div className='wrap-anywhere'>
-                            {t('Reason:')} {statusReason}
+                            {t('Reason:')}{' '}
+                            {translateServerText(t, statusReason)}
                           </div>
                         )}
                         {statusTime && (

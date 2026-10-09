@@ -275,10 +275,11 @@ jobs:
           path: release-assets
           merge-multiple: true
       - name: Generate checksums
+        working-directory: release-assets
         run: |
-          sha256sum release-assets/new-api-linux-* > release-assets/checksums-linux.txt
-          sha256sum release-assets/new-api-macos-* > release-assets/checksums-macos.txt
-          sha256sum release-assets/new-api-windows-*.exe > release-assets/checksums-windows.txt
+          sha256sum new-api-linux-* > checksums-linux.txt
+          sha256sum new-api-macos-* > checksums-macos.txt
+          sha256sum new-api-windows-*.exe > checksums-windows.txt
       - name: Require complete release artifacts
         run: |
           expected=(

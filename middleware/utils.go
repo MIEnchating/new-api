@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"fmt"
-
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
@@ -32,5 +30,5 @@ func abortWithOpenAiMessage(c *gin.Context, statusCode int, message string, code
 		})
 	}
 	c.Abort()
-	logger.LogError(c.Request.Context(), fmt.Sprintf("user %d | %s", userId, message))
+	logger.LogError(c.Request.Context(), common.LogText("user %d | %s", userId, message))
 }

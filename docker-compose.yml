@@ -31,6 +31,8 @@ services:
       CHATGPT2API_SSO_SECRET: ${CHATGPT2API_SSO_SECRET:-}
       CHATGPT2API_SSO_ORIGIN: ${CHATGPT2API_SSO_ORIGIN:-}
       NEWAPI_SSO_ORIGINS: ${NEWAPI_SSO_ORIGINS:-}
+      DEFAULT_LANGUAGE: ${DEFAULT_LANGUAGE:-en}
+      NODE_NAME: ${NODE_NAME:-new-api-node-1}
     networks:
       - nginx
     healthcheck:

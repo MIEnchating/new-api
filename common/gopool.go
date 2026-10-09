@@ -2,7 +2,6 @@ package common
 
 import (
 	"context"
-	"fmt"
 	"math"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -17,7 +16,7 @@ func init() {
 		if stopChan, ok := ctx.Value(constant.ContextKeyStopChan).(chan bool); ok {
 			SafeSendBool(stopChan, true)
 		}
-		SysError(fmt.Sprintf("panic in gopool.RelayPool: %v", i))
+		SysError(LogText("panic in gopool.RelayPool: %v", i))
 	})
 }
 

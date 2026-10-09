@@ -35,6 +35,7 @@ import { LOG_TYPE_ENUM } from '../constants'
 import type { UsageLog } from '../data/schema'
 import {
   formatModelName,
+  logTokenName,
   parseLogOther,
   getLoginMethodLabel,
   getSecondFactorMethodLabel,
@@ -114,7 +115,7 @@ export function CommonLogMobileCard<TData>(props: {
     },
     token: {
       label: t('Token'),
-      value: log.token_name,
+      value: logTokenName(log, t),
       visible: displayable && props.cells.has('token_name') && !!log.token_name,
       sensitive: true,
     },

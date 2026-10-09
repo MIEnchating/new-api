@@ -1173,10 +1173,10 @@ func drawLotteryAt(
 		RecordLog(
 			userId,
 			LogTypeSystem,
-			fmt.Sprintf("抽奖获得额度 %s", logger.LogQuota(prizeQuota)),
+			common.NewMessage("Lottery reward {{quota}}", map[string]any{"quota": logger.FormatQuota(prizeQuota)}),
 		)
 	} else {
-		RecordLog(userId, LogTypeSystem, "参与抽奖，本次未中奖")
+		RecordLog(userId, LogTypeSystem, common.NewMessage("Lottery draw, no prize won"))
 	}
 	status, err := getLotteryStatusAt(userId, now)
 	if err != nil {
@@ -1280,7 +1280,7 @@ func RevokeLotteryReward(drawId int64, operatorUserId int, reason string) error 
 	RecordLog(
 		draw.UserId,
 		LogTypeSystem,
-		fmt.Sprintf("抽奖奖励撤回 %s", logger.LogQuota(draw.Quota)),
+		common.NewMessage("Lottery reward revoked {{quota}}", map[string]any{"quota": logger.FormatQuota(draw.Quota)}),
 	)
 	return nil
 }
