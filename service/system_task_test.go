@@ -232,3 +232,29 @@ func TestEnqueueSystemTaskReportsCreatedAndExistingActive(t *testing.T) {
 	require.NotNil(t, second)
 	assert.NotEqual(t, first.TaskID, second.TaskID)
 }
+
+type calendarTestHandler struct{ due bool }
+
+func (*calendarTestHandler) Type() string                                   { return "test_calendar" }
+func (*calendarTestHandler) Run(context.Context, *model.SystemTask, string) {}
+func (handler *calendarTestHandler) ScheduledPayload(time.Time) (any, bool, error) {
+	return map[string]string{"group": "vip"}, handler.due, nil
+}
+
+func TestSystemTaskSchedulerCalendarPayload(t *testing.T) {
+	truncate(t)
+	handler := &calendarTestHandler{}
+	withSystemTaskRegistry(t, handler)
+	runSystemTaskScheduler()
+	assert.EqualValues(t, 0, countSystemTasks(t, handler.Type()))
+	handler.due = true
+	runSystemTaskScheduler()
+	task, err := model.GetLatestSystemTask(handler.Type())
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	var payload map[string]string
+	require.NoError(t, task.DecodePayload(&payload))
+	assert.Equal(t, "vip", payload["group"])
+	runSystemTaskScheduler()
+	assert.EqualValues(t, 1, countSystemTasks(t, handler.Type()))
+}

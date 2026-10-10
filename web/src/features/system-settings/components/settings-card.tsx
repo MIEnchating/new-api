@@ -31,6 +31,7 @@ type SettingsCardProps = {
   description?: string
   children: React.ReactNode
   className?: string
+  disableHoverEffect?: boolean
 }
 
 export const SettingsCard = memo(function SettingsCard({
@@ -38,9 +39,13 @@ export const SettingsCard = memo(function SettingsCard({
   description,
   children,
   className,
+  disableHoverEffect,
 }: SettingsCardProps) {
   return (
-    <Card className={className}>
+    <Card
+      className={className}
+      data-card-hover={disableHoverEffect ? 'false' : undefined}
+    >
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         {description && <CardDescription>{description}</CardDescription>}

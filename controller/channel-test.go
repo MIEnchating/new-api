@@ -36,10 +36,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type channelTestProbe struct {
+	Group  string
+	Prompt string
+}
+
 type testResult struct {
-	context     *gin.Context
-	localErr    error
-	newAPIError *types.NewAPIError
+	context       *gin.Context
+	responseBody  []byte
+	streamOutcome relaycommon.StreamOutcome
+	localErr      error
+	newAPIError   *types.NewAPIError
 }
 
 func normalizeChannelTestEndpoint(channel *model.Channel, endpointType string) string {
@@ -71,6 +78,10 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 }
 
 func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
+	return testChannelWithProbe(ctx, channel, testUserID, testModel, endpointType, isStream, nil)
+}
+
+func testChannelWithProbe(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool, probe *channelTestProbe) testResult {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -165,7 +176,12 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	c.Request.Header.Set("Content-Type", "application/json")
 	c.Set("channel", channel.Type)
 	c.Set("base_url", channel.GetBaseURL())
-	group, _ := model.GetUserGroup(testUserID, false)
+	var group string
+	if probe != nil {
+		group = probe.Group
+	} else {
+		group, _ = model.GetUserGroup(testUserID, false)
+	}
 	c.Set("group", group)
 
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, testModel)
@@ -228,6 +244,9 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 
 	request := buildTestRequest(testModel, endpointType, channel, isStream)
+	if probe != nil {
+		request = buildIntelligenceRequest(testModel, endpointType, probe.Prompt, isStream)
+	}
 
 	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
 
@@ -468,7 +487,8 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		}
 	}
 	result := w.Result()
-	respBody, err := readTestResponseBody(result.Body, isStream)
+	// Intelligence previews need the entire output; the ordinary channel test keeps its 8 KiB log cap.
+	respBody, err := readTestResponseBody(result.Body, isStream && probe == nil)
 	if err != nil {
 		return testResult{
 			context:     c,
@@ -504,11 +524,15 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 		Group:               info.UsingGroup,
 		Other:               other,
 	})
-	common.SysLog(common.LogText("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
+	if probe == nil {
+		common.SysLog(common.LogText("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
+	}
 	return testResult{
-		context:     c,
-		localErr:    nil,
-		newAPIError: nil,
+		context:       c,
+		localErr:      nil,
+		newAPIError:   nil,
+		responseBody:  respBody,
+		streamOutcome: info.StreamStatus.OutcomeSnapshot(),
 	}
 }
 

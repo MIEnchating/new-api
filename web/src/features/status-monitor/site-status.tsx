@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
+  Brain,
   Radio,
   AlertTriangle,
   CheckCircle2,
@@ -28,12 +29,13 @@ import {
   Search,
   type LucideIcon,
 } from 'lucide-react'
-import { memo, useCallback, useMemo, useState } from 'react'
+import { lazy, Suspense, memo, useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
 import { PublicLayout } from '@/components/layout'
+import { LoadingState as PanelLoadingState } from '@/components/loading-state'
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -65,6 +67,12 @@ import { MonitorDetailsDrawer } from './monitor-details-drawer'
 import { getOrderedHeartbeats, getMonitorRequestStats } from './monitor-utils'
 import { OfficialProviderStatuses } from './official-provider-status'
 import { RefreshControl } from './refresh-control'
+
+const IntelligenceMonitor = lazy(() =>
+  import('./intelligence-monitor').then((module) => ({
+    default: module.IntelligenceMonitor,
+  }))
+)
 
 type MonitorStatusMeta = {
   label: string
@@ -441,7 +449,7 @@ function LoadingState() {
 
 export function SiteStatus() {
   const { t } = useTranslation()
-  const [activeTab, setActiveTab] = useState('site-status')
+  const [activeTab, setActiveTab] = useState('intelligence')
   const officialQuery = useQuery({
     queryKey: ['official-provider-status'],
     queryFn: async () =>
@@ -665,7 +673,7 @@ export function SiteStatus() {
         <div className='fixed inset-0 overflow-hidden pt-16'>
           <main
             aria-label={t('Site status')}
-            aria-busy={refreshLoading}
+            aria-busy={activeTab !== 'intelligence' && refreshLoading}
             className='h-full min-h-0 overflow-hidden'
           >
             <Tabs
@@ -676,7 +684,11 @@ export function SiteStatus() {
               className='mx-auto flex h-full min-h-0 w-full max-w-[1600px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8'
             >
               <div className='flex shrink-0 flex-col justify-between gap-3 sm:flex-row sm:items-center'>
-                <TabsList className='shrink-0 gap-1 p-1 group-data-horizontal/tabs:h-auto'>
+                <TabsList className='max-w-full shrink-0 gap-1 overflow-x-auto p-1 group-data-horizontal/tabs:h-auto'>
+                  <TabsTrigger value='intelligence' className='h-9 gap-2 px-3'>
+                    <Brain className='size-4' />
+                    {t('Intelligence testing')}
+                  </TabsTrigger>
                   <TabsTrigger value='site-status' className='h-9 gap-2 px-3'>
                     <Activity className='size-4' />
                     {t('Site status')}
@@ -689,13 +701,15 @@ export function SiteStatus() {
                     {t('Official status')}
                   </TabsTrigger>
                 </TabsList>
-                <RefreshControl
-                  key={activeTab}
-                  loading={refreshLoading}
-                  refreshing={refreshInProgress}
-                  lastUpdated={refreshedAt}
-                  onRefresh={handleManualRefresh}
-                />
+                {activeTab !== 'intelligence' && (
+                  <RefreshControl
+                    key={activeTab}
+                    loading={refreshLoading}
+                    refreshing={refreshInProgress}
+                    lastUpdated={refreshedAt}
+                    onRefresh={handleManualRefresh}
+                  />
+                )}
               </div>
               <TabsContent
                 value='site-status'
@@ -738,6 +752,14 @@ export function SiteStatus() {
                   onRetry={handleManualRefresh}
                   compact
                 />
+              </TabsContent>
+              <TabsContent
+                value='intelligence'
+                className='min-h-0 min-w-0 overflow-y-auto pb-2'
+              >
+                <Suspense fallback={<PanelLoadingState />}>
+                  <IntelligenceMonitor />
+                </Suspense>
               </TabsContent>
             </Tabs>
           </main>

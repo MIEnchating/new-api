@@ -46,11 +46,20 @@ import { SiteStatus } from '../site-status'
 import { defaultHealthThresholds, type CacheMetricsResponse } from '../types'
 
 async function renderSiteStatus(
-  access = { enabled: true, requireAuth: false }
+  access = { enabled: true, requireAuth: false },
+  initialTab: 'site-status' | 'intelligence' = 'site-status'
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  if (initialTab === 'site-status') {
+    client.setQueryDefaults(['status-monitor', 'intelligence', 'results'], {
+      staleTime: Infinity,
+    })
+    client.setQueryData(['status-monitor', 'intelligence', 'results'], {
+      history: [],
+    })
+  }
   client.setQueryData(['status'], {
     HeaderNavModules: { siteStatus: access },
     SidebarModulesAdmin: '{"console":{"enabled":false,"status":false}}',
@@ -74,14 +83,16 @@ async function renderSiteStatus(
     history: createMemoryHistory({ initialEntries: ['/site-status'] }),
   })
   await router.load()
-  return {
-    ...render(
-      <QueryClientProvider client={client}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
-    ),
-    router,
+  const view = render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
+  )
+  if (initialTab === 'site-status') {
+    const tab = screen.queryByRole('tab', { name: 'Site status' })
+    if (tab) fireEvent.click(tab)
   }
+  return { ...view, router }
 }
 
 describe('status page separation', () => {
@@ -203,6 +214,39 @@ describe('status page separation', () => {
     expect(
       get.mock.calls.map(([url]) => url).filter((url) => url !== '/api/notice')
     ).toEqual(['/api/uptime/status', '/api/uptime/status'])
+  })
+
+  it('opens intelligence testing first by default for visitors without settings or execution controls', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+      data: {
+        success: true,
+        data:
+          url === '/api/status-monitor/intelligence/results'
+            ? { history: [] }
+            : url === '/api/notice'
+              ? ''
+              : [],
+      },
+    }))
+    const view = await renderSiteStatus(undefined, 'intelligence')
+    try {
+      const tabs = screen.getAllByRole('tab')
+      expect(tabs.slice(0, 3).map((tab) => tab.textContent)).toEqual([
+        'Intelligence testing',
+        'Site status',
+        'Official status',
+      ])
+      expect(tabs[0]).toHaveAttribute('aria-selected', 'true')
+      expect(
+        await screen.findByText('No intelligence test results yet')
+      ).toBeVisible()
+      expect(screen.queryByLabelText('Prompt')).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole('button', { name: 'Run now' })
+      ).not.toBeInTheDocument()
+    } finally {
+      view.unmount()
+    }
   })
 
   it('status monitor retains cache analytics without loading official or site status', async () => {

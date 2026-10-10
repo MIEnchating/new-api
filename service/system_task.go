@@ -46,6 +46,12 @@ type ScheduledSystemTaskHandler interface {
 	NewPayload() any
 }
 
+// CalendarSystemTaskHandler selects a payload only when a wall-clock schedule is due.
+type CalendarSystemTaskHandler interface {
+	SystemTaskHandler
+	ScheduledPayload(now time.Time) (any, bool, error)
+}
+
 var (
 	systemTaskHandlersMu sync.RWMutex
 	systemTaskHandlers   = map[string]SystemTaskHandler{}
@@ -263,15 +269,16 @@ func runSystemTaskClaimPass(runnerID string) {
 func runSystemTaskScheduler() {
 	now := common.GetTimestamp()
 	handlers := registeredSystemTaskHandlers()
-	scheduledHandlers := make([]ScheduledSystemTaskHandler, 0, len(handlers))
+	scheduledHandlers := make([]SystemTaskHandler, 0, len(handlers))
 	taskTypes := make([]string, 0, len(handlers))
 	for _, handler := range handlers {
-		scheduled, ok := handler.(ScheduledSystemTaskHandler)
-		if !ok || !scheduled.Enabled() {
+		scheduled, periodic := handler.(ScheduledSystemTaskHandler)
+		_, calendar := handler.(CalendarSystemTaskHandler)
+		if !calendar && (!periodic || !scheduled.Enabled()) {
 			continue
 		}
-		scheduledHandlers = append(scheduledHandlers, scheduled)
-		taskTypes = append(taskTypes, scheduled.Type())
+		scheduledHandlers = append(scheduledHandlers, handler)
+		taskTypes = append(taskTypes, handler.Type())
 	}
 	latestTasks, err := model.GetLatestSystemTasks(taskTypes)
 	if err != nil {
@@ -284,11 +291,26 @@ func runSystemTaskScheduler() {
 			if latest.Status == model.SystemTaskStatusPending || latest.Status == model.SystemTaskStatusRunning {
 				continue // an active row already exists
 			}
-			if now-latest.UpdatedAt < int64(scheduled.Interval().Seconds()) {
-				continue // not due yet
-			}
 		}
-		if _, err := model.CreateSystemTask(scheduled.Type(), scheduled.NewPayload(), nil); err != nil {
+		var payload any
+		if calendar, ok := scheduled.(CalendarSystemTaskHandler); ok {
+			value, due, err := calendar.ScheduledPayload(time.Unix(now, 0))
+			if err != nil {
+				logger.LogWarn(context.Background(), common.LogText("system task scheduler query failed: %v", err))
+				continue
+			}
+			if !due {
+				continue
+			}
+			payload = value
+		} else {
+			periodic := scheduled.(ScheduledSystemTaskHandler)
+			if latest != nil && now-latest.UpdatedAt < int64(periodic.Interval().Seconds()) {
+				continue
+			}
+			payload = periodic.NewPayload()
+		}
+		if _, err := model.CreateSystemTask(scheduled.Type(), payload, nil); err != nil {
 			activeTask, activeErr := model.GetActiveSystemTask(scheduled.Type())
 			if activeErr == nil && activeTask != nil {
 				continue
