@@ -25,11 +25,14 @@ import { describe, expect, test } from 'vitest'
 
 import { DEFAULT_LOGO } from '../constants'
 import { normalizeSystemLogo } from '../system-branding'
+import { THEME_STORAGE_KEYS } from '../theme-storage'
 
 function initializeBootstrapTheme(options: {
   cookie?: string
   systemDark: boolean
-  cookiesUnavailable?: boolean
+  mode?: string
+  preset?: string
+  storageUnavailable?: boolean
 }): Document {
   const indexHtml = readFileSync(resolve('index.html'), 'utf8')
   const document = new DOMParser().parseFromString(indexHtml, 'text/html')
@@ -43,7 +46,6 @@ function initializeBootstrapTheme(options: {
 
   Object.defineProperty(document, 'cookie', {
     get() {
-      if (options.cookiesUnavailable) throw new Error('Cookies unavailable')
       return options.cookie ?? ''
     },
   })
@@ -52,6 +54,14 @@ function initializeBootstrapTheme(options: {
     document,
     window: {
       matchMedia: () => ({ matches: options.systemDark }),
+      localStorage: {
+        getItem(key: string) {
+          if (options.storageUnavailable) throw new Error('Storage unavailable')
+          if (key === THEME_STORAGE_KEYS.mode) return options.mode ?? null
+          if (key === THEME_STORAGE_KEYS.preset) return options.preset ?? null
+          return null
+        },
+      },
     },
   })
 
@@ -103,17 +113,16 @@ describe('system branding', () => {
   })
 
   test.each([
-    { cookie: 'vite-ui-theme=light', systemDark: true, expected: 'light' },
-    { cookie: 'vite-ui-theme=dark', systemDark: false, expected: 'dark' },
-    { cookie: 'vite-ui-theme=system', systemDark: true, expected: 'dark' },
-    { cookie: 'vite-ui-theme=system', systemDark: false, expected: 'light' },
-    { cookie: 'vite-ui-theme=invalid', systemDark: true, expected: 'dark' },
-    { cookie: 'vite-ui-theme=%E0%A4%A', systemDark: true, expected: 'dark' },
-    { cookie: '', systemDark: false, expected: 'light' },
+    { mode: 'light', systemDark: true, expected: 'light' },
+    { mode: 'dark', systemDark: false, expected: 'dark' },
+    { mode: 'system', systemDark: true, expected: 'dark' },
+    { mode: 'system', systemDark: false, expected: 'light' },
+    { mode: 'invalid', systemDark: true, expected: 'dark' },
+    { mode: undefined, systemDark: false, expected: 'light' },
   ])(
-    'uses $expected before React mounts with cookie "$cookie" and systemDark=$systemDark',
-    ({ cookie, systemDark, expected }) => {
-      const document = initializeBootstrapTheme({ cookie, systemDark })
+    'uses $expected before React mounts with saved mode "$mode" and systemDark=$systemDark',
+    ({ mode, systemDark, expected }) => {
+      const document = initializeBootstrapTheme({ mode, systemDark })
 
       expect(document.documentElement.classList.contains(expected)).toBe(true)
       expect(
@@ -124,20 +133,35 @@ describe('system branding', () => {
     }
   )
 
+  test.each(['light', undefined])(
+    'ignores legacy dark cookies when the local mode is %s',
+    (mode) => {
+      const document = initializeBootstrapTheme({
+        cookie: 'vite-ui-theme=dark; theme_preset=ocean-breeze',
+        mode,
+        systemDark: false,
+      })
+
+      expect(document.documentElement.classList.contains('light')).toBe(true)
+      expect(document.body.hasAttribute('data-theme-preset')).toBe(false)
+    }
+  )
+
   test('applies the saved color preset before React mounts', () => {
     const document = initializeBootstrapTheme({
-      cookie: 'vite-ui-theme=dark; theme_preset=ocean-breeze',
+      cookie: 'theme_preset=rose-garden',
+      preset: 'ocean-breeze',
       systemDark: false,
     })
 
     expect(document.body.getAttribute('data-theme-preset')).toBe('ocean-breeze')
   })
 
-  test.each(['ocean-breeze%22%20invalid', 'unknown-preset'])(
+  test.each(['ocean-breeze%22%20invalid', 'unknown-preset', 'default'])(
     'ignores invalid saved preset %s before React mounts',
     (preset) => {
       const document = initializeBootstrapTheme({
-        cookie: `theme_preset=${preset}`,
+        preset,
         systemDark: false,
       })
 
@@ -145,10 +169,10 @@ describe('system branding', () => {
     }
   )
 
-  test('uses the system theme when cookies are unavailable', () => {
+  test('uses the system theme when local storage is unavailable', () => {
     const document = initializeBootstrapTheme({
       systemDark: true,
-      cookiesUnavailable: true,
+      storageUnavailable: true,
     })
 
     expect(document.documentElement.classList.contains('dark')).toBe(true)

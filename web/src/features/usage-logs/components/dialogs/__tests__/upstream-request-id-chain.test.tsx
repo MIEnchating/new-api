@@ -217,4 +217,36 @@ describe('upstream request ID chain', () => {
 
     await unmountChain(rendered)
   })
+
+  test('can collapse to only the first request ID', async () => {
+    const rendered = await renderChain({
+      requestIds: [
+        'request-one',
+        'request-two',
+        'request-three',
+        'request-four',
+      ],
+      collapsedPreview: 'first',
+    })
+
+    assert.equal(rendered.container.textContent?.includes('request-one'), true)
+    assert.equal(rendered.container.textContent?.includes('request-two'), false)
+    assert.equal(
+      rendered.container.textContent?.includes('request-three'),
+      false
+    )
+
+    const expandButton = rendered.container.querySelector(
+      'button[aria-label="Expand"]'
+    )
+    assert.ok(expandButton)
+    await act(async () => click(expandButton))
+    assert.equal(rendered.container.textContent?.includes('request-two'), true)
+    assert.equal(
+      rendered.container.textContent?.includes('request-three'),
+      true
+    )
+
+    await unmountChain(rendered)
+  })
 })

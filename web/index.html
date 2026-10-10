@@ -206,15 +206,12 @@
           ? 'dark'
           : 'light'
         try {
-          var cookies = document.cookie
-          var savedTheme = cookies.match(/(?:^|;\s*)vite-ui-theme=([^;]*)/)
-          if (savedTheme) {
-            var mode = decodeURIComponent(savedTheme[1])
-            if (mode === 'light' || mode === 'dark') theme = mode
-          }
-          var savedPreset = cookies.match(/(?:^|;\s*)theme_preset=([^;]*)/)
-          if (savedPreset) {
-            var preset = decodeURIComponent(savedPreset[1])
+          // Keep aligned with THEME_STORAGE_KEYS in src/lib/theme-storage.ts.
+          // Legacy cookies can belong to another instance on the same host.
+          var mode = window.localStorage.getItem('newapi:theme:v1:mode')
+          if (mode === 'light' || mode === 'dark') theme = mode
+          var preset = window.localStorage.getItem('newapi:theme:v1:preset')
+          if (preset) {
             // Keep aligned with THEME_PRESETS in src/lib/theme-customization.ts.
             var presets = [
               'anthropic',
@@ -232,7 +229,7 @@
             }
           }
         } catch {
-          // System appearance remains available when cookies cannot be read.
+          // System appearance remains available when storage cannot be read.
         }
         document.documentElement.classList.add(theme)
       })()

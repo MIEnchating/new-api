@@ -41,6 +41,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
+import { CopyButton } from '@/components/copy-button'
 import { Dialog } from '@/components/dialog'
 import { StatusBadge, type StatusBadgeProps } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
@@ -98,6 +99,7 @@ import {
 } from '../../types'
 import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
+import { UpstreamRequestIdChain } from './execution-trace-dialog'
 
 function timingTextColorClass(
   variant: 'success' | 'warning' | 'danger'
@@ -1066,7 +1068,19 @@ export function DetailsDialog(props: DetailsDialogProps) {
           {props.log.request_id && (
             <DetailRow
               label={t('Request ID')}
-              value={props.log.request_id}
+              value={
+                <span className='flex min-w-0 items-start gap-1'>
+                  <span className='min-w-0 font-mono break-all'>
+                    {props.log.request_id}
+                  </span>
+                  <CopyButton
+                    value={props.log.request_id}
+                    size='icon'
+                    className='text-muted-foreground hover:text-foreground -mt-1 size-6'
+                    aria-label={`${t('Copy to clipboard')}: ${props.log.request_id}`}
+                  />
+                </span>
+              }
               mono
             />
           )}
@@ -1078,6 +1092,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   <span className='font-mono break-all'>
                     {upstreamRequestIds[0]}
                   </span>
+                  <CopyButton
+                    value={upstreamRequestIds[0]}
+                    size='icon'
+                    className='text-muted-foreground hover:text-foreground -mt-1 size-6'
+                    aria-label={`${t('Copy to clipboard')}: ${upstreamRequestIds[0]}`}
+                  />
                   <span className='text-muted-foreground text-[11px]'>
                     {t('Source')}:{' '}
                     {upstreamRequestIdSourceLabel(
@@ -1093,46 +1113,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
             <DetailRow
               label={t('Upstream Request ID Chain')}
               value={
-                <details className='group min-w-0 font-sans'>
-                  <summary className='hover:bg-muted/60 flex cursor-pointer list-none items-center gap-2 rounded-md px-2 py-1.5 select-none [&::-webkit-details-marker]:hidden'>
-                    <ChevronRight className='text-muted-foreground size-3.5 shrink-0 transition-transform group-open:rotate-90' />
-                    <span className='bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 text-[11px] tabular-nums'>
-                      {t('{{count}} request IDs', {
-                        count: upstreamRequestIds.length,
-                      })}
-                    </span>
-                    <span className='min-w-0 truncate font-mono text-xs'>
-                      {upstreamRequestIds[0]}
-                    </span>
-                    <span className='text-muted-foreground shrink-0'>→</span>
-                    <span className='min-w-0 truncate font-mono text-xs'>
-                      {upstreamRequestIds.at(-1)}
-                    </span>
-                  </summary>
-                  <span className='border-border/70 mt-1 ml-1.5 flex min-w-0 flex-col gap-1 border-l pl-3'>
-                    {upstreamRequestIds.map((requestId, index) => (
-                      <span
-                        key={requestId}
-                        className='flex min-w-0 items-start gap-2 py-1'
-                      >
-                        <span className='text-muted-foreground w-4 shrink-0 text-right text-[11px] tabular-nums'>
-                          {index + 1}
-                        </span>
-                        <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
-                          <span className='min-w-0 font-mono text-xs break-all'>
-                            {requestId}
-                          </span>
-                          <span className='text-muted-foreground text-[11px]'>
-                            {upstreamRequestIdSourceLabel(
-                              t,
-                              upstreamRequestIdSources[requestId]
-                            )}
-                          </span>
-                        </span>
-                      </span>
-                    ))}
-                  </span>
-                </details>
+                <UpstreamRequestIdChain
+                  requestIds={upstreamRequestIds}
+                  sources={upstreamRequestIdSources}
+                  collapsedPreview='first'
+                />
               }
             />
           )}

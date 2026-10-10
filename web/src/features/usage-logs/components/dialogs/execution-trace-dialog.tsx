@@ -19,11 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import {
   Activity,
-  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Copy,
   Info,
   ListTree,
   Loader2,
@@ -36,13 +34,13 @@ import { useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ChannelExecutionTimelineList } from '@/components/channel-execution-timeline-list'
+import { CopyButton } from '@/components/copy-button'
 import { Dialog } from '@/components/dialog'
 import { RouteGroupProgressChain } from '@/components/route-group-progress-chain'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { getChannelExecutionTrace } from '@/features/channels/api'
-import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
 import {
   buildCompactChannelExecutionEvents,
   buildChannelExecutionTimeline,
@@ -107,9 +105,9 @@ const COLLAPSED_REQUEST_ID_CHAIN_LENGTH = 3
 export function UpstreamRequestIdChain(props: {
   requestIds: string[]
   sources?: Record<string, string>
+  collapsedPreview?: 'first' | 'ends'
 }) {
   const { t } = useTranslation()
-  const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
   const [expanded, setExpanded] = useState(false)
   const contentId = useId()
   const requestIdsKey = props.requestIds.join('\u001f')
@@ -124,16 +122,22 @@ export function UpstreamRequestIdChain(props: {
     requestId,
     index,
   }))
-  const canCollapse = entries.length > COLLAPSED_REQUEST_ID_CHAIN_LENGTH
+  const canCollapse =
+    props.collapsedPreview === 'first'
+      ? entries.length > 1
+      : entries.length > COLLAPSED_REQUEST_ID_CHAIN_LENGTH
   const finalEntry = entries.at(-1)
-  const visibleEntries =
-    canCollapse && !expanded && finalEntry ? [entries[0], finalEntry] : entries
+  let visibleEntries = entries
+  if (canCollapse && !expanded) {
+    visibleEntries = [entries[0]]
+    if (props.collapsedPreview !== 'first' && finalEntry) {
+      visibleEntries.push(finalEntry)
+    }
+  }
   const hiddenCount = entries.length - visibleEntries.length
   const toggleLabel = t(expanded ? 'Collapse' : 'Expand')
 
   const renderRequestId = (entry: (typeof entries)[number]) => {
-    const copied = copiedText === entry.requestId
-
     return (
       <li
         key={`${entry.requestId}-${entry.index}`}
@@ -150,21 +154,12 @@ export function UpstreamRequestIdChain(props: {
             {upstreamRequestIdSourceLabel(t, props.sources?.[entry.requestId])}
           </div>
         </div>
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon-xs'
-          className='text-muted-foreground hover:text-foreground mt-0.5'
-          onClick={() => void copyToClipboard(entry.requestId)}
+        <CopyButton
+          value={entry.requestId}
+          size='icon'
+          className='text-muted-foreground hover:text-foreground mt-0.5 size-6'
           aria-label={`${t('Copy to clipboard')}: ${entry.requestId}`}
-          title={copied ? t('Copied') : t('Copy to clipboard')}
-        >
-          {copied ? (
-            <Check className='text-success' aria-hidden='true' />
-          ) : (
-            <Copy aria-hidden='true' />
-          )}
-        </Button>
+        />
       </li>
     )
   }
@@ -228,7 +223,7 @@ export function UpstreamRequestIdChain(props: {
                 {t('+{{count}} more', { count: hiddenCount })}
               </Button>
             </li>
-            {renderRequestId(visibleEntries[1])}
+            {visibleEntries[1] ? renderRequestId(visibleEntries[1]) : null}
           </>
         ) : (
           visibleEntries.map((entry) => renderRequestId(entry))
