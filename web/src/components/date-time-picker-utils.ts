@@ -18,10 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { enUS, fr, ja, ru, vi, zhCN, zhTW } from 'react-day-picker/locale'
 
+import { toIntlLocale } from '@/i18n/languages'
+
 const calendarLocales = { en: enUS, fr, ja, ru, vi } as const
 
 export function getCalendarLocale(language: string) {
-  const normalized = language.toLowerCase()
+  const normalized = (toIntlLocale(language) ?? 'en').toLowerCase()
   if (normalized === 'zh-tw' || normalized.startsWith('zh-hant')) {
     return zhTW
   }
@@ -31,17 +33,12 @@ export function getCalendarLocale(language: string) {
 }
 
 export function getDateFormat(language: string) {
-  const normalized = language.toLowerCase()
+  const normalized = (toIntlLocale(language) ?? 'en').toLowerCase()
   return normalized.startsWith('zh') ? 'YYYY年M月D日' : 'YYYY-MM-DD'
 }
 
 export function getReactAriaLocale(language: string) {
-  const normalized = language.toLowerCase()
-  if (normalized === 'zh-tw' || normalized.startsWith('zh-hant')) {
-    return 'zh-TW'
-  }
-  if (normalized.startsWith('zh')) return 'zh-CN'
-  return language
+  return toIntlLocale(language) ?? 'en'
 }
 
 export type CalendarPopoverPlacement = 'top start' | 'bottom start'

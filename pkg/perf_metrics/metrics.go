@@ -20,6 +20,10 @@ import (
 
 var hotBuckets sync.Map
 
+// perfMetricsNow is replaceable in package tests so window-boundary behavior
+// remains deterministic while production uses the wall clock.
+var perfMetricsNow = time.Now
+
 // seriesSchema is a stable client cache/schema marker. Do not change it when
 // hiding fields or making response-only privacy hardening changes.
 const seriesSchema = "dbcd0a3c01b55203"
@@ -43,7 +47,7 @@ func RecordRelayResult(ctx context.Context, info *relaycommon.RelayInfo, apiErr 
 	if outcome == OutcomeIgnored {
 		return
 	}
-	now := time.Now()
+	now := perfMetricsNow()
 	hasTtft := info.IsStream && info.HasSendResponse()
 	ttftMs := int64(0)
 	if hasTtft {
@@ -87,7 +91,7 @@ func RecordTaskResult(task *model.Task, result *relaycommon.TaskInfo) {
 	}
 	endTs := task.FinishTime
 	if endTs <= 0 {
-		endTs = time.Now().Unix()
+		endTs = perfMetricsNow().Unix()
 	}
 	sample := Sample{
 		Model:   modelName,
@@ -123,7 +127,7 @@ func Record(sample Sample) {
 	key := bucketKey{
 		model:    sample.Model,
 		group:    sample.Group,
-		bucketTs: bucketStart(time.Now().Unix()),
+		bucketTs: bucketStart(perfMetricsNow().Unix()),
 	}
 	actual, _ := hotBuckets.LoadOrStore(key, &atomicBucket{})
 	actual.(*atomicBucket).add(sample)
@@ -144,7 +148,7 @@ func queryWindow(now time.Time, hours int) (int64, int64) {
 }
 
 func Query(params QueryParams) (QueryResult, error) {
-	startTs, endTs := queryWindow(time.Now(), params.Hours)
+	startTs, endTs := queryWindow(perfMetricsNow(), params.Hours)
 	allowedGroups := allowedGroupSet(params.AllowedGroups)
 
 	merged := map[bucketKey]counters{}
@@ -204,7 +208,7 @@ func QuerySummaryAll(hours int, groups []string, recentModels ...string) (Summar
 	if len(recentModels) > MaxRecentModels {
 		return SummaryAllResult{}, common.NewMessage("Invalid parameters")
 	}
-	now := time.Now()
+	now := perfMetricsNow()
 	startTs, endTs := queryWindow(now, hours)
 	recentStartTs, _ := queryWindow(now, recentSuccessHistoryHours)
 	allowedGroups := allowedGroupSet(groups)
@@ -325,7 +329,7 @@ func QueryCache(hours int, groups []string) (CacheQueryResult, error) {
 	if hours > 24*30 {
 		hours = 24 * 30
 	}
-	endTs := time.Now().Unix()
+	endTs := perfMetricsNow().Unix()
 	startTs := endTs - int64(hours)*3600
 	allowedGroups := allowedGroupSet(groups)
 	groupBuckets := map[string]map[int64]counters{}
@@ -701,7 +705,7 @@ func successRate(value counters) float64 {
 }
 
 func QueryRecentRequestStats() (RecentRequestStats, error) {
-	now := time.Now().Unix()
+	now := perfMetricsNow().Unix()
 	counts, err := model.GetRecentRelayRequestCounts(now)
 	if err != nil {
 		return RecentRequestStats{}, err

@@ -53,7 +53,7 @@ function mergeDateAndTime(
   next.setHours(
     timeSource?.getHours() ?? fallbackHour,
     timeSource?.getMinutes() ?? fallbackMinute,
-    0,
+    timeSource?.getSeconds() ?? 0,
     0
   )
   return next
@@ -77,14 +77,16 @@ export function CompactDateTimeRangePicker({
 
   const label = useMemo(() => {
     if (!start && !end) return t('Date Range')
-    const startText = start ? dayjs(start).format(`${dateFormat} HH:mm`) : '-'
-    const endText = end ? dayjs(end).format(`${dateFormat} HH:mm`) : '-'
+    const startText = start
+      ? dayjs(start).format(`${dateFormat} HH:mm:ss`)
+      : '-'
+    const endText = end ? dayjs(end).format(`${dateFormat} HH:mm:ss`) : '-'
     return `${startText} ~ ${endText}`
   }, [dateFormat, end, start, t])
 
   const mobileLabel = useMemo(() => {
     if (!start || !end || !dayjs(start).isSame(end, 'day')) return label
-    return `${dayjs(start).format('MM/DD HH:mm')}–${dayjs(end).format('HH:mm')}`
+    return `${dayjs(start).format('MM/DD HH:mm:ss')}–${dayjs(end).format('HH:mm:ss')}`
   }, [start, end, label])
 
   const handleOpenChange = (nextOpen: boolean) => {
@@ -117,8 +119,9 @@ export function CompactDateTimeRangePicker({
     const current = target === 'start' ? draftStart : draftEnd
     if (!current) return
     const next = new Date(current)
-    const [hours, minutes] = value.split(':').map(Number)
-    next.setHours(hours, minutes, 0, 0)
+    if (!value) return
+    const [hours, minutes, seconds = 0] = value.split(':').map(Number)
+    next.setHours(hours, minutes, seconds, 0)
     if (target === 'start') setDraftStart(next)
     else setDraftEnd(next)
   }
@@ -333,7 +336,8 @@ function TimeSelectRow({
 }: TimeSelectRowProps) {
   return (
     <TimePicker
-      value={value ? dayjs(value).format('HH:mm') : '00:00'}
+      step={1}
+      value={value ? dayjs(value).format('HH:mm:ss') : '00:00'}
       disabled={disabled}
       aria-label={label}
       showIcon={false}

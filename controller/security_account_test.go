@@ -210,6 +210,13 @@ func TestSecurityAccountDeletionRechecksTransactionAndConsumesFailedProof(t *tes
 
 func TestSecurityAccountDeletionConcurrentRequestsHaveOneWinner(t *testing.T) {
 	user, identity := setupSecurityEnrollmentTest(t)
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		// Keep requests concurrent, but serialize SQLite transactions so a
+		// competing proof claim cannot block the deletion's read-to-write upgrade.
+		connection, err := model.DB.DB()
+		require.NoError(t, err)
+		connection.SetMaxOpenConns(1)
+	}
 	proof := issueSecurityEnrollmentProof(t, identity, service.VerificationOperation{Scope: service.VerificationScopeAccountDelete}, "password")
 	start := make(chan struct{})
 	responses := make(chan string, 2)

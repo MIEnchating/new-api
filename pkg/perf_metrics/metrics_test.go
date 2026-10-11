@@ -195,6 +195,9 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 			t.Logf("database version: %s", version)
 
 			now := time.Now()
+			previousNow := perfMetricsNow
+			perfMetricsNow = func() time.Time { return now }
+			t.Cleanup(func() { perfMetricsNow = previousNow })
 			start, _ := queryWindow(now, 24)
 			hour := now.Unix() - now.Unix()%3600 - 3600
 			// Historical counters remain usable without reclassification or migration.

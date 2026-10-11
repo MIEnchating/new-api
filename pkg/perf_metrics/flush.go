@@ -22,7 +22,7 @@ func flushLoop() {
 }
 
 func flushCompletedBuckets() {
-	currentBucket := bucketStart(time.Now().Unix())
+	currentBucket := bucketStart(perfMetricsNow().Unix())
 	hotBuckets.Range(func(key, value any) bool {
 		k := key.(bucketKey)
 		if k.bucketTs >= currentBucket {
@@ -65,7 +65,7 @@ func flushCompletedBuckets() {
 }
 
 func deleteOldEmptyBucket(k bucketKey, rawKey any) {
-	if k.bucketTs < bucketStart(time.Now().Add(-24*time.Hour).Unix()) {
+	if k.bucketTs < bucketStart(perfMetricsNow().Add(-24*time.Hour).Unix()) {
 		hotBuckets.Delete(rawKey)
 	}
 }
@@ -74,7 +74,7 @@ func cleanupExpiredMetrics(retentionDays int) {
 	if retentionDays <= 0 {
 		return
 	}
-	cutoff := time.Now().Add(-time.Duration(retentionDays) * 24 * time.Hour).Unix()
+	cutoff := perfMetricsNow().Add(-time.Duration(retentionDays) * 24 * time.Hour).Unix()
 	if err := model.DeletePerfMetricsBefore(cutoff); err != nil {
 		common.SysError(common.LogText("failed to cleanup expired perf metrics: %s", err.Error()))
 	}

@@ -84,14 +84,14 @@ export function DateTimePicker({
         placeholderValue={
           ariaValue ?? toCalendarDateTime(fromDate(new Date(), timeZone))
         }
-        granularity='minute'
+        granularity='second'
         hourCycle={24}
         isDisabled={disabled}
         // Keep the calendar open so a date and its time can be selected in one pass.
         shouldCloseOnSelect={false}
         onChange={(nextValue) => {
           const nextDate = nextValue?.toDate(timeZone)
-          nextDate?.setSeconds(0, 0)
+          nextDate?.setMilliseconds(0)
           onChange?.(nextDate)
         }}
         className={cn('w-full min-w-0', className)}
@@ -129,22 +129,23 @@ export function DateTimePicker({
           includeTime
           timeValue={
             ariaValue
-              ? `${String(ariaValue.hour).padStart(2, '0')}:${String(ariaValue.minute).padStart(2, '0')}`
+              ? `${String(ariaValue.hour).padStart(2, '0')}:${String(ariaValue.minute).padStart(2, '0')}:${String(ariaValue.second).padStart(2, '0')}`
               : ''
           }
           onTimeChange={(nextTime) => {
-            const [hour, minute] = nextTime.split(':').map(Number)
+            if (!nextTime) return
+            const [hour, minute, second = 0] = nextTime.split(':').map(Number)
             if (!Number.isInteger(hour) || !Number.isInteger(minute)) return
             const baseValue =
               ariaValue ?? toCalendarDateTime(fromDate(new Date(), timeZone))
             const nextValue = baseValue.set({
               hour,
               minute,
-              second: 0,
+              second,
               millisecond: 0,
             })
             const nextDate = nextValue.toDate(timeZone)
-            nextDate.setSeconds(0, 0)
+            nextDate.setMilliseconds(0)
             onChange?.(nextDate)
           }}
         />

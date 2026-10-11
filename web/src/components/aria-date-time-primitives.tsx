@@ -182,7 +182,7 @@ export function AriaCalendarPopover({
               <input
                 aria-label={t('Time')}
                 type='time'
-                step={60}
+                step={1}
                 value={timeValue ?? ''}
                 onChange={(event) => onTimeChange?.(event.target.value)}
                 className='border-input bg-background text-foreground focus-visible:ring-ring h-9 rounded-md border px-2 text-sm tabular-nums outline-none focus-visible:ring-2'

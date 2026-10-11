@@ -24,6 +24,7 @@ type TimePickerProps = {
   disabled?: boolean
   className?: string
   showIcon?: boolean
+  step?: number
   'aria-label'?: string
 }
 
@@ -33,12 +34,13 @@ export function TimePicker({
   disabled = false,
   className,
   showIcon = true,
+  step = 60,
   'aria-label': ariaLabel,
 }: TimePickerProps) {
   return (
     <input
       type='time'
-      step={60}
+      step={step}
       value={value}
       disabled={disabled}
       aria-label={ariaLabel}

@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { useAuthStore } from '@/stores/auth-store'
+
 import { DEFAULT_CONFIG, DEFAULT_PARAMETER_ENABLED } from '../constants'
 import {
   saveConfig,
@@ -43,6 +45,7 @@ const MESSAGE_SAVE_DEBOUNCE_MS = 500
  * Main state management hook for playground
  */
 export function usePlaygroundState() {
+  const ownerId = useRef(useAuthStore.getState().auth.user?.id)
   // Load initial state from localStorage
   const [config, setConfig] = useState<PlaygroundConfig>(
     getInitialPlaygroundConfig
@@ -74,7 +77,7 @@ export function usePlaygroundState() {
 
     messagesSaveTimerRef.current = window.setTimeout(() => {
       messagesSaveTimerRef.current = null
-      saveMessages(latestMessagesRef.current)
+      saveMessages(latestMessagesRef.current, ownerId.current)
     }, MESSAGE_SAVE_DEBOUNCE_MS)
   }, [])
 
@@ -82,10 +85,13 @@ export function usePlaygroundState() {
     let cancelled = false
 
     window.setTimeout(() => {
-      const loadedMessages = loadMessages() ?? []
-      if (cancelled) {
+      if (
+        cancelled ||
+        ownerId.current !== useAuthStore.getState().auth.user?.id
+      ) {
         return
       }
+      const loadedMessages = loadMessages() ?? []
 
       latestMessagesRef.current = loadedMessages
       hasLoadedMessagesRef.current = true
@@ -102,7 +108,7 @@ export function usePlaygroundState() {
     () => () => {
       if (messagesSaveTimerRef.current !== null) {
         window.clearTimeout(messagesSaveTimerRef.current)
-        saveMessages(latestMessagesRef.current)
+        saveMessages(latestMessagesRef.current, ownerId.current)
       }
     },
     []
@@ -113,7 +119,7 @@ export function usePlaygroundState() {
     <K extends keyof PlaygroundConfig>(key: K, value: PlaygroundConfig[K]) => {
       setConfig((prev) => {
         const updated = { ...prev, [key]: value }
-        saveConfig(updated)
+        saveConfig(updated, ownerId.current)
         return updated
       })
     },
@@ -125,7 +131,7 @@ export function usePlaygroundState() {
     (key: keyof ParameterEnabled, value: boolean) => {
       setParameterEnabled((prev) => {
         const updated = { ...prev, [key]: value }
-        saveParameterEnabled(updated)
+        saveParameterEnabled(updated, ownerId.current)
         return updated
       })
     },
@@ -153,8 +159,8 @@ export function usePlaygroundState() {
   const resetConfig = useCallback(() => {
     setConfig(DEFAULT_CONFIG)
     setParameterEnabled(DEFAULT_PARAMETER_ENABLED)
-    saveConfig(DEFAULT_CONFIG)
-    saveParameterEnabled(DEFAULT_PARAMETER_ENABLED)
+    saveConfig(DEFAULT_CONFIG, ownerId.current)
+    saveParameterEnabled(DEFAULT_PARAMETER_ENABLED, ownerId.current)
   }, [])
 
   return {
