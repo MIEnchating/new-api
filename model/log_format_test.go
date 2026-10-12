@@ -180,7 +180,7 @@ func TestUserLogQueriesExcludeAdminOnlyRetryFailures(t *testing.T) {
 		Other:     common.MapToJsonStr(map[string]interface{}{}),
 	}).Error)
 
-	userLogs, total, err := GetUserLogs(42, LogTypeUnknown, 0, 0, "", "", 0, 20, "", "", "")
+	userLogs, total, err := GetUserLogs(42, LogFilter{Type: LogTypeUnknown}, 0, 20)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, total)
 	require.Len(t, userLogs, 1)
@@ -191,7 +191,7 @@ func TestUserLogQueriesExcludeAdminOnlyRetryFailures(t *testing.T) {
 	require.Len(t, tokenLogs, 1)
 	require.Equal(t, "final channel failed", tokenLogs[0].Content)
 
-	adminLogs, adminTotal, err := GetAllLogs(LogTypeUnknown, 0, 0, "", "", "", 0, 20, 0, "", "", "")
+	adminLogs, adminTotal, err := GetAllLogs(LogFilter{Type: LogTypeUnknown}, 0, 20)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, adminTotal)
 	require.Len(t, adminLogs, 2)

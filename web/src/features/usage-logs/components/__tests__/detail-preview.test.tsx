@@ -28,6 +28,7 @@ import { I18nextProvider } from 'react-i18next'
 import { afterAll, afterEach, beforeEach, expect, test, vi } from 'vitest'
 
 import en from '@/i18n/locales/en.json'
+import zh from '@/i18n/locales/zh.json'
 import {
   DEFAULT_CURRENCY_CONFIG,
   useSystemConfigStore,
@@ -70,7 +71,6 @@ function makeLog(other: LogOtherData, type = 2): UsageLog {
     other: JSON.stringify(other),
     request_id: 'req-1',
     upstream_request_id: '',
-    actual_response_model: '',
   }
 }
 
@@ -142,11 +142,7 @@ test('keeps log details open when the parent refreshes with unchanged data', asy
   const { rerender } = render(<DetailPreview other={other} isAdmin />, {
     wrapper,
   })
-  fireEvent.click(
-    screen.getByRole('button', {
-      name: 'Click to view full details: Per-call · $0.25',
-    })
-  )
+  fireEvent.click(screen.getByRole('button', { name: 'Per-call · $0.25' }))
   expect(await screen.findByRole('dialog')).toBeVisible()
   rerender(<DetailPreview other={other} isAdmin />)
   expect(screen.getByRole('dialog')).toBeVisible()
@@ -178,29 +174,18 @@ test.each([
     expected: 'priority · Per-call $0.01/request',
   },
   {
+    name: 'parsed token expression',
+    other: {
+      billing_mode: 'tiered_expr',
+      matched_tier: 'standard',
+      expr_b64: btoa('tier("standard", p * 2 + c * 10)'),
+    },
+    expected: 'standard · $2 / $10/M',
+  },
+  {
     name: 'per-call',
     other: { model_price: 0.25 },
     expected: 'Per-call · $0.25',
-  },
-  {
-    name: 'historical task multiplier without a recorded billing mode',
-    other: { is_task: true, model_price: 0.4, seconds: 5 },
-    expected: 'Per-call · $0.4',
-  },
-  {
-    name: 'per-second',
-    other: { billing_mode: 'per_second', model_price: 0.4, seconds: 5 },
-    expected: 'Per-second · $0.4/second',
-  },
-  {
-    name: 'free per-second',
-    other: { billing_mode: 'per_second', model_price: 0, seconds: 5 },
-    expected: 'Per-second · $0/second',
-  },
-  {
-    name: 'per-second without a recorded price',
-    other: { billing_mode: 'per_second' },
-    expected: 'Per-second',
   },
   {
     name: 'standard',
@@ -242,6 +227,88 @@ test.each([true, false])(
     expect(dialog.getByText('Billable duration')).toBeVisible()
     expect(dialog.getByText('5 second')).toBeVisible()
     expect(dialog.queryByText('Per-call')).not.toBeInTheDocument()
+  }
+)
+
+test.each([
+  {
+    tier: 'standard',
+    billingUnit: 'token' as const,
+    fixedPrice: undefined,
+    expected: 'Dynamic Pricing · standard',
+  },
+  {
+    tier: 'long_context',
+    billingUnit: 'token' as const,
+    fixedPrice: undefined,
+    expected: 'Dynamic Pricing · long_context',
+  },
+  {
+    tier: 'free_small_output',
+    billingUnit: 'request' as const,
+    fixedPrice: 0,
+    expected: 'free_small_output · Per-call $0/request',
+  },
+])(
+  'nested expression preserves the recorded $tier settlement in the list',
+  ({ tier, billingUnit, fixedPrice, expected }) => {
+    const expression = `len <= 272000
+      ? (c > 5
+        ? tier("standard", p * 2 + c * 10 + cr * 0.1 + cc * 2.5)
+        : tier("free_small_output", fixed(0)))
+      : (c > 5
+        ? tier("long_context", p * 5 + c * 22.5 + cr * 0.5)
+        : tier("free_small_output", fixed(0)))`
+    const preview = renderPreview({
+      billing_mode: 'tiered_expr',
+      billing_unit: billingUnit,
+      fixed_price: fixedPrice,
+      matched_tier: tier,
+      expr_b64: btoa(expression),
+    })
+    expect(preview.textContent).toBe(expected)
+  }
+)
+
+test.each([
+  { name: 'missing expression', expr: undefined },
+  { name: 'invalid encoded expression', expr: '%' },
+  {
+    name: 'tier absent from the parsed expression',
+    expr: btoa('tier("different", p * 99 + c * 99)'),
+  },
+])(
+  'token pricing with $name preserves the saved tier without guessing prices',
+  ({ expr }) => {
+    const preview = renderPreview({
+      billing_mode: 'tiered_expr',
+      matched_tier: 'recorded',
+      expr_b64: expr,
+    })
+    expect(preview.textContent).toBe('Dynamic Pricing · recorded')
+  }
+)
+
+test.each([false, true])(
+  'dynamic pricing without a saved tier uses a localized neutral fallback for task=%s',
+  async (isTask) => {
+    i18n.addResourceBundle('zh', 'translation', zh.translation)
+    const preview = renderPreview({
+      is_task: isTask,
+      billing_mode: 'tiered_expr',
+      expr_b64: btoa(
+        isTask
+          ? 'tier("base", u("clips") * 0.25)'
+          : 'tier("base", p * 2 + c * 10)'
+      ),
+    })
+    expect(preview.textContent).toBe(
+      'Dynamic Pricing · Special billing expression'
+    )
+    await act(() => i18n.changeLanguage('zh'))
+    expect(
+      screen.getByRole('button', { name: '动态计费 · 特殊计费表达式' })
+    ).toBeVisible()
   }
 )
 
@@ -430,7 +497,7 @@ test('task log prices select the executing provider’s schema', () => {
 })
 
 test.each(['missing schema', 'unsupported expression', 'unknown tier'])(
-  'task pricing with %s shows an explicit unavailable summary',
+  'task pricing with %s preserves the saved tier without guessing prices',
   (scenario) => {
     if (scenario !== 'missing schema') {
       client.setQueryData(['pricing'], {
@@ -453,6 +520,8 @@ test.each(['missing schema', 'unsupported expression', 'unknown tier'])(
       expr_b64: Buffer.from(expression).toString('base64'),
       matched_tier: scenario === 'unknown tier' ? 'old' : 'music',
     })
-    expect(preview.textContent).toBe('Dynamic Pricing · No matching results')
+    expect(preview.textContent).toBe(
+      `Dynamic Pricing · ${scenario === 'unknown tier' ? 'old' : 'music'}`
+    )
   }
 )
