@@ -274,3 +274,52 @@ it('refreshes history when the last running task finishes', async () => {
   expect(screen.getByText('history-runner')).toBeVisible()
   client.clear()
 })
+
+it('opens intelligence task details with per-attempt reasons and request IDs', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: [
+        {
+          ...task,
+          type: 'intelligence_test',
+          status: 'failed',
+          error: 'No intelligence test completed successfully',
+          result: {
+            channels: [
+              {
+                group: 'vip',
+                model: 'test-model',
+                question_name: 'Pelican',
+                error: 'Upstream returned an HTTP error',
+                attempts: [
+                  {
+                    request_id: 'attempt-request',
+                    latency_ms: 100,
+                    http_status: 503,
+                    error: 'Upstream returned an HTTP error',
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+      total: 1,
+    },
+  })
+  const client = renderPanel()
+  const buttons = await screen.findAllByRole('button', { name: 'Detail' })
+  await userEvent.click(buttons[0])
+  const dialog = await screen.findByRole('dialog')
+  expect(within(dialog).getByText('attempt-request')).toBeVisible()
+  expect(within(dialog).getByText(/HTTP 503/)).toBeVisible()
+  expect(
+    within(dialog).getAllByText('Upstream returned an HTTP error').length
+  ).toBeGreaterThan(0)
+  await userEvent.keyboard('{Escape}')
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
+  client.clear()
+})

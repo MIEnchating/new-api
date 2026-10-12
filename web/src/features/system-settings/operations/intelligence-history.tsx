@@ -30,6 +30,7 @@ import {
   deleteIntelligenceRecord,
   type IntelligenceTask,
 } from '@/features/status-monitor/intelligence-api'
+import { IntelligenceDetails } from '@/features/status-monitor/intelligence-details'
 import { getIntelligenceQuestionName } from '@/features/status-monitor/intelligence-labels'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
@@ -191,20 +192,27 @@ export function IntelligenceHistory(props: { history: IntelligenceTask[] }) {
             id: 'actions',
             header: t('Actions'),
             cell: (task) => (
-              <Button
-                type='button'
-                variant='ghost'
-                size='sm'
-                className='text-destructive'
-                disabled={
-                  task.status === 'pending' ||
-                  task.status === 'running' ||
-                  remove.isPending
-                }
-                onClick={() => setSelected(task)}
-              >
-                {t('Delete')}
-              </Button>
+              <div className='flex items-center gap-1'>
+                <IntelligenceDetails
+                  taskId={task.task_id}
+                  error={task.error}
+                  result={task.result}
+                />
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='sm'
+                  className='text-destructive'
+                  disabled={
+                    task.status === 'pending' ||
+                    task.status === 'running' ||
+                    remove.isPending
+                  }
+                  onClick={() => setSelected(task)}
+                >
+                  {t('Delete')}
+                </Button>
+              </div>
             ),
           },
         ]}

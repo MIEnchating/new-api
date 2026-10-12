@@ -28,6 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { IntelligenceDetails } from '@/features/status-monitor/intelligence-details'
 import type {
   SystemTask,
   SystemTaskStatus,
@@ -166,7 +167,15 @@ export function SystemTasksTable(props: SystemTasksTableProps) {
                 className='text-destructive max-w-[220px] truncate py-3 pr-4 align-middle text-xs'
                 title={task.error || undefined}
               >
-                {task.error || '-'}
+                {task.type === 'intelligence_test' ? (
+                  <IntelligenceDetails
+                    taskId={task.task_id}
+                    error={task.error}
+                    result={task.result}
+                  />
+                ) : (
+                  t(task.error || '-')
+                )}
               </TableCell>
             </TableRow>
           )

@@ -62,6 +62,13 @@ export const intelligenceConfigSchema = z.object({
     ),
 })
 export type IntelligenceConfig = z.infer<typeof intelligenceConfigSchema>
+export type IntelligenceAttempt = {
+  request_id: string
+  upstream_request_id?: string
+  latency_ms: number
+  http_status?: number
+  error: string
+}
 export type IntelligenceTask = {
   task_id: string
   status: 'pending' | 'running' | 'succeeded' | 'failed'
@@ -78,6 +85,8 @@ export type IntelligenceTask = {
       group?: string
       model?: string
       endpoint?: string
+      attempts?: IntelligenceAttempt[]
+      http_status?: number
       request_id?: string
       upstream_request_id?: string
       channel_name?: string

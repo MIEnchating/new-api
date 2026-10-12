@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service/authz"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
@@ -127,6 +128,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	require.NoError(t, db.Create(&model.User{Id: 1, Username: "intelligence-test", Role: common.RoleRootUser, Status: common.UserStatusEnabled, Group: "default", Quota: 1000000}).Error)
 	output := "<!DOCTYPE html><html><body><svg viewBox=\"0 0 10 10\">" + strings.Repeat("<!-- frame -->", 900) + "</svg></body></html>"
 	var streamRequests, jsonRequests atomic.Int32
+	var failRequests atomic.Int32
 	var arrivals atomic.Int32
 	var checkParallel atomic.Bool
 	checkParallel.Store(true)
@@ -145,6 +147,12 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 				w.WriteHeader(http.StatusGatewayTimeout)
 				return
 			}
+		}
+		if failRequests.Add(-1) >= 0 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			fmt.Fprint(w, `{"error":{"message":"private credential test-secret","type":"server_error"}}`)
+			return
 		}
 		var request map[string]any
 		if !assert.NoError(t, common.DecodeJson(r.Body, &request)) {
@@ -263,6 +271,26 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	assert.NotEqual(t, firstRequestID, secondRequestID)
 	assert.Equal(t, "vip", gjson.Get(finished.Result, "channels.0.group").String())
 	assert.Equal(t, "default", gjson.Get(finished.Result, "channels.1.group").String())
+	failRequests.Store(5)
+	recovered := retryIntelligenceRequest(context.Background(), 0, func() intelligenceChannelResult {
+		return runIntelligenceRequest(context.Background(), &channels[0], 1, config.ForGroup(config.Groups[1]), 0)
+	})
+	require.Len(t, recovered.Attempts, 6)
+	assert.Empty(t, recovered.Error)
+	assert.Equal(t, output, recovered.HTML)
+	ids := map[string]bool{}
+	for i, attempt := range recovered.Attempts {
+		assert.False(t, ids[attempt.RequestID])
+		ids[attempt.RequestID] = true
+		if i < 5 {
+			assert.Equal(t, http.StatusServiceUnavailable, attempt.HTTPStatus)
+			assert.Equal(t, "Upstream returned an HTTP error", attempt.Error)
+		}
+	}
+	serialized, err := common.Marshal(recovered)
+	require.NoError(t, err)
+	assert.NotContains(t, string(serialized), "test-secret")
+	failRequests.Store(0)
 	scheduled, err := model.CreateSystemTask(intelligenceTaskType, payload, nil)
 	require.NoError(t, err)
 	_, due, err = handler.ScheduledPayload(now.Add(10 * time.Second))
@@ -289,6 +317,8 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	assert.False(t, gjson.GetBytes(history.Body.Bytes(), "data.history.0.result.channels.0.html").Exists())
 	publicHistory := call(GetIntelligenceResults, http.MethodGet, nil)
 	assert.NotContains(t, publicHistory.Body.String(), firstRequestID)
+	assert.NotContains(t, publicHistory.Body.String(), "attempts")
+	assert.Contains(t, history.Body.String(), "attempts")
 	assert.NotContains(t, publicHistory.Body.String(), secondRequestID)
 	assert.True(t, gjson.GetBytes(publicHistory.Body.Bytes(), "success").Bool())
 	assert.False(t, gjson.GetBytes(publicHistory.Body.Bytes(), "data.config").Exists())
@@ -591,4 +621,62 @@ func TestIntelligenceStreamDefaultsAndSchedule(t *testing.T) {
 	require.Len(t, due.Groups, 2)
 	assert.True(t, *due.ForGroup(due.Groups[0]).Stream)
 	assert.False(t, *due.ForGroup(due.Groups[1]).Stream)
+}
+
+func TestIntelligenceRetryAttempts(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		succeedAt, want int
+	}{{"immediate", 1, 1}, {"recovers", 3, 3}, {"exhausts five retries", 0, 6}} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			row := retryIntelligenceRequest(context.Background(), 0, func() intelligenceChannelResult {
+				calls++
+				result := intelligenceChannelResult{RequestID: fmt.Sprintf("request-%d", calls), Error: "Upstream returned an HTTP error", HTTPStatus: 503}
+				if calls == tc.succeedAt {
+					result.Error = ""
+					result.HTML = "<html>success</html>"
+					result.HTTPStatus = 200
+				}
+				return result
+			})
+			assert.Equal(t, tc.want, calls)
+			require.Len(t, row.Attempts, tc.want)
+			assert.Equal(t, fmt.Sprintf("request-%d", tc.want), row.RequestID)
+			if tc.succeedAt > 0 {
+				assert.Empty(t, row.Error)
+				assert.Equal(t, "<html>success</html>", row.HTML)
+			} else {
+				assert.NotEmpty(t, row.Error)
+			}
+		})
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	calls := 0
+	row := retryIntelligenceRequest(ctx, time.Hour, func() intelligenceChannelResult {
+		calls++
+		cancel()
+		return intelligenceChannelResult{RequestID: "cancelled", Error: "failure"}
+	})
+	assert.Equal(t, 1, calls)
+	assert.Equal(t, "Intelligence test was cancelled", row.Error)
+}
+
+func TestIntelligenceFailureDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		response testResult
+		stream   bool
+		want     string
+	}{
+		{"deadline", testResult{localErr: context.DeadlineExceeded}, false, "Intelligence test exceeded the 180-second request timeout"},
+		{"cancelled", testResult{localErr: context.Canceled}, false, "Intelligence test was cancelled"},
+		{"http", testResult{upstreamStatus: 503, localErr: fmt.Errorf("secret-key https://private")}, false, "Upstream returned an HTTP error"},
+		{"stream timeout", testResult{streamOutcome: relaycommon.StreamOutcome{EndReason: relaycommon.StreamEndReasonTimeout}}, true, "Upstream stream timed out while waiting for data"},
+		{"truncated", testResult{streamOutcome: relaycommon.StreamOutcome{ExpectsTerminal: true}}, true, "Upstream stream ended before completion"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, intelligenceFailureReason(context.Background(), tc.response, tc.stream))
+		})
+	}
 }

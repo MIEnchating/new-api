@@ -43,11 +43,12 @@ type channelTestProbe struct {
 }
 
 type testResult struct {
-	context       *gin.Context
-	responseBody  []byte
-	streamOutcome relaycommon.StreamOutcome
-	localErr      error
-	newAPIError   *types.NewAPIError
+	context        *gin.Context
+	responseBody   []byte
+	streamOutcome  relaycommon.StreamOutcome
+	upstreamStatus int
+	localErr       error
+	newAPIError    *types.NewAPIError
 }
 
 func normalizeChannelTestEndpoint(channel *model.Channel, endpointType string) string {
@@ -82,7 +83,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	return testChannelWithProbe(ctx, channel, testUserID, testModel, endpointType, isStream, nil)
 }
 
-func testChannelWithProbe(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool, probe *channelTestProbe) testResult {
+func testChannelWithProbe(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool, probe *channelTestProbe) (testResponse testResult) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -469,12 +470,19 @@ func testChannelWithProbe(ctx context.Context, channel *model.Channel, testUserI
 				err,
 			))
 			return testResult{
-				context:     c,
-				localErr:    err,
-				newAPIError: types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError),
+				context:        c,
+				localErr:       err,
+				upstreamStatus: httpResp.StatusCode,
+				newAPIError:    types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError),
 			}
 		}
 	}
+	defer func() {
+		testResponse.streamOutcome = info.StreamStatus.OutcomeSnapshot()
+		if httpResp != nil {
+			testResponse.upstreamStatus = httpResp.StatusCode
+		}
+	}()
 	usageA, respErr := adaptor.DoResponse(c, httpResp, info)
 	if respErr != nil {
 		return testResult{

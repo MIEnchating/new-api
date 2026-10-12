@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"slices"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
@@ -207,10 +209,15 @@ func publishedIntelligenceTask(task *model.SystemTask, includeHTML bool, admin b
 			row["request_id"] = channel.RequestID
 			row["upstream_request_id"] = channel.UpstreamRequestID
 			row["channel_name"] = channel.ChannelName
+			row["attempts"] = channel.Attempts
+			row["http_status"] = channel.HTTPStatus
 		}
 		// Also sanitize historical errors, rather than trusting persisted strings.
 		if channel.Error != "" {
 			row["error"] = "Intelligence test request failed"
+			if admin && len(channel.Attempts) > 0 {
+				row["error"] = channel.Error
+			}
 		}
 		if includeHTML && channel.HTML != "" {
 			row["html"] = channel.HTML
@@ -381,7 +388,18 @@ func (config intelligenceConfig) DueGroups(now time.Time) intelligenceConfig {
 	return due
 }
 
+type intelligenceAttempt struct {
+	RequestID         string `json:"request_id"`
+	UpstreamRequestID string `json:"upstream_request_id,omitempty"`
+	LatencyMs         int64  `json:"latency_ms"`
+	Error             string `json:"error"`
+	HTTPStatus        int    `json:"http_status,omitempty"`
+}
+
 type intelligenceChannelResult struct {
+	Attempts   []intelligenceAttempt `json:"attempts,omitempty"`
+	HTTPStatus int                   `json:"http_status,omitempty"`
+
 	RequestID         string `json:"request_id,omitempty"`
 	UpstreamRequestID string `json:"upstream_request_id,omitempty"`
 	Group             string `json:"group"`
@@ -479,7 +497,9 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 				target := targets[index/len(config.Questions)]
 				questionIndex := index % len(config.Questions)
 				channel := *target.channel
-				row := runIntelligenceRequest(ctx, &channel, userID, target.config, questionIndex)
+				row := retryIntelligenceRequest(ctx, time.Second, func() intelligenceChannelResult {
+					return runIntelligenceRequest(ctx, &channel, userID, target.config, questionIndex)
+				})
 				completed <- completedRequest{index, row}
 			}
 		})
@@ -507,6 +527,75 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, result, nil)
 }
 
+// Retry failed requests up to five times (six attempts total). Backoff remains
+// inside the worker slot so retries cannot exceed the request concurrency limit.
+func retryIntelligenceRequest(ctx context.Context, delay time.Duration, attempt func() intelligenceChannelResult) intelligenceChannelResult {
+	started := time.Now()
+	var row intelligenceChannelResult
+	var attempts []intelligenceAttempt
+	for index := range 6 {
+		if ctx.Err() != nil {
+			break
+		}
+		if index > 0 {
+			timer := time.NewTimer(delay * time.Duration(1<<(index-1)))
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+			case <-timer.C:
+			}
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		row = attempt()
+		attempts = append(attempts, intelligenceAttempt{RequestID: row.RequestID, UpstreamRequestID: row.UpstreamRequestID, LatencyMs: row.LatencyMs, Error: row.Error, HTTPStatus: row.HTTPStatus})
+		if row.Error == "" {
+			break
+		}
+	}
+	if ctx.Err() != nil {
+		row.Error = "Intelligence test was cancelled"
+		row.HTML = ""
+	}
+	row.Attempts = attempts
+	row.LatencyMs = time.Since(started).Milliseconds()
+	return row
+}
+
+// Persist diagnostic facts, never raw upstream messages, URLs or credentials.
+func intelligenceFailureReason(ctx context.Context, response testResult, streamFailed bool) string {
+	var networkError net.Error
+	switch {
+	case errors.Is(ctx.Err(), context.DeadlineExceeded), errors.Is(response.localErr, context.DeadlineExceeded):
+		return "Intelligence test exceeded the 180-second request timeout"
+	case errors.Is(ctx.Err(), context.Canceled), errors.Is(response.localErr, context.Canceled):
+		return "Intelligence test was cancelled"
+	case errors.As(response.localErr, &networkError) && networkError.Timeout():
+		return "Upstream connection timed out"
+	case response.upstreamStatus >= 400:
+		return "Upstream returned an HTTP error"
+	case response.streamOutcome.EndReason == relaycommon.StreamEndReasonTimeout:
+		return "Upstream stream timed out while waiting for data"
+	case response.streamOutcome.IncompleteReason == "max_output_tokens":
+		return "Upstream reached the output token limit"
+	case response.streamOutcome.IncompleteReason == "content_filter":
+		return "Upstream blocked the response with a content filter"
+	case response.streamOutcome.Response == relaycommon.ResponseOutcomeIncomplete:
+		return "Upstream response was incomplete"
+	case response.streamOutcome.HasErrors || response.streamOutcome.Response == relaycommon.ResponseOutcomeFailed:
+		return "Upstream reported a stream error"
+	case streamFailed:
+		return "Upstream stream ended before completion"
+	case response.newAPIError != nil && response.newAPIError.GetErrorCode() == types.ErrorCodeDoRequestFailed:
+		return "Could not connect to the upstream service"
+	case response.newAPIError != nil && response.newAPIError.GetErrorCode() == types.ErrorCodeBadResponseBody:
+		return "Upstream returned an invalid response body"
+	default:
+		return "Intelligence test request failed"
+	}
+}
+
 // Each request owns its context and result; only the coordinator persists progress.
 func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID int, config intelligenceConfig, questionIndex int) (row intelligenceChannelResult) {
 	question := config.Questions[questionIndex]
@@ -516,7 +605,7 @@ func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID 
 		row.LatencyMs = time.Since(started).Milliseconds()
 		if recover() != nil {
 			row.HTML = ""
-			row.Error = "Intelligence test request failed"
+			row.Error = "Intelligence test encountered an internal error"
 		}
 	}()
 	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
@@ -526,6 +615,7 @@ func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID 
 	if response.context != nil {
 		row.UpstreamRequestID = response.context.GetString(common.UpstreamRequestIdKey)
 	}
+	row.HTTPStatus = response.upstreamStatus
 	outcome := response.streamOutcome
 	streamFailed := isStream && (outcome.HasErrors ||
 		(outcome.EndReason != relaycommon.StreamEndReasonNone && outcome.EndReason != relaycommon.StreamEndReasonDone && outcome.EndReason != relaycommon.StreamEndReasonEOF && outcome.EndReason != relaycommon.StreamEndReasonHandlerStop) ||
@@ -533,7 +623,7 @@ func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID 
 		(outcome.ExpectsTerminal && outcome.Response != relaycommon.ResponseOutcomeCompleted))
 	if response.localErr != nil || response.newAPIError != nil || streamFailed {
 		// Never persist upstream errors, which may contain credentials or internal URLs.
-		row.Error = "Intelligence test request failed"
+		row.Error = intelligenceFailureReason(requestCtx, response, streamFailed)
 		return row
 	}
 	row.HTML = extractIntelligenceOutput(response.responseBody, config.Endpoint, isStream)
