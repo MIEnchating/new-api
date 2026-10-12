@@ -71,7 +71,7 @@ export function IntelligenceMonitor() {
       {query.data.history.length === 0 && (
         <EmptyState title={t('No intelligence test results yet')} />
       )}
-      <div className='grid min-w-0 items-start gap-4 md:grid-cols-2 2xl:grid-cols-3'>
+      <div className='grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))] items-start gap-4'>
         {query.data.history.map((task) => {
           let status = t('Pending')
           if (task.status === 'running') status = t('Running')

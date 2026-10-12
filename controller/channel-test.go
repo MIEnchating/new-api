@@ -37,8 +37,9 @@ import (
 )
 
 type channelTestProbe struct {
-	Group  string
-	Prompt string
+	RequestID string
+	Group     string
+	Prompt    string
 }
 
 type testResult struct {
@@ -160,6 +161,10 @@ func testChannelWithProbe(ctx context.Context, channel *model.Channel, testUserI
 	// GeminiChatRequest.IsStream 依据请求 URL 判定，合成请求路径需与生产入口保持一致
 	if isStream && constant.EndpointType(endpointType) == constant.EndpointTypeGemini {
 		requestPath = strings.Replace(requestPath, ":generateContent", ":streamGenerateContent", 1)
+	}
+	if probe != nil && probe.RequestID != "" {
+		ctx = context.WithValue(ctx, constant.ContextKeyRequestId, probe.RequestID)
+		c.Set(common.RequestIdKey, probe.RequestID)
 	}
 	c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, requestPath, nil)
 

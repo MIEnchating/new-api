@@ -21,7 +21,7 @@ import (
 )
 
 const intelligenceOptionKey = "IntelligenceMonitorConfig"
-const intelligenceTaskType = "intelligence_test"
+const intelligenceTaskType = model.SystemTaskTypeIntelligenceTest
 
 const defaultIntelligencePrompt = "请生成可直接运行的单文件HTML，使用内联SVG绘制鹈鹕骑自行车的二维循环动画。画面以鹈鹕和自行车为主体，展示清晰的身体结构、踩踏动作和车轮转动，配合协调的背景、配色与层次。动画应流畅自然、衔接连续，并适配不同屏幕尺寸。禁止依赖外部资源，只输出完整HTML，不要代码围栏或解释文字。"
 
@@ -166,7 +166,7 @@ func GetIntelligenceMonitor(c *gin.Context) {
 		slices.Sort(models)
 		catalog[group] = slices.Compact(models)
 	}
-	history, err := intelligenceHistory()
+	history, err := intelligenceHistory(true)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -175,7 +175,7 @@ func GetIntelligenceMonitor(c *gin.Context) {
 }
 
 // Public responses are an allowlist: never serialize a system task or its payload.
-func publishedIntelligenceTask(task *model.SystemTask, includeHTML bool) (gin.H, error) {
+func publishedIntelligenceTask(task *model.SystemTask, includeHTML bool, admin bool) (gin.H, error) {
 	var config intelligenceConfig
 	if err := task.DecodePayload(&config); err != nil {
 		return nil, err
@@ -194,6 +194,11 @@ func publishedIntelligenceTask(task *model.SystemTask, includeHTML bool) (gin.H,
 	for _, channel := range result.Channels {
 		row := gin.H{"channel_id": channel.ChannelID, "question_index": channel.QuestionIndex,
 			"question_name": channel.QuestionName, "latency_ms": channel.LatencyMs, "error": "", "group": channel.Group, "model": channel.Model, "endpoint": channel.Endpoint}
+		if admin {
+			row["request_id"] = channel.RequestID
+			row["upstream_request_id"] = channel.UpstreamRequestID
+			row["channel_name"] = channel.ChannelName
+		}
 		// Also sanitize historical errors, rather than trusting persisted strings.
 		if channel.Error != "" {
 			row["error"] = "Intelligence test request failed"
@@ -217,14 +222,14 @@ func publishedIntelligenceTask(task *model.SystemTask, includeHTML bool) (gin.H,
 		"result": gin.H{"channels": channels}}, nil
 }
 
-func intelligenceHistory() ([]gin.H, error) {
-	tasks, _, err := model.ListSystemTasks(model.SystemTaskFilter{Type: intelligenceTaskType}, 0, 20)
+func intelligenceHistory(admin bool) ([]gin.H, error) {
+	tasks, err := model.ListIntelligenceTestHistory()
 	if err != nil {
 		return nil, err
 	}
 	history := make([]gin.H, 0, len(tasks))
 	for _, task := range tasks {
-		response, err := publishedIntelligenceTask(task, false)
+		response, err := publishedIntelligenceTask(task, false, admin)
 		if err != nil {
 			return nil, err
 		}
@@ -234,7 +239,7 @@ func intelligenceHistory() ([]gin.H, error) {
 }
 
 func GetIntelligenceResults(c *gin.Context) {
-	history, err := intelligenceHistory()
+	history, err := intelligenceHistory(false)
 	if err != nil {
 		common.ApiErrorT(c, "Intelligence test request failed")
 		return
@@ -372,16 +377,18 @@ func (config intelligenceConfig) DueGroups(now time.Time) intelligenceConfig {
 }
 
 type intelligenceChannelResult struct {
-	Group         string `json:"group"`
-	Model         string `json:"model"`
-	Endpoint      string `json:"endpoint"`
-	ChannelID     int    `json:"channel_id"`
-	ChannelName   string `json:"channel_name"`
-	QuestionIndex int    `json:"question_index"`
-	QuestionName  string `json:"question_name"`
-	HTML          string `json:"html,omitempty"`
-	LatencyMs     int64  `json:"latency_ms"`
-	Error         string `json:"error"`
+	RequestID         string `json:"request_id,omitempty"`
+	UpstreamRequestID string `json:"upstream_request_id,omitempty"`
+	Group             string `json:"group"`
+	Model             string `json:"model"`
+	Endpoint          string `json:"endpoint"`
+	ChannelID         int    `json:"channel_id"`
+	ChannelName       string `json:"channel_name"`
+	QuestionIndex     int    `json:"question_index"`
+	QuestionName      string `json:"question_name"`
+	HTML              string `json:"html,omitempty"`
+	LatencyMs         int64  `json:"latency_ms"`
+	Error             string `json:"error"`
 }
 type intelligenceResult struct {
 	Channels []intelligenceChannelResult `json:"channels"`
@@ -393,11 +400,11 @@ func GetIntelligenceTestResult(c *gin.Context) {
 		common.ApiErrorT(c, "Intelligence test request failed")
 		return
 	}
-	if task == nil || task.Type != intelligenceTaskType {
+	if task == nil || task.Type != intelligenceTaskType || task.IntelligenceResultDeleted() {
 		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Intelligence test not found"})
 		return
 	}
-	response, err := publishedIntelligenceTask(task, true)
+	response, err := publishedIntelligenceTask(task, true, false)
 	if err != nil {
 		common.ApiErrorT(c, "Intelligence test request failed")
 		return
@@ -456,11 +463,15 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 				finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, err)
 				return
 			}
+			requestID := common.NewRequestId()
 			started := time.Now()
 			requestCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-			response := testChannelWithProbe(requestCtx, channel, userID, config.Model, config.Endpoint, isStream, &channelTestProbe{Group: config.Group, Prompt: question.Prompt})
+			response := testChannelWithProbe(requestCtx, channel, userID, config.Model, config.Endpoint, isStream, &channelTestProbe{RequestID: requestID, Group: config.Group, Prompt: question.Prompt})
 			cancel()
-			row := intelligenceChannelResult{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, ChannelID: channel.Id, ChannelName: channel.Name, QuestionIndex: questionIndex, QuestionName: question.Name, LatencyMs: time.Since(started).Milliseconds()}
+			row := intelligenceChannelResult{RequestID: requestID, Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, ChannelID: channel.Id, ChannelName: channel.Name, QuestionIndex: questionIndex, QuestionName: question.Name, LatencyMs: time.Since(started).Milliseconds()}
+			if response.context != nil {
+				row.UpstreamRequestID = response.context.GetString(common.UpstreamRequestIdKey)
+			}
 			outcome := response.streamOutcome
 			streamFailed := isStream && (outcome.HasErrors ||
 				(outcome.EndReason != relaycommon.StreamEndReasonNone && outcome.EndReason != relaycommon.StreamEndReasonDone && outcome.EndReason != relaycommon.StreamEndReasonEOF && outcome.EndReason != relaycommon.StreamEndReasonHandlerStop) ||
@@ -595,4 +606,18 @@ func extractIntelligenceOutput(body []byte, endpoint string, isStream bool) stri
 		answer.WriteString(gjson.GetBytes(body, "choices.0.message.content").String())
 	}
 	return strings.TrimSpace(answer.String())
+}
+
+func DeleteIntelligenceRecord(c *gin.Context) {
+	deleted, err := model.DeleteIntelligenceTestResult(c.Param("task_id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !deleted {
+		common.ApiErrorT(c, "Only completed intelligence test records can be deleted")
+		return
+	}
+	recordManageAudit(c, "intelligence_monitor.delete", map[string]any{"task_id": c.Param("task_id")})
+	common.ApiSuccessT(c, "Deleted successfully", nil)
 }

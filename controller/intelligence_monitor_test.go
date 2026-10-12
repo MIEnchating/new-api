@@ -225,6 +225,11 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	assert.Equal(t, output, gjson.Get(finished.Result, "channels.0.html").String())
 	assert.Equal(t, "Pelican", gjson.Get(finished.Result, "channels.0.question_name").String())
 	assert.Len(t, gjson.Get(finished.Result, "channels").Array(), 2)
+	firstRequestID := gjson.Get(finished.Result, "channels.0.request_id").String()
+	secondRequestID := gjson.Get(finished.Result, "channels.1.request_id").String()
+	require.NotEmpty(t, firstRequestID)
+	require.NotEmpty(t, secondRequestID)
+	assert.NotEqual(t, firstRequestID, secondRequestID)
 	assert.Equal(t, "vip", gjson.Get(finished.Result, "channels.0.group").String())
 	assert.Equal(t, "default", gjson.Get(finished.Result, "channels.1.group").String())
 	scheduled, err := model.CreateSystemTask(intelligenceTaskType, payload, nil)
@@ -245,8 +250,12 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	history := call(GetIntelligenceMonitor, http.MethodGet, nil)
 	assert.True(t, gjson.GetBytes(history.Body.Bytes(), "success").Bool())
 	assert.NotContains(t, history.Body.String(), "test-secret")
+	assert.Contains(t, history.Body.String(), firstRequestID)
+	assert.Contains(t, history.Body.String(), secondRequestID)
 	assert.False(t, gjson.GetBytes(history.Body.Bytes(), "data.history.0.result.channels.0.html").Exists())
 	publicHistory := call(GetIntelligenceResults, http.MethodGet, nil)
+	assert.NotContains(t, publicHistory.Body.String(), firstRequestID)
+	assert.NotContains(t, publicHistory.Body.String(), secondRequestID)
 	assert.True(t, gjson.GetBytes(publicHistory.Body.Bytes(), "success").Bool())
 	assert.False(t, gjson.GetBytes(publicHistory.Body.Bytes(), "data.config").Exists())
 	assert.False(t, gjson.GetBytes(publicHistory.Body.Bytes(), "data.catalog").Exists())
@@ -261,6 +270,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	assert.False(t, gjson.GetBytes(w.Body.Bytes(), "data.locked_by").Exists())
 	assert.False(t, gjson.GetBytes(w.Body.Bytes(), "data.result.channels.0.channel_name").Exists())
 	assert.NotContains(t, w.Body.String(), defaultIntelligencePrompt)
+	assert.NotContains(t, w.Body.String(), firstRequestID)
 	// A cancelled scheduled run fails without issuing another upstream request.
 	next, err := model.CreateSystemTask(intelligenceTaskType, config, nil)
 	require.NoError(t, err)
@@ -317,6 +327,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	engine.GET("/api/status-monitor/intelligence", middleware.AdminAuth(), middleware.RequirePermission(authz.ChannelOperate), GetIntelligenceMonitor)
 	engine.PUT("/api/status-monitor/intelligence", middleware.AdminAuth(), middleware.RequirePermission(authz.ChannelOperate), UpdateIntelligenceMonitor)
 	engine.POST("/api/status-monitor/intelligence/run", middleware.AdminAuth(), middleware.RequirePermission(authz.ChannelOperate), RunIntelligenceMonitor)
+	engine.DELETE("/api/status-monitor/intelligence/results/:task_id", middleware.AdminAuth(), middleware.RequirePermission(authz.ChannelOperate), DeleteIntelligenceRecord)
 	for _, authenticated := range []bool{false, true} {
 		for _, route := range []struct {
 			method, path string
@@ -327,6 +338,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 			{http.MethodGet, "/api/status-monitor/intelligence", false},
 			{http.MethodPut, "/api/status-monitor/intelligence", false},
 			{http.MethodPost, "/api/status-monitor/intelligence/run", false},
+			{http.MethodDelete, "/api/status-monitor/intelligence/results/" + task.TaskID, false},
 		} {
 			request := httptest.NewRequest(route.method, route.path, nil)
 			if authenticated {
@@ -344,13 +356,59 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 			assert.Equal(t, want, recorder.Code, "%s %s authenticated=%v: %s", route.method, route.path, authenticated, recorder.Body.String())
 		}
 	}
+	for _, tc := range []struct {
+		name     string
+		status   model.SystemTaskStatus
+		taskType string
+		allowed  bool
+	}{
+		{"success", model.SystemTaskStatusSucceeded, intelligenceTaskType, true},
+		{"failure", model.SystemTaskStatusFailed, intelligenceTaskType, true},
+		{"pending", model.SystemTaskStatusPending, intelligenceTaskType, false},
+		{"running", model.SystemTaskStatusRunning, intelligenceTaskType, false},
+		{"other", model.SystemTaskStatusSucceeded, "other", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := model.SystemTask{TaskID: tc.name, Type: tc.taskType, Status: tc.status, Payload: `{"scheduled_at":123}`, Result: `{"channels":[{"html":"private generated content","request_id":"request-123"}]}`, Error: "old error"}
+			require.NoError(t, db.Create(&task).Error)
+			deleted, err := model.DeleteIntelligenceTestResult(task.TaskID)
+			require.NoError(t, err)
+			assert.Equal(t, tc.allowed, deleted)
+			stored, err := model.GetSystemTaskByTaskID(task.TaskID)
+			require.NoError(t, err)
+			assert.Equal(t, task.Payload, stored.Payload, "preserve schedule deduplication payload")
+			if !tc.allowed {
+				assert.Equal(t, task.Result, stored.Result)
+				return
+			}
+			assert.Empty(t, stored.Error)
+			assert.NotContains(t, stored.Result, "private generated content")
+			assert.NotContains(t, stored.Result, "request-123")
+			deleted, err = model.DeleteIntelligenceTestResult(task.TaskID)
+			require.NoError(t, err)
+			assert.False(t, deleted)
+			history, err := model.ListIntelligenceTestHistory()
+			require.NoError(t, err)
+			for _, row := range history {
+				assert.NotEqual(t, task.TaskID, row.TaskID)
+			}
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+			GetIntelligenceTestResult(c)
+			assert.Equal(t, http.StatusNotFound, recorder.Code)
+		})
+	}
+	deleted, err := model.DeleteIntelligenceTestResult("missing")
+	require.NoError(t, err)
+	assert.False(t, deleted)
 }
 
 func TestIntelligencePublicResultHidesInternalErrors(t *testing.T) {
 	config, err := common.Marshal(intelligenceConfig{Group: "vip", Model: "model", Questions: []intelligenceQuestion{{Name: "Animation", Prompt: "private prompt"}}})
 	require.NoError(t, err)
 	task := &model.SystemTask{TaskID: "public-id", Type: intelligenceTaskType, Status: model.SystemTaskStatusFailed, Payload: string(config), LockedBy: "private-worker", Error: "database://secret", Result: `{"channels":[{"channel_id":1,"channel_name":"private-provider","question_name":"Animation","error":"api-key=secret"}]}`}
-	response, err := publishedIntelligenceTask(task, true)
+	response, err := publishedIntelligenceTask(task, true, false)
 	require.NoError(t, err)
 	encoded, err := common.Marshal(response)
 	require.NoError(t, err)

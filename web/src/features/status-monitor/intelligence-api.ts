@@ -78,6 +78,9 @@ export type IntelligenceTask = {
       group?: string
       model?: string
       endpoint?: string
+      request_id?: string
+      upstream_request_id?: string
+      channel_name?: string
       channel_id: number
       question_index: number
       question_name: string
@@ -133,4 +136,11 @@ export async function getIntelligenceResult(taskId: string) {
     `${endpoint}/results/${encodeURIComponent(taskId)}`
   )
   return requireServerSuccess(response.data).data
+}
+
+export async function deleteIntelligenceRecord(taskId: string) {
+  const response = await api.delete<Response<unknown>>(
+    `${endpoint}/results/${encodeURIComponent(taskId)}`
+  )
+  return requireServerSuccess(response.data)
 }

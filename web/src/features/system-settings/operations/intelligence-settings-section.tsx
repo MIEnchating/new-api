@@ -68,6 +68,7 @@ import {
   SettingsPageFormActions,
 } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { IntelligenceHistory } from './intelligence-history'
 
 export function IntelligenceSettingsSection() {
   const query = useQuery({
@@ -516,6 +517,7 @@ export function IntelligenceSettings(props: {
           </FieldDescription>
         </div>
       </SettingsForm>
+      <IntelligenceHistory history={props.data.history} />
     </SettingsSection>
   )
 }

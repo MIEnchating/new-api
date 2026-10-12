@@ -31,6 +31,7 @@ import { I18nextProvider } from 'react-i18next'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { SettingsPageProvider } from '@/features/system-settings/components/settings-page-context'
+import { IntelligenceHistory } from '@/features/system-settings/operations/intelligence-history'
 import {
   IntelligenceSettingsSection,
   IntelligenceSettings,
@@ -39,7 +40,10 @@ import en from '@/i18n/locales/en.json'
 import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
 
-import type { IntelligenceMonitorData } from '../intelligence-api'
+import type {
+  IntelligenceMonitorData,
+  IntelligenceTask,
+} from '../intelligence-api'
 import {
   inspectIntelligenceHtml,
   intelligencePreviewDocument,
@@ -660,11 +664,113 @@ it('shows only compact result metadata and previews without channel IDs, record 
     for (const card of cards) {
       expect(card).toHaveClass('border', 'ring-0')
     }
-    expect(cards[0]?.parentElement).toHaveClass('md:grid-cols-2')
+    expect(cards[0]?.parentElement).toHaveClass(
+      'grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))]'
+    )
+    await userEvent.click(
+      screen.getAllByRole('button', { name: 'Enlarge preview' })[0]
+    )
+    const dialog = await screen.findByRole('dialog')
+    const enlarged = within(dialog).getByTitle('Generated animation preview')
+    expect(enlarged).toHaveAttribute('sandbox', 'allow-scripts')
+    expect(enlarged.getAttribute('srcdoc')).toContain("connect-src 'none'")
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    )
     expect(frames[0].closest('[data-preview-viewport]')).toHaveClass(
       'aspect-[6/5]',
       'overflow-hidden'
     )
+  } finally {
+    view.unmount()
+    client.clear()
+  }
+})
+
+it('shows admin request IDs and confirms deletion while protecting active runs', async () => {
+  const client = new QueryClient({
+    defaultOptions: { mutations: { retry: false } },
+  })
+  const invalidate = vi.spyOn(client, 'invalidateQueries')
+  const remove = vi
+    .spyOn(api, 'delete')
+    .mockResolvedValue({ data: { success: true } })
+  const task: IntelligenceTask = {
+    task_id: 'run-1',
+    status: 'succeeded',
+    created_at: 1791613858,
+    updated_at: 1791613858,
+    group: 'vip',
+    model: 'test-model',
+    endpoint: 'openai',
+    error: '',
+    result: {
+      channels: [
+        {
+          channel_id: 108,
+          question_index: 0,
+          question_name: 'Pelican',
+          latency_ms: 100,
+          error: '',
+          request_id: 'request-123',
+          upstream_request_id: 'upstream-456',
+        },
+      ],
+    },
+  }
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligenceHistory
+        history={[
+          task,
+          {
+            ...task,
+            task_id: 'running-task',
+            status: 'running',
+            result: {
+              channels: [
+                {
+                  channel_id: 108,
+                  question_index: 0,
+                  question_name: 'Pelican',
+                  latency_ms: 100,
+                  error: '',
+                  request_id: undefined,
+                  upstream_request_id: undefined,
+                },
+              ],
+            },
+          },
+        ]}
+      />
+    </QueryClientProvider>
+  )
+  const user = userEvent.setup()
+  try {
+    expect(screen.getByText('request-123')).toBeVisible()
+    expect(screen.getByText('upstream-456')).toBeVisible()
+    expect(screen.getByText('Not recorded')).toBeVisible()
+    expect(screen.getAllByRole('button', { name: 'Delete' })[1]).toBeDisabled()
+    await user.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+    let dialog = await screen.findByRole('alertdialog')
+    expect(remove).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(remove).not.toHaveBeenCalled()
+    await user.click(screen.getAllByRole('button', { name: 'Delete' })[0])
+    dialog = await screen.findByRole('alertdialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+    await waitFor(() =>
+      expect(remove).toHaveBeenCalledWith(
+        '/api/status-monitor/intelligence/results/run-1'
+      )
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    )
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['status-monitor', 'intelligence'],
+    })
   } finally {
     view.unmount()
     client.clear()

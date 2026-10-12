@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
+import { Maximize2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -24,8 +25,10 @@ import {
   WebPreview,
   WebPreviewBody,
 } from '@/components/ai-elements/web-preview'
+import { Dialog } from '@/components/dialog'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
+import { Button } from '@/components/ui/button'
 
 import { getIntelligenceResult } from './intelligence-api'
 import { intelligencePreviewDocument } from './intelligence-html'
@@ -37,8 +40,7 @@ export function IntelligencePreview(props: {
   questionIndex: number
 }) {
   const { t } = useTranslation()
-  const viewport = useRef<HTMLDivElement>(null)
-  const [scale, setScale] = useState(1)
+  const [expanded, setExpanded] = useState(false)
   const query = useQuery({
     queryKey: ['status-monitor', 'intelligence-result', props.taskId],
     queryFn: () => getIntelligenceResult(props.taskId),
@@ -57,19 +59,6 @@ export function IntelligencePreview(props: {
     [html]
   )
 
-  useEffect(() => {
-    const element = viewport.current
-    if (!element) return
-    // Keep the generated page at a consistent desktop viewport, then fit the
-    // whole scene into the card instead of cropping a full-width document.
-    setScale(element.getBoundingClientRect().width / 960)
-    const observer = new ResizeObserver(([entry]) => {
-      setScale(entry.contentRect.width / 960)
-    })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [html])
-
   if (query.isPending) return <LoadingState className='aspect-[6/5] min-h-0' />
   if (query.isError) {
     return (
@@ -86,17 +75,68 @@ export function IntelligencePreview(props: {
   }
 
   return (
+    <>
+      <div className='relative border-t'>
+        <div className='pointer-events-none' inert>
+          <IntelligenceAnimation document={previewDocument} />
+        </div>
+        <Button
+          variant='ghost'
+          aria-label={t('Enlarge preview')}
+          className='absolute inset-0 h-full w-full rounded-none p-0 hover:bg-transparent active:translate-y-0'
+          onClick={() => setExpanded(true)}
+        >
+          <span className='bg-background/80 text-foreground absolute right-2 bottom-2 rounded-md border p-1.5'>
+            <Maximize2 aria-hidden='true' className='size-3.5' />
+          </span>
+        </Button>
+      </div>
+      <Dialog
+        open={expanded}
+        onOpenChange={setExpanded}
+        title={t('Generated animation preview')}
+        contentClassName='sm:max-w-[min(64rem,95vw)]'
+        bodyClassName='flex justify-center'
+      >
+        {expanded && (
+          <div className='w-full max-w-[min(960px,84vh)]'>
+            <IntelligenceAnimation document={previewDocument} />
+          </div>
+        )}
+      </Dialog>
+    </>
+  )
+}
+
+function IntelligenceAnimation(props: { document: string }) {
+  const { t } = useTranslation()
+  const viewport = useRef<HTMLDivElement>(null)
+  const [scale, setScale] = useState(1)
+  useEffect(() => {
+    const element = viewport.current
+    if (!element) return
+    // Keep the generated page at a consistent desktop viewport, then fit the
+    // whole scene into the card instead of cropping a full-width document.
+    setScale(element.getBoundingClientRect().width / 960)
+    const observer = new ResizeObserver(([entry]) => {
+      setScale(entry.contentRect.width / 960)
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [props.document])
+
+  return (
     <div
       ref={viewport}
       data-preview-viewport
-      className='bg-muted relative aspect-[6/5] overflow-hidden border-t'
+      className='bg-muted relative aspect-[6/5] overflow-hidden'
     >
       <WebPreview
         className='absolute top-0 left-0 h-[800px] w-[960px] origin-top-left rounded-none border-0'
         style={{ transform: `scale(${scale})` }}
       >
         <WebPreviewBody
-          srcDoc={previewDocument}
+          srcDoc={props.document}
           sandbox='allow-scripts'
           referrerPolicy='no-referrer'
           title={t('Generated animation preview')}
