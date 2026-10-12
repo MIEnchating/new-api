@@ -137,6 +137,10 @@ it.each(['2fa', 'passkey'] as const)(
 )
 
 it('refreshes Telegram bindings from the server result after the callback popup has closed', async () => {
+  client.setQueryData(STATUS_QUERY_KEY, {
+    telegram_oauth: true,
+    telegram_oauth_configured: true,
+  })
   const popup = {
     closed: false,
     location: { replace: vi.fn() },

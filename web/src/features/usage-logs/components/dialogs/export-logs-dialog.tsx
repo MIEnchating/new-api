@@ -22,6 +22,7 @@ import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { CompactDateTimeRangePicker } from '@/components/compact-date-time-range-picker'
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { useStatus } from '@/hooks/use-status'
@@ -36,7 +37,6 @@ import {
   toCsvLine,
 } from '../../lib/export'
 import { buildApiParams, getDefaultTimeRange } from '../../lib/utils'
-import { CompactDateTimeRangePicker } from '../compact-date-time-range-picker'
 import { useLogsViewScope } from '../usage-logs-provider'
 
 const route = getRouteApi('/_authenticated/usage-logs/$section')

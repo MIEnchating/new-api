@@ -302,6 +302,7 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
           <DataTableFacetedFilter
             key={filter.columnId}
             column={column}
+            selectedValues={column.getFilterValue() as string[] | undefined}
             title={filter.title}
             options={filter.options}
             singleSelect={filter.singleSelect}
@@ -310,7 +311,7 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
         )
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [props.filters, props.table]
+    [props.filters, props.table, props.table.getState().columnFilters]
   )
 
   const handleReset = () => {

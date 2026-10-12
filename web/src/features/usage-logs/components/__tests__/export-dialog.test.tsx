@@ -165,61 +165,67 @@ it('blocks a range longer than the configured limit before any request', async (
   expect(fetchSpy).not.toHaveBeenCalled()
 })
 
-it('downloads the streamed logs of the current filters as CSV', async () => {
-  const fetchSpy = mockExportResponse([
-    {
-      id: 1,
-      created_at: 1760000000,
-      type: 2,
-      content: '',
-      token_name: 'prod',
-      model_name: 'gpt-4o',
-      quota: 0,
-      other: '',
-      request_id: 'req-2',
-    },
-    {
-      id: 2,
-      created_at: 1759990000,
-      type: 2,
-      content: '',
-      token_name: 'prod',
-      model_name: 'gpt-4o',
-      quota: 0,
-      other: '',
-      request_id: 'req-1',
-    },
-    { success: true, message: '', data: { count: 2 } },
-  ])
-  const success = vi.spyOn(toast, 'success')
-  const user = userEvent.setup()
-  const range = recentRange()
-  renderExport({ role: ROLE.USER, search: { ...range, model: 'gpt-4o' } })
+it.each([
+  { role: ROLE.USER, path: '/api/log/self/export' },
+  { role: ROLE.ADMIN, path: '/api/log/export' },
+])(
+  'downloads filtered CSV using $path for role $role',
+  async ({ role, path }) => {
+    const fetchSpy = mockExportResponse([
+      {
+        id: 1,
+        created_at: 1760000000,
+        type: 2,
+        content: '',
+        token_name: 'prod',
+        model_name: 'gpt-4o',
+        quota: 0,
+        other: '',
+        request_id: 'req-2',
+      },
+      {
+        id: 2,
+        created_at: 1759990000,
+        type: 2,
+        content: '',
+        token_name: 'prod',
+        model_name: 'gpt-4o',
+        quota: 0,
+        other: '',
+        request_id: 'req-1',
+      },
+      { success: true, message: '', data: { count: 2 } },
+    ])
+    const success = vi.spyOn(toast, 'success')
+    const user = userEvent.setup()
+    const range = recentRange()
+    renderExport({ role, search: { ...range, model: 'gpt-4o' } })
 
-  await user.click(await screen.findByRole('button', { name: 'Export' }))
-  await user.click(
-    within(screen.getByRole('dialog')).getByRole('button', { name: 'Export' })
-  )
+    await user.click(await screen.findByRole('button', { name: 'Export' }))
+    await user.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Export' })
+    )
 
-  await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1))
-  const [url] = fetchSpy.mock.calls[0]
-  const params = new URL(String(url), 'http://localhost').searchParams
-  expect(String(url)).toMatch(/^\/api\/log\/self\/export\?/)
-  expect(params.get('model_name')).toBe('gpt-4o')
-  expect(params.get('start_timestamp')).toBe(
-    String(Math.floor(range.startTime / 1000))
-  )
-  expect(params.has('p')).toBe(false)
-  const file = createObjectURL.mock.calls[0][0]
-  const bytes = new Uint8Array(await file.arrayBuffer())
-  expect(bytes.subarray(0, 3)).toEqual(new Uint8Array([0xef, 0xbb, 0xbf]))
-  const rows = (await file.text()).trimEnd().split('\r\n')
-  expect(rows).toHaveLength(3)
-  expect(rows[1]).toContain('"req-2"')
-  expect(rows[2]).toContain('"req-1"')
-  expect(success).toHaveBeenCalledWith('Exported 2 logs')
-  await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
-})
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledTimes(1))
+    const [url] = fetchSpy.mock.calls[0]
+    const params = new URL(String(url), 'http://localhost').searchParams
+    expect(new URL(String(url), 'http://localhost').pathname).toBe(path)
+    expect(params.get('model_name')).toBe('gpt-4o')
+    expect(params.get('start_timestamp')).toBe(
+      String(Math.floor(range.startTime / 1000))
+    )
+    expect(params.has('p')).toBe(false)
+    const file = createObjectURL.mock.calls[0][0]
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    expect(bytes.subarray(0, 3)).toEqual(new Uint8Array([0xef, 0xbb, 0xbf]))
+    const rows = (await file.text()).trimEnd().split('\r\n')
+    expect(rows).toHaveLength(3)
+    expect(rows[1]).toContain('"req-2"')
+    expect(rows[2]).toContain('"req-1"')
+    expect(success).toHaveBeenCalledWith('Exported 2 logs')
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  }
+)
 
 it('reports a server refusal and keeps the dialog open without a download', async () => {
   mockExportResponse([

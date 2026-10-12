@@ -31,6 +31,7 @@ const consumeLog: UsageLog = {
   username: 'alice',
   token_name: 'prod',
   model_name: 'gpt-4o-mini',
+  actual_response_model: '',
   quota: 250000,
   prompt_tokens: 2008,
   completion_tokens: 16,

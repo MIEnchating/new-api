@@ -126,7 +126,7 @@ describe('theme preference persistence', () => {
     expect(screen.getByLabelText('Theme mode')).toHaveTextContent('system')
     expect(document.documentElement).toHaveClass('light')
     expect(document.body).not.toHaveAttribute('data-theme-preset')
-    expect(document.body).toHaveAttribute('data-theme-font', 'system')
+    expect(document.body).toHaveAttribute('data-theme-font', 'sans')
     expect(document.body).not.toHaveAttribute('data-theme-radius')
     expect(document.body).not.toHaveAttribute('data-theme-scale')
     expect(document.body).toHaveAttribute('data-theme-content-layout', 'full')
@@ -172,7 +172,7 @@ describe('theme preference persistence', () => {
     expect(screen.getByLabelText('Theme mode')).toHaveTextContent('system')
     expect(document.documentElement).toHaveClass('light')
     expect(document.body).not.toHaveAttribute('data-theme-preset')
-    expect(document.body).toHaveAttribute('data-theme-font', 'system')
+    expect(document.body).toHaveAttribute('data-theme-font', 'sans')
     expect(document.body).not.toHaveAttribute('data-theme-radius')
     expect(document.body).not.toHaveAttribute('data-theme-scale')
     expect(document.body).toHaveAttribute('data-theme-content-layout', 'full')
@@ -194,7 +194,7 @@ describe('theme preference persistence', () => {
 
       expect(screen.getByLabelText('Theme mode')).toHaveTextContent('system')
       expect(document.body).not.toHaveAttribute('data-theme-preset')
-      expect(document.body).toHaveAttribute('data-theme-font', 'system')
+      expect(document.body).toHaveAttribute('data-theme-font', 'sans')
       expect(document.body).not.toHaveAttribute('data-theme-radius')
       expect(document.body).not.toHaveAttribute('data-theme-scale')
       expect(document.body).toHaveAttribute('data-theme-content-layout', 'full')
@@ -269,23 +269,23 @@ describe('theme font selection', () => {
     expect(document.body).toHaveAttribute('data-theme-font', 'sans')
   })
 
-  it('restores the browser font after selecting Auto and remounting', async () => {
+  it('restores the default preset font after selecting Auto and remounting', async () => {
     localStorage.setItem('newapi:theme:v1:font', 'sans')
     const user = userEvent.setup()
     const first = render(<ThemeFixture />)
 
     await user.click(screen.getByRole('button', { name: 'Auto font' }))
 
-    expect(document.body).toHaveAttribute('data-theme-font', 'system')
+    expect(document.body).toHaveAttribute('data-theme-font', 'sans')
     expect(localStorage.getItem('newapi:theme:v1:font')).toBeNull()
 
     first.unmount()
     render(<ThemeFixture />)
 
-    expect(document.body).toHaveAttribute('data-theme-font', 'system')
+    expect(document.body).toHaveAttribute('data-theme-font', 'sans')
   })
 
-  it('uses the preset font in Auto and restores the browser font on the default preset', async () => {
+  it('uses the preset font in Auto and restores the default preset font on the default preset', async () => {
     const user = userEvent.setup()
     render(<ThemeFixture />)
 
@@ -295,7 +295,7 @@ describe('theme font selection', () => {
 
     await user.click(screen.getByRole('button', { name: 'Default preset' }))
 
-    expect(document.body).toHaveAttribute('data-theme-font', 'system')
+    expect(document.body).toHaveAttribute('data-theme-font', 'sans')
     expect(localStorage.getItem('newapi:theme:v1:font')).toBeNull()
   })
 })

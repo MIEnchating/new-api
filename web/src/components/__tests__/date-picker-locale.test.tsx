@@ -38,7 +38,11 @@ async function setInterfaceLanguage(language: string) {
 }
 
 async function openCalendar(label: string) {
-  await userEvent.click(screen.getByRole('button', { name: label }))
+  await userEvent.click(
+    screen.getByRole('button', {
+      name: (name) => name === label || name === `${label} ${label}`,
+    })
+  )
   return screen.findByRole('grid')
 }
 

@@ -133,7 +133,9 @@ it('searches only the selected user group and lists all users again after the fi
 
   await waitFor(() => expect(get).toHaveBeenLastCalledWith(premiumSearchUrl))
   expect(router.state.location.search).toMatchObject({ group: 'premium' })
-  expect(getGroupFilterTrigger()).toHaveTextContent('premium')
+  await waitFor(() =>
+    expect(getGroupFilterTrigger()).toHaveTextContent('premium')
+  )
 
   await user.click(screen.getByRole('option', { name: 'Clear filters' }))
 

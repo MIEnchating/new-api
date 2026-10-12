@@ -58,6 +58,7 @@ function makeLog(other: LogOtherData, type = 2): UsageLog {
     username: 'user',
     token_name: 'token',
     model_name: 'wan2.5-i2v-preview',
+    actual_response_model: '',
     quota: 5000,
     prompt_tokens: 0,
     completion_tokens: 0,
@@ -142,7 +143,11 @@ test('keeps log details open when the parent refreshes with unchanged data', asy
   const { rerender } = render(<DetailPreview other={other} isAdmin />, {
     wrapper,
   })
-  fireEvent.click(screen.getByRole('button', { name: 'Per-call · $0.25' }))
+  fireEvent.click(
+    screen.getByRole('button', {
+      name: 'Click to view full details: Per-call · $0.25',
+    })
+  )
   expect(await screen.findByRole('dialog')).toBeVisible()
   rerender(<DetailPreview other={other} isAdmin />)
   expect(screen.getByRole('dialog')).toBeVisible()
@@ -307,7 +312,9 @@ test.each([false, true])(
     )
     await act(() => i18n.changeLanguage('zh'))
     expect(
-      screen.getByRole('button', { name: '动态计费 · 特殊计费表达式' })
+      screen.getByRole('button', {
+        name: '点击查看详细信息: 动态计费 · 特殊计费表达式',
+      })
     ).toBeVisible()
   }
 )
