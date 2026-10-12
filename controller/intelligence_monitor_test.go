@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -126,9 +127,25 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	require.NoError(t, db.Create(&model.User{Id: 1, Username: "intelligence-test", Role: common.RoleRootUser, Status: common.UserStatusEnabled, Group: "default", Quota: 1000000}).Error)
 	output := "<!DOCTYPE html><html><body><svg viewBox=\"0 0 10 10\">" + strings.Repeat("<!-- frame -->", 900) + "</svg></body></html>"
 	var streamRequests, jsonRequests atomic.Int32
+	var arrivals atomic.Int32
+	var checkParallel atomic.Bool
+	checkParallel.Store(true)
+	releaseRequests := make(chan struct{})
 	var responseTerminal atomic.Value
 	responseTerminal.Store("response.failed")
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if checkParallel.Load() {
+			if arrivals.Add(1) == 4 {
+				close(releaseRequests)
+			}
+			select {
+			case <-releaseRequests:
+			case <-time.After(5 * time.Second):
+				assert.Fail(t, "two runs with two requests each must execute concurrently")
+				w.WriteHeader(http.StatusGatewayTimeout)
+				return
+			}
+		}
 		var request map[string]any
 		if !assert.NoError(t, common.DecodeJson(r.Body, &request)) {
 			w.WriteHeader(400)
@@ -209,19 +226,33 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	queued := call(RunIntelligenceMonitor, http.MethodPost, nil)
 	require.True(t, gjson.GetBytes(queued.Body.Bytes(), "success").Bool(), queued.Body.String())
 	duplicate := call(RunIntelligenceMonitor, http.MethodPost, nil)
-	assert.False(t, gjson.GetBytes(duplicate.Body.Bytes(), "success").Bool())
-	task, err := model.GetActiveSystemTask(intelligenceTaskType)
+	require.True(t, gjson.GetBytes(duplicate.Body.Bytes(), "success").Bool())
+	task, err := model.GetSystemTaskByTaskID(gjson.GetBytes(queued.Body.Bytes(), "data.task_id").String())
 	require.NoError(t, err)
 	require.NotNil(t, task)
 	claimed, ok, err := model.ClaimSystemTask(task.ID, task.Type, "test-runner", time.Now().Add(time.Minute).Unix())
 	require.NoError(t, err)
 	require.True(t, ok)
-	handler.Run(context.Background(), claimed, "test-runner")
+	second, err := model.GetSystemTaskByTaskID(gjson.GetBytes(duplicate.Body.Bytes(), "data.task_id").String())
+	require.NoError(t, err)
+	require.NotEqual(t, task.TaskID, second.TaskID)
+	second, ok, err = model.ClaimSystemTask(second.ID, second.Type, "second-runner", time.Now().Add(time.Minute).Unix())
+	require.NoError(t, err)
+	require.True(t, ok)
+	var runs sync.WaitGroup
+	runs.Go(func() { handler.Run(context.Background(), claimed, "test-runner") })
+	runs.Go(func() { handler.Run(context.Background(), second, "second-runner") })
+	runs.Wait()
+	checkParallel.Store(false)
+	second, err = model.GetSystemTaskByTaskID(second.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, model.SystemTaskStatusSucceeded, second.Status, second.Result)
+
 	finished, err := model.GetSystemTaskByTaskID(task.TaskID)
 	require.NoError(t, err)
 	require.Equal(t, model.SystemTaskStatusSucceeded, finished.Status, finished.Error+finished.Result)
-	assert.EqualValues(t, 1, streamRequests.Load())
-	assert.EqualValues(t, 1, jsonRequests.Load())
+	assert.EqualValues(t, 2, streamRequests.Load())
+	assert.EqualValues(t, 2, jsonRequests.Load())
 	assert.Equal(t, output, gjson.Get(finished.Result, "channels.0.html").String())
 	assert.Equal(t, "Pelican", gjson.Get(finished.Result, "channels.0.question_name").String())
 	assert.Len(t, gjson.Get(finished.Result, "channels").Array(), 2)
@@ -241,6 +272,9 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, claimedSchedule)
 	require.NoError(t, model.FinishSystemTask(scheduled.TaskID, "schedule-runner", model.SystemTaskStatusSucceeded, nil, ""))
+	_, err = model.CreateSystemTask(intelligenceTaskType, payload, nil)
+	require.Error(t, err, "a completed scheduled run must still deduplicate concurrent schedulers")
+
 	_, due, err = handler.ScheduledPayload(now.Add(20 * time.Second))
 	require.NoError(t, err)
 	assert.False(t, due)
@@ -356,6 +390,31 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 			assert.Equal(t, want, recorder.Code, "%s %s authenticated=%v: %s", route.method, route.path, authenticated, recorder.Body.String())
 		}
 	}
+
+	// Execution slots limit concurrency across independent runners. Extra tasks stay queued.
+	var slotTasks []*model.SystemTask
+	for index := range 5 {
+		queuedTask, err := model.CreateSystemTask(intelligenceTaskType, config, nil)
+		require.NoError(t, err)
+		slotTasks = append(slotTasks, queuedTask)
+		_, acquired, err := model.ClaimSystemTask(queuedTask.ID, queuedTask.Type, fmt.Sprintf("slot-runner-%d", index), time.Now().Add(time.Minute).Unix())
+		require.NoError(t, err)
+		assert.Equal(t, index < 4, acquired)
+	}
+	require.NoError(t, model.RenewSystemTaskLock(slotTasks[1].TaskID, "slot-runner-1", time.Now().Add(2*time.Minute).Unix()))
+	require.NoError(t, model.FinishSystemTask(slotTasks[0].TaskID, "slot-runner-0", model.SystemTaskStatusSucceeded, nil, ""))
+	_, acquired, err := model.ClaimSystemTask(slotTasks[4].ID, intelligenceTaskType, "queued-runner", time.Now().Add(time.Minute).Unix())
+	require.NoError(t, err)
+	require.True(t, acquired, "a released slot must admit queued work")
+	require.NoError(t, db.Model(&model.SystemTaskLock{}).Where("task_id = ?", slotTasks[1].TaskID).Update("locked_until", time.Now().Add(-time.Minute).Unix()).Error)
+	require.NoError(t, model.ExpireStaleSystemTaskLocks(time.Now().Unix()))
+	expired, err := model.GetSystemTaskByTaskID(slotTasks[1].TaskID)
+	require.NoError(t, err)
+	assert.Equal(t, model.SystemTaskStatusFailed, expired.Status)
+	require.ErrorIs(t, model.UpdateSystemTaskState(expired.TaskID, "slot-runner-1", nil), model.ErrSystemTaskLockLost)
+	live, err := model.GetSystemTaskByTaskID(slotTasks[2].TaskID)
+	require.NoError(t, err)
+	assert.Equal(t, model.SystemTaskStatusRunning, live.Status, "expiring one slot must not affect another")
 	for _, tc := range []struct {
 		name     string
 		status   model.SystemTaskStatus

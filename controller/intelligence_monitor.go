@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -49,6 +51,13 @@ type intelligenceGroup struct {
 	Stream   *bool    `json:"stream,omitempty"`
 	Enabled  bool     `json:"enabled"`
 	Times    []string `json:"times"`
+}
+
+func (config intelligenceConfig) SystemTaskScheduleKey() string {
+	if config.ScheduledAt == 0 {
+		return ""
+	}
+	return fmt.Sprintf("intelligence_schedule_%d", config.ScheduledAt)
 }
 
 func (config intelligenceConfig) ForGroup(group intelligenceGroup) intelligenceConfig {
@@ -321,13 +330,9 @@ func RunIntelligenceMonitor(c *gin.Context) {
 		common.ApiErrorT(c, "Intelligence testing supports at most 50 channel-question pairs per run")
 		return
 	}
-	task, created, err := service.EnqueueSystemTask(intelligenceTaskType, config)
+	task, _, err := service.EnqueueSystemTask(intelligenceTaskType, config)
 	if err != nil {
 		common.ApiError(c, err)
-		return
-	}
-	if !created {
-		common.ApiErrorT(c, "An intelligence test is already running")
 		return
 	}
 	recordManageAudit(c, "intelligence_monitor.run", map[string]any{"task_id": task.TaskID, "group": request.Group})
@@ -339,7 +344,7 @@ type intelligenceTestHandler struct{}
 func (intelligenceTestHandler) Type() string { return intelligenceTaskType }
 
 // Daily times use Beijing time independently of the host timezone. Missed
-// minutes (server offline or a previous task still active) are not replayed.
+// minutes while the server is offline are not replayed. Active runs do not block scheduling.
 func (intelligenceTestHandler) ScheduledPayload(now time.Time) (any, bool, error) {
 	config := getIntelligenceConfig()
 	if config.Validate() != nil {
@@ -451,56 +456,94 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 		return
 	}
 	total := len(targets) * len(config.Questions)
-	result := intelligenceResult{Channels: make([]intelligenceChannelResult, 0, total)}
+	result := intelligenceResult{Channels: make([]intelligenceChannelResult, total)}
 	progress := service.NewSystemTaskProgressReporter(task, runnerID)
 	progress(0, total)
-	valid := 0
-	for _, target := range targets {
-		channel, config := target.channel, target.config
-		isStream := config.Stream == nil || *config.Stream
-		for questionIndex, question := range config.Questions {
-			if err := ctx.Err(); err != nil {
-				finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, err)
-				return
-			}
-			requestID := common.NewRequestId()
-			started := time.Now()
-			requestCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-			response := testChannelWithProbe(requestCtx, channel, userID, config.Model, config.Endpoint, isStream, &channelTestProbe{RequestID: requestID, Group: config.Group, Prompt: question.Prompt})
-			cancel()
-			row := intelligenceChannelResult{RequestID: requestID, Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, ChannelID: channel.Id, ChannelName: channel.Name, QuestionIndex: questionIndex, QuestionName: question.Name, LatencyMs: time.Since(started).Milliseconds()}
-			if response.context != nil {
-				row.UpstreamRequestID = response.context.GetString(common.UpstreamRequestIdKey)
-			}
-			outcome := response.streamOutcome
-			streamFailed := isStream && (outcome.HasErrors ||
-				(outcome.EndReason != relaycommon.StreamEndReasonNone && outcome.EndReason != relaycommon.StreamEndReasonDone && outcome.EndReason != relaycommon.StreamEndReasonEOF && outcome.EndReason != relaycommon.StreamEndReasonHandlerStop) ||
-				(outcome.Response != relaycommon.ResponseOutcomeUnknown && outcome.Response != relaycommon.ResponseOutcomeCompleted) ||
-				(outcome.ExpectsTerminal && outcome.Response != relaycommon.ResponseOutcomeCompleted))
-			if response.localErr != nil || response.newAPIError != nil || streamFailed {
-				// Upstream errors can contain credentials or internal URLs. Do not persist them.
-				row.Error = "Intelligence test request failed"
-			} else {
-				row.HTML = extractIntelligenceOutput(response.responseBody, config.Endpoint, isStream)
-				if row.HTML == "" {
-					row.Error = "Intelligence test returned no output"
-				} else if len(row.HTML) > 131072 {
-					row.HTML = ""
-					row.Error = "Intelligence test output exceeded 128 KiB"
-				} else {
-					valid++
-				}
-			}
-			result.Channels = append(result.Channels, row)
-			progress(len(result.Channels), total)
-		}
+	jobs := make(chan int, total)
+	for index := range total {
+		jobs <- index
 	}
-
+	close(jobs)
+	type completedRequest struct {
+		index int
+		row   intelligenceChannelResult
+	}
+	completed := make(chan completedRequest, total)
+	var workers sync.WaitGroup
+	for range min(4, total) {
+		workers.Go(func() {
+			for index := range jobs {
+				if ctx.Err() != nil {
+					return
+				}
+				target := targets[index/len(config.Questions)]
+				questionIndex := index % len(config.Questions)
+				channel := *target.channel
+				row := runIntelligenceRequest(ctx, &channel, userID, target.config, questionIndex)
+				completed <- completedRequest{index, row}
+			}
+		})
+	}
+	go func() { workers.Wait(); close(completed) }()
+	valid, processed := 0, 0
+	for done := range completed {
+		result.Channels[done.index] = done.row
+		if done.row.Error == "" {
+			valid++
+		}
+		processed++
+		progress(processed, total)
+	}
+	// Unstarted requests are not published as empty successful results on cancellation.
+	result.Channels = slices.DeleteFunc(result.Channels, func(row intelligenceChannelResult) bool { return row.RequestID == "" })
+	if err := ctx.Err(); err != nil {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, err)
+		return
+	}
 	if valid == 0 {
 		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, errors.New("No intelligence test completed successfully"))
 		return
 	}
 	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, result, nil)
+}
+
+// Each request owns its context and result; only the coordinator persists progress.
+func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID int, config intelligenceConfig, questionIndex int) (row intelligenceChannelResult) {
+	question := config.Questions[questionIndex]
+	row = intelligenceChannelResult{RequestID: common.NewRequestId(), Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, ChannelID: channel.Id, ChannelName: channel.Name, QuestionIndex: questionIndex, QuestionName: question.Name}
+	started := time.Now()
+	defer func() {
+		row.LatencyMs = time.Since(started).Milliseconds()
+		if recover() != nil {
+			row.HTML = ""
+			row.Error = "Intelligence test request failed"
+		}
+	}()
+	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	isStream := config.Stream == nil || *config.Stream
+	response := testChannelWithProbe(requestCtx, channel, userID, config.Model, config.Endpoint, isStream, &channelTestProbe{RequestID: row.RequestID, Group: config.Group, Prompt: question.Prompt})
+	if response.context != nil {
+		row.UpstreamRequestID = response.context.GetString(common.UpstreamRequestIdKey)
+	}
+	outcome := response.streamOutcome
+	streamFailed := isStream && (outcome.HasErrors ||
+		(outcome.EndReason != relaycommon.StreamEndReasonNone && outcome.EndReason != relaycommon.StreamEndReasonDone && outcome.EndReason != relaycommon.StreamEndReasonEOF && outcome.EndReason != relaycommon.StreamEndReasonHandlerStop) ||
+		(outcome.Response != relaycommon.ResponseOutcomeUnknown && outcome.Response != relaycommon.ResponseOutcomeCompleted) ||
+		(outcome.ExpectsTerminal && outcome.Response != relaycommon.ResponseOutcomeCompleted))
+	if response.localErr != nil || response.newAPIError != nil || streamFailed {
+		// Never persist upstream errors, which may contain credentials or internal URLs.
+		row.Error = "Intelligence test request failed"
+		return row
+	}
+	row.HTML = extractIntelligenceOutput(response.responseBody, config.Endpoint, isStream)
+	if row.HTML == "" {
+		row.Error = "Intelligence test returned no output"
+	} else if len(row.HTML) > 131072 {
+		row.HTML = ""
+		row.Error = "Intelligence test output exceeded 128 KiB"
+	}
+	return row
 }
 
 func buildIntelligenceRequest(modelName, endpoint, prompt string, isStream bool) dto.Request {

@@ -233,7 +233,7 @@ it('rejects an empty question or an out-of-range schedule without saving', async
   const view = render(
     <QueryClientProvider client={client}>
       <SettingsPageProvider actionsContainer={actions}>
-        <IntelligenceSettings data={data} running />
+        <IntelligenceSettings data={data} />
       </SettingsPageProvider>
     </QueryClientProvider>
   )
@@ -242,7 +242,7 @@ it('rejects an empty question or an out-of-range schedule without saving', async
     'Complete each question'
   )
   expect(put).not.toHaveBeenCalled()
-  expect(screen.getByRole('button', { name: 'Running' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Run all groups' })).toBeEnabled()
   view.unmount()
   client.clear()
 })
@@ -325,7 +325,7 @@ it('localizes the built-in question and endpoint menu while preserving user edit
   const view = render(
     <I18nextProvider i18n={i18n}>
       <QueryClientProvider client={client}>
-        <IntelligenceSettings data={data} running={false} />
+        <IntelligenceSettings data={data} />
       </QueryClientProvider>
     </I18nextProvider>
   )
@@ -361,7 +361,7 @@ it('localizes the built-in question and endpoint menu while preserving user edit
   }
 })
 
-it('saves independent daily times for multiple groups and manually runs only the selected group', async () => {
+it('saves independent daily times for multiple groups and allows more runs while another task is active', async () => {
   const data: IntelligenceMonitorData = {
     config: {
       questions: [{ name: 'Pelican', prompt: 'Draw a pelican' }],
@@ -383,7 +383,18 @@ it('saves independent daily times for multiple groups and manually runs only the
       ],
     },
     catalog: { default: ['model-a'], vip: ['model-b'] },
-    history: [],
+    history: [
+      {
+        task_id: 'active-run',
+        status: 'running',
+        created_at: 1791613858,
+        updated_at: 1791613858,
+        group: 'default',
+        model: 'model-a',
+        endpoint: 'openai',
+        error: '',
+      },
+    ],
   }
   const client = new QueryClient()
   const actions = document.createElement('div')
@@ -398,7 +409,7 @@ it('saves independent daily times for multiple groups and manually runs only the
   const view = render(
     <QueryClientProvider client={client}>
       <SettingsPageProvider actionsContainer={actions}>
-        <IntelligenceSettings data={data} running={false} />
+        <IntelligenceSettings data={data} />
       </SettingsPageProvider>
     </QueryClientProvider>
   )
@@ -414,6 +425,14 @@ it('saves independent daily times for multiple groups and manually runs only the
       expect(post).toHaveBeenCalledWith(
         '/api/status-monitor/intelligence/run',
         { group: 'vip' }
+      )
+    )
+    expect(screen.getByRole('button', { name: 'Run all groups' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Run all groups' }))
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        '/api/status-monitor/intelligence/run',
+        {}
       )
     )
     await user.click(screen.getAllByRole('button', { name: 'Add time' })[1])
@@ -462,7 +481,6 @@ it('keeps daily times compact and keyboard editable in a separate group settings
   const view = render(
     <QueryClientProvider client={client}>
       <IntelligenceSettings
-        running={false}
         data={{
           config: {
             groups: [

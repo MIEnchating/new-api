@@ -30,7 +30,7 @@ const (
 // SystemTaskHandler executes a claimed task of a specific type. Run owns the
 // task lifecycle from claim to terminal state: it MUST call
 // model.FinishSystemTask (succeeded/failed) before returning and MUST honor
-// ctx cancellation, which the runner triggers if the per-type lock is lost.
+// ctx cancellation, which the runner triggers if its execution lease is lost.
 type SystemTaskHandler interface {
 	Type() string
 	Run(ctx context.Context, task *model.SystemTask, runnerID string)
@@ -203,8 +203,17 @@ func StartLogCleanupTask(targetTimestamp int64) (*model.SystemTask, error) {
 
 // EnqueueSystemTask creates an on-demand task of the given type. The returned
 // bool is true only when a new pending row was created; false means an active
-// task of the same type already exists and was returned.
+// singleton task of the same type already exists and was returned. Concurrent
+// task types always enqueue a separate run.
 func EnqueueSystemTask(taskType string, payload any) (*model.SystemTask, bool, error) {
+	if model.SystemTaskConcurrency(taskType) > 1 {
+		task, err := model.CreateSystemTask(taskType, payload, nil)
+		if err != nil {
+			return nil, false, err
+		}
+		notifySystemTaskRunner()
+		return task, true, nil
+	}
 	activeTask, err := model.GetActiveSystemTask(taskType)
 	if err != nil {
 		return nil, false, err
@@ -225,7 +234,7 @@ func EnqueueSystemTask(taskType string, payload any) (*model.SystemTask, bool, e
 	return task, true, nil
 }
 
-// runSystemTaskClaimPass tries to claim one pending task per registered type
+// runSystemTaskClaimPass claims pending tasks within each type's slot limit
 // and dispatches each claimed task in its own goroutine so a long-running
 // handler (e.g. channel test) never blocks another type (e.g. log cleanup).
 func runSystemTaskClaimPass(runnerID string) {
@@ -239,33 +248,44 @@ func runSystemTaskClaimPass(runnerID string) {
 		logger.LogWarn(context.Background(), common.LogText("system task runner query failed: %v", err))
 		return
 	}
+
 	for _, handler := range handlers {
-		task := pendingTasks[handler.Type()]
-		if task == nil {
-			continue
+		tasks := []*model.SystemTask{pendingTasks[handler.Type()]}
+		if handler.Type() == model.SystemTaskTypeIntelligenceTest {
+			tasks, err = model.FindPendingIntelligenceTasks()
+			if err != nil {
+				logger.LogWarn(context.Background(), common.LogText("system task runner query failed: %v", err))
+				continue
+			}
 		}
-		claimedTask, claimed, err := model.ClaimSystemTask(task.ID, handler.Type(), runnerID, systemTaskLockUntil())
-		if err != nil {
-			logger.LogWarn(context.Background(), common.LogText("system task claim failed: %v", err))
-			continue
-		}
-		if !claimed {
-			continue
-		}
-		dispatchHandler := handler
-		dispatchTask := claimedTask
-		gopool.Go(func() {
-			runWithLeaseHeartbeat(dispatchTask, runnerID, func(ctx context.Context) {
-				dispatchHandler.Run(ctx, dispatchTask, runnerID)
+		for _, task := range tasks {
+			if task == nil {
+				continue
+			}
+			// Each claim owns a unique lease, including competing claims for the same
+			// queued task. A losing claim must never release the winner's lease.
+			owner := runnerID + "-" + common.GetRandomString(8)
+			claimedTask, claimed, err := model.ClaimSystemTask(task.ID, handler.Type(), owner, systemTaskLockUntil())
+			if err != nil {
+				logger.LogWarn(context.Background(), common.LogText("system task claim failed: %v", err))
+				continue
+			}
+			if !claimed {
+				break
+			}
+			gopool.Go(func() {
+				defer notifySystemTaskRunner()
+				runWithLeaseHeartbeat(claimedTask, owner, func(ctx context.Context) {
+					handler.Run(ctx, claimedTask, owner)
+				})
 			})
-		})
+		}
 	}
 }
 
-// runSystemTaskScheduler creates a new task row for each enabled scheduled
-// handler whose interval has elapsed since its last run and that has no active
-// row. The task active_key unique index deduplicates concurrent creation while
-// the per-type lock guarantees only one runner executes the task.
+// runSystemTaskScheduler creates due scheduled runs. Singleton types require
+// no active row; concurrent calendar types deduplicate by their schedule identity.
+// Database execution slots enforce each type's concurrency limit.
 func runSystemTaskScheduler() {
 	now := common.GetTimestamp()
 	handlers := registeredSystemTaskHandlers()
@@ -287,7 +307,7 @@ func runSystemTaskScheduler() {
 	}
 	for _, scheduled := range scheduledHandlers {
 		latest := latestTasks[scheduled.Type()]
-		if latest != nil {
+		if latest != nil && model.SystemTaskConcurrency(scheduled.Type()) == 1 {
 			if latest.Status == model.SystemTaskStatusPending || latest.Status == model.SystemTaskStatusRunning {
 				continue // an active row already exists
 			}
@@ -324,7 +344,7 @@ func runSystemTaskScheduler() {
 	}
 }
 
-// runWithLeaseHeartbeat renews the per-type lock on a background ticker while
+// runWithLeaseHeartbeat renews the execution lease on a background ticker while
 // fn runs. The TTL is a crash-detection window, not a task time limit: an
 // arbitrarily long handler stays alive as long as the heartbeat succeeds.
 func runWithLeaseHeartbeat(task *model.SystemTask, runnerID string, fn func(ctx context.Context)) {
@@ -353,8 +373,8 @@ func runWithLeaseHeartbeat(task *model.SystemTask, runnerID string, fn func(ctx 
 		}
 	}()
 
+	defer close(done)
 	fn(ctx)
-	close(done)
 }
 
 func runLogCleanupTask(ctx context.Context, task *model.SystemTask, runnerID string) {

@@ -84,16 +84,10 @@ export function IntelligenceSettingsSection() {
   })
   if (query.isPending) return <LoadingState />
   if (query.isError) return <ErrorState onRetry={() => void query.refetch()} />
-  const running = query.data.history.some(
-    (task) => task.status === 'pending' || task.status === 'running'
-  )
-  return <IntelligenceSettings data={query.data} running={running} />
+  return <IntelligenceSettings data={query.data} />
 }
 
-export function IntelligenceSettings(props: {
-  data: IntelligenceMonitorData
-  running: boolean
-}) {
+export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const endpoints = getIntelligenceEndpointOptions(t)
@@ -154,12 +148,11 @@ export function IntelligenceSettings(props: {
             onClick={() => run.mutate(undefined)}
             disabled={
               pending ||
-              props.running ||
               form.formState.isDirty ||
               !props.data.config.groups.every((group) => group.model)
             }
           >
-            {props.running ? t('Running') : t('Run all groups')}
+            {t('Run all groups')}
           </Button>
         </SettingsPageActionsPortal>
         <div className='grid min-w-0 items-start gap-5 @min-[60rem]:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]'>
@@ -368,7 +361,6 @@ export function IntelligenceSettings(props: {
                         size='sm'
                         disabled={
                           pending ||
-                          props.running ||
                           form.formState.isDirty ||
                           !selectedGroups[index].group ||
                           !selectedGroups[index].model
@@ -417,7 +409,7 @@ export function IntelligenceSettings(props: {
                 </Button>
                 <FieldDescription>
                   {t(
-                    'Each group has its own model, endpoint and daily times. The question bank is shared. Missed times are skipped while the server is offline or another test is running.'
+                    'Each group has its own model, endpoint and daily times. The question bank is shared. Missed times are skipped while the server is offline.'
                   )}
                 </FieldDescription>
               </div>
@@ -512,7 +504,7 @@ export function IntelligenceSettings(props: {
           )}
           <FieldDescription>
             {t(
-              'Save changes before running a test. Only one intelligence test can run at a time.'
+              'Save changes before running a test. Up to 4 runs execute simultaneously, with 4 concurrent requests per run. Additional runs wait in the queue.'
             )}
           </FieldDescription>
         </div>

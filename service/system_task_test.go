@@ -233,11 +233,23 @@ func TestEnqueueSystemTaskReportsCreatedAndExistingActive(t *testing.T) {
 	assert.NotEqual(t, first.TaskID, second.TaskID)
 }
 
-type calendarTestHandler struct{ due bool }
+type calendarTestHandler struct {
+	due      bool
+	taskType string
+	payload  any
+}
 
-func (*calendarTestHandler) Type() string                                   { return "test_calendar" }
+func (handler *calendarTestHandler) Type() string {
+	if handler.taskType != "" {
+		return handler.taskType
+	}
+	return "test_calendar"
+}
 func (*calendarTestHandler) Run(context.Context, *model.SystemTask, string) {}
 func (handler *calendarTestHandler) ScheduledPayload(time.Time) (any, bool, error) {
+	if handler.payload != nil {
+		return handler.payload, handler.due, nil
+	}
 	return map[string]string{"group": "vip"}, handler.due, nil
 }
 
@@ -257,4 +269,99 @@ func TestSystemTaskSchedulerCalendarPayload(t *testing.T) {
 	assert.Equal(t, "vip", payload["group"])
 	runSystemTaskScheduler()
 	assert.EqualValues(t, 1, countSystemTasks(t, handler.Type()))
+}
+
+func TestSystemTaskIntelligenceConcurrentDispatch(t *testing.T) {
+	truncate(t)
+	started := make(chan string, 5)
+	finished := make(chan error, 5)
+	release := make(chan struct{})
+	handler := &stubScheduledHandler{taskType: model.SystemTaskTypeIntelligenceTest, onRun: func(_ context.Context, task *model.SystemTask, runnerID string) {
+		started <- task.TaskID
+		<-release
+		finished <- model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, nil, "")
+	}}
+	withSystemTaskRegistry(t, handler)
+	// Close the gate even on failure, and await every dispatched handler before
+	// the shared test database is reset by the next test.
+	dispatched := 0
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+		for range dispatched {
+			select {
+			case <-finished:
+			case <-time.After(5 * time.Second):
+				t.Error("handler did not exit")
+			}
+		}
+	})
+	var tasks []*model.SystemTask
+	for range 5 {
+		task, created, err := EnqueueSystemTask(handler.Type(), nil)
+		require.NoError(t, err)
+		require.True(t, created)
+		tasks = append(tasks, task)
+	}
+	runSystemTaskClaimPass("first-runner")
+	for range 4 {
+		select {
+		case <-started:
+			dispatched++
+		case <-time.After(5 * time.Second):
+			t.Fatal("four intelligence tasks must start without waiting for completion")
+		}
+	}
+	runSystemTaskClaimPass("second-runner")
+	queued, err := model.GetSystemTaskByTaskID(tasks[4].TaskID)
+	require.NoError(t, err)
+	assert.Equal(t, model.SystemTaskStatusPending, queued.Status)
+	close(release)
+	for range 4 {
+		require.NoError(t, <-finished)
+		dispatched--
+	}
+	runSystemTaskClaimPass("second-runner")
+	select {
+	case id := <-started:
+		dispatched++
+		assert.Equal(t, tasks[4].TaskID, id)
+	case <-time.After(5 * time.Second):
+		t.Fatal("queued task did not start after slots were released")
+	}
+}
+
+// Stable calendar identities remain unique after completion; manual runs are independent.
+type intelligenceCalendarTestPayload struct{}
+
+func (intelligenceCalendarTestPayload) SystemTaskScheduleKey() string {
+	return "intelligence_schedule_test"
+}
+
+func TestSystemTaskSchedulerIntelligenceOverlapsManualRuns(t *testing.T) {
+	truncate(t)
+	handler := &calendarTestHandler{taskType: model.SystemTaskTypeIntelligenceTest, due: true, payload: intelligenceCalendarTestPayload{}}
+	withSystemTaskRegistry(t, handler)
+	manual, created, err := EnqueueSystemTask(handler.Type(), nil)
+	require.NoError(t, err)
+	require.True(t, created)
+	_, claimed, err := model.ClaimSystemTask(manual.ID, manual.Type, "manual-runner", common.GetTimestamp()+60)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	runSystemTaskScheduler()
+	runSystemTaskScheduler()
+	assert.EqualValues(t, 2, countSystemTasks(t, handler.Type()))
+	scheduled, err := model.GetLatestSystemTask(handler.Type())
+	require.NoError(t, err)
+	require.NotEqual(t, manual.TaskID, scheduled.TaskID)
+	_, claimed, err = model.ClaimSystemTask(scheduled.ID, scheduled.Type, "schedule-runner", common.GetTimestamp()+60)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	require.NoError(t, model.FinishSystemTask(scheduled.TaskID, "schedule-runner", model.SystemTaskStatusSucceeded, nil, ""))
+	runSystemTaskScheduler()
+	assert.EqualValues(t, 2, countSystemTasks(t, handler.Type()))
+	require.NoError(t, model.FinishSystemTask(manual.TaskID, "manual-runner", model.SystemTaskStatusSucceeded, nil, ""))
 }

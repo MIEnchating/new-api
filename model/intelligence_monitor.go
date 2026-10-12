@@ -21,3 +21,10 @@ func ListIntelligenceTestHistory() ([]*SystemTask, error) {
 func (task *SystemTask) IntelligenceResultDeleted() bool {
 	return task.Result == deletedIntelligenceResult
 }
+
+// Pending intelligence runs are claimed oldest first, up to the shared slot limit.
+func FindPendingIntelligenceTasks() ([]*SystemTask, error) {
+	var tasks []*SystemTask
+	err := DB.Where("type = ? AND status = ?", SystemTaskTypeIntelligenceTest, SystemTaskStatusPending).Order("id asc").Limit(SystemTaskConcurrency(SystemTaskTypeIntelligenceTest)).Find(&tasks).Error
+	return tasks, err
+}

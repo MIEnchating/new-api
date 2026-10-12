@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
 
@@ -89,6 +90,15 @@ func GenerateSystemTaskID() (string, error) {
 	return "systask_" + key, nil
 }
 
+// SystemTaskConcurrency is enforced by database-backed execution slots across runners.
+// Other maintenance jobs retain their existing singleton behavior.
+func SystemTaskConcurrency(taskType string) int {
+	if taskType == SystemTaskTypeIntelligenceTest {
+		return 4
+	}
+	return 1
+}
+
 func CreateSystemTask(taskType string, payload any, state any) (*SystemTask, error) {
 	taskID, err := GenerateSystemTaskID()
 	if err != nil {
@@ -110,6 +120,17 @@ func CreateSystemTask(taskType string, payload any, state any) (*SystemTask, err
 		ActiveKey: &taskType,
 		Payload:   payloadText,
 		State:     stateText,
+	}
+
+	if SystemTaskConcurrency(taskType) > 1 {
+		task.ActiveKey = nil
+		// Calendar payloads provide a durable identity: the unique task_id also
+		// prevents a second scheduler from recreating an already completed run.
+		if scheduled, ok := payload.(interface{ SystemTaskScheduleKey() string }); ok {
+			if key := scheduled.SystemTaskScheduleKey(); key != "" {
+				task.TaskID = key
+			}
+		}
 	}
 
 	if err := DB.Create(task).Error; err != nil {
@@ -265,7 +286,19 @@ func ClaimSystemTask(id int64, taskType string, runnerID string, lockUntil int64
 		return nil, false, err
 	}
 
-	acquired, expiredTaskID, err := acquireSystemTaskLock(taskType, task.TaskID, runnerID, now, lockUntil)
+	var acquired bool
+	var expiredTaskID string
+	var err error
+	for slot := range SystemTaskConcurrency(taskType) {
+		key := taskType
+		if slot > 0 {
+			key = fmt.Sprintf("%s:%d", taskType, slot)
+		}
+		acquired, expiredTaskID, err = acquireSystemTaskLock(key, task.TaskID, runnerID, now, lockUntil)
+		if err != nil || acquired {
+			break
+		}
+	}
 	if err != nil || !acquired {
 		return nil, acquired, err
 	}
