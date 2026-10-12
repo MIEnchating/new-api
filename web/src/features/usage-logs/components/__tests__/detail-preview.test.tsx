@@ -104,7 +104,7 @@ const i18n = createInstance()
 beforeEach(async () => {
   await i18n.init({
     lng: 'en',
-    resources: { en },
+    resources: { en, zh, 'zh-CN': zh },
     interpolation: { escapeValue: false },
   })
   useSystemConfigStore
