@@ -9,6 +9,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 )
 
+// AllowUserQuotaQuery is additive: old hashes omit it and correctly default to
+// false. Keep the schema so live quota reservations are not rehydrated from DB.
 const tokenCacheSchemaVersion = 3
 
 func getTokenCacheKey(key string) string {
@@ -69,7 +71,7 @@ if redis.call('EXISTS', KEYS[2]) == 1 then
 end
 if redis.call('EXISTS', KEYS[1]) == 1
   and tonumber(redis.call('HGET', KEYS[1], 'CacheSchema') or '0') == tonumber(ARGV[19]) then
-  redis.call('EXPIRE', KEYS[1], ARGV[20])
+  redis.call('EXPIRE', KEYS[1], ARGV[21])
   return 2
 end
 redis.call('HSET', KEYS[1],
@@ -78,8 +80,9 @@ redis.call('HSET', KEYS[1],
   'UnlimitedQuota', ARGV[8], 'ModelLimitsEnabled', ARGV[9], 'ModelLimits', ARGV[10],
   'AllowIps', ARGV[11], 'Group', ARGV[12], 'CrossGroupRetry', ARGV[13],
   'GroupRouteConfig', ARGV[14], 'GroupRouteSticky', ARGV[15], 'AutoGroups', ARGV[16],
-  'RemainQuota', ARGV[17], 'UsedQuota', ARGV[18], 'CacheSchema', ARGV[19])
-redis.call('EXPIRE', KEYS[1], ARGV[20])
+  'RemainQuota', ARGV[17], 'UsedQuota', ARGV[18], 'CacheSchema', ARGV[19],
+  'AllowUserQuotaQuery', ARGV[20])
+redis.call('EXPIRE', KEYS[1], ARGV[21])
 return 1`
 
 	return common.RDB.Eval(context.Background(), script, []string{
@@ -90,7 +93,8 @@ return 1`
 		strconv.FormatBool(token.UnlimitedQuota), strconv.FormatBool(token.ModelLimitsEnabled),
 		token.ModelLimits, allowIps, token.Group, strconv.FormatBool(token.CrossGroupRetry),
 		token.GroupRouteConfig, strconv.FormatBool(token.GroupRouteSticky), token.AutoGroups,
-		token.RemainQuota, token.UsedQuota, tokenCacheSchemaVersion, tokenCacheTTLSeconds(),
+		token.RemainQuota, token.UsedQuota, tokenCacheSchemaVersion,
+		strconv.FormatBool(token.AllowUserQuotaQuery), tokenCacheTTLSeconds(),
 	).Int()
 }
 

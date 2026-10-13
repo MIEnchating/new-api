@@ -19,16 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 package controller
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -60,10 +59,11 @@ func TestBuildTokenUsageLabelsFollowUserLanguage(t *testing.T) {
 
 func TestBuildTokenUsageDataIncludesAccountAndKeyQuota(t *testing.T) {
 	token := &model.Token{
-		Name:           "limited-key",
-		RemainQuota:    4_000_000,
-		UsedQuota:      1_000_000,
-		UnlimitedQuota: false,
+		Name:                "limited-key",
+		AllowUserQuotaQuery: true,
+		RemainQuota:         4_000_000,
+		UsedQuota:           1_000_000,
+		UnlimitedQuota:      false,
 	}
 
 	labels := gin.H{
@@ -83,9 +83,15 @@ func TestBuildTokenUsageDataIncludesAccountAndKeyQuota(t *testing.T) {
 	require.Equal(t, false, data["unlimited_quota"])
 	require.Equal(t, common.QuotaPerUnit, data["quota_per_unit"])
 	require.Equal(t, labels, data["labels"])
+
+	token.AllowUserQuotaQuery = false
+	data = buildTokenUsageData(token, 12_500_000, 0, labels)
+	require.NotContains(t, data, "account")
+	require.Equal(t, 4_000_000, data["total_available"])
 }
 
 func TestGetTokenUsageUsesAuthenticatedTokenID(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	db := setupTokenControllerTestDB(t)
 	token := &model.Token{
 		UserId:         42,
@@ -97,6 +103,9 @@ func TestGetTokenUsageUsesAuthenticatedTokenID(t *testing.T) {
 		UsedQuota:      1_000_000,
 		UnlimitedQuota: false,
 	}
+	require.NoError(t, db.AutoMigrate(&model.User{}))
+	require.NoError(t, db.Create(&model.User{Id: 42, Username: "usage-owner", Quota: 9_000_000}).Error)
+	token.AllowUserQuotaQuery = true
 	require.NoError(t, db.Create(token).Error)
 
 	recorder := httptest.NewRecorder()
@@ -123,7 +132,7 @@ func TestGetTokenUsageUsesAuthenticatedTokenID(t *testing.T) {
 			} `json:"account"`
 		} `json:"data"`
 	}
-	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
 	require.True(t, response.Code)
 	require.Equal(t, "usage-key", response.Data.Name)
 	require.Equal(t, 3_000_000, response.Data.TotalAvailable)

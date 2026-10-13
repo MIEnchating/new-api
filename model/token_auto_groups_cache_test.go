@@ -28,6 +28,37 @@ func TestTokenAutoGroupsRoundTripThroughRedisHashCache(t *testing.T) {
 	assert.Equal(t, []string{"vip", "default"}, groups)
 }
 
+func TestTokenAllowUserQuotaQueryRoundTripsThroughRedisHashCache(t *testing.T) {
+	server := useUserCacheMiniRedis(t)
+	token := Token{
+		Id: 43, UserId: 7, Key: "token-user-quota-cache-key", Name: "user-quota-cache",
+		AllowUserQuotaQuery: true, GroupRouteSticky: true,
+		GroupRouteConfig: `[{"group":"vip","priority":1,"cooldown_seconds":60}]`,
+		AutoGroups:       `["vip","default"]`, RemainQuota: 100, UsedQuota: 30,
+	}
+
+	initialized, err := cacheInitToken(token)
+	require.NoError(t, err)
+	require.Equal(t, 1, initialized)
+	cached, err := cacheGetTokenByKey(token.Key)
+	require.NoError(t, err)
+	assert.True(t, cached.AllowUserQuotaQuery)
+	assert.True(t, cached.GroupRouteSticky)
+	assert.JSONEq(t, token.GroupRouteConfig, cached.GroupRouteConfig)
+	assert.JSONEq(t, token.AutoGroups, cached.AutoGroups)
+	assert.Equal(t, 100, cached.RemainQuota)
+	assert.Equal(t, 30, cached.UsedQuota)
+	// A stale DB snapshot must not overwrite an active quota reservation.
+	server.HSet(getTokenCacheKey(token.Key), "RemainQuota", "70")
+	initialized, err = cacheInitToken(token)
+	require.NoError(t, err)
+	require.Equal(t, 2, initialized)
+	cached, err = cacheGetTokenByKey(token.Key)
+	require.NoError(t, err)
+	assert.Equal(t, 70, cached.RemainQuota)
+	assert.Positive(t, server.TTL(getTokenCacheKey(token.Key)))
+}
+
 func TestTokenUpdateSynchronouslyNarrowsPreheatedAutoGroupsCache(t *testing.T) {
 	truncateTables(t)
 	useUserCacheMiniRedis(t)

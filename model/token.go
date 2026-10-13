@@ -34,6 +34,8 @@ type Token struct {
 	AutoGroups         string         `json:"-" gorm:"type:text"`
 	CacheSchema        int            `json:"-" gorm:"-"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
+	// 允许用此令牌查询所属用户的额度；新建令牌默认开启，已有令牌升级后保持关闭
+	AllowUserQuotaQuery bool `json:"allow_user_quota_query"`
 }
 
 const TokenGroupRouteMaxCooldownSeconds = 31_536_000
@@ -410,7 +412,8 @@ func (token *Token) Update() (err error) {
 		common.SysLog(common.LogText("failed to invalidate token cache before update: %s", cacheErr.Error()))
 	}
 	return DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "group_route_config", "group_route_sticky", "auto_groups").Updates(token).Error
+		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "group_route_config", "group_route_sticky", "auto_groups",
+		"allow_user_quota_query").Updates(token).Error
 }
 
 func (token *Token) UpdateGroupRouteConfig() (err error) {
