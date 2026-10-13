@@ -16,237 +16,271 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react'
+import { createInstance } from 'i18next'
+import type { ReactNode } from 'react'
+import { I18nextProvider } from 'react-i18next'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
-import { Window } from 'happy-dom'
-import type React from 'react'
-import { afterAll, describe, test } from 'vitest'
+import en from '@/i18n/locales/en.json'
+import zh from '@/i18n/locales/zh.json'
 
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'MouseEvent',
-  'CustomEvent',
-  'MutationObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
-
-const { act } = await import('react')
-const { createRoot } = await import('react-dom/client')
-const { createInstance } = await import('i18next')
-const { I18nextProvider, initReactI18next } = await import('react-i18next')
+import { usageLogSchema } from '../../../data/schema'
+import { DetailsDialog } from '../details-dialog'
+import { UpstreamRequestIdChain } from '../execution-trace-dialog'
 
 const i18n = createInstance()
-await i18n.use(initReactI18next).init({
-  lng: 'en',
-  resources: {
-    en: {
-      translation: {
-        'Upstream Request ID': 'Upstream Request ID',
-        'Upstream Request ID Chain': 'Upstream Request ID Chain',
-        'Copy to clipboard': 'Copy to clipboard',
-        Copied: 'Copied',
-        Expand: 'Expand',
-        Collapse: 'Collapse',
-        '+{{count}} more': '+{{count}} more',
-        'Not recorded': 'Not recorded',
-        'Sub2API / other upstream (X-Request-Id)':
-          'Sub2API / other upstream (X-Request-Id)',
-      },
-    },
-  },
+const originalClipboard = Object.getOwnPropertyDescriptor(
+  navigator,
+  'clipboard'
+)
+let client: QueryClient
+beforeEach(async () => {
+  await i18n.init({
+    lng: 'en',
+    resources: { en, zh },
+    interpolation: { escapeValue: false },
+  })
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+})
+afterEach(() => {
+  cleanup()
+  client.clear()
+  if (originalClipboard) {
+    Object.defineProperty(navigator, 'clipboard', originalClipboard)
+  } else {
+    Reflect.deleteProperty(navigator, 'clipboard')
+  }
 })
 
-const { UpstreamRequestIdChain } = await import('../execution-trace-dialog')
-const reactTestGlobals = globalThis as typeof globalThis & {
-  IS_REACT_ACT_ENVIRONMENT?: boolean
-}
-reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
-
-type RenderedChain = {
-  container: HTMLDivElement
-  root: ReturnType<typeof createRoot>
-}
-
-async function renderChain(
-  props: React.ComponentProps<typeof UpstreamRequestIdChain>
-): Promise<RenderedChain> {
-  const container = document.createElement('div')
-  document.body.append(container)
-  const root = createRoot(container)
-
-  await act(async () => {
-    root.render(
-      <I18nextProvider i18n={i18n}>
-        <UpstreamRequestIdChain {...props} />
-      </I18nextProvider>
-    )
-  })
-
-  return { container, root }
-}
-
-async function unmountChain(rendered: RenderedChain) {
-  await act(async () => rendered.root.unmount())
-  rendered.container.remove()
-}
-
-function click(element: Element) {
-  element.dispatchEvent(
-    new MouseEvent('click', { bubbles: true, cancelable: true })
+function renderWithProviders(children: ReactNode) {
+  return render(
+    <I18nextProvider i18n={i18n}>
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    </I18nextProvider>
   )
 }
 
+const sources = {
+  'client-id': 'x-client-request-id',
+  'provider-id': 'x-request-id',
+}
+
 describe('upstream request ID chain', () => {
-  afterAll(() => {
-    domWindow.close()
+  test('shows both response ID sources and copies the raw client correlation ID', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    renderWithProviders(
+      <UpstreamRequestIdChain
+        requestIds={['client-id', 'provider-id']}
+        sources={sources}
+      />
+    )
+    expect(
+      screen.getByText('Upstream client correlation ID (X-Client-Request-ID)')
+    ).toBeVisible()
+    expect(
+      screen.getByText('Upstream response request ID (X-Request-ID)')
+    ).toBeVisible()
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Copy to clipboard: client-id' })
+    )
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeVisible()
+    expect(writeText).toHaveBeenCalledWith('client-id')
+    await act(() => i18n.changeLanguage('zh'))
+    expect(
+      screen.getByText(
+        zh.translation['Upstream client correlation ID (X-Client-Request-ID)']
+      )
+    ).toBeVisible()
+    expect(
+      screen.getByText(
+        zh.translation['Upstream response request ID (X-Request-ID)']
+      )
+    ).toBeVisible()
   })
 
-  test('shows up to three request IDs without collapse controls', async () => {
+  test('shows up to three request IDs without collapse controls', () => {
     const requestIds = ['request-one', 'request-two', 'request-three']
-    const rendered = await renderChain({ requestIds })
-
+    renderWithProviders(<UpstreamRequestIdChain requestIds={requestIds} />)
     for (const requestId of requestIds) {
-      assert.equal(rendered.container.textContent?.includes(requestId), true)
+      expect(screen.getByText(requestId)).toBeVisible()
     }
-    assert.equal(
-      rendered.container.querySelector('button[aria-label="Expand"]'),
-      null
-    )
-    assert.equal(
-      rendered.container.querySelector('button[aria-label="Collapse"]'),
-      null
-    )
-
-    await unmountChain(rendered)
+    expect(
+      screen.queryByRole('button', { name: 'Expand' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Collapse' })
+    ).not.toBeInTheDocument()
   })
 
-  test('summarizes a long chain with the first and final request IDs', async () => {
+  test('summarizes a long chain with the first and final request IDs', () => {
+    renderWithProviders(
+      <UpstreamRequestIdChain
+        requestIds={[
+          'request-one',
+          'request-two',
+          'request-three',
+          'request-four',
+        ]}
+      />
+    )
+    expect(screen.getByText('request-one')).toBeVisible()
+    expect(screen.getByText('request-four')).toBeVisible()
+    expect(screen.queryByText('request-two')).not.toBeInTheDocument()
+    expect(screen.queryByText('request-three')).not.toBeInTheDocument()
+    expect(screen.getByText('+2 more')).toBeVisible()
+    expect(
+      screen.getAllByRole('button', { name: 'Expand' })[0]
+    ).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  test('expands the complete chain in order and can collapse it again', () => {
     const requestIds = [
       'request-one',
       'request-two',
       'request-three',
       'request-four',
     ]
-    const rendered = await renderChain({ requestIds })
-
-    assert.equal(rendered.container.textContent?.includes('request-one'), true)
-    assert.equal(rendered.container.textContent?.includes('request-two'), false)
-    assert.equal(
-      rendered.container.textContent?.includes('request-three'),
-      false
+    renderWithProviders(
+      <UpstreamRequestIdChain
+        requestIds={requestIds}
+        sources={{ 'request-two': 'x-request-id' }}
+      />
     )
-    assert.equal(rendered.container.textContent?.includes('request-four'), true)
-    assert.equal(rendered.container.textContent?.includes('+2 more'), true)
-
-    const rows = rendered.container.querySelectorAll('ol > li')
-    assert.equal(rows.length, 3)
-    assert.equal(rows[0]?.querySelector('span')?.textContent?.trim(), '1')
-    assert.equal(rows[2]?.querySelector('span')?.textContent?.trim(), '4')
-
-    const expandButton = rendered.container.querySelector(
-      'button[aria-label="Expand"]'
+    fireEvent.click(screen.getAllByRole('button', { name: 'Expand' })[0])
+    const rows = screen.getAllByRole('listitem')
+    expect(rows).toHaveLength(4)
+    requestIds.forEach((requestId, index) =>
+      expect(within(rows[index]).getByText(requestId)).toBeVisible()
     )
-    assert.ok(expandButton)
-    assert.equal(expandButton.getAttribute('aria-expanded'), 'false')
-
-    await unmountChain(rendered)
+    expect(
+      screen.getByText('Upstream response request ID (X-Request-ID)')
+    ).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Collapse' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse' }))
+    expect(screen.queryByText('request-two')).not.toBeInTheDocument()
+    expect(screen.getByText('request-four')).toBeVisible()
   })
 
-  test('expands the complete chain in order and can collapse it again', async () => {
-    const requestIds = [
-      'request-one',
-      'request-two',
-      'request-three',
-      'request-four',
-    ]
-    const rendered = await renderChain({
-      requestIds,
-      sources: {
-        'request-two': 'x-request-id',
-      },
-    })
-
-    const expandButton = rendered.container.querySelector(
-      'button[aria-label="Expand"]'
+  test('can collapse to only the first request ID', () => {
+    renderWithProviders(
+      <UpstreamRequestIdChain
+        requestIds={[
+          'request-one',
+          'request-two',
+          'request-three',
+          'request-four',
+        ]}
+        collapsedPreview='first'
+      />
     )
-    assert.ok(expandButton)
-    await act(async () => click(expandButton))
-
-    const expandedRows = rendered.container.querySelectorAll('ol > li')
-    assert.equal(expandedRows.length, 4)
-    assert.deepEqual(
-      [...expandedRows].map((row) =>
-        row.querySelector('div.font-mono')?.textContent?.trim()
-      ),
-      requestIds
-    )
-    assert.equal(
-      rendered.container.textContent?.includes(
-        'Sub2API / other upstream (X-Request-Id)'
-      ),
-      true
-    )
-
-    const collapseButton = rendered.container.querySelector(
-      'button[aria-label="Collapse"]'
-    )
-    assert.ok(collapseButton)
-    assert.equal(collapseButton.getAttribute('aria-expanded'), 'true')
-    await act(async () => click(collapseButton))
-
-    assert.equal(rendered.container.querySelectorAll('ol > li').length, 3)
-    assert.equal(rendered.container.textContent?.includes('request-two'), false)
-    assert.equal(rendered.container.textContent?.includes('request-four'), true)
-
-    await unmountChain(rendered)
+    expect(screen.getByText('request-one')).toBeVisible()
+    expect(screen.queryByText('request-two')).not.toBeInTheDocument()
+    expect(screen.queryByText('request-four')).not.toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole('button', { name: 'Expand' })[0])
+    expect(screen.getByText('request-two')).toBeVisible()
+    expect(screen.getByText('request-four')).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse' }))
+    expect(screen.queryByText('request-two')).not.toBeInTheDocument()
+    expect(screen.queryByText('request-four')).not.toBeInTheDocument()
   })
+})
 
-  test('can collapse to only the first request ID', async () => {
-    const rendered = await renderChain({
-      requestIds: [
-        'request-one',
-        'request-two',
-        'request-three',
-        'request-four',
-      ],
-      collapsedPreview: 'first',
+describe('log detail request IDs', () => {
+  test.each([
+    ['client-id', 'Upstream client correlation ID (X-Client-Request-ID)'],
+    ['provider-id', 'Upstream response request ID (X-Request-ID)'],
+  ])(
+    'labels a single %s with its response header source',
+    async (requestId, label) => {
+      const log = usageLogSchema.parse({
+        id: 1,
+        user_id: 1,
+        created_at: 1,
+        type: 5,
+        content: '',
+        request_id: 'local-id',
+        upstream_request_id: requestId,
+        other: JSON.stringify({
+          admin_info: { upstream_request_id_sources: sources },
+        }),
+      })
+      renderWithProviders(
+        <DetailsDialog
+          log={log}
+          isAdmin
+          isRoot={false}
+          open
+          onOpenChange={() => {}}
+        />
+      )
+      const dialog = within(await screen.findByRole('dialog'))
+      expect(dialog.getByText(label, { exact: false })).toBeVisible()
+      expect(
+        dialog.getByRole('button', { name: `Copy to clipboard: ${requestId}` })
+      ).toBeVisible()
+      expect(
+        dialog.getByRole('button', { name: 'Copy to clipboard: local-id' })
+      ).toBeVisible()
+    }
+  )
+
+  test('retains both upstream IDs while showing the local ID separately', async () => {
+    const log = usageLogSchema.parse({
+      id: 1,
+      user_id: 1,
+      created_at: 1,
+      type: 5,
+      content: '',
+      request_id: 'local-id',
+      upstream_request_id: 'client-id',
+      other: JSON.stringify({
+        admin_info: {
+          upstream_request_ids: ['local-id', 'client-id', 'provider-id'],
+          upstream_request_id_sources: sources,
+        },
+      }),
     })
-
-    assert.equal(rendered.container.textContent?.includes('request-one'), true)
-    assert.equal(rendered.container.textContent?.includes('request-two'), false)
-    assert.equal(
-      rendered.container.textContent?.includes('request-three'),
-      false
+    renderWithProviders(
+      <DetailsDialog
+        log={log}
+        isAdmin
+        isRoot={false}
+        open
+        onOpenChange={() => {}}
+      />
     )
-
-    const expandButton = rendered.container.querySelector(
-      'button[aria-label="Expand"]'
-    )
-    assert.ok(expandButton)
-    await act(async () => click(expandButton))
-    assert.equal(rendered.container.textContent?.includes('request-two'), true)
-    assert.equal(
-      rendered.container.textContent?.includes('request-three'),
-      true
-    )
-
-    await unmountChain(rendered)
+    const dialog = within(await screen.findByRole('dialog'))
+    fireEvent.click(dialog.getAllByRole('button', { name: 'Expand' })[0])
+    expect(
+      dialog.getByText('Upstream client correlation ID (X-Client-Request-ID)')
+    ).toBeVisible()
+    expect(
+      dialog.getByText('Upstream response request ID (X-Request-ID)')
+    ).toBeVisible()
+    expect(
+      dialog.getAllByRole('button', { name: 'Copy to clipboard: local-id' })
+    ).toHaveLength(1)
+    expect(
+      dialog.getByRole('button', { name: 'Copy to clipboard: client-id' })
+    ).toBeVisible()
+    expect(
+      dialog.getByRole('button', { name: 'Copy to clipboard: provider-id' })
+    ).toBeVisible()
   })
 })

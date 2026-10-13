@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -17,6 +18,7 @@ const providerRequestIdHeader = "X-Request-Id"
 
 const (
 	upstreamRequestIdSourceOneAPI    = "x-oneapi-request-id"
+	upstreamRequestIdSourceClientID  = "x-client-request-id"
 	upstreamRequestIdSourceGenericID = "x-request-id"
 )
 
@@ -26,10 +28,8 @@ func appendUpstreamRequestId(c *gin.Context, requestId string) {
 		return
 	}
 	requestIds := c.GetStringSlice(common.UpstreamRequestIdsKey)
-	for _, existing := range requestIds {
-		if existing == requestId {
-			return
-		}
+	if slices.Contains(requestIds, requestId) {
+		return
 	}
 	c.Set(common.UpstreamRequestIdsKey, append(requestIds, requestId))
 }
@@ -44,34 +44,36 @@ func recordUpstreamRequestIdSource(c *gin.Context, requestId string, source stri
 	if sourceByRequestId == nil {
 		sourceByRequestId = make(map[string]string)
 	}
-	// The native new-api header is more specific than the generic
-	// X-Request-Id header when an upstream happens to return the same value.
-	if sourceByRequestId[requestId] != upstreamRequestIdSourceOneAPI || source == upstreamRequestIdSourceOneAPI {
+	// Keep the most specific source even when a later attempt repeats an ID.
+	sourcesByPriority := []string{upstreamRequestIdSourceOneAPI, upstreamRequestIdSourceClientID, upstreamRequestIdSourceGenericID}
+	previousPriority := slices.Index(sourcesByPriority, sourceByRequestId[requestId])
+	if previousPriority < 0 || slices.Index(sourcesByPriority, source) < previousPriority {
 		sourceByRequestId[requestId] = source
 	}
 	c.Set(common.UpstreamRequestIdSourcesKey, sourceByRequestId)
 }
 
-// CaptureUpstreamRequestId records the best available upstream correlation ID.
-// Native new-api IDs take precedence; X-Request-Id supports providers such as
-// sub2api and is used only as a fallback.
+// CaptureUpstreamRequestId collects all response correlation IDs and selects
+// the current primary ID in native, client-correlation, then generic order.
+// An empty response clears the primary ID but preserves IDs from earlier attempts.
 func CaptureUpstreamRequestId(c *gin.Context, header http.Header) string {
 	if c == nil {
 		return ""
 	}
-	if requestId := strings.TrimSpace(header.Get(common.RequestIdKey)); requestId != "" {
-		c.Set(common.UpstreamRequestIdKey, requestId)
-		appendUpstreamRequestId(c, requestId)
-		recordUpstreamRequestIdSource(c, requestId, upstreamRequestIdSourceOneAPI)
-		return requestId
+	primaryID := ""
+	for _, source := range []string{upstreamRequestIdSourceOneAPI, upstreamRequestIdSourceClientID, upstreamRequestIdSourceGenericID} {
+		requestID := strings.TrimSpace(header.Get(source))
+		if requestID == "" {
+			continue
+		}
+		if primaryID == "" {
+			primaryID = requestID
+		}
+		appendUpstreamRequestId(c, requestID)
+		recordUpstreamRequestIdSource(c, requestID, source)
 	}
-	requestId := strings.TrimSpace(header.Get(providerRequestIdHeader))
-	if requestId != "" {
-		c.Set(common.UpstreamRequestIdKey, requestId)
-		appendUpstreamRequestId(c, requestId)
-		recordUpstreamRequestIdSource(c, requestId, upstreamRequestIdSourceGenericID)
-	}
-	return requestId
+	c.Set(common.UpstreamRequestIdKey, primaryID)
+	return primaryID
 }
 
 func CloseResponseBodyGracefully(httpResponse *http.Response) {
@@ -87,24 +89,9 @@ func CloseResponseBodyGracefully(httpResponse *http.Response) {
 // ShouldCopyUpstreamHeader checks whether a given upstream response header
 // should be copied to the client response. It returns false for Content-Length
 // (managed separately) and X-Oneapi-Request-Id (to preserve the local instance
-// ID). X-Oneapi-Request-Id and the X-Request-Id fallback are captured into the
-// Gin context for later logging.
-func ShouldCopyUpstreamHeader(c *gin.Context, k string, v []string) bool {
-	if strings.EqualFold(k, "Content-Length") {
-		return false
-	}
-	if strings.EqualFold(k, common.RequestIdKey) {
-		if len(v) > 0 {
-			CaptureUpstreamRequestId(c, http.Header{common.RequestIdKey: v})
-		}
-		return false
-	}
-	if strings.EqualFold(k, providerRequestIdHeader) && len(v) > 0 {
-		if c != nil && strings.TrimSpace(c.GetString(common.UpstreamRequestIdKey)) == "" {
-			CaptureUpstreamRequestId(c, http.Header{providerRequestIdHeader: v})
-		}
-	}
-	return true
+// ID). Correlation IDs are collected separately from the full response headers.
+func ShouldCopyUpstreamHeader(_ *gin.Context, k string, _ []string) bool {
+	return !strings.EqualFold(k, "Content-Length") && !strings.EqualFold(k, common.RequestIdKey)
 }
 
 func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {

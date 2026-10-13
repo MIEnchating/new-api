@@ -305,6 +305,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		var sameChannel *appmodel.Channel
 		sameChannelRetries := 0
 		for {
+			c.Set(common.UpstreamRequestIdKey, "")
 			var channel *appmodel.Channel
 			if sameChannel != nil {
 				channel = sameChannel

@@ -296,8 +296,10 @@ function upstreamRequestIdSourceLabel(t: TFunction, source?: string) {
   switch (source) {
     case 'x-oneapi-request-id':
       return t('New API / One API (X-Oneapi-Request-Id)')
+    case 'x-client-request-id':
+      return t('Upstream client correlation ID (X-Client-Request-ID)')
     case 'x-request-id':
-      return t('Sub2API / other upstream (X-Request-Id)')
+      return t('Upstream response request ID (X-Request-ID)')
     default:
       return t('Not recorded')
   }

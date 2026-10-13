@@ -2,14 +2,29 @@ package channel
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/schema"
 )
 
 func TestNewTaskAPIRequestInheritsClientCancellation(t *testing.T) {
@@ -209,5 +224,202 @@ func TestToWebSocketURL(t *testing.T) {
 		"ws://127.0.0.1:3000/backend-api/codex/responses": "ws://127.0.0.1:3000/backend-api/codex/responses",
 	} {
 		assert.Equal(t, want, toWebSocketURL(input), input)
+	}
+}
+
+// Only URL and header setup are involved in transport correlation tests.
+type requestIDTestAdaptor struct {
+	Adaptor
+	url string
+}
+
+func (a requestIDTestAdaptor) GetRequestURL(_ *relaycommon.RelayInfo) (string, error) {
+	return a.url, nil
+}
+
+func (a requestIDTestAdaptor) SetupRequestHeader(_ *gin.Context, _ *http.Header, _ *relaycommon.RelayInfo) error {
+	return nil
+}
+
+func TestUpstreamRequestIDsHTTP(t *testing.T) {
+	service.InitHttpClient()
+	for _, tc := range []struct {
+		name    string
+		status  int
+		stream  bool
+		header  http.Header
+		primary string
+		ids     []string
+	}{
+		{"success", http.StatusOK, false, http.Header{"X-Client-Request-Id": {"client-id"}, "X-Request-Id": {"provider-id"}}, "client-id", []string{"client-id", "provider-id"}},
+		{"stream", http.StatusOK, true, http.Header{"X-Client-Request-Id": {"client-id"}, "X-Request-Id": {"provider-id"}}, "client-id", []string{"client-id", "provider-id"}},
+		{"error", http.StatusBadGateway, false, http.Header{"X-Client-Request-Id": {"error-id"}}, "error-id", []string{"error-id"}},
+		{"stream error", http.StatusBadGateway, true, http.Header{"X-Client-Request-Id": {"error-id"}}, "error-id", []string{"error-id"}},
+		{"provider only", http.StatusOK, false, http.Header{"X-Request-Id": {"provider-id"}}, "provider-id", []string{"provider-id"}},
+		{"no headers", http.StatusOK, false, http.Header{}, "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				for key, values := range tc.header {
+					w.Header()[key] = values
+				}
+				if tc.stream {
+					w.Header().Set("Content-Type", "text/event-stream")
+				}
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, "response body")
+			}))
+			defer upstream.Close()
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
+			c.Set(common.RequestIdKey, "local-id")
+			service.CaptureUpstreamRequestId(c, http.Header{"X-Request-Id": {"previous-id"}})
+			info := &relaycommon.RelayInfo{IsStream: tc.stream, ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeSub2API}}
+			req, err := http.NewRequest(http.MethodPost, upstream.URL, strings.NewReader("request"))
+			require.NoError(t, err)
+			resp, err := DoRequest(c, req, info)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			assert.Equal(t, tc.status, resp.StatusCode)
+			assert.Equal(t, tc.primary, c.GetString(common.UpstreamRequestIdKey))
+			wantIDs := append([]string{"previous-id"}, tc.ids...)
+			assert.Equal(t, wantIDs, c.GetStringSlice(common.UpstreamRequestIdsKey))
+			assert.Equal(t, "local-id", c.GetString(common.RequestIdKey))
+
+			// A subsequent transport failure must clear the primary ID, retaining history.
+			cancelled, cancel := context.WithCancel(context.Background())
+			cancel()
+			retry, err := http.NewRequestWithContext(cancelled, http.MethodPost, upstream.URL, strings.NewReader("retry"))
+			require.NoError(t, err)
+			_, err = DoRequest(c, retry, info)
+			require.Error(t, err)
+			assert.Empty(t, c.GetString(common.UpstreamRequestIdKey))
+			assert.Equal(t, wantIDs, c.GetStringSlice(common.UpstreamRequestIdsKey))
+		})
+	}
+}
+
+func TestUpstreamRequestIDsWebSocket(t *testing.T) {
+	for _, status := range []int{http.StatusSwitchingProtocols, http.StatusBadGateway} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				header := http.Header{"X-Client-Request-Id": {"client-id"}, "X-Request-Id": {"provider-id"}}
+				if status != http.StatusSwitchingProtocols {
+					for key, values := range header {
+						w.Header()[key] = values
+					}
+					w.WriteHeader(status)
+					return
+				}
+				upgrader := websocket.Upgrader{}
+				conn, err := upgrader.Upgrade(w, r, header)
+				if err == nil {
+					_ = conn.Close()
+				}
+			}))
+			defer upstream.Close()
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/relay", nil)
+			c.Set(common.RequestIdKey, "local-id")
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeSub2API}}
+			adaptor := requestIDTestAdaptor{url: upstream.URL}
+			conn, err := DoWssRequest(adaptor, c, info, nil)
+			if status == http.StatusSwitchingProtocols {
+				require.NoError(t, err)
+				require.NoError(t, conn.Close())
+			} else {
+				require.Error(t, err)
+			}
+			assert.Equal(t, "client-id", c.GetString(common.UpstreamRequestIdKey))
+			assert.Equal(t, []string{"client-id", "provider-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
+			assert.Equal(t, "local-id", c.GetString(common.RequestIdKey))
+
+			cancelled, cancel := context.WithCancel(context.Background())
+			cancel()
+			c.Request = c.Request.WithContext(cancelled)
+			_, err = DoWssRequest(adaptor, c, info, nil)
+			require.Error(t, err)
+			assert.Empty(t, c.GetString(common.UpstreamRequestIdKey))
+			assert.Equal(t, []string{"client-id", "provider-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
+		})
+	}
+}
+
+func TestUpstreamRequestIDsPersistLogs(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector = sqlite.Open(":memory:")
+			if dialect != "sqlite" {
+				dsn := os.Getenv("REQUEST_ID_" + strings.ToUpper(dialect) + "_DSN")
+				if dsn == "" {
+					t.Skip("request ID test database DSN is not configured")
+				}
+				if dialect == "mysql" {
+					driver = mysql.Open(dsn)
+				} else {
+					driver = postgres.Open(dsn)
+				}
+			}
+			db, err := gorm.Open(driver, &gorm.Config{NamingStrategy: schema.NamingStrategy{TablePrefix: fmt.Sprintf("request_id_%d_", time.Now().UnixNano())}})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+			t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+			var version string
+			query := "SELECT VERSION()"
+			if dialect == "sqlite" {
+				query = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(query).Scan(&version).Error)
+			t.Logf("%s version: %s", dialect, version)
+			require.NoError(t, db.AutoMigrate(&model.Log{}, &model.User{}))
+			t.Cleanup(func() { require.NoError(t, db.Migrator().DropTable(&model.Log{}, &model.User{})) })
+			require.NoError(t, db.Create(&model.User{Id: 1, Username: "request-id-test"}).Error)
+			oldDB, oldLogDB := model.DB, model.LOG_DB
+			oldRedis, oldConsume, oldExport := common.RedisEnabled, common.LogConsumeEnabled, common.DataExportEnabled
+			model.DB, model.LOG_DB = db, db
+			common.RedisEnabled, common.LogConsumeEnabled, common.DataExportEnabled = false, true, false
+			t.Cleanup(func() {
+				model.DB, model.LOG_DB = oldDB, oldLogDB
+				common.RedisEnabled, common.LogConsumeEnabled, common.DataExportEnabled = oldRedis, oldConsume, oldExport
+			})
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
+			c.Set(common.RequestIdKey, "local-id")
+			c.Set("username", "request-id-test")
+			service.CaptureUpstreamRequestId(c, http.Header{"X-Client-Request-Id": {"first-client"}, "X-Request-Id": {"provider-id"}})
+			intermediate := model.NewLogOther()
+			intermediate.SetAdmin("retry_intermediate", true)
+			model.RecordErrorLog(c, 1, 1, "test-model", "", "", "upstream error", 0, 0, false, "default", intermediate)
+			service.CaptureUpstreamRequestId(c, http.Header{"X-Client-Request-Id": {"second-client"}, "X-Request-Id": {"provider-id"}})
+			model.RecordConsumeLog(c, 1, model.RecordConsumeLogParams{ModelName: "test-model"})
+			service.CaptureUpstreamRequestId(c, nil)
+			model.RecordErrorLog(c, 1, 1, "test-model", "", "", "network error", 0, 0, false, "default", model.NewLogOther())
+			var logs []model.Log
+			require.NoError(t, db.Order("id ASC").Find(&logs).Error)
+			require.Len(t, logs, 3)
+			for i, primary := range []string{"first-client", "second-client", ""} {
+				assert.Equal(t, "local-id", logs[i].RequestId)
+				assert.Equal(t, primary, logs[i].UpstreamRequestId)
+				var other struct {
+					AdminInfo struct {
+						IDs          []string          `json:"upstream_request_ids"`
+						Sources      map[string]string `json:"upstream_request_id_sources"`
+						Intermediate bool              `json:"retry_intermediate"`
+					} `json:"admin_info"`
+				}
+				require.NoError(t, common.UnmarshalJsonStr(logs[i].Other, &other))
+				expectedIDs := []string{"first-client", "provider-id"}
+				expectedSources := map[string]string{"first-client": "x-client-request-id", "provider-id": "x-request-id"}
+				if i > 0 {
+					expectedIDs = append(expectedIDs, "second-client")
+					expectedSources["second-client"] = "x-client-request-id"
+				}
+				assert.Equal(t, expectedIDs, other.AdminInfo.IDs)
+				assert.Equal(t, expectedSources, other.AdminInfo.Sources)
+				assert.Equal(t, i == 0, other.AdminInfo.Intermediate)
+			}
+		})
 	}
 }

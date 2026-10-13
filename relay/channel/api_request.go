@@ -10,7 +10,6 @@ import (
 	"sync"
 
 	common2 "github.com/QuantumNous/new-api/common"
-	rootconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
@@ -304,6 +303,7 @@ func applyHeaderOverrideToRequest(req *http.Request, headerOverride map[string]s
 }
 
 func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
+	c.Set(common2.UpstreamRequestIdKey, "")
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
@@ -334,6 +334,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 }
 
 func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
+	c.Set(common2.UpstreamRequestIdKey, "")
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
@@ -370,6 +371,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 // request context, and reports a rejected handshake as a *types.NewAPIError
 // carrying the upstream status code (types.NewError preserves it).
 func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*websocket.Conn, error) {
+	c.Set(common2.UpstreamRequestIdKey, "")
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
@@ -404,9 +406,6 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	targetConn, resp, err := dialer.DialContext(c.Request.Context(), fullRequestURL, targetHeader)
 	if resp != nil {
 		service.CaptureUpstreamRequestId(c, resp.Header)
-		if info.ChannelType == rootconstant.ChannelTypeSub2API {
-			c.Set(common2.UpstreamRequestIdKey, c.GetString(common2.RequestIdKey))
-		}
 	}
 	if err != nil {
 		statusCode := http.StatusInternalServerError
@@ -445,6 +444,7 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
+	c.Set(common2.UpstreamRequestIdKey, "")
 	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
@@ -488,14 +488,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 			resp.Proto)
 	}
 
-	// Sub2API uses X-Request-ID for its own access-log correlation. Its
-	// response may contain a provider X-Request-ID, which must not replace the
-	// ID that was used to identify the request in Sub2API.
-	localRequestID := c.GetString(common2.RequestIdKey)
 	service.CaptureUpstreamRequestId(c, resp.Header)
-	if info.ChannelType == rootconstant.ChannelTypeSub2API && localRequestID != "" {
-		c.Set(common2.UpstreamRequestIdKey, localRequestID)
-	}
 	if info.IsStream && info.RelayMode == constant.RelayModeResponses {
 		logger.LogInfo(c, fmt.Sprintf(
 			"stream trace: stage=upstream_headers elapsed_ms=%d status=%d proto=%q content_type=%q content_length=%d transfer_encoding=%q content_encoding=%q server=%q via=%q cf_ray=%q upstream_request_id=%q provider_request_id=%q",
@@ -511,6 +504,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 }
 
 func DoTaskApiRequest(a TaskAdaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*http.Response, error) {
+	c.Set(common2.UpstreamRequestIdKey, "")
 	fullRequestURL, err := a.BuildRequestURL(info)
 	if err != nil {
 		return nil, err

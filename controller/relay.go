@@ -145,6 +145,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	var lastFailedChannelError *types.NewAPIError
 
 	for {
+		c.Set(common.UpstreamRequestIdKey, "")
 		relayInfo.StreamStatus = nil
 		relayInfo.PerformanceBusinessRejection = false
 		relayInfo.PerformanceOutputTokens = 0
@@ -810,6 +811,7 @@ func executeTaskSubmissionWith(
 	var lastFailedTaskChannelError *types.NewAPIError
 	finalTaskErrorLogged := false
 	for {
+		c.Set(common.UpstreamRequestIdKey, "")
 		stage = "select_channel"
 		if requestErr := c.Request.Context().Err(); requestErr != nil {
 			diagnostics.cancelled("before_attempt", retryParam.GetRetry()+1)
