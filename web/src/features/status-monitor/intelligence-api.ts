@@ -40,7 +40,8 @@ export const intelligenceConfigSchema = z.object({
       z
         .object({
           group: z.string().trim().min(1).max(64),
-          model: z.string().trim().min(1).max(255),
+          model: z.string().trim().max(255).optional(),
+          models: z.array(z.string().trim().min(1).max(255)).max(50).optional(),
           endpoint: z.enum([
             'openai',
             'openai-response',
@@ -51,6 +52,14 @@ export const intelligenceConfigSchema = z.object({
           enabled: z.boolean(),
           times: z.array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)).max(24),
         })
+        .refine(
+          (value) => (value.models?.length ?? 0) > 0 || Boolean(value.model),
+          { path: ['models'] }
+        )
+        .refine(
+          (value) => new Set(value.models).size === (value.models?.length ?? 0),
+          { path: ['models'] }
+        )
         .refine((value) => !value.enabled || value.times.length > 0)
         .refine((value) => new Set(value.times).size === value.times.length)
     )
@@ -78,7 +87,18 @@ export type IntelligenceTask = {
   group: string
   model: string
   endpoint: string
-  state?: { processed: number; total: number; progress: number }
+  state?: {
+    processed: number
+    total: number
+    progress: number
+    models?: {
+      group: string
+      model: string
+      total: number
+      processed: number
+      failed: number
+    }[]
+  }
   error: string
   result?: {
     channels: {

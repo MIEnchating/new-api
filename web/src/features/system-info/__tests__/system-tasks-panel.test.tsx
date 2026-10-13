@@ -284,12 +284,16 @@ it('opens intelligence task details with per-attempt reasons and request IDs', a
           ...task,
           type: 'intelligence_test',
           status: 'failed',
+          group: 'vip',
+          model: 'test-model',
+          endpoint: 'openai-response',
           error: 'No intelligence test completed successfully',
           result: {
             channels: [
               {
                 group: 'vip',
                 model: 'test-model',
+                endpoint: 'openai-response',
                 question_name: 'Pelican',
                 error: 'Upstream returned an HTTP error',
                 attempts: [
@@ -312,6 +316,10 @@ it('opens intelligence task details with per-attempt reasons and request IDs', a
   const buttons = await screen.findAllByRole('button', { name: 'Detail' })
   await userEvent.click(buttons[0])
   const dialog = await screen.findByRole('dialog')
+  expect(within(dialog).getByText('Group')).toBeVisible()
+  expect(within(dialog).getByText('vip')).toBeVisible()
+  expect(within(dialog).getByText('test-model')).toBeVisible()
+  expect(within(dialog).getByText('openai-response')).toBeVisible()
   expect(within(dialog).getByText('attempt-request')).toBeVisible()
   expect(within(dialog).getByText(/HTTP 503/)).toBeVisible()
   expect(

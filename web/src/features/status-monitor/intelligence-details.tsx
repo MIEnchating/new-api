@@ -30,6 +30,7 @@ import { getIntelligenceQuestionName } from './intelligence-labels'
 type DiagnosticChannel = {
   group?: string
   model?: string
+  endpoint?: string
   question_name?: string
   error?: string
   attempts?: IntelligenceAttempt[]
@@ -37,6 +38,9 @@ type DiagnosticChannel = {
 
 export function IntelligenceDetails(props: {
   taskId: string
+  group?: string
+  model?: string
+  endpoint?: string
   error?: string
   result?: unknown
 }) {
@@ -44,9 +48,14 @@ export function IntelligenceDetails(props: {
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const result = props.result as { channels?: DiagnosticChannel[] } | undefined
   const channels = Array.isArray(result?.channels) ? result.channels : []
+  const firstChannel = channels[0]
+  const group = props.group || firstChannel?.group
+  const model = props.model || firstChannel?.model
+  const endpoint = props.endpoint || firstChannel?.endpoint
   return (
     <Dialog
       title={t('Intelligence test details')}
+      contentClassName='sm:max-w-3xl'
       trigger={
         <Button variant='ghost' size='sm'>
           {t('Detail')}
@@ -58,6 +67,28 @@ export function IntelligenceDetails(props: {
           <span className='min-w-0 font-mono break-all'>{props.taskId}</span>
           <CopyButton value={props.taskId} />
         </div>
+        <dl className='bg-muted/30 grid grid-cols-1 gap-2 rounded-lg border p-3 sm:grid-cols-3'>
+          <div className='min-w-0 space-y-1'>
+            <dt className='text-muted-foreground text-xs'>{t('Group')}</dt>
+            <dd className='truncate font-medium' title={group}>
+              {group || t('Not recorded')}
+            </dd>
+          </div>
+          <div className='min-w-0 space-y-1'>
+            <dt className='text-muted-foreground text-xs'>{t('Model')}</dt>
+            <dd className='truncate font-medium' title={model}>
+              {model || t('Not recorded')}
+            </dd>
+          </div>
+          <div className='min-w-0 space-y-1'>
+            <dt className='text-muted-foreground text-xs'>
+              {t('API Endpoint')}
+            </dt>
+            <dd className='truncate font-mono text-xs' title={endpoint}>
+              {endpoint || t('Not recorded')}
+            </dd>
+          </div>
+        </dl>
         {props.error && (
           <p className='text-destructive break-words whitespace-pre-wrap'>
             {t(props.error)}
@@ -66,9 +97,15 @@ export function IntelligenceDetails(props: {
         {channels.map((row, index) => (
           <section key={index} className='space-y-2 rounded-lg border p-3'>
             <p className='font-medium break-words'>
-              {row.group} · {row.model} ·{' '}
+              {row.group || group || t('Not recorded')} ·{' '}
+              {row.model || model || t('Not recorded')} ·{' '}
               {getIntelligenceQuestionName(row.question_name || '', t)}
             </p>
+            {(row.endpoint || endpoint) && (
+              <p className='text-muted-foreground text-xs'>
+                {t('API Endpoint')}: {row.endpoint || endpoint}
+              </p>
+            )}
             {row.error && (
               <p className='text-destructive break-words whitespace-pre-wrap'>
                 {t(row.error)}

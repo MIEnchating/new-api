@@ -208,6 +208,82 @@ it('saves edited questions and scheduling settings before allowing a manual run'
   client.clear()
 })
 
+it('separates settings from records and preserves unsaved edits across tabs', async () => {
+  const data: IntelligenceMonitorData = {
+    config: {
+      groups: [
+        {
+          group: 'default',
+          model: 'test-model',
+          endpoint: 'openai',
+          enabled: false,
+          times: ['09:00'],
+        },
+      ],
+      questions: [{ name: 'Pelican', prompt: 'Original prompt' }],
+    },
+    catalog: { default: ['test-model'] },
+    history: [
+      {
+        task_id: 'run-1',
+        status: 'succeeded',
+        created_at: 1791613858,
+        updated_at: 1791613858,
+        group: 'default',
+        model: 'test-model',
+        endpoint: 'openai',
+        error: '',
+        result: { channels: [] },
+      },
+    ],
+  }
+  const client = new QueryClient()
+  const actions = document.createElement('div')
+  actions.dataset.testActions = ''
+  document.body.append(actions)
+  const view = render(
+    <QueryClientProvider client={client}>
+      <SettingsPageProvider actionsContainer={actions}>
+        <IntelligenceSettings data={data} />
+      </SettingsPageProvider>
+    </QueryClientProvider>
+  )
+  const user = userEvent.setup()
+  try {
+    expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(screen.getByLabelText('Prompt')).toBeVisible()
+    expect(screen.queryByText('run-1')).not.toBeInTheDocument()
+    await user.clear(screen.getByLabelText('Prompt'))
+    await user.type(screen.getByLabelText('Prompt'), 'Edited prompt')
+
+    await user.click(
+      screen.getByRole('tab', { name: 'Intelligence test history' })
+    )
+    expect(
+      screen.getByRole('tab', { name: 'Intelligence test history' })
+    ).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByText('run-1')).toBeVisible()
+    expect(screen.getByLabelText('Prompt')).not.toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: 'Save' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Run all groups' })
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'Settings' }))
+    expect(screen.getByLabelText('Prompt')).toHaveValue('Edited prompt')
+    expect(screen.getByRole('button', { name: 'Save' })).toBeVisible()
+    expect(screen.queryByText('run-1')).not.toBeInTheDocument()
+  } finally {
+    view.unmount()
+    client.clear()
+  }
+})
+
 it('rejects an empty question or an out-of-range schedule without saving', async () => {
   const data: IntelligenceMonitorData = {
     config: {
@@ -382,7 +458,11 @@ it('saves independent daily times for multiple groups and allows more runs while
         },
       ],
     },
-    catalog: { default: ['model-a'], vip: ['model-b'] },
+    catalog: {
+      default: ['model-a', 'model-a-extended'],
+      vip: ['model-b'],
+      other: ['model-c'],
+    },
     history: [
       {
         task_id: 'active-run',
@@ -435,6 +515,18 @@ it('saves independent daily times for multiple groups and allows more runs while
         {}
       )
     )
+    await user.click(
+      screen.getAllByRole('combobox', { name: 'Select models' })[0]
+    )
+    await user.click(
+      await screen.findByRole('option', { name: 'model-a-extended' })
+    )
+    await user.keyboard('{Escape}')
+    await user.click(
+      screen.getAllByRole('switch', {
+        name: 'Scheduled intelligence testing',
+      })[1]
+    )
     await user.click(screen.getAllByRole('button', { name: 'Add time' })[1])
     expect(
       screen.getByRole('button', { name: 'Run all groups' })
@@ -447,13 +539,15 @@ it('saves independent daily times for multiple groups and allows more runs while
           groups: [
             expect.objectContaining({
               group: 'default',
+              models: ['model-a', 'model-a-extended'],
               times: ['09:00', '15:00', '21:00'],
               enabled: true,
             }),
             expect.objectContaining({
               group: 'vip',
+              models: ['model-b'],
               times: ['00:00', '09:00'],
-              enabled: false,
+              enabled: true,
             }),
           ],
         })
@@ -470,6 +564,23 @@ it('saves independent daily times for multiple groups and allows more runs while
     expect(
       screen.getAllByRole('combobox', { name: 'API Endpoint' })
     ).toHaveLength(2)
+    await user.click(
+      screen.getAllByRole('combobox', { name: 'Model Group' })[0]
+    )
+    await user.click(await screen.findByRole('option', { name: 'other' }))
+    const group = screen.getByRole('group', { name: 'other' })
+    expect(within(group).queryByText('model-a')).not.toBeInTheDocument()
+    expect(
+      within(group).queryByText('model-a-extended')
+    ).not.toBeInTheDocument()
+    put.mockClear()
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(
+      await screen.findByText(
+        'Select between 1 and 50 models for intelligence testing'
+      )
+    ).toBeVisible()
+    expect(put).not.toHaveBeenCalled()
   } finally {
     view.unmount()
     client.clear()
@@ -530,6 +641,20 @@ it('keeps daily times compact and keyboard editable in a separate group settings
     expect(
       within(firstGroup).queryByDisplayValue('15:00')
     ).not.toBeInTheDocument()
+    const schedule = within(firstGroup).getByRole('switch', {
+      name: 'Scheduled intelligence testing',
+    })
+    await user.click(schedule)
+    expect(
+      within(firstGroup).queryByLabelText('Execution time 1')
+    ).not.toBeInTheDocument()
+    await user.click(schedule)
+    expect(within(firstGroup).getByLabelText('Execution time 1')).toHaveValue(
+      '09:00'
+    )
+    expect(within(firstGroup).getByLabelText('Execution time 2')).toHaveValue(
+      '21:00'
+    )
   } finally {
     view.unmount()
     client.clear()
@@ -581,9 +706,9 @@ it('shows only compact result metadata and previews without channel IDs, record 
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  const channels = ['default', 'vip'].map((group) => ({
-    group,
-    model: 'test-model',
+  const channels = ['test-model', 'second-model'].map((model) => ({
+    group: 'default',
+    model,
     channel_id: 1,
     question_index: 0,
     question_name: 'Pelican',
@@ -611,7 +736,7 @@ it('shows only compact result metadata and previews without channel IDs, record 
                 ...channel,
                 html: animation.replace(
                   '<body>',
-                  `<body><h1>${channel.group}</h1>`
+                  `<body><h1>${channel.model}</h1>`
                 ),
               })),
             },
@@ -627,14 +752,14 @@ it('shows only compact result metadata and previews without channel IDs, record 
   try {
     const frames = await screen.findAllByTitle('Generated animation preview')
     expect(frames).toHaveLength(2)
-    for (const group of ['default', 'vip']) {
-      const label = screen.getByLabelText(`Group: ${group}`)
-      expect(label).toHaveTextContent(group)
+    for (const label of screen.getAllByLabelText('Group: default')) {
+      expect(label).toHaveTextContent('default')
       expect(label).toHaveAttribute('data-slot', 'status-badge')
     }
-    for (const label of screen.getAllByLabelText('Model: test-model')) {
-      expect(label).toHaveTextContent('test-model')
-      expect(label).toHaveAttribute('title', 'test-model')
+    for (const channel of channels) {
+      const label = screen.getByLabelText(`Model: ${channel.model}`)
+      expect(label).toHaveTextContent(channel.model)
+      expect(label).toHaveAttribute('title', channel.model)
       expect(label).toHaveClass('font-mono')
     }
 
@@ -643,7 +768,7 @@ it('shows only compact result metadata and previews without channel IDs, record 
       expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
       expect(frame).toHaveAttribute('referrerpolicy', 'no-referrer')
       expect(frame.getAttribute('srcdoc')).toContain(
-        `<h1>${channels[index].group}</h1>`
+        `<h1>${channels[index].model}</h1>`
       )
       expect(frame.getAttribute('srcdoc')).toContain("connect-src 'none'")
     }
@@ -683,8 +808,12 @@ it('shows only compact result metadata and previews without channel IDs, record 
       expect(card).toHaveClass('border', 'ring-0')
     }
     expect(cards[0]?.parentElement).toHaveClass(
-      'grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))]'
+      'grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))]',
+      'overflow-x-hidden'
     )
+    expect(
+      cards[0]?.querySelector('[data-slot=card-header] > div')
+    ).toHaveClass('flex-wrap')
     await userEvent.click(
       screen.getAllByRole('button', { name: 'Enlarge preview' })[0]
     )
@@ -789,6 +918,207 @@ it('shows admin request IDs and confirms deletion while protecting active runs',
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['status-monitor', 'intelligence'],
     })
+  } finally {
+    view.unmount()
+    client.clear()
+  }
+})
+
+it('separates running models and displays their own progress independently', async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const groups = ['fast-model', 'slow-model'].map((model) => ({
+    group: 'default',
+    model,
+    endpoint: 'openai',
+  }))
+  const task: IntelligenceTask = {
+    task_id: 'two-models',
+    status: 'running',
+    created_at: 1791613858,
+    updated_at: 1791613858,
+    group: '',
+    model: '',
+    endpoint: '',
+    error: '',
+    groups,
+    state: {
+      processed: 1,
+      total: 3,
+      progress: 33,
+      models: [
+        {
+          group: 'default',
+          model: 'fast-model',
+          total: 1,
+          processed: 1,
+          failed: 0,
+        },
+        {
+          group: 'default',
+          model: 'slow-model',
+          total: 2,
+          processed: 0,
+          failed: 0,
+        },
+      ],
+    },
+  }
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: { history: [task] } },
+  })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligenceMonitor />
+    </QueryClientProvider>
+  )
+  try {
+    const fast = (await screen.findByLabelText('Model: fast-model')).closest(
+      '[data-slot=card]'
+    ) as HTMLElement
+    const slow = screen
+      .getByLabelText('Model: slow-model')
+      .closest('[data-slot=card]') as HTMLElement
+    expect(fast).not.toBe(slow)
+    expect(within(fast).getByText('Completed')).toBeVisible()
+    expect(within(fast).getByRole('progressbar')).toHaveAttribute(
+      'aria-valuenow',
+      '100'
+    )
+    expect(within(slow).getByText('Running')).toBeVisible()
+    expect(within(slow).getByRole('progressbar')).not.toHaveAttribute(
+      'aria-valuenow'
+    )
+    expect(within(slow).getByText('0 / 2')).toBeVisible()
+    const models = task.state?.models ?? []
+    act(() =>
+      client.setQueryData(['status-monitor', 'intelligence', 'results'], {
+        history: [
+          {
+            ...task,
+            state: {
+              ...task.state,
+              models: [models[0], { ...models[1], processed: 1 }],
+            },
+          },
+        ],
+      })
+    )
+    await waitFor(() =>
+      expect(within(slow).getByRole('progressbar')).toHaveAttribute(
+        'aria-valuenow',
+        '50'
+      )
+    )
+    expect(within(fast).getByRole('progressbar')).toHaveAttribute(
+      'aria-valuenow',
+      '100'
+    )
+    // Legacy batch percentages cannot be attributed to individual models.
+    act(() =>
+      client.setQueryData(['status-monitor', 'intelligence', 'results'], {
+        history: [{ ...task, state: { processed: 1, total: 3, progress: 33 } }],
+      })
+    )
+    await waitFor(() => {
+      for (const progress of screen.getAllByRole('progressbar')) {
+        expect(progress).not.toHaveAttribute('aria-valuenow')
+      }
+    })
+  } finally {
+    view.unmount()
+    client.clear()
+  }
+})
+
+it('shows finished model previews while another model runs and fetches its result when it finishes', async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const channels = ['fast-model', 'slow-model'].map((model) => ({
+    group: 'default',
+    model,
+    endpoint: 'openai-response',
+    channel_id: 1,
+    question_index: 0,
+    question_name: 'Pelican',
+    latency_ms: 100,
+    error: '',
+    html: animation.replace('<body>', `<body><h1>${model}</h1>`),
+  }))
+  let task: IntelligenceTask = {
+    task_id: 'partial-results',
+    status: 'running',
+    created_at: 1791613858,
+    updated_at: 1791613858,
+    group: '',
+    model: '',
+    endpoint: '',
+    error: '',
+    groups: channels,
+    state: {
+      processed: 1,
+      total: 2,
+      progress: 50,
+      models: channels.map((row, index) => ({
+        group: row.group,
+        model: row.model,
+        total: 1,
+        processed: index === 0 ? 1 : 0,
+        failed: 0,
+      })),
+    },
+    result: { channels: [channels[0]] },
+  }
+  vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+    data: {
+      success: true,
+      data: url.endsWith('/partial-results') ? task : { history: [task] },
+    },
+  }))
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligenceMonitor />
+    </QueryClientProvider>
+  )
+  try {
+    const preview = await screen.findByTitle('Generated animation preview')
+    expect(preview.getAttribute('srcdoc')).toContain('<h1>fast-model</h1>')
+    const slow = screen
+      .getByLabelText('Model: slow-model')
+      .closest('[data-slot=card]') as HTMLElement
+    expect(within(slow).getByText('Running')).toBeVisible()
+    expect(within(slow).getByRole('progressbar')).not.toHaveAttribute(
+      'aria-valuenow'
+    )
+    task = {
+      ...task,
+      status: 'succeeded',
+      result: { channels },
+      state: {
+        total: 2,
+        processed: 2,
+        progress: 100,
+        models: task.state?.models?.map((row) => ({ ...row, processed: 1 })),
+      },
+    }
+    await act(async () => {
+      await client.invalidateQueries({
+        queryKey: ['status-monitor', 'intelligence', 'results'],
+      })
+    })
+    await waitFor(() => {
+      const previews = screen.getAllByTitle('Generated animation preview')
+      expect(previews).toHaveLength(2)
+      expect(previews[1].getAttribute('srcdoc')).toContain(
+        '<h1>slow-model</h1>'
+      )
+    })
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    expect(
+      screen.queryByText('Intelligence test returned no output')
+    ).not.toBeInTheDocument()
   } finally {
     view.unmount()
     client.clear()

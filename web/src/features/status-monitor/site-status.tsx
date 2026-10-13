@@ -755,7 +755,7 @@ export function SiteStatus() {
               </TabsContent>
               <TabsContent
                 value='intelligence'
-                className='min-h-0 min-w-0 overflow-y-auto pb-2'
+                className='min-h-0 min-w-0 overflow-x-hidden overflow-y-auto pb-2'
               >
                 <Suspense fallback={<PanelLoadingState />}>
                   <IntelligenceMonitor />

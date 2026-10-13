@@ -71,127 +71,192 @@ export function IntelligenceMonitor() {
       {query.data.history.length === 0 && (
         <EmptyState title={t('No intelligence test results yet')} />
       )}
-      <div className='grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))] items-start gap-4'>
+      <div className='grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] items-start gap-3 overflow-x-hidden sm:gap-4'>
         {query.data.history.map((task) => {
-          let status = t('Pending')
-          if (task.status === 'running') status = t('Running')
-          if (task.status === 'succeeded') status = t('Completed')
-          if (task.status === 'failed') status = t('Failed')
           const date = new Date(task.created_at * 1000).toLocaleString(locale)
           const channels = task.result?.channels ?? []
-          if (channels.length === 0) {
-            return (
-              <Card
-                key={task.task_id}
-                data-card-hover='false'
-                className='min-w-0 gap-3 border ring-0'
-              >
-                <CardHeader className='gap-2'>
-                  <div className='flex items-start justify-between gap-2'>
-                    <div className='min-w-0 flex-1 space-y-1.5'>
-                      {(task.groups?.length
-                        ? task.groups
-                        : [{ group: task.group, model: task.model }]
-                      ).map((group) => (
-                        <IntelligenceResultIdentity
-                          key={group.group}
-                          group={group.group}
-                          model={group.model}
-                        />
-                      ))}
+          const groups = task.groups?.length
+            ? task.groups
+            : [{ group: task.group, model: task.model }]
+          const progressCards = groups
+            .filter((group) => {
+              const hasResult = channels.some(
+                (channel) =>
+                  (channel.group || task.group) === group.group &&
+                  (channel.model || task.model) === group.model
+              )
+              if (!hasResult) return true
+              if (task.status !== 'running' && task.status !== 'pending') {
+                return false
+              }
+              const progress = task.state?.models?.find(
+                (item) =>
+                  item.group === group.group && item.model === group.model
+              )
+              return !progress || progress.processed < progress.total
+            })
+            .map((group) => {
+              const progress = task.state?.models?.find(
+                (item) =>
+                  item.group === group.group && item.model === group.model
+              )
+              let status = task.status
+              if (
+                progress &&
+                progress.total > 0 &&
+                progress.processed >= progress.total
+              ) {
+                status =
+                  progress.failed === progress.total ? 'failed' : 'succeeded'
+              }
+              const active = status === 'running' || status === 'pending'
+              let label = t('Pending')
+              if (status === 'running') label = t('Running')
+              if (status === 'succeeded') label = t('Completed')
+              if (status === 'failed') label = t('Failed')
+              // Older tasks only have batch progress. Do not present that as
+              // the progress of an individual model in a multi-model run.
+              const counts =
+                progress ?? (groups.length === 1 ? task.state : undefined)
+              const percent =
+                counts && counts.total > 0
+                  ? Math.min(
+                      100,
+                      Math.round((counts.processed * 100) / counts.total)
+                    )
+                  : null
+              return (
+                <Card
+                  key={`${task.task_id}-${group.group}-${group.model}`}
+                  data-card-hover='false'
+                  className='min-w-0 gap-3 border ring-0'
+                >
+                  <CardHeader className='gap-3'>
+                    <div className='flex min-w-0 flex-wrap items-start justify-between gap-2'>
+                      <IntelligenceResultIdentity
+                        group={group.group}
+                        model={group.model}
+                      />
+                      <Badge
+                        variant={
+                          status === 'failed' ? 'destructive' : 'secondary'
+                        }
+                        className='shrink-0 text-xs'
+                      >
+                        {label}
+                      </Badge>
                     </div>
+                    <div className='text-muted-foreground flex flex-wrap items-center justify-between gap-2 text-xs tabular-nums'>
+                      <time
+                        dateTime={new Date(
+                          task.created_at * 1000
+                        ).toISOString()}
+                      >
+                        {date}
+                      </time>
+                      {counts && counts.total > 0 && (
+                        <span>
+                          {formatNumber(counts.processed, locale)} /{' '}
+                          {formatNumber(counts.total, locale)}
+                        </span>
+                      )}
+                    </div>
+                    {(active || percent !== null) && (
+                      <Progress
+                        value={
+                          status === 'running' &&
+                          (percent === null || percent === 0)
+                            ? null
+                            : (percent ?? 0)
+                        }
+                        aria-label={`${t('Progress')}: ${group.group} · ${group.model}`}
+                        className='[&_[data-slot=progress-indicator][data-indeterminate]]:w-1/3 [&_[data-slot=progress-indicator][data-indeterminate]]:motion-safe:animate-[intelligence-progress_1.4s_ease-in-out_infinite_alternate] [&_[data-slot=progress-track]]:h-1.5'
+                      />
+                    )}
+                    {(task.error || status === 'failed') && (
+                      <p
+                        role='alert'
+                        className='text-destructive text-xs break-words'
+                      >
+                        {t(task.error || 'Intelligence test request failed')}
+                      </p>
+                    )}
+                  </CardHeader>
+                </Card>
+              )
+            })
+          return [
+            ...channels.map((channel) => (
+              <Card
+                key={`${task.task_id}-${channel.group}-${channel.model}-${channel.channel_id}-${channel.question_index}`}
+                data-card-hover='false'
+                className='min-w-0 gap-0 border py-0 ring-0'
+              >
+                <CardHeader className='gap-1.5 overflow-hidden py-3'>
+                  <div className='flex min-w-0 flex-wrap items-start justify-between gap-2'>
+                    <IntelligenceResultIdentity
+                      group={channel.group || task.group}
+                      model={channel.model || task.model}
+                    />
                     <Badge
-                      variant={
-                        task.status === 'failed' ? 'destructive' : 'secondary'
-                      }
+                      variant={channel.error ? 'destructive' : 'secondary'}
+                      className='shrink-0 text-[10px]'
                     >
-                      {status}
+                      {channel.error ? t('Failed') : t('Completed')}
                     </Badge>
                   </div>
-                  <p className='text-muted-foreground text-xs'>{date}</p>
-                  {(task.status === 'running' || task.status === 'pending') && (
-                    <Progress
-                      value={task.state?.progress ?? 0}
-                      aria-label={t('Progress')}
-                    />
-                  )}
-                  {task.error && (
-                    <p
-                      role='alert'
-                      className='text-destructive text-xs break-words'
+                  <div className='text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs'>
+                    <span
+                      className='min-w-0 flex-1 truncate'
+                      title={getIntelligenceQuestionName(
+                        channel.question_name,
+                        t
+                      )}
                     >
-                      {t(task.error)}
-                    </p>
-                  )}
+                      {getIntelligenceQuestionName(channel.question_name, t)}
+                    </span>
+                    <span
+                      className='shrink-0 tabular-nums'
+                      title={t('Latency')}
+                    >
+                      {formatNumber(channel.latency_ms / 1000, locale)}{' '}
+                      {t('seconds')}
+                    </span>
+                    <time
+                      className='max-w-[5.5rem] shrink-0 truncate text-[10px] tabular-nums'
+                      dateTime={new Date(task.created_at * 1000).toISOString()}
+                      title={date}
+                    >
+                      {new Date(task.created_at * 1000).toLocaleString(locale, {
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                      })}
+                    </time>
+                  </div>
                 </CardHeader>
-              </Card>
-            )
-          }
-          return channels.map((channel) => (
-            <Card
-              key={`${task.task_id}-${channel.group}-${channel.channel_id}-${channel.question_index}`}
-              data-card-hover='false'
-              className='min-w-0 gap-0 border py-0 ring-0'
-            >
-              <CardHeader className='gap-1.5 py-3'>
-                <div className='flex items-start justify-between gap-2'>
-                  <IntelligenceResultIdentity
-                    group={channel.group || task.group}
-                    model={channel.model || task.model}
+                {channel.error ? (
+                  <p
+                    role='alert'
+                    className='text-destructive border-t px-4 py-3 text-xs break-words'
+                  >
+                    {t(channel.error)}
+                  </p>
+                ) : (
+                  <IntelligencePreview
+                    taskId={task.task_id}
+                    channelId={channel.channel_id}
+                    group={channel.group}
+                    model={channel.model}
+                    questionIndex={channel.question_index}
                   />
-                  <Badge
-                    variant={channel.error ? 'destructive' : 'secondary'}
-                    className='shrink-0 text-[10px]'
-                  >
-                    {channel.error ? t('Failed') : t('Completed')}
-                  </Badge>
-                </div>
-                <div className='text-muted-foreground flex min-w-0 items-center gap-2 text-xs'>
-                  <span
-                    className='min-w-0 flex-1 truncate'
-                    title={getIntelligenceQuestionName(
-                      channel.question_name,
-                      t
-                    )}
-                  >
-                    {getIntelligenceQuestionName(channel.question_name, t)}
-                  </span>
-                  <span className='shrink-0 tabular-nums' title={t('Latency')}>
-                    {formatNumber(channel.latency_ms / 1000, locale)}{' '}
-                    {t('seconds')}
-                  </span>
-                  <time
-                    className='shrink-0 text-[10px] tabular-nums'
-                    dateTime={new Date(task.created_at * 1000).toISOString()}
-                    title={date}
-                  >
-                    {new Date(task.created_at * 1000).toLocaleString(locale, {
-                      month: '2-digit',
-                      day: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      hour12: false,
-                    })}
-                  </time>
-                </div>
-              </CardHeader>
-              {channel.error ? (
-                <p
-                  role='alert'
-                  className='text-destructive border-t px-4 py-3 text-xs break-words'
-                >
-                  {t(channel.error)}
-                </p>
-              ) : (
-                <IntelligencePreview
-                  taskId={task.task_id}
-                  channelId={channel.channel_id}
-                  group={channel.group}
-                  questionIndex={channel.question_index}
-                />
-              )}
-            </Card>
-          ))
+                )}
+              </Card>
+            )),
+            ...progressCards,
+          ]
         })}
       </div>
     </section>
@@ -201,21 +266,21 @@ export function IntelligenceMonitor() {
 function IntelligenceResultIdentity(props: { group: string; model: string }) {
   const { t } = useTranslation()
   return (
-    <CardTitle className='flex min-w-0 flex-1 items-center gap-1.5'>
+    <CardTitle className='flex max-w-full min-w-0 flex-[1_1_14rem] flex-wrap items-center gap-1.5'>
       <GroupBadge
         group={props.group}
         icon={Layers}
         aria-label={`${t('Group')}: ${props.group}`}
-        className='bg-muted/70 h-6 max-w-[45%] rounded-md border border-current/15 px-2 text-xs font-semibold'
+        className='bg-muted/70 h-6 max-w-full rounded-md border border-current/15 px-2 text-xs font-semibold'
       />
       <Badge
         variant='outline'
         aria-label={`${t('Model')}: ${props.model}`}
         title={props.model}
-        className='bg-muted/30 h-6 min-w-0 shrink justify-start gap-1.5 rounded-md px-2 font-mono text-xs font-semibold'
+        className='bg-muted/30 h-auto min-h-6 max-w-full min-w-0 justify-start gap-1.5 rounded-md px-2 font-mono text-xs font-semibold'
       >
         <Cpu aria-hidden='true' className='text-muted-foreground shrink-0' />
-        <span className='truncate'>{props.model}</span>
+        <span className='break-all whitespace-normal'>{props.model}</span>
       </Badge>
     </CardTitle>
   )

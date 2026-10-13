@@ -37,6 +37,7 @@ export function IntelligencePreview(props: {
   taskId: string
   channelId: number
   group?: string
+  model?: string
   questionIndex: number
 }) {
   const { t } = useTranslation()
@@ -44,13 +45,23 @@ export function IntelligencePreview(props: {
   const query = useQuery({
     queryKey: ['status-monitor', 'intelligence-result', props.taskId],
     queryFn: () => getIntelligenceResult(props.taskId),
-    staleTime: Infinity,
+    staleTime: (query) =>
+      query.state.data?.status === 'succeeded' ||
+      query.state.data?.status === 'failed'
+        ? Infinity
+        : 0,
+    refetchInterval: (query) =>
+      query.state.data?.status === 'running' ||
+      query.state.data?.status === 'pending'
+        ? 3000
+        : false,
     meta: { errorToast: false },
   })
   const row = query.data?.result?.channels.find(
     (channel) =>
       channel.channel_id === props.channelId &&
       channel.group === props.group &&
+      channel.model === props.model &&
       channel.question_index === props.questionIndex
   )
   const html = row?.html ?? ''

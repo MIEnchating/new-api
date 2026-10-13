@@ -127,7 +127,7 @@ export function IntelligenceHistory(props: { history: IntelligenceTask[] }) {
                 {task.result?.channels.length ? (
                   task.result.channels.map((row) => (
                     <div
-                      key={`${row.group}-${row.channel_id}-${row.question_index}`}
+                      key={`${row.group}-${row.model}-${row.channel_id}-${row.question_index}`}
                       className='space-y-1 text-xs'
                     >
                       <p className='font-medium'>
@@ -195,6 +195,9 @@ export function IntelligenceHistory(props: { history: IntelligenceTask[] }) {
               <div className='flex items-center gap-1'>
                 <IntelligenceDetails
                   taskId={task.task_id}
+                  group={task.group}
+                  model={task.model}
+                  endpoint={task.endpoint}
                   error={task.error}
                   result={task.result}
                 />

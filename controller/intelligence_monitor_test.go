@@ -67,6 +67,13 @@ func TestIntelligenceConfigValidation(t *testing.T) {
 		change(&config)
 		require.Error(t, config.Validate())
 	}
+	multi := intelligenceConfig{Groups: []intelligenceGroup{{Group: "default", Models: []string{"first", "second"}, Endpoint: "openai"}}, Questions: valid.Questions}
+	require.NoError(t, multi.Validate())
+	for _, models := range [][]string{nil, {"first", "first"}, {"first", ""}, {strings.Repeat("x", 256)}} {
+		invalid := multi
+		invalid.Groups = []intelligenceGroup{{Group: "default", Models: models, Endpoint: "openai"}}
+		require.Error(t, invalid.Validate())
+	}
 }
 
 // Uses real engines and isolated databases; no production tables are touched.
@@ -135,6 +142,8 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	releaseRequests := make(chan struct{})
 	var responseTerminal atomic.Value
 	responseTerminal.Store("response.failed")
+	releaseSecondModel := make(chan struct{})
+	unblockSecondModel := sync.OnceFunc(func() { close(releaseSecondModel) })
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if checkParallel.Load() {
 			if arrivals.Add(1) == 4 {
@@ -158,6 +167,13 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 		if !assert.NoError(t, common.DecodeJson(r.Body, &request)) {
 			w.WriteHeader(400)
 			return
+		}
+		if request["model"] == "second-model" {
+			select {
+			case <-releaseSecondModel:
+			case <-r.Context().Done():
+				return
+			}
 		}
 		if r.URL.Path == "/v1/responses" {
 			assert.Equal(t, true, request["stream"])
@@ -194,6 +210,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 		_, _ = w.Write(response)
 	}))
 	t.Cleanup(upstream.Close)
+	t.Cleanup(unblockSecondModel)
 	url := upstream.URL
 	channels := []model.Channel{
 		{Id: 1, Type: constant.ChannelTypeOpenAI, Key: "test-secret", Name: "selected", Status: common.ChannelStatusEnabled, Group: "default,vip", Models: "gpt-4o-mini", BaseURL: &url},
@@ -215,7 +232,8 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	}
 	saved := call(UpdateIntelligenceMonitor, http.MethodPut, config)
 	require.True(t, gjson.GetBytes(saved.Body.Bytes(), "success").Bool(), saved.Body.String())
-	assert.Equal(t, config, getIntelligenceConfig())
+	config = getIntelligenceConfig()
+	assert.Equal(t, []string{"gpt-4o-mini"}, config.Groups[0].Models)
 	var stored model.Option
 	require.NoError(t, db.First(&stored, model.Option{Key: intelligenceOptionKey}).Error)
 	var persisted intelligenceConfig
@@ -227,7 +245,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, due)
 	assert.Len(t, payload.(intelligenceConfig).Groups, 1)
-	targets, err := intelligenceTargets(config.ForGroup(config.Groups[0]))
+	targets, err := intelligenceTargets(config.ForGroup(config.Groups[0], config.Groups[0].SelectedModels()[0]))
 	require.NoError(t, err)
 	require.Len(t, targets, 1)
 	assert.Equal(t, 1, targets[0].Id)
@@ -271,9 +289,72 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	assert.NotEqual(t, firstRequestID, secondRequestID)
 	assert.Equal(t, "vip", gjson.Get(finished.Result, "channels.0.group").String())
 	assert.Equal(t, "default", gjson.Get(finished.Result, "channels.1.group").String())
+	checkParallel.Store(false)
+	require.NoError(t, db.Model(&channels[0]).Update("models", "gpt-4o-mini,second-model").Error)
+	multi := intelligenceConfig{Groups: []intelligenceGroup{{Group: "vip", Models: []string{"gpt-4o-mini", "second-model"}, Endpoint: "openai", Stream: lo.ToPtr(false), Times: []string{"09:00"}}}, Questions: config.Questions}
+	updated := call(UpdateIntelligenceMonitor, http.MethodPut, multi)
+	require.True(t, gjson.GetBytes(updated.Body.Bytes(), "success").Bool(), updated.Body.String())
+	assert.Equal(t, multi.Groups[0].Models, getIntelligenceConfig().Groups[0].Models)
+	queuedMulti := call(RunIntelligenceMonitor, http.MethodPost, map[string]string{"group": "vip"})
+	require.True(t, gjson.GetBytes(queuedMulti.Body.Bytes(), "success").Bool(), queuedMulti.Body.String())
+	multiTask, err := model.GetSystemTaskByTaskID(gjson.GetBytes(queuedMulti.Body.Bytes(), "data.task_id").String())
+	require.NoError(t, err)
+	multiTask, ok, err = model.ClaimSystemTask(multiTask.ID, multiTask.Type, "multi-runner", time.Now().Add(time.Minute).Unix())
+	require.NoError(t, err)
+	require.True(t, ok)
+	multiFinished := make(chan struct{})
+	go func() {
+		handler.Run(context.Background(), multiTask, "multi-runner")
+		close(multiFinished)
+	}()
+	t.Cleanup(func() {
+		unblockSecondModel()
+		<-multiFinished
+	})
+	// One model must publish completion while the other upstream is still blocked.
+	require.Eventually(t, func() bool {
+		active, err := model.GetSystemTaskByTaskID(multiTask.TaskID)
+		if err != nil {
+			return false
+		}
+		return gjson.Get(active.State, "models.0.processed").Int() == 1
+	}, 5*time.Second, 10*time.Millisecond)
+	active, err := model.GetSystemTaskByTaskID(multiTask.TaskID)
+	require.NoError(t, err)
+	activePublic, err := publishedIntelligenceTask(active, false, false)
+	require.NoError(t, err)
+	activeJSON, err := common.Marshal(activePublic)
+	require.NoError(t, err)
+	assert.Equal(t, model.SystemTaskStatusRunning, active.Status)
+	assert.EqualValues(t, 1, gjson.GetBytes(activeJSON, "state.models.0.processed").Int())
+	assert.EqualValues(t, 0, gjson.GetBytes(activeJSON, "state.models.1.processed").Int())
+	assert.EqualValues(t, 50, gjson.GetBytes(activeJSON, "state.progress").Int())
+	assert.EqualValues(t, 1, gjson.GetBytes(activeJSON, "result.channels.#").Int())
+	assert.Equal(t, "gpt-4o-mini", gjson.GetBytes(activeJSON, "result.channels.0.model").String())
+	assert.False(t, gjson.GetBytes(activeJSON, "result.channels.0.html").Exists())
+	assert.False(t, gjson.GetBytes(activeJSON, "result.channels.0.request_id").Exists())
+	activePreview, err := publishedIntelligenceTask(active, true, false)
+	require.NoError(t, err)
+	previewJSON, err := common.Marshal(activePreview)
+	require.NoError(t, err)
+	assert.Equal(t, output, gjson.GetBytes(previewJSON, "result.channels.0.html").String())
+	unblockSecondModel()
+	<-multiFinished
+	multiTask, err = model.GetSystemTaskByTaskID(multiTask.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, model.SystemTaskStatusSucceeded, multiTask.Status, multiTask.Error)
+	assert.EqualValues(t, 1, gjson.Get(multiTask.State, "models.1.processed").Int())
+	assert.EqualValues(t, 100, gjson.Get(multiTask.State, "progress").Int())
+	assert.Equal(t, "gpt-4o-mini", gjson.Get(multiTask.Result, "channels.0.model").String())
+	assert.Equal(t, "second-model", gjson.Get(multiTask.Result, "channels.1.model").String())
+	publicMulti, err := publishedIntelligenceTask(multiTask, false, false)
+	require.NoError(t, err)
+	assert.Equal(t, []gin.H{{"group": "vip", "model": "gpt-4o-mini", "endpoint": "openai"}, {"group": "vip", "model": "second-model", "endpoint": "openai"}}, publicMulti["groups"])
+	restored := call(UpdateIntelligenceMonitor, http.MethodPut, config)
+	require.True(t, gjson.GetBytes(restored.Body.Bytes(), "success").Bool(), restored.Body.String())
 	failRequests.Store(5)
 	recovered := retryIntelligenceRequest(context.Background(), 0, func() intelligenceChannelResult {
-		return runIntelligenceRequest(context.Background(), &channels[0], 1, config.ForGroup(config.Groups[1]), 0)
+		return runIntelligenceRequest(context.Background(), &channels[0], 1, config.ForGroup(config.Groups[1], config.Groups[1].SelectedModels()[0]), 0)
 	})
 	require.Len(t, recovered.Attempts, 6)
 	assert.Empty(t, recovered.Error)
@@ -546,7 +627,7 @@ func TestIntelligenceLegacyConfigurationPreservesQuestionsAndTargets(t *testing.
 	common.OptionMap = map[string]string{intelligenceOptionKey: ` {"group":"vip","model":"model","endpoint":"openai-response","enabled":true,"interval_minutes":30,"questions":[{"name":"Custom","prompt":"custom prompt"}]} `}
 	config := getIntelligenceConfig()
 	require.Len(t, config.Groups, 1)
-	assert.Equal(t, intelligenceGroup{Group: "vip", Model: "model", Endpoint: "openai-response", Stream: lo.ToPtr(true), Times: []string{"09:00"}}, config.Groups[0])
+	assert.Equal(t, intelligenceGroup{Group: "vip", Model: "model", Models: []string{"model"}, Endpoint: "openai-response", Stream: lo.ToPtr(true), Times: []string{"09:00"}}, config.Groups[0])
 	assert.Equal(t, []intelligenceQuestion{{Name: "Custom", Prompt: "custom prompt"}}, config.Questions)
 }
 
@@ -619,8 +700,8 @@ func TestIntelligenceStreamDefaultsAndSchedule(t *testing.T) {
 	assert.False(t, *config.Groups[1].Stream)
 	due := config.DueGroups(time.Date(2026, 10, 10, 1, 0, 0, 0, time.UTC))
 	require.Len(t, due.Groups, 2)
-	assert.True(t, *due.ForGroup(due.Groups[0]).Stream)
-	assert.False(t, *due.ForGroup(due.Groups[1]).Stream)
+	assert.True(t, *due.ForGroup(due.Groups[0], due.Groups[0].Model).Stream)
+	assert.False(t, *due.ForGroup(due.Groups[1], due.Groups[1].Model).Stream)
 }
 
 func TestIntelligenceRetryAttempts(t *testing.T) {

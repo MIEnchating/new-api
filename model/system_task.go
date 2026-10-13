@@ -373,18 +373,32 @@ func acquireSystemTaskLock(taskType string, taskID string, lockedBy string, now 
 }
 
 func UpdateSystemTaskState(taskID string, lockedBy string, state any) error {
+	return updateSystemTaskProgress(taskID, lockedBy, state, nil)
+}
+
+// UpdateSystemTaskStateAndResult publishes completed work without ending the task.
+func UpdateSystemTaskStateAndResult(taskID string, lockedBy string, state any, result any) error {
+	resultText, err := marshalSystemTaskJSON(result)
+	if err != nil {
+		return err
+	}
+	return updateSystemTaskProgress(taskID, lockedBy, state, &resultText)
+}
+
+func updateSystemTaskProgress(taskID string, lockedBy string, state any, resultText *string) error {
 	stateText, err := marshalSystemTaskJSON(state)
 	if err != nil {
 		return err
 	}
 	now := common.GetTimestamp()
+	updates := map[string]any{"state": stateText, "updated_at": now}
+	if resultText != nil {
+		updates["result"] = *resultText
+	}
 	result := DB.Model(&SystemTask{}).
 		Where("task_id = ? AND status = ? AND locked_by = ?", taskID, SystemTaskStatusRunning, lockedBy).
 		Where("EXISTS (SELECT 1 FROM system_task_locks WHERE system_task_locks.task_id = system_tasks.task_id AND system_task_locks.locked_by = ? AND system_task_locks.locked_until >= ?)", lockedBy, now).
-		Updates(map[string]any{
-			"state":      stateText,
-			"updated_at": now,
-		})
+		Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
