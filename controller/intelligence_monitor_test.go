@@ -11,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -372,6 +373,16 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(serialized), "test-secret")
 	failRequests.Store(0)
+	expiredRequest, cancelExpired := context.WithDeadline(context.Background(), time.Unix(1, 0))
+	defer cancelExpired()
+	deadlineAttempts := 0
+	deadlineResult := retryIntelligenceRequest(context.Background(), 0, func() intelligenceChannelResult {
+		deadlineAttempts++
+		return runIntelligenceRequest(expiredRequest, &channels[0], 1, config.ForGroup(config.Groups[1], config.Groups[1].SelectedModels()[0]), 0)
+	})
+	assert.Equal(t, 1, deadlineAttempts, "local deadlines must not start five more upstream requests")
+	require.Len(t, deadlineResult.Attempts, 1)
+	assert.Equal(t, "Intelligence test exceeded the 180-second request timeout", deadlineResult.Error)
 	scheduled, err := model.CreateSystemTask(intelligenceTaskType, payload, nil)
 	require.NoError(t, err)
 	_, due, err = handler.ScheduledPayload(now.Add(10 * time.Second))
@@ -702,6 +713,23 @@ func TestIntelligenceStreamDefaultsAndSchedule(t *testing.T) {
 	require.Len(t, due.Groups, 2)
 	assert.True(t, *due.ForGroup(due.Groups[0], due.Groups[0].Model).Stream)
 	assert.False(t, *due.ForGroup(due.Groups[1], due.Groups[1].Model).Stream)
+}
+
+func TestIntelligenceStreamingRequestSurvivesGenerationDeadline(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		parent, stopTask := context.WithCancel(context.Background())
+		defer stopTask()
+		stream, cancelStream := intelligenceRequestContext(parent, true)
+		defer cancelStream()
+		nonStream, cancelNonStream := intelligenceRequestContext(parent, false)
+		defer cancelNonStream()
+		// Virtual time: long generation does not require a three-minute test.
+		time.Sleep(181 * time.Second)
+		require.NoError(t, stream.Err(), "an active stream must not be cut off at 180 seconds")
+		require.ErrorIs(t, nonStream.Err(), context.DeadlineExceeded)
+		stopTask()
+		require.ErrorIs(t, stream.Err(), context.Canceled, "task cancellation must still stop the stream")
+	})
 }
 
 func TestIntelligenceRetryAttempts(t *testing.T) {

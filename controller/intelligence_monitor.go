@@ -437,6 +437,7 @@ type intelligenceAttempt struct {
 }
 
 type intelligenceChannelResult struct {
+	noRetry    bool
 	Attempts   []intelligenceAttempt `json:"attempts,omitempty"`
 	HTTPStatus int                   `json:"http_status,omitempty"`
 
@@ -623,7 +624,7 @@ func retryIntelligenceRequest(ctx context.Context, delay time.Duration, attempt 
 		}
 		row = attempt()
 		attempts = append(attempts, intelligenceAttempt{RequestID: row.RequestID, UpstreamRequestID: row.UpstreamRequestID, LatencyMs: row.LatencyMs, Error: row.Error, HTTPStatus: row.HTTPStatus})
-		if row.Error == "" {
+		if row.Error == "" || row.noRetry {
 			break
 		}
 	}
@@ -681,9 +682,9 @@ func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID 
 			row.Error = "Intelligence test encountered an internal error"
 		}
 	}()
-	requestCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
 	isStream := config.Stream == nil || *config.Stream
+	requestCtx, cancel := intelligenceRequestContext(ctx, isStream)
+	defer cancel()
 	response := testChannelWithProbe(requestCtx, channel, userID, config.Model, config.Endpoint, isStream, &channelTestProbe{RequestID: row.RequestID, Group: config.Group, Prompt: question.Prompt})
 	if response.context != nil {
 		row.UpstreamRequestID = response.context.GetString(common.UpstreamRequestIdKey)
@@ -697,6 +698,9 @@ func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID 
 	if response.localErr != nil || response.newAPIError != nil || streamFailed {
 		// Never persist upstream errors, which may contain credentials or internal URLs.
 		row.Error = intelligenceFailureReason(requestCtx, response, streamFailed)
+		row.noRetry = requestCtx.Err() != nil ||
+			errors.Is(response.localErr, context.DeadlineExceeded) ||
+			errors.Is(response.localErr, context.Canceled)
 		return row
 	}
 	row.HTML = extractIntelligenceOutput(response.responseBody, config.Endpoint, isStream)
@@ -707,6 +711,15 @@ func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID 
 		row.Error = "Intelligence test output exceeded 128 KiB"
 	}
 	return row
+}
+
+// Active streams use the relay's idle timeout rather than a fixed generation
+// deadline. Parent cancellation still stops work when the task loses its lease.
+func intelligenceRequestContext(parent context.Context, isStream bool) (context.Context, context.CancelFunc) {
+	if isStream {
+		return context.WithCancel(parent)
+	}
+	return context.WithTimeout(parent, 3*time.Minute)
 }
 
 func buildIntelligenceRequest(modelName, endpoint, prompt string, isStream bool) dto.Request {
