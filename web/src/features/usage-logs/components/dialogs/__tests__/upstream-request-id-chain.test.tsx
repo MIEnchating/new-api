@@ -125,6 +125,37 @@ describe('upstream request ID chain', () => {
     ).not.toBeInTheDocument()
   })
 
+  test('inline chains align long IDs with the detail value and omit the nested title', () => {
+    const requestId = `upstream-request-${'a'.repeat(128)}`
+    renderWithProviders(
+      <UpstreamRequestIdChain requestIds={[requestId, 'next-request']} inline />
+    )
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument()
+    const id = screen.getByText(requestId)
+    expect(id).toHaveClass('min-w-0', 'break-all')
+    const row = screen.getAllByRole('listitem')[0]
+    expect(row).toHaveClass('flex', 'min-w-0', 'items-start')
+    expect(within(row).queryByText('1.')).not.toBeInTheDocument()
+    const copy = within(row).getByRole('button', {
+      name: `Copy to clipboard: ${requestId}`,
+    })
+    expect(copy.parentElement).toBe(id.parentElement)
+    expect(copy).toHaveClass('shrink-0')
+  })
+
+  test('empty chains take no space and a single ID needs no expand control', () => {
+    const view = renderWithProviders(<UpstreamRequestIdChain requestIds={[]} />)
+    expect(view.container).toBeEmptyDOMElement()
+    view.unmount()
+    renderWithProviders(
+      <UpstreamRequestIdChain requestIds={['only-request']} />
+    )
+    expect(screen.getByText('only-request')).toBeVisible()
+    expect(
+      screen.queryByRole('button', { name: 'Expand' })
+    ).not.toBeInTheDocument()
+  })
+
   test('summarizes a long chain with the first and final request IDs', () => {
     renderWithProviders(
       <UpstreamRequestIdChain
@@ -159,7 +190,10 @@ describe('upstream request ID chain', () => {
         sources={{ 'request-two': 'x-request-id' }}
       />
     )
-    fireEvent.click(screen.getAllByRole('button', { name: 'Expand' })[0])
+    const toggle = screen.getByRole('button', { name: 'Expand' })
+    toggle.focus()
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: 'Collapse' })).toHaveFocus()
     const rows = screen.getAllByRole('listitem')
     expect(rows).toHaveLength(4)
     requestIds.forEach((requestId, index) =>
@@ -266,7 +300,8 @@ describe('log detail request IDs', () => {
       />
     )
     const dialog = within(await screen.findByRole('dialog'))
-    fireEvent.click(dialog.getAllByRole('button', { name: 'Expand' })[0])
+    expect(dialog.getAllByText('Upstream Request ID Chain')).toHaveLength(1)
+    fireEvent.click(dialog.getByRole('button', { name: 'Expand' }))
     expect(
       dialog.getByText('Upstream client correlation ID (X-Client-Request-ID)')
     ).toBeVisible()

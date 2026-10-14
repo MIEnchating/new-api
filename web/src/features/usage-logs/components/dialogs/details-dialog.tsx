@@ -1119,6 +1119,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
                   requestIds={upstreamRequestIds}
                   sources={upstreamRequestIdSources}
                   collapsedPreview='first'
+                  inline
                 />
               }
             />

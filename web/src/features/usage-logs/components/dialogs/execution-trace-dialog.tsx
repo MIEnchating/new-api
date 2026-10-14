@@ -109,6 +109,7 @@ export function UpstreamRequestIdChain(props: {
   requestIds: string[]
   sources?: Record<string, string>
   collapsedPreview?: 'first' | 'ends'
+  inline?: boolean
 }) {
   const { t } = useTranslation()
   const [expanded, setExpanded] = useState(false)
@@ -144,95 +145,77 @@ export function UpstreamRequestIdChain(props: {
     return (
       <li
         key={`${entry.requestId}-${entry.index}`}
-        className='grid min-w-0 grid-cols-[1.75rem_minmax(0,1fr)_1.75rem] items-start gap-2 px-3 py-2'
+        className='flex min-w-0 items-start gap-2'
       >
-        <span className='bg-muted text-muted-foreground mt-0.5 flex size-6 items-center justify-center rounded-full font-mono text-[10px] font-medium tabular-nums'>
-          {entry.index + 1}
-        </span>
-        <div className='min-w-0'>
-          <div className='text-foreground font-mono text-xs leading-5 break-all'>
-            {entry.requestId}
+        {entries.length > 1 && !props.inline ? (
+          <span className='text-muted-foreground w-4 shrink-0 pt-0.5 text-right font-mono text-[10px] leading-5 tabular-nums'>
+            {entry.index + 1}.
+          </span>
+        ) : null}
+        <div className='min-w-0 flex-1'>
+          <div className='flex min-w-0 items-start gap-1'>
+            <span className='text-foreground min-w-0 font-mono text-xs leading-5 break-all'>
+              {entry.requestId}
+            </span>
+            <CopyButton
+              value={entry.requestId}
+              size='icon'
+              className='text-muted-foreground hover:text-foreground -mt-0.5 size-6'
+              aria-label={`${t('Copy to clipboard')}: ${entry.requestId}`}
+            />
           </div>
-          <div className='text-muted-foreground mt-0.5 text-[11px] leading-4 break-words'>
+          <div className='text-muted-foreground text-[11px] leading-4 break-words'>
             {upstreamRequestIdSourceLabel(t, props.sources?.[entry.requestId])}
           </div>
         </div>
-        <CopyButton
-          value={entry.requestId}
-          size='icon'
-          className='text-muted-foreground hover:text-foreground mt-0.5 size-6'
-          aria-label={`${t('Copy to clipboard')}: ${entry.requestId}`}
-        />
       </li>
     )
   }
 
   return (
-    <section className='bg-background overflow-hidden rounded-md border'>
-      <div className='bg-muted/30 flex min-w-0 items-center gap-2 border-b px-3 py-2'>
-        <ListTree
-          className='text-muted-foreground size-3.5 shrink-0'
-          aria-hidden='true'
-        />
-        <h3 className='min-w-0 flex-1 truncate text-xs font-medium'>
+    <div className='flex min-w-0 flex-col gap-2'>
+      {!props.inline ? (
+        <h3 className='text-muted-foreground text-xs font-medium'>
           {t(
             props.requestIds.length === 1
               ? 'Upstream Request ID'
               : 'Upstream Request ID Chain'
           )}
         </h3>
-        <span className='bg-muted text-muted-foreground rounded px-1.5 py-0.5 font-mono text-[10px] leading-none tabular-nums'>
-          {props.requestIds.length}
-        </span>
-        {canCollapse ? (
-          <Button
-            type='button'
-            variant='ghost'
-            size='icon-xs'
-            className='text-muted-foreground hover:text-foreground -mr-1'
-            data-press-animation='none'
-            onClick={() => setExpanded((current) => !current)}
-            aria-expanded={expanded}
-            aria-controls={contentId}
-            aria-label={toggleLabel}
-            title={toggleLabel}
-          >
-            {expanded ? (
-              <ChevronUp aria-hidden='true' />
-            ) : (
-              <ChevronDown aria-hidden='true' />
-            )}
-          </Button>
-        ) : null}
-      </div>
-
-      <ol id={contentId} className='divide-y'>
+      ) : null}
+      <ol id={contentId} className='flex min-w-0 flex-col gap-2'>
         {canCollapse && !expanded ? (
           <>
             {renderRequestId(visibleEntries[0])}
-            <li className='flex items-center justify-center px-3 py-1.5'>
-              <Button
-                type='button'
-                variant='ghost'
-                size='sm'
-                className='text-muted-foreground hover:text-foreground h-7 w-full text-xs'
-                data-press-animation='none'
-                onClick={() => setExpanded(true)}
-                aria-expanded='false'
-                aria-controls={contentId}
-                aria-label={t('Expand')}
-              >
-                <ChevronDown aria-hidden='true' />
-                {t('+{{count}} more', { count: hiddenCount })}
-              </Button>
-            </li>
             {visibleEntries[1] ? renderRequestId(visibleEntries[1]) : null}
           </>
         ) : (
           visibleEntries.map((entry) => renderRequestId(entry))
         )}
       </ol>
-    </section>
+      {canCollapse ? (
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          className='text-muted-foreground hover:text-foreground h-6 gap-1 self-start px-1 text-[11px]'
+          data-press-animation='none'
+          onClick={() => setExpanded((current) => !current)}
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          aria-label={toggleLabel}
+        >
+          {expanded ? (
+            <ChevronUp aria-hidden='true' />
+          ) : (
+            <ChevronDown aria-hidden='true' />
+          )}
+          {expanded
+            ? toggleLabel
+            : t('+{{count}} more', { count: hiddenCount })}
+        </Button>
+      ) : null}
+    </div>
   )
 }
 

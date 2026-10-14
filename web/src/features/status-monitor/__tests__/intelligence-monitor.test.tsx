@@ -691,7 +691,7 @@ it('keeps history cards stationary when the pointer enters a result', async () =
     </QueryClientProvider>
   )
   try {
-    const title = await screen.findByLabelText('Group: default')
+    const title = await screen.findByLabelText('Model: test-model')
     expect(title.closest('[data-slot=card]')).toHaveAttribute(
       'data-card-hover',
       'false'
@@ -752,10 +752,8 @@ it('shows only compact result metadata and previews without channel IDs, record 
   try {
     const frames = await screen.findAllByTitle('Generated animation preview')
     expect(frames).toHaveLength(2)
-    for (const label of screen.getAllByLabelText('Group: default')) {
-      expect(label).toHaveTextContent('default')
-      expect(label).toHaveAttribute('data-slot', 'status-badge')
-    }
+    expect(screen.getByRole('tab', { name: 'default' })).toBeVisible()
+    expect(screen.queryByLabelText('Group: default')).not.toBeInTheDocument()
     for (const channel of channels) {
       const label = screen.getByLabelText(`Model: ${channel.model}`)
       expect(label).toHaveTextContent(channel.model)
@@ -1118,6 +1116,175 @@ it('shows finished model previews while another model runs and fetches its resul
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
     expect(
       screen.queryByText('Intelligence test returned no output')
+    ).not.toBeInTheDocument()
+  } finally {
+    view.unmount()
+    client.clear()
+  }
+})
+
+it('filters results and pending models by group with keyboard tabs and falls back after a group disappears', async () => {
+  const user = userEvent.setup()
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const groups = ['default', 'vip', 'all'].map((group) => ({
+    group,
+    model: 'shared-model',
+    endpoint: 'openai-response',
+  }))
+  const task: IntelligenceTask = {
+    task_id: 'group-tabs',
+    status: 'running',
+    created_at: 1791613858,
+    updated_at: 1791613858,
+    group: '',
+    model: '',
+    endpoint: '',
+    error: '',
+    groups,
+    state: {
+      processed: 1,
+      total: 3,
+      progress: 33,
+      models: groups.map((group, index) => ({
+        ...group,
+        total: 1,
+        processed: index === 0 ? 1 : 0,
+        failed: 0,
+      })),
+    },
+    result: {
+      channels: [
+        {
+          ...groups[0],
+          channel_id: 1,
+          question_index: 0,
+          question_name: 'Pelican',
+          latency_ms: 100,
+          error: 'Example upstream error',
+        },
+      ],
+    },
+  }
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: { history: [task] } },
+  })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligenceMonitor />
+    </QueryClientProvider>
+  )
+  try {
+    const all = await screen.findByRole('tab', { name: 'All' })
+    expect(all).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getAllByLabelText('Model: shared-model')).toHaveLength(3)
+    expect(screen.getByRole('tablist', { name: 'Group' })).toHaveClass(
+      'overflow-x-auto',
+      'flex-nowrap',
+      'min-w-0'
+    )
+    await user.click(screen.getByRole('tab', { name: 'default' }))
+    expect(screen.getByRole('tabpanel')).toHaveAccessibleName('default')
+    expect(screen.getAllByLabelText('Model: shared-model')).toHaveLength(1)
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Example upstream error'
+    )
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+    await user.keyboard('{ArrowRight}{Enter}')
+    await waitFor(() =>
+      expect(screen.getByRole('tab', { name: 'vip' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      )
+    )
+    expect(screen.getByRole('tabpanel')).toHaveAccessibleName('vip')
+    expect(
+      screen.getByRole('progressbar', { name: 'Progress: vip · shared-model' })
+    ).toBeVisible()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('Group: vip')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'all' }))
+    expect(screen.getAllByLabelText('Model: shared-model')).toHaveLength(1)
+    expect(
+      screen.getByRole('progressbar', { name: 'Progress: all · shared-model' })
+    ).toBeVisible()
+    act(() =>
+      client.setQueryData(['status-monitor', 'intelligence', 'results'], {
+        history: [{ ...task, groups: [groups[0]] }],
+      })
+    )
+    await waitFor(() => expect(all).toHaveAttribute('aria-selected', 'true'))
+    expect(screen.queryByRole('tab', { name: 'all' })).not.toBeInTheDocument()
+    expect(screen.getByRole('alert')).toBeVisible()
+    act(() =>
+      client.setQueryData(['status-monitor', 'intelligence', 'results'], {
+        history: [],
+      })
+    )
+    expect(
+      await screen.findByText('No intelligence test results yet')
+    ).toBeVisible()
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+  } finally {
+    view.unmount()
+    client.clear()
+  }
+})
+
+it('uses legacy task groups and discovers groups stored only on historical results', async () => {
+  const user = userEvent.setup()
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const task: IntelligenceTask = {
+    task_id: 'legacy-groups',
+    status: 'failed',
+    created_at: 1791613858,
+    updated_at: 1791613858,
+    group: 'legacy',
+    model: 'legacy-model',
+    endpoint: '',
+    error: '',
+    result: {
+      channels: [
+        {
+          channel_id: 1,
+          question_index: 0,
+          question_name: 'Pelican',
+          latency_ms: 100,
+          error: 'Legacy failure',
+        },
+        {
+          group: 'archived',
+          model: 'archived-model',
+          channel_id: 2,
+          question_index: 0,
+          question_name: 'Pelican',
+          latency_ms: 100,
+          error: 'Archived failure',
+        },
+      ],
+    },
+  }
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: { history: [task] } },
+  })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligenceMonitor />
+    </QueryClientProvider>
+  )
+  try {
+    await user.click(await screen.findByRole('tab', { name: 'legacy' }))
+    expect(screen.getByLabelText('Model: legacy-model')).toBeVisible()
+    expect(
+      screen.queryByLabelText('Model: archived-model')
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'archived' }))
+    expect(screen.getByLabelText('Model: archived-model')).toBeVisible()
+    expect(
+      screen.queryByLabelText('Model: legacy-model')
     ).not.toBeInTheDocument()
   } finally {
     view.unmount()
