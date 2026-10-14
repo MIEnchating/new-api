@@ -93,17 +93,18 @@ func TestCaptureUpstreamRequestIdDeduplicatesChain(t *testing.T) {
 	require.Equal(t, []string{"same-request-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
 }
 
-func TestCaptureUpstreamRequestIdCollectsAllHeaders(t *testing.T) {
+func TestCaptureUpstreamRequestIdSelectsOneHeaderPerResponse(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		headers http.Header
 		want    []string
 		sources map[string]string
 	}{
-		{"client and provider", http.Header{"X-Client-Request-Id": {" client-id "}, "X-Request-Id": {"Provider-ID"}}, []string{"client-id", "Provider-ID"}, map[string]string{"client-id": "x-client-request-id", "Provider-ID": "x-request-id"}},
-		{"all three", http.Header{common.RequestIdKey: {"oneapi-id"}, "X-Client-Request-Id": {"client-id"}, "X-Request-Id": {"provider-id"}}, []string{"oneapi-id", "client-id", "provider-id"}, map[string]string{"oneapi-id": "x-oneapi-request-id", "client-id": "x-client-request-id", "provider-id": "x-request-id"}},
+		{"client and provider", http.Header{"X-Client-Request-Id": {" client-id "}, "X-Request-Id": {"Provider-ID"}}, []string{"Provider-ID"}, map[string]string{"Provider-ID": "x-request-id"}},
+		{"all three", http.Header{common.RequestIdKey: {"oneapi-id"}, "X-Client-Request-Id": {"client-id"}, "X-Request-Id": {"provider-id"}}, []string{"oneapi-id"}, map[string]string{"oneapi-id": "x-oneapi-request-id"}},
+		{"client fallback", http.Header{"X-Client-Request-Id": {" client-id "}, "X-Request-Id": {" "}}, []string{"client-id"}, map[string]string{"client-id": "x-client-request-id"}},
 		{"same value", http.Header{common.RequestIdKey: {"shared"}, "X-Client-Request-Id": {"shared"}, "X-Request-Id": {"shared"}}, []string{"shared"}, map[string]string{"shared": "x-oneapi-request-id"}},
-		{"case sensitive values", http.Header{"X-Client-Request-Id": {"ID"}, "X-Request-Id": {"id"}}, []string{"ID", "id"}, map[string]string{"ID": "x-client-request-id", "id": "x-request-id"}},
+		{"case sensitive values", http.Header{"X-Client-Request-Id": {"ID"}, "X-Request-Id": {"id"}}, []string{"id"}, map[string]string{"id": "x-request-id"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newUpstreamRequestIdTestContext()
@@ -127,10 +128,8 @@ func TestCaptureUpstreamRequestIdSourcePriorityAcrossAttempts(t *testing.T) {
 		CaptureUpstreamRequestId(c, header)
 		source := c.MustGet(common.UpstreamRequestIdSourcesKey).(map[string]string)["shared"]
 		switch headerName {
-		case "x-ReQuEsT-ID":
+		case "x-ReQuEsT-ID", "X-CLIENT-REQUEST-ID", "x-request-id":
 			assert.Equal(t, "x-request-id", source)
-		case "X-CLIENT-REQUEST-ID", "x-request-id":
-			assert.Equal(t, "x-client-request-id", source)
 		default:
 			assert.Equal(t, "x-oneapi-request-id", source)
 		}

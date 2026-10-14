@@ -45,7 +45,7 @@ func recordUpstreamRequestIdSource(c *gin.Context, requestId string, source stri
 		sourceByRequestId = make(map[string]string)
 	}
 	// Keep the most specific source even when a later attempt repeats an ID.
-	sourcesByPriority := []string{upstreamRequestIdSourceOneAPI, upstreamRequestIdSourceClientID, upstreamRequestIdSourceGenericID}
+	sourcesByPriority := []string{upstreamRequestIdSourceOneAPI, upstreamRequestIdSourceGenericID, upstreamRequestIdSourceClientID}
 	previousPriority := slices.Index(sourcesByPriority, sourceByRequestId[requestId])
 	if previousPriority < 0 || slices.Index(sourcesByPriority, source) < previousPriority {
 		sourceByRequestId[requestId] = source
@@ -53,27 +53,25 @@ func recordUpstreamRequestIdSource(c *gin.Context, requestId string, source stri
 	c.Set(common.UpstreamRequestIdSourcesKey, sourceByRequestId)
 }
 
-// CaptureUpstreamRequestId collects all response correlation IDs and selects
-// the current primary ID in native, client-correlation, then generic order.
+// CaptureUpstreamRequestId records one ID per response: native request ID,
+// generic request ID, then client correlation ID as a fallback.
 // An empty response clears the primary ID but preserves IDs from earlier attempts.
 func CaptureUpstreamRequestId(c *gin.Context, header http.Header) string {
 	if c == nil {
 		return ""
 	}
-	primaryID := ""
-	for _, source := range []string{upstreamRequestIdSourceOneAPI, upstreamRequestIdSourceClientID, upstreamRequestIdSourceGenericID} {
+	c.Set(common.UpstreamRequestIdKey, "")
+	for _, source := range []string{upstreamRequestIdSourceOneAPI, upstreamRequestIdSourceGenericID, upstreamRequestIdSourceClientID} {
 		requestID := strings.TrimSpace(header.Get(source))
 		if requestID == "" {
 			continue
 		}
-		if primaryID == "" {
-			primaryID = requestID
-		}
+		c.Set(common.UpstreamRequestIdKey, requestID)
 		appendUpstreamRequestId(c, requestID)
 		recordUpstreamRequestIdSource(c, requestID, source)
+		return requestID
 	}
-	c.Set(common.UpstreamRequestIdKey, primaryID)
-	return primaryID
+	return ""
 }
 
 func CloseResponseBodyGracefully(httpResponse *http.Response) {
