@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"slices"
@@ -207,7 +208,12 @@ func GetIntelligenceMonitor(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"config": getIntelligenceConfig(), "catalog": catalog, "history": history}})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"config":      getIntelligenceConfig(),
+		"catalog":     catalog,
+		"group_order": service.OrderGroupNames(slices.Collect(maps.Keys(catalog))),
+		"history":     history,
+	}})
 }
 
 // Public responses are an allowlist: never serialize a system task or its payload.

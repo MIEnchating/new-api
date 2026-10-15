@@ -213,6 +213,61 @@ it('saves edited questions and scheduling settings before allowing a manual run'
   client.clear()
 })
 
+it.each([
+  { order: ['vip', 'default', 'other'], expected: ['vip', 'default', 'other'] },
+  { order: undefined, expected: ['default', 'other', 'vip'] },
+])(
+  'shows group options in server order with a legacy fallback ($order)',
+  async ({ order, expected }) => {
+    const data: IntelligenceMonitorData = {
+      config: {
+        groups: [
+          {
+            group: 'default',
+            model: 'test-model',
+            endpoint: 'openai',
+            enabled: false,
+            times: ['09:00'],
+          },
+        ],
+        questions: [{ name: 'Pelican', prompt: 'Original prompt' }],
+      },
+      catalog: {
+        default: ['test-model'],
+        other: ['test-model'],
+        vip: ['test-model'],
+      },
+      group_order: order,
+      history: [],
+    }
+    const client = new QueryClient()
+    const view = render(
+      <QueryClientProvider client={client}>
+        <SettingsPageProvider actionsContainer={null}>
+          <IntelligenceSettings data={data} />
+        </SettingsPageProvider>
+      </QueryClientProvider>
+    )
+    const user = userEvent.setup()
+    try {
+      const selector = screen.getByRole('combobox', { name: 'Model Group' })
+      await user.click(selector)
+      expect(
+        screen.getAllByRole('option').map((option) => option.textContent)
+      ).toEqual(expected)
+      expect(screen.getByRole('option', { name: 'default' })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      )
+      await user.click(screen.getByRole('option', { name: 'vip' }))
+      expect(selector).toHaveTextContent('vip')
+    } finally {
+      view.unmount()
+      client.clear()
+    }
+  }
+)
+
 it('separates settings from records and preserves unsaved edits across tabs', async () => {
   const data: IntelligenceMonitorData = {
     config: {

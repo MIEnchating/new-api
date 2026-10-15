@@ -122,6 +122,7 @@ export type IntelligenceTask = {
 export type IntelligenceMonitorData = {
   config: IntelligenceConfig
   catalog: Record<string, string[]>
+  group_order?: string[]
   history: IntelligenceTask[]
 }
 type Response<T> = { success: boolean; message?: string; data: T }

@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
@@ -74,6 +75,52 @@ func TestIntelligenceConfigValidation(t *testing.T) {
 		invalid := multi
 		invalid.Groups = []intelligenceGroup{{Group: "default", Models: models, Endpoint: "openai"}}
 		require.Error(t, invalid.Validate())
+	}
+}
+
+func TestIntelligenceCatalogGroupOrder(t *testing.T) {
+	db, _ := newAuditTestDatabase(t, "sqlite", "")
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.SystemTask{}))
+	oldDB, oldOptions := model.DB, common.OptionMap
+	oldOrder := setting.GroupOrder2JSONString()
+	model.DB, common.OptionMap = db, map[string]string{}
+	t.Cleanup(func() {
+		model.DB, common.OptionMap = oldDB, oldOptions
+		require.NoError(t, setting.UpdateGroupOrderByJSONString(oldOrder))
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		require.NoError(t, sqlDB.Close())
+	})
+	require.NoError(t, db.Create(&[]model.Channel{
+		{Status: common.ChannelStatusEnabled, Group: "default,vip,other", Models: "test-model"},
+		{Status: common.ChannelStatusEnabled, Group: "vip", Models: "test-model"},
+		{Status: common.ChannelStatusManuallyDisabled, Group: "disabled", Models: "test-model"},
+	}).Error)
+	for _, tc := range []struct {
+		name  string
+		order string
+		want  []string
+	}{
+		{"configured order excludes unavailable groups and appends unconfigured groups", `["vip","disabled","missing","default"]`, []string{"vip", "default", "other"}},
+		{"unconfigured order falls back to names", `[]`, []string{"default", "other", "vip"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, setting.UpdateGroupOrderByJSONString(tc.order))
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/api/status-monitor/intelligence", nil)
+			GetIntelligenceMonitor(c)
+			require.Equal(t, http.StatusOK, recorder.Code)
+			var response struct {
+				Success bool `json:"success"`
+				Data    struct {
+					GroupOrder []string `json:"group_order"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.True(t, response.Success, recorder.Body.String())
+			assert.Equal(t, tc.want, response.Data.GroupOrder)
+		})
 	}
 }
 

@@ -96,6 +96,9 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
   const [activeTab, setActiveTab] = useState<'settings' | 'history'>('settings')
   const queryClient = useQueryClient()
   const endpoints = getIntelligenceEndpointOptions(t)
+  const groupOptions = (
+    props.data.group_order ?? Object.keys(props.data.catalog).sort()
+  ).map((value) => ({ value, label: value }))
   const form = useForm<IntelligenceConfig>({
     resolver: zodResolver(intelligenceConfigSchema),
     defaultValues: {
@@ -244,9 +247,7 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                             </FieldLabel>
                             <Select
                               value={selectedGroups[index].group || null}
-                              items={Object.keys(props.data.catalog)
-                                .sort()
-                                .map((value) => ({ value, label: value }))}
+                              items={groupOptions}
                               onValueChange={(value) => {
                                 if (value === null) return
                                 form.setValue(`groups.${index}.group`, value, {
@@ -267,13 +268,14 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                                 <SelectValue placeholder={t('Select group')} />
                               </SelectTrigger>
                               <SelectContent alignItemWithTrigger={false}>
-                                {Object.keys(props.data.catalog)
-                                  .sort()
-                                  .map((value) => (
-                                    <SelectItem key={value} value={value}>
-                                      {value}
-                                    </SelectItem>
-                                  ))}
+                                {groupOptions.map((option) => (
+                                  <SelectItem
+                                    key={option.value}
+                                    value={option.value}
+                                  >
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </Field>
