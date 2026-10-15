@@ -112,6 +112,12 @@ func MaskEmail(email string) string {
 
 // MaskSensitiveInfo moved to the conversion kit (kitutil) because the types
 // package error formatting depends on it; host callers keep this name.
-func MaskSensitiveInfo(str string) string {
-	return kitutil.MaskSensitiveInfo(str)
+func MaskSensitiveInfo(str string, upstreamURLs ...string) string {
+	return kitutil.MaskSensitiveInfo(str, upstreamURLs...)
+}
+
+// MaskLegacyErrorLog keeps historical logs safe when their upstream context
+// was not persisted. New error logs use a channel-aware user message instead.
+func MaskLegacyErrorLog(str string) string {
+	return kitutil.MaskLegacyErrorLog(str)
 }

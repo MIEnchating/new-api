@@ -275,7 +275,7 @@ func writeRelayErrorResponse(c *gin.Context, ws *websocket.Conn, relayFormat typ
 	logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(preparation.LogMessage)))
 
 	if relayFormat == types.RelayFormatOpenAIRealtime {
-		helper.WssError(c, ws, err.ToOpenAIError())
+		helper.WssError(c, ws, err.ToOpenAIError(common.UpstreamAddresses(c)...))
 		return
 	}
 	if c.Writer.Written() {
@@ -288,12 +288,12 @@ func writeRelayErrorResponse(c *gin.Context, ws *websocket.Conn, relayFormat typ
 	if relayFormat == types.RelayFormatClaude {
 		c.JSON(err.StatusCode, gin.H{
 			"type":  "error",
-			"error": err.ToClaudeError(),
+			"error": err.ToClaudeError(common.UpstreamAddresses(c)...),
 		})
 		return
 	}
 	c.JSON(err.StatusCode, gin.H{
-		"error": err.ToOpenAIError(),
+		"error": err.ToOpenAIError(common.UpstreamAddresses(c)...),
 	})
 }
 
@@ -307,12 +307,12 @@ func writeRelayStreamError(c *gin.Context, relayFormat types.RelayFormat, err *t
 	switch relayFormat {
 	case types.RelayFormatClaude:
 		event = "error"
-		payload = gin.H{"type": "error", "error": err.ToClaudeError()}
+		payload = gin.H{"type": "error", "error": err.ToClaudeError(common.UpstreamAddresses(c)...)}
 	case types.RelayFormatOpenAIResponses, types.RelayFormatOpenAIResponsesCompaction:
 		event = "error"
-		payload = gin.H{"type": "error", "error": err.ToOpenAIError()}
+		payload = gin.H{"type": "error", "error": err.ToOpenAIError(common.UpstreamAddresses(c)...)}
 	default:
-		payload = gin.H{"error": err.ToOpenAIError()}
+		payload = gin.H{"error": err.ToOpenAIError(common.UpstreamAddresses(c)...)}
 	}
 
 	data, marshalErr := common.Marshal(payload)
@@ -541,7 +541,7 @@ func prepareRelayErrorResponse(c *gin.Context, err *types.NewAPIError, requestId
 	setRelayResponseRequestId(err, requestId)
 	userMessage := err.Error()
 	if !messageReplaced {
-		userMessage = common.MaskSensitiveInfo(userMessage)
+		userMessage = common.MaskSensitiveInfo(userMessage, common.UpstreamAddresses(c)...)
 	}
 	preparation := &relayErrorResponsePreparation{Err: err, LogMessage: logMessage, OriginalStatusCode: originalStatusCode, OriginalMessage: originalMessage, UserStatusCode: err.StatusCode, UserMessage: userMessage, CustomErrorApplied: customErrorApplied}
 	if c != nil {

@@ -289,11 +289,26 @@ func sanitizeErrorLogContents(logs []*Log) {
 	}
 }
 
+// userErrorLogContent uses the message masked with the original channel context.
+// Legacy rows predate that snapshot and retain their conservative projection,
+// including when the original channel has been edited or deleted.
+func userErrorLogContent(log *Log) string {
+	var other struct {
+		AdminInfo struct {
+			UserErrorContent *string `json:"user_error_content"`
+		} `json:"admin_info"`
+	}
+	if common.UnmarshalJsonStr(log.Other, &other) == nil && other.AdminInfo.UserErrorContent != nil {
+		return common.MaskSensitiveInfo(common.MessageWithoutRequestId(*other.AdminInfo.UserErrorContent))
+	}
+	return common.MaskLegacyErrorLog(common.MessageWithoutRequestId(log.Content))
+}
+
 func formatUserLogs(logs []*Log, startIdx int) {
 	sanitizeErrorLogContents(logs)
 	for i := range logs {
 		if logs[i].Type == LogTypeError {
-			logs[i].Content = common.MaskSensitiveInfo(logs[i].Content)
+			logs[i].Content = userErrorLogContent(logs[i])
 		}
 		logs[i].ChannelId = 0
 		logs[i].ChannelName = ""
@@ -467,6 +482,10 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
+	if other == nil {
+		other = NewLogOther()
+	}
+	other.SetAdmin("user_error_content", common.MaskSensitiveInfo(common.MessageWithoutRequestId(content), common.UpstreamAddresses(c)...))
 	appendUpstreamRequestIdsToLogOther(c, other)
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP
@@ -856,7 +875,7 @@ func StreamUserLogs(ctx context.Context, userId int, filter LogFilter, fn func(*
 		count++
 		log.Id = count
 		if log.Type == LogTypeError {
-			log.Content = common.MaskSensitiveInfo(common.MessageWithoutRequestId(log.Content))
+			log.Content = userErrorLogContent(log)
 		}
 		log.ChannelId = 0
 		log.ChannelName = ""

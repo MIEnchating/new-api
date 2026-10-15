@@ -36,7 +36,10 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     server: {
-      deps: { inline: [/@lobehub\//, /antd-style/] },
+      // Bun marks Zod's ESM namespace as __esModule, so Vitest's external
+      // CJS interop unwraps its default export and loses the named `z` export.
+      // Transform Zod through Vite to preserve both namespace and named imports.
+      deps: { inline: ['zod', /@lobehub\//, /antd-style/] },
     },
     setupFiles: ['./src/test-setup.ts'],
     // Several heavy jsdom suites (channel-configuration, visual-billing-editor)

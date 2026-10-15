@@ -329,6 +329,7 @@ func TestWriteRelayErrorResponseMasksOriginalWhenCustomRulePassesThroughMessage(
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://upstream.example")
 	rawMessage := `Post "https://upstream.example/v1/responses?key=diagnostic-key": EOF`
 	apiErr := types.NewError(
 		errors.New(rawMessage),
@@ -358,6 +359,7 @@ func TestWriteRelayErrorResponseMasksFinalOriginalTransportErrorForUser(t *testi
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://upstream.example")
 	c.Set(common.RequestIdKey, "masked-final-transport-trace")
 	service.TrackChannelExecutionGroupEvent(
 		c,

@@ -439,7 +439,7 @@ func (a PollingTaskAdaptor) ParseTaskResult(_ *model.Task, _ *http.Response, bod
 func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*channel.TaskSubmitResponse, *dto.TaskError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError, common.UpstreamAddresses(c)...)
 	}
 	_ = resp.Body.Close()
 
@@ -447,7 +447,7 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 	if strings.HasPrefix(action, "kie-video:") {
 		upstreamID, status, err := parseKIEVideoSubmitResponse(responseBody)
 		if err != nil {
-			return nil, service.TaskErrorWrapper(err, "invalid_kie_video_response", resp.StatusCode)
+			return nil, service.TaskErrorWrapper(err, "invalid_kie_video_response", resp.StatusCode, common.UpstreamAddresses(c)...)
 		}
 		return &channel.TaskSubmitResponse{
 			UpstreamTaskID: upstreamID,
@@ -458,7 +458,7 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 	if strings.HasPrefix(action, "apimart-video:") {
 		upstreamID, status, err := parseAPIMartVideoSubmitResponse(responseBody)
 		if err != nil {
-			return nil, service.TaskErrorWrapper(err, "invalid_apimart_video_response", resp.StatusCode)
+			return nil, service.TaskErrorWrapper(err, "invalid_apimart_video_response", resp.StatusCode, common.UpstreamAddresses(c)...)
 		}
 		return &channel.TaskSubmitResponse{
 			UpstreamTaskID: upstreamID,
@@ -470,7 +470,7 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 	// Parse Sora-compatible response.
 	var dResp responseTask
 	if err := common.Unmarshal(responseBody, &dResp); err != nil {
-		return nil, service.TaskErrorWrapper(errors.Wrapf(err, "body: %s", responseBody), "unmarshal_response_body_failed", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(errors.Wrapf(err, "body: %s", responseBody), "unmarshal_response_body_failed", http.StatusInternalServerError, common.UpstreamAddresses(c)...)
 	}
 
 	upstreamID := dResp.ID
@@ -481,7 +481,7 @@ func (a *TaskAdaptor) ParseResponse(c *gin.Context, resp *http.Response, info *r
 		upstreamID = dResp.VideoID
 	}
 	if upstreamID == "" {
-		return nil, service.TaskErrorWrapper(fmt.Errorf("task_id is empty"), "invalid_response", http.StatusInternalServerError)
+		return nil, service.TaskErrorWrapper(fmt.Errorf("task_id is empty"), "invalid_response", http.StatusInternalServerError, common.UpstreamAddresses(c)...)
 	}
 
 	// 使用公开 task_xxxx ID 返回给客户端

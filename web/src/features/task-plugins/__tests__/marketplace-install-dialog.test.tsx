@@ -188,11 +188,14 @@ test('first install shows source on demand and disables repeat submission until 
       screen.getByRole('button', { name: 'Install and enable' })
     ).toBeEnabled()
   )
-  expect(screen.getByText('const')).toHaveClass('tok-keyword')
-  expect(screen.getByText('"demo"')).toHaveClass('tok-string')
-  expect(screen.getByText('// comment')).toHaveClass('tok-comment')
-  expect(screen.getByText('42')).toHaveClass('tok-number')
-  expect(screen.getByText('run')).toHaveClass('tok-definition')
+  // CodeMirror may finish parsing after the source download enables installation.
+  await waitFor(() => {
+    expect(screen.getByText('const')).toHaveClass('tok-keyword')
+    expect(screen.getByText('"demo"')).toHaveClass('tok-string')
+    expect(screen.getByText('// comment')).toHaveClass('tok-comment')
+    expect(screen.getByText('42')).toHaveClass('tok-number')
+    expect(screen.getByText('run')).toHaveClass('tok-definition')
+  })
   await user.click(screen.getByRole('button', { name: 'Install and enable' }))
   expect(
     await screen.findByRole('button', { name: 'Installing...' })

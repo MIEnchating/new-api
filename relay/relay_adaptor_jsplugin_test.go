@@ -1,15 +1,18 @@
 package relay
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	jspluginadaptor "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -162,4 +165,30 @@ func TestGetTaskAdaptorForRequestPinsLegacyMappedPlugin(t *testing.T) {
 	require.NotNil(t, pinned.Plugin)
 	assert.Equal(t, "sora", pinned.Plugin.Meta.Key)
 	assert.Same(t, pinned.Generation, pluginruntime.DefaultRegistry.Generation())
+}
+
+func TestSoraCompatibilityMasksConfiguredUpstreamErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, action, body, code string
+	}{
+		{"KIE provider failure", "kie-video:test", `{"code":500,"msg":"https://private.example.com/jobs?key=secret; see https://docs.example.org/errors"}`, "invalid_kie_video_response"},
+		{"APIMart provider failure", "apimart-video:test", `{"code":500,"msg":"https://private.example.com/jobs?key=secret; see https://docs.example.org/errors"}`, "invalid_apimart_video_response"},
+		{"malformed legacy response", "sora-test", `invalid response from https://private.example.com/jobs?key=secret; see https://docs.example.org/errors`, "unmarshal_response_body_failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://private.example.com")
+			info := &relaycommon.RelayInfo{TaskRelayInfo: &relaycommon.TaskRelayInfo{Action: tc.action}}
+			adaptor := GetTaskAdaptor(constant.TaskPlatformSoraCompat)
+			require.NotNil(t, adaptor)
+			response := &http.Response{StatusCode: http.StatusBadGateway, Body: io.NopCloser(strings.NewReader(tc.body))}
+			result, taskErr := adaptor.ParseResponse(c, response, info)
+			require.Nil(t, result)
+			require.NotNil(t, taskErr)
+			assert.Equal(t, tc.code, taskErr.Code)
+			assert.NotContains(t, taskErr.Message, "private.example.com")
+			assert.NotContains(t, taskErr.Message, "secret")
+			assert.Contains(t, taskErr.Message, "https://docs.example.org/errors")
+		})
+	}
 }

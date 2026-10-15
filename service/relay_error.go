@@ -68,7 +68,8 @@ func HandleChannelFailure(c *gin.Context, channelError types.ChannelError, err *
 	if err == nil {
 		return false
 	}
-	logger.LogError(c, common.LogText("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode())))
+	upstreamURLs := common.UpstreamAddresses(c)
+	logger.LogError(c, common.LogText("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode(upstreamURLs...))))
 	if types.IsStreamEventError(err) &&
 		(types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err)) {
 		return false
@@ -88,7 +89,7 @@ func HandleChannelFailure(c *gin.Context, channelError types.ChannelError, err *
 		tokenGroupRouteAdvanced = MarkTokenGroupRouteFailure(c, err)
 	}
 	if !channelRouteAdvanced && ShouldDisableChannelForContext(c, err) && channelError.AutoBan {
-		reason := err.MaskSensitiveErrorWithStatusCode()
+		reason := err.MaskSensitiveErrorWithStatusCode(upstreamURLs...)
 		gopool.Go(func() {
 			DisableChannel(channelError, reason)
 		})
@@ -130,6 +131,6 @@ func RecordRelayErrorLog(c *gin.Context, channelID int, err *types.NewAPIError, 
 		actualResponseModel = relayInfo.ActualResponseModel()
 	}
 	model.RecordErrorLog(c, c.GetInt("id"), channelID, c.GetString("original_model"), actualResponseModel,
-		c.GetString("token_name"), err.MaskSensitiveErrorWithStatusCode(), c.GetInt("token_id"),
+		c.GetString("token_name"), err.MaskSensitiveErrorWithStatusCode(common.UpstreamAddresses(c)...), c.GetInt("token_id"),
 		int(time.Since(startTime).Seconds()), common.GetContextKeyBool(c, constant.ContextKeyIsStream), c.GetString("group"), other)
 }

@@ -1,10 +1,12 @@
 package model
 
 import (
+	"context"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -536,4 +538,52 @@ func TestLogFormattingPreservesLargeIntegerLexemes(t *testing.T) {
 		FormatAdminLogs(adminLogs)
 		assert.Equal(t, unprivileged, adminLogs[0].Other)
 	})
+}
+
+func TestErrorLogAddressMaskingPreservesHistoryAndPublicLinks(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&Log{}, &User{}))
+	previousDB, previousLogDB, previousRedis := DB, LOG_DB, common.RedisEnabled
+	DB, LOG_DB, common.RedisEnabled = db, db, false
+	t.Cleanup(func() {
+		DB, LOG_DB, common.RedisEnabled = previousDB, previousLogDB, previousRedis
+		sqlDB, err := db.DB()
+		require.NoError(t, err)
+		require.NoError(t, sqlDB.Close())
+	})
+	legacyContent := `Post "https://retired.private.example/v1/chat": EOF; Authorization: Bearer legacy-secret`
+	require.NoError(t, db.Create(&Log{UserId: 42, TokenId: 7, Type: LogTypeError, Content: legacyContent}).Error)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://private.example.com")
+	content := `Post "https://private.example.com/v1/chat?key=current-secret": EOF; see https://docs.example.org/errors; api.openai.com; Authorization: Bearer auth-secret`
+	RecordErrorLog(c, 42, 17, "test-model", "", "test-token", content, 7, 0, false, "default", nil)
+
+	userLogs, total, err := GetUserLogs(42, LogFilter{}, 0, 20)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, total)
+	tokenLogs, err := GetLogByTokenId(7)
+	require.NoError(t, err)
+	var exported []*Log
+	require.NoError(t, StreamUserLogs(context.Background(), 42, LogFilter{}, func(log *Log) error {
+		exported = append(exported, log)
+		return nil
+	}))
+	for name, logs := range map[string][]*Log{"user list": userLogs, "token list": tokenLogs, "export": exported} {
+		t.Run(name, func(t *testing.T) {
+			require.Len(t, logs, 2)
+			assert.Contains(t, logs[0].Content, "https://docs.example.org/errors")
+			assert.Contains(t, logs[0].Content, "api.openai.com")
+			for _, log := range logs {
+				assert.NotContains(t, log.Content, "private.example")
+				assert.NotContains(t, log.Content, "secret")
+				assert.Zero(t, log.ChannelId)
+				assert.NotContains(t, log.Other, "admin_info")
+			}
+		})
+	}
+	var stored Log
+	require.NoError(t, db.Order("id DESC").First(&stored).Error)
+	FormatAdminLogs([]*Log{&stored})
+	assert.Equal(t, content, stored.Content)
 }
