@@ -16,9 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
+import { focusManager, useQuery } from '@tanstack/react-query'
 import { Maximize2 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -30,43 +37,89 @@ import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
 
-import { getIntelligenceResult } from './intelligence-api'
+import {
+  getIntelligenceResult,
+  type IntelligenceTask,
+} from './intelligence-api'
 import { intelligencePreviewDocument } from './intelligence-html'
 
-export function IntelligencePreview(props: {
+type IntelligencePreviewProps = {
   taskId: string
   channelId: number
   group?: string
   model?: string
   questionIndex: number
-}) {
-  const { t } = useTranslation()
+}
+
+export const IntelligencePreview = memo(function IntelligencePreview(
+  props: IntelligencePreviewProps
+) {
+  const viewport = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(
+    () => typeof IntersectionObserver === 'undefined'
+  )
   const [expanded, setExpanded] = useState(false)
+
+  useEffect(() => {
+    const element = viewport.current
+    if (!element || typeof IntersectionObserver === 'undefined') return
+    // Unmount offscreen documents, including their scripts and query observers.
+    // CSS visibility and iframe lazy loading do not stop an already loaded page.
+    const observer = new IntersectionObserver(([entry]) => {
+      setVisible(entry.isIntersecting)
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
+
+  return (
+    <div ref={viewport} className='bg-muted relative aspect-[6/5] border-t'>
+      {(visible || expanded) && (
+        <IntelligencePreviewContent
+          {...props}
+          expanded={expanded}
+          onExpandedChange={setExpanded}
+        />
+      )}
+    </div>
+  )
+})
+
+function IntelligencePreviewContent(
+  props: IntelligencePreviewProps & {
+    expanded: boolean
+    onExpandedChange: (expanded: boolean) => void
+  }
+) {
+  const { t } = useTranslation()
+  // React Query shares one visibility listener across all preview cards.
+  const pageVisible = useSyncExternalStore(
+    focusManager.subscribe,
+    () => focusManager.isFocused(),
+    () => false
+  )
   const query = useQuery({
     queryKey: ['status-monitor', 'intelligence-result', props.taskId],
     queryFn: () => getIntelligenceResult(props.taskId),
+    enabled: pageVisible,
     staleTime: (query) =>
+      findIntelligencePreview(query.state.data, props)?.html ||
       query.state.data?.status === 'succeeded' ||
       query.state.data?.status === 'failed'
         ? Infinity
         : 0,
     refetchInterval: (query) =>
-      query.state.data?.status === 'running' ||
-      query.state.data?.status === 'pending'
+      !findIntelligencePreview(query.state.data, props)?.html &&
+      (query.state.data?.status === 'running' ||
+        query.state.data?.status === 'pending')
         ? 3000
         : false,
     meta: { errorToast: false },
   })
-  const row = query.data?.result?.channels.find(
-    (channel) =>
-      channel.channel_id === props.channelId &&
-      channel.group === props.group &&
-      channel.model === props.model &&
-      channel.question_index === props.questionIndex
-  )
+  const row = findIntelligencePreview(query.data, props)
   const html = row?.html ?? ''
   const previewDocument = useMemo(
-    () => intelligencePreviewDocument(html),
+    () => (html ? intelligencePreviewDocument(html) : ''),
     [html]
   )
 
@@ -87,15 +140,17 @@ export function IntelligencePreview(props: {
 
   return (
     <>
-      <div className='relative border-t'>
-        <div className='pointer-events-none' inert>
-          <IntelligenceAnimation document={previewDocument} />
+      <div className='relative'>
+        <div className='pointer-events-none aspect-[6/5]' inert>
+          {pageVisible && !props.expanded && (
+            <IntelligenceAnimation document={previewDocument} />
+          )}
         </div>
         <Button
           variant='ghost'
           aria-label={t('Enlarge preview')}
           className='absolute inset-0 h-full w-full rounded-none p-0 hover:bg-transparent active:translate-y-0'
-          onClick={() => setExpanded(true)}
+          onClick={() => props.onExpandedChange(true)}
         >
           <span className='bg-background/80 text-foreground absolute right-2 bottom-2 rounded-md border p-1.5'>
             <Maximize2 aria-hidden='true' className='size-3.5' />
@@ -103,19 +158,34 @@ export function IntelligencePreview(props: {
         </Button>
       </div>
       <Dialog
-        open={expanded}
-        onOpenChange={setExpanded}
+        open={props.expanded}
+        onOpenChange={props.onExpandedChange}
         title={t('Generated animation preview')}
         contentClassName='sm:max-w-[min(64rem,95vw)]'
         bodyClassName='flex justify-center'
       >
-        {expanded && (
+        {props.expanded && (
           <div className='w-full max-w-[min(960px,84vh)]'>
-            <IntelligenceAnimation document={previewDocument} />
+            {pageVisible && (
+              <IntelligenceAnimation document={previewDocument} />
+            )}
           </div>
         )}
       </Dialog>
     </>
+  )
+}
+
+function findIntelligencePreview(
+  task: IntelligenceTask | undefined,
+  props: IntelligencePreviewProps
+) {
+  return task?.result?.channels.find(
+    (channel) =>
+      channel.channel_id === props.channelId &&
+      channel.group === props.group &&
+      channel.model === props.model &&
+      channel.question_index === props.questionIndex
   )
 }
 

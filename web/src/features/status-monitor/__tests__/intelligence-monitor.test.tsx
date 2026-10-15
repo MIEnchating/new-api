@@ -16,7 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  focusManager,
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query'
 import {
   act,
   cleanup,
@@ -49,6 +53,7 @@ import {
   intelligencePreviewDocument,
 } from '../intelligence-html'
 import { IntelligenceMonitor } from '../intelligence-monitor'
+import { IntelligencePreview } from '../intelligence-preview'
 
 const animation = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>@keyframes ride {to {transform:rotate(360deg)}} svg {width:100%}</style></head><body><svg viewBox="0 0 100 100"><circle r="10"/></svg></body></html>`
 afterEach(() => {
@@ -1289,5 +1294,246 @@ it('uses legacy task groups and discovers groups stored only on historical resul
   } finally {
     view.unmount()
     client.clear()
+  }
+})
+
+it('loads previews only in view, releases offscreen animations and restores cached results on return', async () => {
+  let intersect: (visible: boolean) => void = () => undefined
+  const disconnect = vi.fn()
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      constructor(callback: IntersectionObserverCallback) {
+        intersect = (visible) =>
+          callback(
+            [{ isIntersecting: visible } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver
+          )
+      }
+      observe() {}
+      disconnect = disconnect
+    }
+  )
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        task_id: 'visibility',
+        status: 'succeeded',
+        result: {
+          channels: [
+            {
+              channel_id: 1,
+              question_index: 0,
+              html: animation,
+            },
+          ],
+        },
+      },
+    },
+  })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligencePreview
+        taskId='visibility'
+        channelId={1}
+        questionIndex={0}
+      />
+    </QueryClientProvider>
+  )
+  try {
+    expect(get).not.toHaveBeenCalled()
+    expect(
+      screen.queryByTitle('Generated animation preview')
+    ).not.toBeInTheDocument()
+    act(() => intersect(true))
+    const frame = await screen.findByTitle('Generated animation preview')
+    expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
+    expect(frame.getAttribute('srcdoc')).toContain("connect-src 'none'")
+    act(() => intersect(false))
+    expect(
+      screen.queryByTitle('Generated animation preview')
+    ).not.toBeInTheDocument()
+    expect(view.container.firstElementChild).toHaveClass('aspect-[6/5]')
+    act(() => intersect(true))
+    expect(
+      await screen.findByTitle('Generated animation preview')
+    ).toBeVisible()
+    expect(get).toHaveBeenCalledTimes(1)
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Enlarge preview' })
+    )
+    const dialog = await screen.findByRole('dialog')
+    expect(document.querySelectorAll('iframe')).toHaveLength(1)
+    expect(
+      within(dialog).getByTitle('Generated animation preview')
+    ).toBeVisible()
+    act(() => intersect(false))
+    expect(
+      within(dialog).getByTitle('Generated animation preview')
+    ).toBeVisible()
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    )
+    expect(document.querySelectorAll('iframe')).toHaveLength(0)
+  } finally {
+    view.unmount()
+    client.clear()
+    vi.unstubAllGlobals()
+  }
+  expect(disconnect).toHaveBeenCalled()
+})
+
+it('releases hidden-page animations and restores the open enlarged preview from cache', async () => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        task_id: 'background',
+        status: 'succeeded',
+        result: {
+          channels: [
+            {
+              channel_id: 1,
+              question_index: 0,
+              html: animation,
+            },
+          ],
+        },
+      },
+    },
+  })
+  focusManager.setFocused(false)
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligencePreview
+        taskId='background'
+        channelId={1}
+        questionIndex={0}
+      />
+    </QueryClientProvider>
+  )
+  try {
+    expect(get).not.toHaveBeenCalled()
+    act(() => focusManager.setFocused(true))
+    await screen.findByTitle('Generated animation preview')
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Enlarge preview' })
+    )
+    const dialog = await screen.findByRole('dialog')
+    expect(
+      within(dialog).getByTitle('Generated animation preview')
+    ).toBeVisible()
+    act(() => focusManager.setFocused(false))
+    expect(document.querySelectorAll('iframe')).toHaveLength(0)
+    expect(dialog).toBeInTheDocument()
+    act(() => focusManager.setFocused(true))
+    expect(
+      await within(dialog).findByTitle('Generated animation preview')
+    ).toBeVisible()
+    expect(document.querySelectorAll('iframe')).toHaveLength(1)
+    expect(get).toHaveBeenCalledTimes(1)
+    await userEvent.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    )
+    expect(
+      await screen.findByTitle('Generated animation preview')
+    ).toBeVisible()
+    act(() => focusManager.setFocused(false))
+    expect(document.querySelectorAll('iframe')).toHaveLength(0)
+  } finally {
+    view.unmount()
+    client.clear()
+    focusManager.setFocused(undefined)
+  }
+})
+
+it('stops downloading completed previews while a batch runs and fetches newly completed models', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const channels = ['fast', 'slow'].map((model) => ({
+    channel_id: 1,
+    question_index: 0,
+    model,
+    html: animation.replace('<body>', `<body><h1>${model}</h1>`),
+  }))
+  const get = vi
+    .spyOn(api, 'get')
+    .mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: {
+          task_id: 'cached-batch',
+          status: 'running',
+          result: { channels: [channels[0]] },
+        },
+      },
+    })
+    .mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          task_id: 'cached-batch',
+          status: 'succeeded',
+          result: { channels },
+        },
+      },
+    })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligencePreview
+        taskId='cached-batch'
+        channelId={1}
+        questionIndex={0}
+        model='fast'
+      />
+    </QueryClientProvider>
+  )
+  try {
+    expect(
+      (await screen.findByTitle('Generated animation preview')).getAttribute(
+        'srcdoc'
+      )
+    ).toContain('<h1>fast</h1>')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9000)
+    })
+    expect(get).toHaveBeenCalledTimes(1)
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <IntelligencePreview
+          taskId='cached-batch'
+          channelId={1}
+          questionIndex={0}
+          model='fast'
+        />
+        <IntelligencePreview
+          taskId='cached-batch'
+          channelId={1}
+          questionIndex={0}
+          model='slow'
+        />
+      </QueryClientProvider>
+    )
+    await waitFor(() => {
+      const frames = screen.getAllByTitle('Generated animation preview')
+      expect(frames).toHaveLength(2)
+      expect(frames[1].getAttribute('srcdoc')).toContain('<h1>slow</h1>')
+    })
+    expect(get).toHaveBeenCalledTimes(2)
+  } finally {
+    view.unmount()
+    client.clear()
+    vi.useRealTimers()
   }
 })
