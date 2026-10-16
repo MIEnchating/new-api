@@ -373,7 +373,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 // request context, and reports a rejected handshake as a *types.NewAPIError
 // carrying the upstream status code (types.NewError preserves it).
 func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*websocket.Conn, error) {
-	c.Set(common2.UpstreamRequestIdKey, "")
+	attempt := service.BeginUpstreamRequestAttempt(c, info.ChannelId, info.ChannelType)
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
@@ -410,7 +410,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 	targetConn, resp, err := dialer.DialContext(c.Request.Context(), fullRequestURL, targetHeader)
 	if resp != nil {
-		service.CaptureUpstreamRequestId(c, resp.Header)
+		service.CaptureUpstreamRequestChain(c, resp.Header, attempt)
 	}
 	if err != nil {
 		statusCode := http.StatusInternalServerError
@@ -449,7 +449,7 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
-	c.Set(common2.UpstreamRequestIdKey, "")
+	attempt := service.BeginUpstreamRequestAttempt(c, info.ChannelId, info.ChannelType)
 	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
@@ -494,7 +494,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 			resp.Proto)
 	}
 
-	service.CaptureUpstreamRequestId(c, resp.Header)
+	service.CaptureUpstreamRequestChain(c, resp.Header, attempt)
 	if info.IsStream && info.RelayMode == constant.RelayModeResponses {
 		logger.LogInfo(c, fmt.Sprintf(
 			"stream trace: stage=upstream_headers elapsed_ms=%d status=%d proto=%q content_type=%q content_length=%d transfer_encoding=%q content_encoding=%q server=%q via=%q cf_ray=%q upstream_request_id=%q provider_request_id=%q",

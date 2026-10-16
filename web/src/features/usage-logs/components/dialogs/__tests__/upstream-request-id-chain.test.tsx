@@ -35,7 +35,11 @@ import zh from '@/i18n/locales/zh.json'
 
 import { usageLogSchema } from '../../../data/schema'
 import { DetailsDialog } from '../details-dialog'
-import { UpstreamRequestIdChain } from '../execution-trace-dialog'
+import {
+  ExecutionTraceDialog,
+  UpstreamRequestChain,
+  UpstreamRequestIdChain,
+} from '../execution-trace-dialog'
 
 const i18n = createInstance()
 const originalClipboard = Object.getOwnPropertyDescriptor(
@@ -317,5 +321,154 @@ describe('log detail request IDs', () => {
     expect(
       dialog.getByRole('button', { name: 'Copy to clipboard: provider-id' })
     ).toBeVisible()
+  })
+})
+
+const attempts = [
+  {
+    attempt: 1,
+    channel_id: 177,
+    channel_type: 'sub2api',
+    nodes: [
+      {
+        id: 'client-id',
+        source: 'x-client-request-id',
+        service: 'sub2api',
+        role: 'client_correlation',
+      },
+      {
+        id: 'provider-id',
+        source: 'x-request-id',
+        service: 'sub2api-upstream',
+        role: 'provider_request',
+      },
+    ],
+  },
+  {
+    attempt: 2,
+    channel_id: 177,
+    channel_type: 'sub2api',
+    nodes: [
+      {
+        id: 'provider-id',
+        source: 'x-request-id',
+        service: 'upstream',
+        role: 'upstream_request',
+      },
+    ],
+  },
+  { attempt: 3, channel_id: 178, channel_type: 'sub2api', nodes: [] },
+]
+
+describe('structured upstream request chain', () => {
+  test('groups repeated IDs by attempt, labels roles, and keeps empty attempts', async () => {
+    renderWithProviders(
+      <UpstreamRequestChain attempts={attempts} requestIds={['legacy-id']} />
+    )
+    expect(screen.queryByText('legacy-id')).not.toBeInTheDocument()
+    const first = screen.getByRole('group', { name: 'Attempt 1 · Channel 177' })
+    expect(
+      within(first).getByText('Sub2API client correlation ID')
+    ).toBeVisible()
+    expect(
+      within(first).getByText('Sub2API upstream provider request ID')
+    ).toBeVisible()
+    const rows = within(first).getAllByRole('listitem')
+    expect(within(rows[0]).getByText('client-id')).toBeVisible()
+    expect(within(rows[1]).getByText('provider-id')).toBeVisible()
+    const second = screen.getByRole('group', {
+      name: 'Attempt 2 · Channel 177',
+    })
+    expect(
+      within(second).getByText('Upstream response request ID (X-Request-ID)')
+    ).toBeVisible()
+    expect(screen.getAllByText('provider-id')).toHaveLength(2)
+    expect(
+      within(
+        screen.getByRole('group', { name: 'Attempt 3 · Channel 178' })
+      ).getByText('No upstream request ID recorded')
+    ).toBeVisible()
+    await act(async () => {
+      await i18n.changeLanguage('zh')
+    })
+    expect(screen.getByText('Sub2API 客户端关联 ID')).toBeVisible()
+  })
+
+  test('execution trace displays the structured chain from its log', async () => {
+    client.setQueryData(['channel-execution-trace', 'local-id'], {
+      success: true,
+      data: {
+        request_id: 'local-id',
+        status: 'success',
+        events: [],
+        channel_ids: [177],
+      },
+    })
+    renderWithProviders(
+      <ExecutionTraceDialog
+        requestId='local-id'
+        upstreamRequestChain={attempts}
+        upstreamRequestIds={['legacy-id']}
+        open
+        onOpenChange={() => {}}
+      />
+    )
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(
+      dialog.getByRole('group', { name: 'Attempt 1 · Channel 177' })
+    ).toBeVisible()
+    expect(dialog.getByText('Sub2API client correlation ID')).toBeVisible()
+    expect(dialog.queryByText('legacy-id')).not.toBeInTheDocument()
+  })
+
+  test('falls back to historical IDs when no structured attempts exist', () => {
+    renderWithProviders(
+      <UpstreamRequestChain
+        attempts={[]}
+        requestIds={['legacy-id']}
+        sources={{ 'legacy-id': 'x-request-id' }}
+      />
+    )
+    expect(screen.getByText('legacy-id')).toBeVisible()
+    expect(
+      screen.getByText('Upstream response request ID (X-Request-ID)')
+    ).toBeVisible()
+  })
+
+  test('log details prefer attempt groups and keep the local ID separate', async () => {
+    const log = usageLogSchema.parse({
+      id: 1,
+      user_id: 1,
+      created_at: 1,
+      type: 5,
+      content: '',
+      request_id: 'local-id',
+      upstream_request_id: 'client-id',
+      other: JSON.stringify({
+        admin_info: {
+          upstream_request_ids: ['client-id', 'provider-id'],
+          upstream_request_chain: attempts,
+        },
+      }),
+    })
+    renderWithProviders(
+      <DetailsDialog
+        log={log}
+        isAdmin
+        isRoot={false}
+        open
+        onOpenChange={() => {}}
+      />
+    )
+    const dialog = within(await screen.findByRole('dialog'))
+    expect(
+      dialog.getByRole('group', { name: 'Attempt 1 · Channel 177' })
+    ).toBeVisible()
+    expect(
+      dialog.getAllByRole('button', { name: 'Copy to clipboard: local-id' })
+    ).toHaveLength(1)
+    expect(
+      dialog.getAllByRole('button', { name: 'Copy to clipboard: client-id' })
+    ).toHaveLength(1)
   })
 })

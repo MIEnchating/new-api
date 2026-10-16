@@ -619,7 +619,15 @@ func TestResponsesWebSocketReusesConnectionAndSettlesEachRequest(t *testing.T) {
 		assert.Equal(t, 10, logs[index].CompletionTokens)
 		var other map[string]any
 		require.NoError(t, common.UnmarshalJsonStr(logs[index].Other, &other))
-		assert.Contains(t, other, "admin_info")
+		require.Contains(t, other, "admin_info")
+		admin := other["admin_info"].(map[string]any)
+		assert.Equal(t, []any{"upstream-ws-handshake"}, admin["upstream_request_ids"])
+		chain := admin["upstream_request_chain"].([]any)
+		require.Len(t, chain, 1, "connection reuse must preserve the handshake without adding attempts")
+		nodes := chain[0].(map[string]any)["nodes"].([]any)
+		require.Len(t, nodes, 1)
+		assert.Equal(t, "upstream-ws-handshake", nodes[0].(map[string]any)["id"])
+		assert.Equal(t, "x-request-id", nodes[0].(map[string]any)["source"])
 		assert.NotContains(t, other, "use_channel")
 		assert.Equal(t, map[string]any{"status": "ok", "end_reason": "done", "response_status": "completed"}, other["stream_status"])
 	}

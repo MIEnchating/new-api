@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"reflect"
 	"slices"
@@ -109,15 +110,18 @@ type responsesWSSession struct {
 
 	// These fields belong to the serial request worker and describe the actual
 	// established connection. Per-request token/user data is never stored here.
-	lastResponseID          string
-	lockedModel             string
-	lockedChannelID         int
-	lockedGroup             string
-	lockedKey               string
-	lockedKeyIndex          int
-	lockedUpstreamRequestID string
-	lockedContext           map[appconstant.ContextKey]any
-	lockedRoute             dto.AdvancedCustomRoute
+	lastResponseID               string
+	lockedModel                  string
+	lockedChannelID              int
+	lockedGroup                  string
+	lockedKey                    string
+	lockedKeyIndex               int
+	lockedUpstreamRequestID      string
+	lockedUpstreamRequestIDs     []string
+	lockedUpstreamRequestSources map[string]string
+	lockedUpstreamRequestChain   []common.UpstreamRequestAttempt
+	lockedContext                map[appconstant.ContextKey]any
+	lockedRoute                  dto.AdvancedCustomRoute
 }
 
 func ResponsesWebSocketHelper(c *gin.Context, client *websocket.Conn, runner ResponsesWSRequestRunner) *types.NewAPIError {
@@ -287,6 +291,10 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		service.AppendUsedChannel(c, s.lockedChannelID)
 		service.TrackResolvedChannelExecutionAttempt(c, s.lockedGroup, modelName, c.Request.URL.Path, &appmodel.Channel{Id: s.lockedChannelID, Name: c.GetString("channel_name")}, 0)
 		c.Set(common.UpstreamRequestIdKey, s.lockedUpstreamRequestID)
+		// Reused calls share the handshake IDs; no new transport attempt occurred.
+		c.Set(common.UpstreamRequestIdsKey, slices.Clone(s.lockedUpstreamRequestIDs))
+		c.Set(common.UpstreamRequestIdSourcesKey, maps.Clone(s.lockedUpstreamRequestSources))
+		c.Set(common.UpstreamRequestChainKey, s.lockedUpstreamRequestChain)
 		info.IsStream = true
 		common.SetContextKey(c, appconstant.ContextKeyIsStream, true)
 		if apiErr = PrepareRequestBilling(c, info); apiErr != nil {
@@ -387,6 +395,12 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				return types.NewError(err, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
 			}
 			s.lockedUpstreamRequestID = c.GetString(common.UpstreamRequestIdKey)
+			s.lockedUpstreamRequestIDs = slices.Clone(c.GetStringSlice(common.UpstreamRequestIdsKey))
+			sources, _ := c.Get(common.UpstreamRequestIdSourcesKey)
+			sourceByID, _ := sources.(map[string]string)
+			s.lockedUpstreamRequestSources = maps.Clone(sourceByID)
+			chain, _ := c.Get(common.UpstreamRequestChainKey)
+			s.lockedUpstreamRequestChain, _ = chain.([]common.UpstreamRequestAttempt)
 			s.lockedKey, s.lockedKeyIndex = info.ApiKey, info.ChannelMultiKeyIndex
 			s.lockedRoute, _ = channel.GetOtherSettings().AdvancedCustom.MatchPathForModel(c.Request.URL.Path, modelName)
 			s.lockedContext = make(map[appconstant.ContextKey]any)

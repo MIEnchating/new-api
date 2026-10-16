@@ -981,6 +981,9 @@ export function useCommonLogsColumns(
                 <ExecutionTraceDialog
                   requestId={log.request_id}
                   upstreamRequestIds={upstreamRequestIds}
+                  upstreamRequestChain={
+                    other?.admin_info?.upstream_request_chain
+                  }
                   upstreamRequestIdSources={
                     other?.admin_info?.upstream_request_id_sources
                   }

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -161,4 +162,70 @@ func TestShouldCopyUpstreamHeaderDoesNotCaptureIDs(t *testing.T) {
 	assert.Equal(t, "provider", c.Writer.Header().Get("X-Request-ID"))
 	assert.True(t, ShouldCopyUpstreamHeader(c, "x-request-id", []string{"provider"}))
 	assert.False(t, ShouldCopyUpstreamHeader(c, "x-oneapi-request-id", []string{"upstream"}))
+}
+
+func TestCaptureUpstreamRequestChain(t *testing.T) {
+	client := common.UpstreamRequestNode{ID: "client", Source: "x-client-request-id", Service: "sub2api", Role: "client_correlation"}
+	provider := common.UpstreamRequestNode{ID: "provider", Source: "x-request-id", Service: "sub2api-upstream", Role: "provider_request"}
+	generic := common.UpstreamRequestNode{ID: "provider", Source: "x-request-id", Service: "upstream", Role: "upstream_request"}
+	for _, tc := range []struct {
+		name   string
+		header http.Header
+		nodes  []common.UpstreamRequestNode
+	}{
+		{"both", http.Header{"X-Client-Request-Id": {" client "}, "X-Request-Id": {" provider "}}, []common.UpstreamRequestNode{client, provider}},
+		{"client only", http.Header{"X-Client-Request-Id": {"client"}}, []common.UpstreamRequestNode{client}},
+		{"provider fallback", http.Header{"X-Client-Request-Id": {" "}, "X-Request-Id": {"provider"}}, []common.UpstreamRequestNode{generic}},
+		{"all three", http.Header{"X-Oneapi-Request-Id": {"other"}, "X-Client-Request-Id": {"client"}, "X-Request-Id": {"provider"}}, []common.UpstreamRequestNode{client, provider}},
+		{"duplicate", http.Header{"X-Client-Request-Id": {"client"}, "X-Request-Id": {"client"}}, []common.UpstreamRequestNode{client}},
+		{"mixed casing", http.Header{"x-CLIENT-request-ID": {"client"}, "X-REQUEST-ID": {"provider"}}, []common.UpstreamRequestNode{client, provider}},
+		{"no headers", nil, []common.UpstreamRequestNode{}},
+		{"empty", http.Header{"X-Client-Request-Id": {" "}, "X-Request-Id": {" "}}, []common.UpstreamRequestNode{}},
+		{"oneapi only ignored", http.Header{"X-Oneapi-Request-Id": {"other"}}, []common.UpstreamRequestNode{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newUpstreamRequestIdTestContext()
+			c.Set(common.RequestIdKey, "local")
+			var snapshot []common.UpstreamRequestAttempt
+			for i := range 2 {
+				index := BeginUpstreamRequestAttempt(c, 177, constant.ChannelTypeSub2API)
+				assert.Empty(t, c.GetString(common.UpstreamRequestIdKey))
+				CaptureUpstreamRequestChain(c, tc.header, index)
+				chain := c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
+				require.Len(t, chain, i+1)
+				assert.Equal(t, common.UpstreamRequestAttempt{Attempt: i + 1, ChannelID: 177, ChannelType: "sub2api", Nodes: tc.nodes}, chain[i])
+				if i == 0 {
+					snapshot = chain
+				}
+			}
+			assert.Len(t, snapshot, 1)
+			assert.Equal(t, tc.nodes, snapshot[0].Nodes)
+			var ids []string
+			for _, node := range tc.nodes {
+				ids = append(ids, node.ID)
+			}
+			assert.Equal(t, ids, c.GetStringSlice(common.UpstreamRequestIdsKey))
+			if len(ids) > 0 {
+				assert.Equal(t, ids[0], c.GetString(common.UpstreamRequestIdKey))
+			} else {
+				assert.Empty(t, c.GetString(common.UpstreamRequestIdKey))
+			}
+			assert.Equal(t, "local", c.GetString(common.RequestIdKey))
+		})
+	}
+}
+
+func TestUpstreamRequestChainKeepsPerAttemptSource(t *testing.T) {
+	c := newUpstreamRequestIdTestContext()
+	for i, source := range []string{"X-Oneapi-Request-Id", "X-Request-Id", "X-Client-Request-Id"} {
+		index := BeginUpstreamRequestAttempt(c, i+1, constant.ChannelTypeOpenAI)
+		CaptureUpstreamRequestChain(c, http.Header{source: {"shared"}}, index)
+	}
+	chain := c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
+	require.Len(t, chain, 3)
+	for i, source := range []string{"x-oneapi-request-id", "x-request-id", "x-client-request-id"} {
+		require.Len(t, chain[i].Nodes, 1)
+		assert.Equal(t, source, chain[i].Nodes[0].Source)
+		assert.Equal(t, i+1, chain[i].ChannelID)
+	}
 }

@@ -99,7 +99,10 @@ import {
 } from '../../types'
 import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
-import { UpstreamRequestIdChain } from './execution-trace-dialog'
+import {
+  UpstreamRequestChain,
+  UpstreamRequestIdChain,
+} from './execution-trace-dialog'
 
 function timingTextColorClass(
   variant: 'success' | 'warning' | 'danger'
@@ -986,6 +989,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
       useChannel?.length === 1 &&
       String(useChannel[0]) === String(props.log.channel)
     )
+  const upstreamRequestChain = other?.admin_info?.upstream_request_chain
+  const hasUpstreamRequestChain = Boolean(upstreamRequestChain?.length)
   const upstreamRequestIds = getUpstreamRequestIds(
     other?.admin_info?.upstream_request_ids,
     props.log.upstream_request_id,
@@ -1086,44 +1091,60 @@ export function DetailsDialog(props: DetailsDialogProps) {
               mono
             />
           )}
-          {props.isAdmin && upstreamRequestIds.length === 1 && (
-            <DetailRow
-              label={t('Upstream Request ID')}
-              value={
-                <span className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5'>
-                  <span className='font-mono break-all'>
-                    {upstreamRequestIds[0]}
-                  </span>
-                  <CopyButton
-                    value={upstreamRequestIds[0]}
-                    size='icon'
-                    className='text-muted-foreground hover:text-foreground -mt-1 size-6'
-                    aria-label={`${t('Copy to clipboard')}: ${upstreamRequestIds[0]}`}
-                  />
-                  <span className='text-muted-foreground text-[11px]'>
-                    {t('Source')}:{' '}
-                    {upstreamRequestIdSourceLabel(
-                      t,
-                      upstreamRequestIdSources[upstreamRequestIds[0]]
-                    )}
-                  </span>
-                </span>
-              }
-            />
-          )}
-          {props.isAdmin && upstreamRequestIds.length > 1 && (
+          {props.isAdmin && hasUpstreamRequestChain && (
             <DetailRow
               label={t('Upstream Request ID Chain')}
               value={
-                <UpstreamRequestIdChain
+                <UpstreamRequestChain
+                  attempts={upstreamRequestChain}
                   requestIds={upstreamRequestIds}
-                  sources={upstreamRequestIdSources}
-                  collapsedPreview='first'
                   inline
                 />
               }
             />
           )}
+          {props.isAdmin &&
+            !hasUpstreamRequestChain &&
+            upstreamRequestIds.length === 1 && (
+              <DetailRow
+                label={t('Upstream Request ID')}
+                value={
+                  <span className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5'>
+                    <span className='font-mono break-all'>
+                      {upstreamRequestIds[0]}
+                    </span>
+                    <CopyButton
+                      value={upstreamRequestIds[0]}
+                      size='icon'
+                      className='text-muted-foreground hover:text-foreground -mt-1 size-6'
+                      aria-label={`${t('Copy to clipboard')}: ${upstreamRequestIds[0]}`}
+                    />
+                    <span className='text-muted-foreground text-[11px]'>
+                      {t('Source')}:{' '}
+                      {upstreamRequestIdSourceLabel(
+                        t,
+                        upstreamRequestIdSources[upstreamRequestIds[0]]
+                      )}
+                    </span>
+                  </span>
+                }
+              />
+            )}
+          {props.isAdmin &&
+            !hasUpstreamRequestChain &&
+            upstreamRequestIds.length > 1 && (
+              <DetailRow
+                label={t('Upstream Request ID Chain')}
+                value={
+                  <UpstreamRequestIdChain
+                    requestIds={upstreamRequestIds}
+                    sources={upstreamRequestIdSources}
+                    collapsedPreview='first'
+                    inline
+                  />
+                }
+              />
+            )}
           {manageOperator && (
             <DetailRow
               label={

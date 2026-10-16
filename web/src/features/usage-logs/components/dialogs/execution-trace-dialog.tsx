@@ -49,8 +49,11 @@ import {
 } from '@/lib/channel-execution-timeline'
 import { resolveRouteGroupProgress } from '@/lib/route-group-progress'
 
+import type { UpstreamRequestAttempt, UpstreamRequestNode } from '../../types'
+
 type ExecutionTraceDialogProps = {
   requestId: string
+  upstreamRequestChain?: UpstreamRequestAttempt[]
   upstreamRequestIds?: string[]
   upstreamRequestIdSources?: Record<string, string>
   isRetryIntermediate?: boolean
@@ -89,8 +92,18 @@ function traceStatusTone(status?: string): IconBadgeTone {
 
 function upstreamRequestIdSourceLabel(
   t: (key: string) => string,
-  source?: string
+  source?: string,
+  node?: UpstreamRequestNode
 ) {
+  if (node?.service === 'sub2api' && node.role === 'client_correlation') {
+    return t('Sub2API client correlation ID')
+  }
+  if (
+    node?.service === 'sub2api-upstream' &&
+    node.role === 'provider_request'
+  ) {
+    return t('Sub2API upstream provider request ID')
+  }
   if (source === 'x-oneapi-request-id') {
     return t('New API / One API (X-Oneapi-Request-Id)')
   }
@@ -108,6 +121,7 @@ const COLLAPSED_REQUEST_ID_CHAIN_LENGTH = 3
 export function UpstreamRequestIdChain(props: {
   requestIds: string[]
   sources?: Record<string, string>
+  nodes?: UpstreamRequestNode[]
   collapsedPreview?: 'first' | 'ends'
   inline?: boolean
 }) {
@@ -165,7 +179,12 @@ export function UpstreamRequestIdChain(props: {
             />
           </div>
           <div className='text-muted-foreground text-[11px] leading-4 break-words'>
-            {upstreamRequestIdSourceLabel(t, props.sources?.[entry.requestId])}
+            {upstreamRequestIdSourceLabel(
+              t,
+              props.nodes?.[entry.index]?.source ??
+                props.sources?.[entry.requestId],
+              props.nodes?.[entry.index]
+            )}
           </div>
         </div>
       </li>
@@ -215,6 +234,67 @@ export function UpstreamRequestIdChain(props: {
             : t('+{{count}} more', { count: hiddenCount })}
         </Button>
       ) : null}
+    </div>
+  )
+}
+
+// Keep attempt boundaries even when separate responses return the same ID.
+export function UpstreamRequestChain(props: {
+  attempts?: UpstreamRequestAttempt[]
+  requestIds: string[]
+  sources?: Record<string, string>
+  collapsedPreview?: 'first' | 'ends'
+  inline?: boolean
+}) {
+  const { t } = useTranslation()
+  if (!props.attempts?.length) {
+    return (
+      <UpstreamRequestIdChain
+        requestIds={props.requestIds}
+        sources={props.sources}
+        collapsedPreview={props.collapsedPreview}
+        inline={props.inline}
+      />
+    )
+  }
+  return (
+    <div className='flex min-w-0 flex-col gap-3'>
+      {!props.inline && (
+        <h3 className='text-muted-foreground text-xs font-medium'>
+          {t('Upstream Request ID Chain')}
+        </h3>
+      )}
+      {props.attempts.map((attempt) => {
+        const label = t('Attempt {{attempt}} · Channel {{channel}}', {
+          attempt: attempt.attempt,
+          channel: attempt.channel_id,
+        })
+        return (
+          <section
+            key={attempt.attempt}
+            role='group'
+            aria-label={label}
+            className='min-w-0 space-y-2'
+          >
+            <h4 className='text-muted-foreground text-[11px] font-medium'>
+              {label}
+            </h4>
+            <div className='border-border min-w-0 border-l pl-3'>
+              {attempt.nodes.length > 0 ? (
+                <UpstreamRequestIdChain
+                  requestIds={attempt.nodes.map((node) => node.id)}
+                  nodes={attempt.nodes}
+                  inline
+                />
+              ) : (
+                <p className='text-muted-foreground text-xs'>
+                  {t('No upstream request ID recorded')}
+                </p>
+              )}
+            </div>
+          </section>
+        )
+      })}
     </div>
   )
 }
@@ -404,7 +484,8 @@ export function ExecutionTraceDialog(props: ExecutionTraceDialogProps) {
               ))}
             </dl>
 
-            <UpstreamRequestIdChain
+            <UpstreamRequestChain
+              attempts={props.upstreamRequestChain}
               requestIds={upstreamRequestIds}
               sources={props.upstreamRequestIdSources}
             />

@@ -157,6 +157,20 @@ interface ToolSurchargeItem {
   price: number
 }
 
+export interface UpstreamRequestNode {
+  id: string
+  source: string
+  service: string
+  role: string
+}
+
+export interface UpstreamRequestAttempt {
+  attempt: number
+  channel_id: number
+  channel_type: string
+  nodes: UpstreamRequestNode[]
+}
+
 export interface LogOtherData {
   admin_info?: {
     retry_intermediate?: boolean
@@ -168,6 +182,7 @@ export interface LogOtherData {
     usage_billing_path?: UsageBillingPath | string
     channel_affinity?: ChannelAffinityInfo
     channel_execution_trace?: ChannelExecutionTraceInfo
+    upstream_request_chain?: UpstreamRequestAttempt[]
     upstream_request_ids?: string[]
     upstream_request_id_sources?: Record<string, string>
     // Top-up audit fields (type=1, admin only)

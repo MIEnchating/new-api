@@ -251,10 +251,10 @@ func TestUpstreamRequestIDsHTTP(t *testing.T) {
 		primary string
 		ids     []string
 	}{
-		{"success", http.StatusOK, false, http.Header{"X-Client-Request-Id": {"client-id"}, "X-Request-Id": {"provider-id"}}, "provider-id", []string{"provider-id"}},
-		{"stream", http.StatusOK, true, http.Header{"X-Client-Request-Id": {"client-id"}, "X-Request-Id": {"provider-id"}}, "provider-id", []string{"provider-id"}},
-		{"error", http.StatusBadGateway, false, http.Header{"X-Client-Request-Id": {"error-id"}}, "error-id", []string{"error-id"}},
-		{"stream error", http.StatusBadGateway, true, http.Header{"X-Client-Request-Id": {"error-id"}}, "error-id", []string{"error-id"}},
+		{"success", http.StatusOK, false, http.Header{"X-Client-Request-Id": {"client-id"}, "X-Request-Id": {"provider-id"}}, "client-id", []string{"client-id", "provider-id"}},
+		{"stream", http.StatusOK, true, http.Header{"X-Client-Request-Id": {"client-id"}, "X-Request-Id": {"provider-id"}}, "client-id", []string{"client-id", "provider-id"}},
+		{"error", http.StatusBadGateway, false, http.Header{"X-Client-Request-Id": {"error-id"}, "X-Request-Id": {"error-provider"}}, "error-id", []string{"error-id", "error-provider"}},
+		{"stream error", http.StatusBadGateway, true, http.Header{"X-Client-Request-Id": {"error-id"}, "X-Request-Id": {"error-provider"}}, "error-id", []string{"error-id", "error-provider"}},
 		{"provider only", http.StatusOK, false, http.Header{"X-Request-Id": {"provider-id"}}, "provider-id", []string{"provider-id"}},
 		{"no headers", http.StatusOK, false, http.Header{}, "", nil},
 	} {
@@ -274,7 +274,7 @@ func TestUpstreamRequestIDsHTTP(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
 			c.Set(common.RequestIdKey, "local-id")
 			service.CaptureUpstreamRequestId(c, http.Header{"X-Request-Id": {"previous-id"}})
-			info := &relaycommon.RelayInfo{IsStream: tc.stream, ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeSub2API}}
+			info := &relaycommon.RelayInfo{IsStream: tc.stream, ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 177, ChannelType: constant.ChannelTypeSub2API}}
 			req, err := http.NewRequest(http.MethodPost, upstream.URL, strings.NewReader("request"))
 			require.NoError(t, err)
 			resp, err := DoRequest(c, req, info)
@@ -285,6 +285,10 @@ func TestUpstreamRequestIDsHTTP(t *testing.T) {
 			wantIDs := append([]string{"previous-id"}, tc.ids...)
 			assert.Equal(t, wantIDs, c.GetStringSlice(common.UpstreamRequestIdsKey))
 			assert.Equal(t, "local-id", c.GetString(common.RequestIdKey))
+			chain := c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
+			require.Len(t, chain, 1)
+			assert.Equal(t, 177, chain[0].ChannelID)
+			assert.Equal(t, "sub2api", chain[0].ChannelType)
 
 			// A subsequent transport failure must clear the primary ID, retaining history.
 			cancelled, cancel := context.WithCancel(context.Background())
@@ -293,6 +297,10 @@ func TestUpstreamRequestIDsHTTP(t *testing.T) {
 			require.NoError(t, err)
 			_, err = DoRequest(c, retry, info)
 			require.Error(t, err)
+			chain = c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
+			require.Len(t, chain, 2)
+			assert.Equal(t, 2, chain[1].Attempt)
+			assert.Empty(t, chain[1].Nodes)
 			assert.Empty(t, c.GetString(common.UpstreamRequestIdKey))
 			assert.Equal(t, wantIDs, c.GetStringSlice(common.UpstreamRequestIdsKey))
 		})
@@ -321,7 +329,7 @@ func TestUpstreamRequestIDsWebSocket(t *testing.T) {
 			c, _ := gin.CreateTestContext(httptest.NewRecorder())
 			c.Request = httptest.NewRequest(http.MethodGet, "/relay", nil)
 			c.Set(common.RequestIdKey, "local-id")
-			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelType: constant.ChannelTypeSub2API}}
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 177, ChannelType: constant.ChannelTypeSub2API}}
 			adaptor := requestIDTestAdaptor{url: upstream.URL}
 			conn, err := DoWssRequest(adaptor, c, info, nil)
 			if status == http.StatusSwitchingProtocols {
@@ -330,17 +338,25 @@ func TestUpstreamRequestIDsWebSocket(t *testing.T) {
 			} else {
 				require.Error(t, err)
 			}
-			assert.Equal(t, "provider-id", c.GetString(common.UpstreamRequestIdKey))
-			assert.Equal(t, []string{"provider-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
+			assert.Equal(t, "client-id", c.GetString(common.UpstreamRequestIdKey))
+			assert.Equal(t, []string{"client-id", "provider-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
 			assert.Equal(t, "local-id", c.GetString(common.RequestIdKey))
+			chain := c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
+			require.Len(t, chain, 1)
+			assert.Equal(t, 177, chain[0].ChannelID)
+			assert.Equal(t, "sub2api", chain[0].ChannelType)
 
 			cancelled, cancel := context.WithCancel(context.Background())
 			cancel()
 			c.Request = c.Request.WithContext(cancelled)
 			_, err = DoWssRequest(adaptor, c, info, nil)
 			require.Error(t, err)
+			chain = c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
+			require.Len(t, chain, 2)
+			assert.Equal(t, 2, chain[1].Attempt)
+			assert.Empty(t, chain[1].Nodes)
 			assert.Empty(t, c.GetString(common.UpstreamRequestIdKey))
-			assert.Equal(t, []string{"provider-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
+			assert.Equal(t, []string{"client-id", "provider-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
 		})
 	}
 }
@@ -388,33 +404,50 @@ func TestUpstreamRequestIDsPersistLogs(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
 			c.Set(common.RequestIdKey, "local-id")
 			c.Set("username", "request-id-test")
-			service.CaptureUpstreamRequestId(c, http.Header{"X-Client-Request-Id": {"first-client"}, "X-Request-Id": {"first-request"}})
+			service.CaptureUpstreamRequestChain(c, http.Header{"X-Client-Request-Id": {"first-client"}, "X-Request-Id": {"first-request"}}, service.BeginUpstreamRequestAttempt(c, 177, constant.ChannelTypeSub2API))
 			intermediate := model.NewLogOther()
 			intermediate.SetAdmin("retry_intermediate", true)
 			model.RecordErrorLog(c, 1, 1, "test-model", "", "", "upstream error", 0, 0, false, "default", intermediate)
-			service.CaptureUpstreamRequestId(c, http.Header{"X-Client-Request-Id": {"second-client"}, "X-Request-Id": {"second-request"}})
+			service.CaptureUpstreamRequestChain(c, http.Header{"X-Client-Request-Id": {"second-client"}, "X-Request-Id": {"second-request"}}, service.BeginUpstreamRequestAttempt(c, 177, constant.ChannelTypeSub2API))
 			model.RecordConsumeLog(c, 1, model.RecordConsumeLogParams{ModelName: "test-model"})
-			service.CaptureUpstreamRequestId(c, nil)
+			service.BeginUpstreamRequestAttempt(c, 178, constant.ChannelTypeSub2API)
 			model.RecordErrorLog(c, 1, 1, "test-model", "", "", "network error", 0, 0, false, "default", model.NewLogOther())
 			var logs []model.Log
 			require.NoError(t, db.Order("id ASC").Find(&logs).Error)
 			require.Len(t, logs, 3)
-			for i, primary := range []string{"first-request", "second-request", ""} {
+			for i, primary := range []string{"first-client", "second-client", ""} {
 				assert.Equal(t, "local-id", logs[i].RequestId)
 				assert.Equal(t, primary, logs[i].UpstreamRequestId)
 				var other struct {
 					AdminInfo struct {
-						IDs          []string          `json:"upstream_request_ids"`
-						Sources      map[string]string `json:"upstream_request_id_sources"`
-						Intermediate bool              `json:"retry_intermediate"`
+						Chain        []common.UpstreamRequestAttempt `json:"upstream_request_chain"`
+						IDs          []string                        `json:"upstream_request_ids"`
+						Sources      map[string]string               `json:"upstream_request_id_sources"`
+						Intermediate bool                            `json:"retry_intermediate"`
 					} `json:"admin_info"`
 				}
 				require.NoError(t, common.UnmarshalJsonStr(logs[i].Other, &other))
-				expectedIDs := []string{"first-request"}
-				expectedSources := map[string]string{"first-request": "x-request-id"}
+				expectedIDs := []string{"first-client", "first-request"}
+				expectedSources := map[string]string{"first-client": "x-client-request-id", "first-request": "x-request-id"}
 				if i > 0 {
-					expectedIDs = append(expectedIDs, "second-request")
+					expectedIDs = append(expectedIDs, "second-client", "second-request")
 					expectedSources["second-request"] = "x-request-id"
+					expectedSources["second-client"] = "x-client-request-id"
+				}
+				require.Len(t, other.AdminInfo.Chain, i+1)
+				for j, attempt := range other.AdminInfo.Chain {
+					assert.Equal(t, j+1, attempt.Attempt)
+					if j == 2 {
+						assert.Equal(t, 178, attempt.ChannelID)
+						assert.Empty(t, attempt.Nodes)
+						continue
+					}
+					assert.Equal(t, 177, attempt.ChannelID)
+					require.Len(t, attempt.Nodes, 2)
+					assert.Equal(t, expectedIDs[j*2], attempt.Nodes[0].ID)
+					assert.Equal(t, expectedIDs[j*2+1], attempt.Nodes[1].ID)
+					assert.Equal(t, "client_correlation", attempt.Nodes[0].Role)
+					assert.Equal(t, "provider_request", attempt.Nodes[1].Role)
 				}
 				assert.Equal(t, expectedIDs, other.AdminInfo.IDs)
 				assert.Equal(t, expectedSources, other.AdminInfo.Sources)

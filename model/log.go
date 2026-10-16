@@ -211,18 +211,23 @@ func MarkLogAdminOnly(other any) {
 	}
 }
 
-func appendUpstreamRequestIdsAdminInfo(c *gin.Context, other map[string]interface{}) {
+func appendUpstreamRequestIdsAdminInfo(c *gin.Context, other map[string]any) {
 	if c == nil || other == nil {
 		return
 	}
+	chainValue, _ := c.Get(common.UpstreamRequestChainKey)
+	chain, _ := chainValue.([]common.UpstreamRequestAttempt)
 	requestIds := c.GetStringSlice(common.UpstreamRequestIdsKey)
-	if len(requestIds) == 0 {
+	if len(requestIds) == 0 && len(chain) == 0 {
 		return
 	}
-	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	adminInfo, ok := other["admin_info"].(map[string]any)
 	if !ok || adminInfo == nil {
-		adminInfo = make(map[string]interface{})
+		adminInfo = make(map[string]any)
 		other["admin_info"] = adminInfo
+	}
+	if len(chain) > 0 {
+		adminInfo["upstream_request_chain"] = chain
 	}
 	adminInfo["upstream_request_ids"] = append([]string(nil), requestIds...)
 	if sources, exists := c.Get(common.UpstreamRequestIdSourcesKey); exists {
@@ -240,9 +245,14 @@ func appendUpstreamRequestIdsToLogOther(c *gin.Context, other *LogOther) {
 	if c == nil || other == nil {
 		return
 	}
+	chainValue, _ := c.Get(common.UpstreamRequestChainKey)
+	chain, _ := chainValue.([]common.UpstreamRequestAttempt)
 	requestIds := c.GetStringSlice(common.UpstreamRequestIdsKey)
-	if len(requestIds) == 0 {
+	if len(requestIds) == 0 && len(chain) == 0 {
 		return
+	}
+	if len(chain) > 0 {
+		other.SetAdmin("upstream_request_chain", chain)
 	}
 	other.SetAdmin("upstream_request_ids", append([]string(nil), requestIds...))
 	if sources, exists := c.Get(common.UpstreamRequestIdSourcesKey); exists {
