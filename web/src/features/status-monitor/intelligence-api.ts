@@ -21,55 +21,84 @@ import { z } from 'zod'
 import { api } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
-export const intelligenceConfigSchema = z.object({
-  questions: z
-    .array(
-      z.object({
-        name: z.string().trim().min(1).max(120),
-        prompt: z
-          .string()
-          .trim()
-          .min(1)
-          .refine((value) => new TextEncoder().encode(value).length <= 8000),
-      })
-    )
-    .min(1)
-    .max(5),
-  groups: z
-    .array(
-      z
-        .object({
-          group: z.string().trim().min(1).max(64),
-          model: z.string().trim().max(255).optional(),
-          models: z.array(z.string().trim().min(1).max(255)).max(50).optional(),
-          endpoint: z.enum([
-            'openai',
-            'openai-response',
-            'anthropic',
-            'gemini',
-          ]),
-          stream: z.boolean().optional(),
-          enabled: z.boolean(),
-          times: z.array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/)).max(24),
+export const intelligenceConfigSchema = z
+  .object({
+    questions: z
+      .array(
+        z.object({
+          name: z.string().trim().min(1).max(120),
+          prompt: z
+            .string()
+            .trim()
+            .min(1)
+            .refine((value) => new TextEncoder().encode(value).length <= 8000),
         })
-        .refine(
-          (value) => (value.models?.length ?? 0) > 0 || Boolean(value.model),
-          { path: ['models'] }
-        )
-        .refine(
-          (value) => new Set(value.models).size === (value.models?.length ?? 0),
-          { path: ['models'] }
-        )
-        .refine((value) => !value.enabled || value.times.length > 0)
-        .refine((value) => new Set(value.times).size === value.times.length)
-    )
-    .min(1)
-    .max(50)
-    .refine(
-      (groups) =>
-        new Set(groups.map((group) => group.group)).size === groups.length
-    ),
-})
+      )
+      .min(1)
+      .max(5),
+    groups: z
+      .array(
+        z
+          .object({
+            group: z.string().trim().min(1).max(64),
+            model: z.string().trim().max(255).optional(),
+            models: z
+              .array(z.string().trim().min(1).max(255))
+              .max(50)
+              .optional(),
+            endpoint: z.enum([
+              'openai',
+              'openai-response',
+              'anthropic',
+              'gemini',
+            ]),
+            question_indexes: z
+              .array(z.number().int().min(0))
+              .min(1)
+              .max(5)
+              .nullable()
+              .optional(),
+            stream: z.boolean().optional(),
+            enabled: z.boolean(),
+            times: z
+              .array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/))
+              .max(24),
+          })
+          .refine(
+            (value) => (value.models?.length ?? 0) > 0 || Boolean(value.model),
+            { path: ['models'] }
+          )
+          .refine(
+            (value) =>
+              new Set(value.models).size === (value.models?.length ?? 0),
+            { path: ['models'] }
+          )
+          .refine((value) => !value.enabled || value.times.length > 0)
+          .refine((value) => new Set(value.times).size === value.times.length)
+      )
+      .min(1)
+      .max(50)
+      .refine(
+        (groups) =>
+          new Set(groups.map((group) => group.group)).size === groups.length
+      ),
+  })
+  .superRefine((config, ctx) => {
+    config.groups.forEach((group, index) => {
+      const selected = group.question_indexes
+      if (
+        selected &&
+        (new Set(selected).size !== selected.length ||
+          selected.some((question) => question >= config.questions.length))
+      ) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['groups', index, 'question_indexes'],
+          message: 'Select at least one valid, unique question for each group',
+        })
+      }
+    })
+  })
 export type IntelligenceConfig = z.infer<typeof intelligenceConfigSchema>
 export type IntelligenceAttempt = {
   request_id: string

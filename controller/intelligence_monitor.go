@@ -39,6 +39,7 @@ type intelligenceConfig struct {
 	Groups          []intelligenceGroup    `json:"groups,omitempty"`
 	ScheduledAt     int64                  `json:"scheduled_at,omitempty"`
 	Questions       []intelligenceQuestion `json:"questions"`
+	QuestionIndexes []int                  `json:"question_indexes"`
 	Group           string                 `json:"group"`
 	Model           string                 `json:"model"`
 	Endpoint        string                 `json:"endpoint"`
@@ -48,13 +49,14 @@ type intelligenceConfig struct {
 }
 
 type intelligenceGroup struct {
-	Group    string   `json:"group"`
-	Model    string   `json:"model,omitempty"`
-	Models   []string `json:"models,omitempty"`
-	Endpoint string   `json:"endpoint"`
-	Stream   *bool    `json:"stream,omitempty"`
-	Enabled  bool     `json:"enabled"`
-	Times    []string `json:"times"`
+	Group           string   `json:"group"`
+	Model           string   `json:"model,omitempty"`
+	Models          []string `json:"models,omitempty"`
+	Endpoint        string   `json:"endpoint"`
+	Stream          *bool    `json:"stream,omitempty"`
+	Enabled         bool     `json:"enabled"`
+	Times           []string `json:"times"`
+	QuestionIndexes []int    `json:"question_indexes"`
 }
 
 func (config intelligenceConfig) SystemTaskScheduleKey() string {
@@ -75,7 +77,19 @@ func (group intelligenceGroup) SelectedModels() []string {
 }
 
 func (config intelligenceConfig) ForGroup(group intelligenceGroup, modelName string) intelligenceConfig {
-	return intelligenceConfig{Questions: config.Questions, Group: group.Group, Model: modelName, Endpoint: group.Endpoint, Stream: group.Stream, IntervalMinutes: 60}
+	return intelligenceConfig{Questions: config.Questions, QuestionIndexes: group.QuestionIndexes, Group: group.Group, Model: modelName, Endpoint: group.Endpoint, Stream: group.Stream, IntervalMinutes: 60}
+}
+
+func (config intelligenceConfig) SelectedQuestionIndexes() []int {
+	if config.QuestionIndexes != nil {
+		return config.QuestionIndexes
+	}
+	// Configurations saved before per-group selection run the entire question bank.
+	indexes := make([]int, len(config.Questions))
+	for i := range indexes {
+		indexes[i] = i
+	}
+	return indexes
 }
 
 func (config intelligenceConfig) Validate() error {
@@ -125,6 +139,17 @@ func (config intelligenceConfig) Validate() error {
 			return errors.New("Each question needs a name and a prompt of at most 8000 bytes")
 		}
 	}
+	indexes := config.SelectedQuestionIndexes()
+	if len(indexes) == 0 || len(indexes) > len(config.Questions) {
+		return errors.New("Select at least one valid, unique question for each group")
+	}
+	seenQuestions := make(map[int]bool, len(indexes))
+	for _, index := range indexes {
+		if index < 0 || index >= len(config.Questions) || seenQuestions[index] {
+			return errors.New("Select at least one valid, unique question for each group")
+		}
+		seenQuestions[index] = true
+	}
 
 	if strings.TrimSpace(config.Group) == "" || strings.TrimSpace(config.Model) == "" || len(config.Group) > 64 || len(config.Model) > 255 {
 		return errors.New("Select a group and model for intelligence testing")
@@ -150,7 +175,7 @@ func getIntelligenceConfig() intelligenceConfig {
 		}
 	}
 	if len(config.Groups) == 0 {
-		config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, Stream: config.Stream, Times: []string{"09:00"}}}
+		config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, Stream: config.Stream, Times: []string{"09:00"}, QuestionIndexes: config.QuestionIndexes}}
 	}
 	for i := range config.Groups {
 		if len(config.Groups[i].Models) == 0 && config.Groups[i].Model != "" {
@@ -178,7 +203,7 @@ func intelligenceTargets(config intelligenceConfig) ([]*model.Channel, error) {
 	if len(targets) == 0 {
 		return nil, errors.New("No enabled channels match the selected group and model")
 	}
-	if len(targets)*len(config.Questions) > 50 {
+	if len(targets)*len(config.SelectedQuestionIndexes()) > 50 {
 		return nil, errors.New("Intelligence testing supports at most 50 channel-question pairs per run")
 	}
 	return targets, nil
@@ -371,12 +396,13 @@ func RunIntelligenceMonitor(c *gin.Context) {
 	total := 0
 	for _, group := range config.Groups {
 		for _, modelName := range group.SelectedModels() {
-			targets, err := intelligenceTargets(config.ForGroup(group, modelName))
+			single := config.ForGroup(group, modelName)
+			targets, err := intelligenceTargets(single)
 			if err != nil {
 				common.ApiErrorT(c, err.Error())
 				return
 			}
-			total += len(targets) * len(config.Questions)
+			total += len(targets) * len(single.SelectedQuestionIndexes())
 		}
 	}
 	if total > 50 {
@@ -506,12 +532,13 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 		return
 	}
 	if len(config.Groups) == 0 {
-		config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, Stream: config.Stream}}
+		config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, Stream: config.Stream, QuestionIndexes: config.QuestionIndexes}}
 	}
 	type target struct {
 		channel       *model.Channel
 		config        intelligenceConfig
 		progressIndex int
+		questionIndex int
 	}
 	targets := []target{}
 	state := intelligenceProgress{}
@@ -524,13 +551,16 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 				return
 			}
 			progressIndex := len(state.Models)
-			state.Models = append(state.Models, intelligenceModelProgress{Group: group.Group, Model: modelName, Total: len(channels) * len(config.Questions)})
+			questionIndexes := single.SelectedQuestionIndexes()
+			state.Models = append(state.Models, intelligenceModelProgress{Group: group.Group, Model: modelName, Total: len(channels) * len(questionIndexes)})
 			for _, channel := range channels {
-				targets = append(targets, target{channel, single, progressIndex})
+				for _, questionIndex := range questionIndexes {
+					targets = append(targets, target{channel, single, progressIndex, questionIndex})
+				}
 			}
 		}
 	}
-	if len(targets)*len(config.Questions) > 50 {
+	if len(targets) > 50 {
 		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, errors.New("Intelligence testing supports at most 50 channel-question pairs per run"))
 		return
 	}
@@ -539,7 +569,7 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
 		return
 	}
-	total := len(targets) * len(config.Questions)
+	total := len(targets)
 	result := intelligenceResult{Channels: make([]intelligenceChannelResult, total)}
 	state.Total = total
 	_ = model.UpdateSystemTaskState(task.TaskID, runnerID, state)
@@ -560,11 +590,10 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 				if ctx.Err() != nil {
 					return
 				}
-				target := targets[index/len(config.Questions)]
-				questionIndex := index % len(config.Questions)
+				target := targets[index]
 				channel := *target.channel
 				row := retryIntelligenceRequest(ctx, time.Second, func() intelligenceChannelResult {
-					return runIntelligenceRequest(ctx, &channel, userID, target.config, questionIndex)
+					return runIntelligenceRequest(ctx, &channel, userID, target.config, target.questionIndex)
 				})
 				completed <- completedRequest{index, row}
 			}
@@ -578,7 +607,7 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 			valid++
 		}
 		processed++
-		modelProgress := &state.Models[targets[done.index/len(config.Questions)].progressIndex]
+		modelProgress := &state.Models[targets[done.index].progressIndex]
 		modelProgress.Processed++
 		if done.row.Error != "" {
 			modelProgress.Failed++

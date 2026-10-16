@@ -78,6 +78,44 @@ func TestIntelligenceConfigValidation(t *testing.T) {
 	}
 }
 
+func TestIntelligenceGroupQuestionSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		indexes []int
+		want    []int
+		invalid bool
+	}{
+		{"legacy selects entire bank", nil, []int{0, 1}, false},
+		{"subset preserves original index", []int{1}, []int{1}, false},
+		{"explicit empty is rejected", []int{}, nil, true},
+		{"duplicate is rejected", []int{1, 1}, nil, true},
+		{"deleted question is rejected", []int{2}, nil, true},
+		{"negative index is rejected", []int{-1}, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			config := intelligenceConfig{
+				Groups:    []intelligenceGroup{{Group: "default", Models: []string{"model"}, Endpoint: "openai", Enabled: true, Times: []string{"09:00"}, QuestionIndexes: tc.indexes}},
+				Questions: []intelligenceQuestion{{Name: "First", Prompt: "First prompt"}, {Name: "Second", Prompt: "Second prompt"}},
+			}
+			encoded, err := common.Marshal(config)
+			require.NoError(t, err)
+			var decoded intelligenceConfig
+			require.NoError(t, common.Unmarshal(encoded, &decoded))
+			if tc.invalid {
+				require.EqualError(t, decoded.Validate(), "Select at least one valid, unique question for each group")
+				return
+			}
+			require.NoError(t, decoded.Validate())
+			single := decoded.ForGroup(decoded.Groups[0], "model")
+			assert.Equal(t, tc.want, single.SelectedQuestionIndexes())
+			due := decoded.DueGroups(time.Date(2026, 10, 16, 1, 0, 0, 0, time.UTC))
+			require.Len(t, due.Groups, 1)
+			assert.Equal(t, tc.want, due.ForGroup(due.Groups[0], "model").SelectedQuestionIndexes())
+			assert.Equal(t, config.Questions, single.Questions)
+		})
+	}
+}
+
 func TestIntelligenceCatalogGroupOrder(t *testing.T) {
 	db, _ := newAuditTestDatabase(t, "sqlite", "")
 	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.SystemTask{}))
@@ -239,11 +277,20 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 		assert.Equal(t, "/v1/chat/completions", r.URL.Path)
 		encoded, err := common.Marshal(request)
 		require.NoError(t, err)
-		assert.Equal(t, defaultIntelligencePrompt, gjson.GetBytes(encoded, "messages.0.content").String())
+		responseOutput := output
+		prompt := gjson.GetBytes(encoded, "messages.0.content").String()
+		switch prompt {
+		case "first selection prompt":
+			responseOutput = "<html>first selection</html>"
+		case "second selection prompt":
+			responseOutput = "<html>second selection</html>"
+		default:
+			assert.Equal(t, defaultIntelligencePrompt, prompt)
+		}
 		if request["stream"] == true {
 			streamRequests.Add(1)
 			w.Header().Set("Content-Type", "text/event-stream")
-			for _, part := range []string{output[:len(output)/2], output[len(output)/2:]} {
+			for _, part := range []string{responseOutput[:len(responseOutput)/2], responseOutput[len(responseOutput)/2:]} {
 				text, _ := common.Marshal(part)
 				fmt.Fprintf(w, "data: {\"id\":\"test\",\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":%s}}]}\n\n", text)
 				w.(http.Flusher).Flush()
@@ -252,7 +299,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 			return
 		}
 		jsonRequests.Add(1)
-		response, err := common.Marshal(map[string]any{"id": "test", "object": "chat.completion", "model": "gpt-4o-mini", "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": output}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}})
+		response, err := common.Marshal(map[string]any{"id": "test", "object": "chat.completion", "model": "gpt-4o-mini", "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": responseOutput}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}})
 		require.NoError(t, err)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(response)
@@ -518,6 +565,83 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 			assert.Empty(t, gjson.Get(streamTask.Result, "channels.0.html").String())
 		}
 	}
+
+	// Persist selections and execute only the requested question/channel pairs.
+	selectedConfig := intelligenceConfig{
+		Questions: []intelligenceQuestion{{Name: "First", Prompt: "first selection prompt"}, {Name: "Second", Prompt: "second selection prompt"}},
+		Groups: []intelligenceGroup{
+			{Group: "vip", Models: []string{"gpt-4o-mini"}, Endpoint: "openai", QuestionIndexes: []int{1}},
+			{Group: "default", Models: []string{"gpt-4o-mini"}, Endpoint: "openai", QuestionIndexes: []int{0, 1}},
+		},
+	}
+	selectedSave := call(UpdateIntelligenceMonitor, http.MethodPut, selectedConfig)
+	require.True(t, gjson.GetBytes(selectedSave.Body.Bytes(), "success").Bool(), selectedSave.Body.String())
+	selectedRun := call(RunIntelligenceMonitor, http.MethodPost, nil)
+	require.True(t, gjson.GetBytes(selectedRun.Body.Bytes(), "success").Bool(), selectedRun.Body.String())
+	selectedTask, err := model.GetSystemTaskByTaskID(gjson.GetBytes(selectedRun.Body.Bytes(), "data.task_id").String())
+	require.NoError(t, err)
+	selectedTask, ok, err = model.ClaimSystemTask(selectedTask.ID, selectedTask.Type, "selection-runner", time.Now().Add(time.Minute).Unix())
+	require.NoError(t, err)
+	require.True(t, ok)
+	beforeSelected := streamRequests.Load()
+	handler.Run(context.Background(), selectedTask, "selection-runner")
+	selectedTask, err = model.GetSystemTaskByTaskID(selectedTask.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, model.SystemTaskStatusSucceeded, selectedTask.Status, selectedTask.Result)
+	assert.EqualValues(t, 3, streamRequests.Load()-beforeSelected)
+	var selectedResult intelligenceResult
+	require.NoError(t, common.UnmarshalJsonStr(selectedTask.Result, &selectedResult))
+	require.Len(t, selectedResult.Channels, 3)
+	assert.Equal(t, "vip", selectedResult.Channels[0].Group)
+	assert.Equal(t, 1, selectedResult.Channels[0].QuestionIndex)
+	assert.Equal(t, "Second", selectedResult.Channels[0].QuestionName)
+	assert.Equal(t, "<html>second selection</html>", selectedResult.Channels[0].HTML)
+	assert.Equal(t, "default", selectedResult.Channels[1].Group)
+	assert.Equal(t, 0, selectedResult.Channels[1].QuestionIndex)
+	assert.Equal(t, "<html>first selection</html>", selectedResult.Channels[1].HTML)
+	assert.Equal(t, 1, selectedResult.Channels[2].QuestionIndex)
+	assert.Equal(t, "<html>second selection</html>", selectedResult.Channels[2].HTML)
+	var selectedProgress intelligenceProgress
+	require.NoError(t, common.UnmarshalJsonStr(selectedTask.State, &selectedProgress))
+	assert.Equal(t, 3, selectedProgress.Total)
+	assert.Equal(t, 3, selectedProgress.Processed)
+	require.Len(t, selectedProgress.Models, 2)
+	assert.Equal(t, 1, selectedProgress.Models[0].Total)
+	assert.Equal(t, 1, selectedProgress.Models[0].Processed)
+	assert.Equal(t, 2, selectedProgress.Models[1].Total)
+	assert.Equal(t, 2, selectedProgress.Models[1].Processed)
+
+	// The 50-pair limit counts selected questions, including totals across groups.
+	limitChannels := make([]model.Channel, 26)
+	for i := range limitChannels {
+		limitChannels[i] = model.Channel{Id: 100 + i, Status: common.ChannelStatusEnabled, Group: "limit-a,limit-b", Models: "gpt-4o-mini"}
+	}
+	require.NoError(t, db.Create(&limitChannels).Error)
+	limitConfig := intelligenceConfig{
+		Questions: selectedConfig.Questions,
+		Groups: []intelligenceGroup{
+			{Group: "limit-a", Models: []string{"gpt-4o-mini"}, Endpoint: "openai", QuestionIndexes: []int{0}},
+			{Group: "limit-b", Models: []string{"gpt-4o-mini"}, Endpoint: "openai", QuestionIndexes: []int{1}},
+		},
+	}
+	limitSave := call(UpdateIntelligenceMonitor, http.MethodPut, limitConfig)
+	require.True(t, gjson.GetBytes(limitSave.Body.Bytes(), "success").Bool(), limitSave.Body.String())
+	allowed := call(RunIntelligenceMonitor, http.MethodPost, map[string]string{"group": "limit-a"})
+	assert.True(t, gjson.GetBytes(allowed.Body.Bytes(), "success").Bool(), allowed.Body.String())
+	rejected := call(RunIntelligenceMonitor, http.MethodPost, nil)
+	assert.False(t, gjson.GetBytes(rejected.Body.Bytes(), "success").Bool())
+	assert.Equal(t, "Intelligence testing supports at most 50 channel-question pairs per run", gjson.GetBytes(rejected.Body.Bytes(), "message").String())
+	limitTask, err := model.CreateSystemTask("intelligence_selection_limit", limitConfig, nil)
+	require.NoError(t, err)
+	limitTask, ok, err = model.ClaimSystemTask(limitTask.ID, limitTask.Type, "limit-runner", time.Now().Add(time.Minute).Unix())
+	require.NoError(t, err)
+	require.True(t, ok)
+	beforeLimit := streamRequests.Load()
+	handler.Run(context.Background(), limitTask, "limit-runner")
+	limitTask, err = model.GetSystemTaskByTaskID(limitTask.TaskID)
+	require.NoError(t, err)
+	assert.Equal(t, model.SystemTaskStatusFailed, limitTask.Status)
+	assert.Equal(t, beforeLimit, streamRequests.Load())
 
 	// Anonymous visitors and ordinary accounts can only read published results.
 	require.NoError(t, model.EnsureLegacyAccessTokenRetireAt(time.Now().Unix()))

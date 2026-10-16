@@ -44,9 +44,10 @@ import en from '@/i18n/locales/en.json'
 import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
 
-import type {
-  IntelligenceMonitorData,
-  IntelligenceTask,
+import {
+  intelligenceConfigSchema,
+  type IntelligenceMonitorData,
+  type IntelligenceTask,
 } from '../intelligence-api'
 import {
   inspectIntelligenceHtml,
@@ -167,11 +168,13 @@ it('saves edited questions and scheduling settings before allowing a manual run'
   })
   expect(streamSwitch).toBeChecked()
   await user.click(streamSwitch)
+  await user.click(screen.getByRole('tab', { name: 'Question bank' }))
   await user.clear(await screen.findByLabelText('Prompt'))
   await user.type(
     screen.getByLabelText('Prompt'),
     'Generate a complete HTML animation'
   )
+  await user.click(screen.getByRole('tab', { name: 'Settings' }))
   await user.click(screen.getByRole('combobox', { name: 'API Endpoint' }))
   await user.click(
     screen.getByRole('option', { name: 'OpenAI Responses API · /v1/responses' })
@@ -314,6 +317,10 @@ it('separates settings from records and preserves unsaved edits across tabs', as
       'aria-selected',
       'true'
     )
+    expect(
+      screen.queryByRole('region', { name: 'Question bank' })
+    ).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'Question bank' }))
     expect(screen.getByLabelText('Prompt')).toBeVisible()
     expect(screen.queryByText('run-1')).not.toBeInTheDocument()
     await user.clear(screen.getByLabelText('Prompt'))
@@ -334,7 +341,7 @@ it('separates settings from records and preserves unsaved edits across tabs', as
       screen.queryByRole('button', { name: 'Run all groups' })
     ).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: 'Settings' }))
+    await user.click(screen.getByRole('tab', { name: 'Question bank' }))
     expect(screen.getByLabelText('Prompt')).toHaveValue('Edited prompt')
     expect(screen.getByRole('button', { name: 'Save' })).toBeVisible()
     expect(screen.queryByText('run-1')).not.toBeInTheDocument()
@@ -467,8 +474,10 @@ it('localizes the built-in question and endpoint menu while preserving user edit
   )
   const user = userEvent.setup()
   try {
+    await user.click(screen.getByRole('tab', { name: '题库' }))
     expect(screen.getByDisplayValue('鹈鹕骑自行车')).toBeVisible()
     expect(screen.getByDisplayValue('Save')).toBeVisible()
+    await user.click(screen.getByRole('tab', { name: '设置' }))
     const endpoint = screen.getByRole('combobox', { name: 'API 端点' })
     expect(endpoint).toHaveTextContent('OpenAI 聊天补全')
     endpoint.focus()
@@ -483,6 +492,7 @@ it('localizes the built-in question and endpoint menu while preserving user edit
     expect(endpoint).toHaveTextContent('OpenAI 响应接口')
     expect(endpoint).toHaveAttribute('aria-expanded', 'false')
     await act(() => i18n.changeLanguage('en'))
+    await user.click(screen.getByRole('tab', { name: 'Question bank' }))
     expect(screen.getByDisplayValue('Pelican riding a bicycle')).toBeVisible()
     expect(endpoint).toHaveTextContent('OpenAI Responses API')
     const name = screen.getByDisplayValue('Pelican riding a bicycle')
@@ -622,6 +632,14 @@ it('saves independent daily times for multiple groups and allows more runs while
     ).toHaveLength(3)
     await user.click(screen.getAllByRole('button', { name: 'Remove group' })[2])
     expect(
+      screen.getAllByRole('combobox', { name: 'API Endpoint', hidden: true })
+    ).toHaveLength(3)
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: 'Remove',
+      })
+    )
+    expect(
       screen.getAllByRole('combobox', { name: 'API Endpoint' })
     ).toHaveLength(2)
     await user.click(
@@ -647,7 +665,172 @@ it('saves independent daily times for multiple groups and allows more runs while
   }
 })
 
-it('keeps daily times compact and keyboard editable in a separate group settings region', async () => {
+it.each([[], [-1], [0, 0], [2], [0.5]].map((indexes) => ({ indexes })))(
+  'rejects invalid question selections $indexes before saving',
+  ({ indexes }) => {
+    const result = intelligenceConfigSchema.safeParse({
+      groups: [
+        {
+          group: 'default',
+          model: 'model',
+          endpoint: 'openai',
+          enabled: false,
+          times: [],
+          question_indexes: indexes,
+        },
+      ],
+      questions: [
+        { name: 'First', prompt: 'First prompt' },
+        { name: 'Second', prompt: 'Second prompt' },
+      ],
+    })
+    expect(result.success).toBe(false)
+  }
+)
+
+it('saves independent question selections and preserves their identity when an earlier question is removed', async () => {
+  const data: IntelligenceMonitorData = {
+    config: {
+      groups: [
+        {
+          group: 'default',
+          model: 'model-a',
+          endpoint: 'openai',
+          enabled: false,
+          times: ['09:00'],
+        },
+        {
+          group: 'vip',
+          model: 'model-b',
+          endpoint: 'openai',
+          enabled: false,
+          times: ['09:00'],
+          question_indexes: [2],
+        },
+      ],
+      questions: [
+        { name: 'First', prompt: 'First prompt' },
+        { name: 'Second', prompt: 'Second prompt' },
+        { name: 'Third', prompt: 'Third prompt' },
+      ],
+    },
+    catalog: { default: ['model-a'], vip: ['model-b'] },
+    history: [],
+  }
+  const client = new QueryClient()
+  const actions = document.createElement('div')
+  actions.dataset.testActions = ''
+  document.body.append(actions)
+  const put = vi.spyOn(api, 'put').mockImplementation(async (_url, config) => ({
+    data: { success: true, data: config },
+  }))
+  const view = render(
+    <QueryClientProvider client={client}>
+      <SettingsPageProvider actionsContainer={actions}>
+        <IntelligenceSettings data={data} />
+      </SettingsPageProvider>
+    </QueryClientProvider>
+  )
+  const user = userEvent.setup()
+  try {
+    const first = screen.getByRole('group', { name: 'default' })
+    const second = screen.getByRole('group', { name: 'vip' })
+    expect(
+      within(first).getByText('default', { selector: '[data-slot=card-title]' })
+    ).toBeVisible()
+    expect(within(first).getByRole('checkbox', { name: 'First' })).toBeChecked()
+    expect(
+      within(second).getByRole('checkbox', { name: 'First' })
+    ).not.toBeChecked()
+    await user.click(within(first).getByRole('checkbox', { name: 'First' }))
+    const third = within(first).getByRole('checkbox', { name: 'Third' })
+    third.focus()
+    await user.keyboard(' ')
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(put).toHaveBeenLastCalledWith(
+        '/api/status-monitor/intelligence',
+        expect.objectContaining({
+          groups: [
+            expect.objectContaining({ question_indexes: [1] }),
+            expect.objectContaining({ question_indexes: [2] }),
+          ],
+        })
+      )
+    )
+    await user.click(screen.getByRole('tab', { name: 'Question bank' }))
+    await user.click(
+      screen.getAllByRole('button', { name: 'Remove question' })[0]
+    )
+    expect(
+      within(screen.getByRole('alertdialog')).getByText('First')
+    ).toBeVisible()
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: 'Cancel',
+      })
+    )
+    expect(screen.getAllByLabelText('Question name')).toHaveLength(3)
+    await user.click(
+      screen.getAllByRole('button', { name: 'Remove question' })[0]
+    )
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: 'Remove',
+      })
+    )
+    await user.click(screen.getByRole('tab', { name: 'Settings' }))
+    expect(
+      within(screen.getByRole('group', { name: 'default' })).getByRole(
+        'checkbox',
+        { name: 'Second' }
+      )
+    ).toBeChecked()
+    expect(
+      within(screen.getByRole('group', { name: 'vip' })).getByRole('checkbox', {
+        name: 'Third',
+      })
+    ).toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() =>
+      expect(put).toHaveBeenLastCalledWith(
+        '/api/status-monitor/intelligence',
+        expect.objectContaining({
+          groups: [
+            expect.objectContaining({ question_indexes: [0] }),
+            expect.objectContaining({ question_indexes: [1] }),
+          ],
+        })
+      )
+    )
+    put.mockClear()
+    await user.click(screen.getByRole('tab', { name: 'Question bank' }))
+    await user.click(
+      screen.getAllByRole('button', { name: 'Remove question' })[0]
+    )
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: 'Remove',
+      })
+    )
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(
+      await screen.findByText(
+        'Select at least one valid, unique question for each group'
+      )
+    ).toBeVisible()
+    expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(put).not.toHaveBeenCalled()
+  } finally {
+    view.unmount()
+    client.clear()
+  }
+})
+
+it('keeps daily times compact and keyboard editable with the question bank in a separate tab', async () => {
   const client = new QueryClient()
   const view = render(
     <QueryClientProvider client={client}>
@@ -674,17 +857,21 @@ it('keeps daily times compact and keyboard editable in a separate group settings
   const user = userEvent.setup()
   try {
     const groupRegion = screen.getByRole('region', { name: 'Test groups' })
-    const questionRegion = screen.getByRole('region', { name: 'Question bank' })
-    for (const region of [groupRegion, questionRegion]) {
-      expect(region.querySelector('[data-slot=card]')).toHaveAttribute(
-        'data-card-hover',
-        'false'
-      )
-    }
+    expect(
+      screen.queryByRole('region', { name: 'Question bank' })
+    ).not.toBeInTheDocument()
+    expect(groupRegion.querySelector('[data-slot=card]')).toHaveAttribute(
+      'data-card-hover',
+      'false'
+    )
     expect(
       within(groupRegion).queryByLabelText('Prompt')
     ).not.toBeInTheDocument()
-    expect(within(questionRegion).getByLabelText('Prompt')).toBeVisible()
+    await user.click(screen.getByRole('tab', { name: 'Question bank' }))
+    expect(screen.getByRole('region', { name: 'Question bank' })).toBeVisible()
+    expect(screen.getByLabelText('Prompt')).toBeVisible()
+    expect(groupRegion).not.toBeVisible()
+    await user.click(screen.getByRole('tab', { name: 'Settings' }))
     const firstGroup = within(groupRegion).getByRole('group', {
       name: 'default',
     })
