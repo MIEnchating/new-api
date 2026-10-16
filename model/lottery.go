@@ -466,7 +466,15 @@ func lotteryWeekStart(now time.Time) time.Time {
 }
 
 func ensureLotteryCampaign(now time.Time) (LotteryCampaign, error) {
-	campaign := LotteryCampaign{Id: 1, StartedAt: lotteryDayStart(now).Unix()}
+	var campaign LotteryCampaign
+	err := DB.First(&campaign, 1).Error
+	if err == nil {
+		return campaign, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return LotteryCampaign{}, err
+	}
+	campaign = LotteryCampaign{Id: 1, StartedAt: lotteryDayStart(now).Unix()}
 	if err := DB.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "id"}}, DoNothing: true,
 	}).Create(&campaign).Error; err != nil {
@@ -528,18 +536,13 @@ func sumLotteryQuotaByDay(userId int, days []time.Time) ([]int, error) {
 	return results, nil
 }
 
-func syncLotteryActivity(userId int, now time.Time) error {
-	config := GetLotteryConfig()
-	campaign, err := ensureLotteryCampaign(now)
-	if err != nil {
-		return err
-	}
+func syncLotteryActivity(userId int, now time.Time, campaign LotteryCampaign, rules LotteryRules) error {
 	today := lotteryDayStart(now)
 	campaignStart := lotteryDayStart(time.Unix(campaign.StartedAt, 0))
 	start := campaignStart
 
 	var profile LotteryProfile
-	err = DB.First(&profile, "user_id = ?", userId).Error
+	err := DB.First(&profile, "user_id = ?", userId).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		profile = LotteryProfile{UserId: userId}
 	} else if err != nil {
@@ -566,29 +569,32 @@ func syncLotteryActivity(userId int, now time.Time) error {
 		return err
 	}
 	activeQuota := common.QuotaRound(
-		float64(config.Rules.DailyActiveAmount) * common.QuotaPerUnit,
+		float64(rules.DailyActiveAmount) * common.QuotaPerUnit,
 	)
 	nowUnix := now.Unix()
 	return DB.Transaction(func(tx *gorm.DB) error {
+		activities := make([]LotteryDailyActivity, len(days))
 		for i, day := range days {
-			activity := LotteryDailyActivity{
+			activities[i] = LotteryDailyActivity{
 				UserId:       userId,
 				ActivityDate: day.Format("2006-01-02"),
 				Quota:        quotas[i],
 				Active:       quotas[i] >= activeQuota,
 				UpdatedAt:    nowUnix,
 			}
-			if err := tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{
-					{Name: "user_id"},
-					{Name: "activity_date"},
-				},
-				DoUpdates: clause.AssignmentColumns(
-					[]string{"quota", "active", "updated_at"},
-				),
-			}).Create(&activity).Error; err != nil {
-				return err
-			}
+		}
+		// Bound the bind parameters while avoiding one round trip per day
+		// when a user first visits or catches up after a long absence.
+		if err := tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{
+				{Name: "user_id"},
+				{Name: "activity_date"},
+			},
+			DoUpdates: clause.AssignmentColumns(
+				[]string{"quota", "active", "updated_at"},
+			),
+		}).CreateInBatches(&activities, 100).Error; err != nil {
+			return err
 		}
 		yesterday := today.AddDate(0, 0, -1)
 		if !yesterday.Before(campaignStart) {
@@ -604,22 +610,27 @@ func syncLotteryActivity(userId int, now time.Time) error {
 	})
 }
 
-func createLotteryGrantIfAbsent(
+func createLotteryGrantsIfAbsent(
 	tx *gorm.DB,
-	grant LotteryChanceGrant,
+	grants ...LotteryChanceGrant,
 ) error {
-	if grant.EventKey == "" || grant.UserId <= 0 || grant.Chances <= 0 {
-		return errors.New("invalid lottery chance grant")
+	if len(grants) == 0 {
+		return nil
 	}
-	if grant.CreatedAt == 0 {
-		grant.CreatedAt = common.GetTimestamp()
+	for i := range grants {
+		if grants[i].EventKey == "" || grants[i].UserId <= 0 || grants[i].Chances <= 0 {
+			return errors.New("invalid lottery chance grant")
+		}
+		if grants[i].CreatedAt == 0 {
+			grants[i].CreatedAt = common.GetTimestamp()
+		}
 	}
 	return tx.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "event_key"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"expires_at",
 		}),
-	}).Create(&grant).Error
+	}).CreateInBatches(&grants, 50).Error
 }
 
 // expireLotteryGrants invalidates any remaining chances whose campaign has
@@ -631,13 +642,12 @@ func expireLotteryGrants(tx *gorm.DB, userId int, nowUnix int64) error {
 		UpdateColumn("consumed", gorm.Expr("chances")).Error
 }
 
-func syncLotteryGrants(userId int, now time.Time) error {
-	config := GetLotteryConfig()
-	if err := syncLotteryActivity(userId, now); err != nil {
-		return err
-	}
+func syncLotteryGrants(userId int, now time.Time, config LotteryConfig) error {
 	campaign, err := ensureLotteryCampaign(now)
 	if err != nil {
+		return err
+	}
+	if err := syncLotteryActivity(userId, now, campaign, config.Rules); err != nil {
 		return err
 	}
 	campaignDate := lotteryDayStart(
@@ -677,17 +687,16 @@ func syncLotteryGrants(userId int, now time.Time) error {
 		if err := syncLotteryRechargeGrants(tx, userId, config.GrantRules, nowUnix); err != nil {
 			return err
 		}
+		grants := make([]LotteryChanceGrant, 0, weeklyEarned+len(config.GrantRules))
 		for index := 1; index <= weeklyEarned; index++ {
-			if err := createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
+			grants = append(grants, LotteryChanceGrant{
 				EventKey: fmt.Sprintf(
 					"weekly:%04d-W%02d:%d:%d",
 					year, week, userId, index,
 				),
 				UserId: userId, Type: LotteryGrantTypeWeeklySpend,
 				Chances: 1, CreatedAt: nowUnix,
-			}); err != nil {
-				return err
-			}
+			})
 		}
 
 		streak := 0
@@ -715,13 +724,11 @@ func syncLotteryGrants(userId int, now time.Time) error {
 				if streak != reward.Days {
 					continue
 				}
-				if err := createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
+				grants = append(grants, LotteryChanceGrant{
 					EventKey: fmt.Sprintf("streak:%s:%s:%d", rewardKey(reward), activity.ActivityDate, userId),
 					UserId:   userId, Type: fmt.Sprintf("streak_%d", reward.Days),
 					Chances: reward.Chances, CreatedAt: nowUnix,
-				}); err != nil {
-					return err
-				}
+				})
 			}
 		}
 		for _, rule := range config.GrantRules {
@@ -730,17 +737,15 @@ func syncLotteryGrants(userId int, now time.Time) error {
 			}
 			switch rule.Type {
 			case LotteryChanceGrantRuleEvent:
-				if err := createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
+				grants = append(grants, LotteryChanceGrant{
 					EventKey: fmt.Sprintf("campaign:%s:user:%d", rule.Id, userId),
 					UserId:   userId, Type: "campaign_" + rule.Id,
 					SourceName: rule.Name, Chances: rule.Chances,
 					ExpiresAt: lotteryGrantExpiry(rule), CreatedAt: nowUnix,
-				}); err != nil {
-					return err
-				}
+				})
 			}
 		}
-		return nil
+		return createLotteryGrantsIfAbsent(tx, grants...)
 	})
 }
 
@@ -857,7 +862,7 @@ func lotteryTopUpRechargeAmount(topUp TopUp) decimal.Decimal {
 }
 
 func createLotteryRechargeGrant(tx *gorm.DB, userId int, rule LotteryChanceGrantRule, eventKey string, createdAt int64) error {
-	return createLotteryGrantIfAbsent(tx, LotteryChanceGrant{
+	return createLotteryGrantsIfAbsent(tx, LotteryChanceGrant{
 		EventKey: eventKey, UserId: userId, Type: "recharge_" + rule.Id,
 		SourceName: rule.Name, Chances: rule.Chances,
 		ExpiresAt: rule.EndAt, CreatedAt: createdAt,
@@ -1011,7 +1016,7 @@ func getLotteryStatusAt(
 		return LotteryStatus{}, errors.New("invalid user")
 	}
 	config := GetLotteryConfig()
-	if err := syncLotteryGrants(userId, now); err != nil {
+	if err := syncLotteryGrants(userId, now, config); err != nil {
 		return LotteryStatus{}, err
 	}
 	var available int64
