@@ -123,18 +123,17 @@ func NewChannelSortOptions(sortBy string, sortOrder string, idSort bool) Channel
 
 func (options ChannelSortOptions) Apply(query *gorm.DB) *gorm.DB {
 	if columnName, ok := channelSortColumns[options.SortBy]; ok {
+		column := clause.Column{Name: columnName}
+		if columnName == "priority" {
+			// Routing treats a missing priority as zero on every database.
+			column = clause.Column{Name: "COALESCE(priority, 0)", Raw: true}
+		}
 		query = query.Order(clause.OrderByColumn{
-			Column: clause.Column{Name: columnName},
+			Column: column,
 			Desc:   options.SortOrder != "asc",
 		})
-		// A stable tie-breaker is required for offset pagination. The visible ID
-		// sort switch selects ID as the primary order; it must not control whether
-		// equal values from another primary sort receive deterministic ordering.
 		if options.SortBy != "id" {
-			query = query.Order(clause.OrderByColumn{
-				Column: clause.Column{Name: "id"},
-				Desc:   true,
-			})
+			query = query.Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true})
 		}
 		return query
 	}
@@ -144,7 +143,10 @@ func (options ChannelSortOptions) Apply(query *gorm.DB) *gorm.DB {
 			Desc:   true,
 		})
 	}
-	return query
+	return query.Order(clause.OrderByColumn{
+		Column: clause.Column{Name: "COALESCE(priority, 0)", Raw: true},
+		Desc:   true,
+	}).Order(clause.OrderByColumn{Column: clause.Column{Name: "id"}, Desc: true})
 }
 
 func resolveChannelSortOptions(idSort bool, sortOptions []ChannelSortOptions) ChannelSortOptions {

@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQueryClient } from '@tanstack/react-query'
+import { getRouteApi } from '@tanstack/react-router'
 import {
   Plus,
   MoreHorizontal,
@@ -26,7 +27,6 @@ import {
   TestTube,
   DollarSign,
   ListChecks,
-  SortAsc,
   RefreshCw,
   ArrowUpFromLine,
   Workflow,
@@ -46,6 +46,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import {
   Tooltip,
@@ -65,22 +66,26 @@ import {
   handleTestAllChannels,
   handleUpdateAllBalances,
 } from '../lib'
+import type { ChannelSortBy } from '../types'
+import { ChannelSortControl } from './channel-priority-controls'
 import { useChannels } from './channels-provider'
 import { ChannelExecutionHubDialog } from './dialogs/channel-execution-hub-dialog'
 
+const route = getRouteApi('/_authenticated/channels/')
+
 export function ChannelsPrimaryButtons() {
   const { t } = useTranslation()
+  const navigate = route.useNavigate()
   const {
     setOpen,
     setCurrentRow,
     enableTagMode,
     setEnableTagMode,
-    idSort,
-    setIdSort,
-    prioritySort,
-    setPrioritySort,
+    sorting,
+    setSorting,
     batchMode,
     setBatchMode,
+    setPriorityActionContainer,
     upstream,
   } = useChannels()
   const queryClient = useQueryClient()
@@ -100,90 +105,60 @@ export function ChannelsPrimaryButtons() {
     setEnableTagMode(checked)
   }
 
-  const handleIdSortToggle = (checked: boolean) => {
-    localStorage.setItem('channels-id-sort', String(checked))
-    setIdSort(checked)
-    if (checked) {
-      localStorage.setItem('channels-priority-sort', 'false')
-      setPrioritySort(false)
-    }
-  }
-
-  const handlePrioritySortToggle = (checked: boolean) => {
-    localStorage.setItem('channels-priority-sort', String(checked))
-    setPrioritySort(checked)
-    if (checked) {
-      localStorage.setItem('channels-id-sort', 'false')
-      setIdSort(false)
-    }
-  }
-
   const handleBatchModeToggle = (checked: boolean) => {
     setBatchMode(checked)
   }
 
   return (
     <>
-      <div className='flex items-center gap-2'>
+      <div className='flex flex-wrap items-center gap-2'>
+        <div ref={setPriorityActionContainer} className='empty:hidden' />
         {/* Desktop: Toggle switches visible */}
-        <div className='hidden items-center gap-2 rounded-md border px-3 py-1.5 sm:flex'>
-          <ListChecks className='text-muted-foreground h-4 w-4' />
-          <Label
-            htmlFor='channel-batch-mode'
-            className='cursor-pointer text-sm'
-          >
-            {t('Batch Operations')}
-          </Label>
-          <Switch
-            id='channel-batch-mode'
-            checked={batchMode}
-            onCheckedChange={handleBatchModeToggle}
-          />
-        </div>
-
-        <div className='hidden items-center gap-2 rounded-md border px-3 py-1.5 sm:flex'>
-          <Tags className='text-muted-foreground h-4 w-4' />
-          <Label htmlFor='tag-mode' className='cursor-pointer text-sm'>
-            {t('Tag Mode')}
-          </Label>
-          <Switch
-            id='tag-mode'
-            checked={enableTagMode}
-            onCheckedChange={handleTagModeToggle}
-          />
-        </div>
-
-        <div className='hidden h-9 items-center gap-2 rounded-md border px-2 sm:flex'>
-          <SortAsc className='text-muted-foreground h-4 w-4' />
-          <span className='text-muted-foreground text-xs'>{t('Sort')}</span>
-          <div className='flex items-center gap-1.5'>
-            <Label htmlFor='channel-id-sort' className='cursor-pointer text-xs'>
-              {t('ID')}
-            </Label>
-            <Switch
-              id='channel-id-sort'
-              size='sm'
-              checked={idSort}
-              onCheckedChange={handleIdSortToggle}
-              aria-label={t('Sort by ID')}
-            />
-          </div>
-          <div className='border-border flex items-center gap-1.5 border-l pl-2'>
+        <div className='bg-muted/40 hidden h-8 shrink-0 items-center gap-2.5 rounded-lg border px-2.5 sm:flex'>
+          <div className='text-muted-foreground has-data-checked:text-foreground flex items-center gap-2'>
             <Label
-              htmlFor='channel-priority-sort'
-              className='cursor-pointer text-xs'
+              htmlFor='channel-batch-mode'
+              className='cursor-pointer gap-1.5 text-xs whitespace-nowrap'
             >
-              {t('Priority')}
+              <ListChecks className='size-3.5' aria-hidden />
+              {t('Batch Operations')}
             </Label>
             <Switch
-              id='channel-priority-sort'
+              id='channel-batch-mode'
               size='sm'
-              checked={prioritySort}
-              onCheckedChange={handlePrioritySortToggle}
-              aria-label={t('Sort by priority')}
+              checked={batchMode}
+              onCheckedChange={handleBatchModeToggle}
+            />
+          </div>
+          <Separator orientation='vertical' className='my-2' />
+          <div className='text-muted-foreground has-data-checked:text-foreground flex items-center gap-2'>
+            <Label
+              htmlFor='tag-mode'
+              className='cursor-pointer gap-1.5 text-xs whitespace-nowrap'
+            >
+              <Tags className='size-3.5' aria-hidden />
+              {t('Tag Mode')}
+            </Label>
+            <Switch
+              id='tag-mode'
+              size='sm'
+              checked={enableTagMode}
+              onCheckedChange={handleTagModeToggle}
             />
           </div>
         </div>
+
+        <ChannelSortControl
+          field={(sorting[0]?.id ?? 'priority') as ChannelSortBy}
+          desc={sorting[0]?.desc ?? true}
+          onChange={(field, desc) => {
+            setSorting([{ id: field, desc }])
+            void navigate({
+              search: (previous) => ({ ...previous, page: 1 }),
+              replace: true,
+            })
+          }}
+        />
 
         <Tooltip>
           <TooltipTrigger
@@ -216,7 +191,6 @@ export function ChannelsPrimaryButtons() {
                 setCurrentRow(null)
                 setOpen('create-channel')
               }}
-              size='sm'
               disabled={!canEditSensitive}
               aria-label={t('Create Channel')}
               data-mobile-compact-action='create'
@@ -237,8 +211,11 @@ export function ChannelsPrimaryButtons() {
 
         {/* More Actions */}
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant='outline' size='sm' />}>
-            <MoreHorizontal className='h-4 w-4' />
+          <DropdownMenuTrigger
+            render={<Button variant='outline' size='icon' />}
+            aria-label={t('More actions')}
+          >
+            <MoreHorizontal className='size-4' aria-hidden />
           </DropdownMenuTrigger>
           <DropdownMenuContent align='end' className='w-56'>
             {/* Mobile-only: toggle switches */}
@@ -258,24 +235,6 @@ export function ChannelsPrimaryButtons() {
             >
               <Tags className='mr-2 h-4 w-4' />
               {t('Tag Mode')}
-            </DropdownMenuCheckboxItem>
-
-            <DropdownMenuCheckboxItem
-              className='sm:hidden'
-              checked={idSort}
-              onCheckedChange={handleIdSortToggle}
-            >
-              <SortAsc className='mr-2 h-4 w-4' />
-              {t('Sort by ID')}
-            </DropdownMenuCheckboxItem>
-
-            <DropdownMenuCheckboxItem
-              className='sm:hidden'
-              checked={prioritySort}
-              onCheckedChange={handlePrioritySortToggle}
-            >
-              <SortAsc className='mr-2 h-4 w-4' />
-              {t('Sort by priority')}
             </DropdownMenuCheckboxItem>
 
             <DropdownMenuSeparator className='sm:hidden' />

@@ -51,6 +51,13 @@ for (const key of domGlobals) {
 
 const { QueryClient, QueryClientProvider } =
   await import('@tanstack/react-query')
+const {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  RouterProvider,
+} = await import('@tanstack/react-router')
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { createInstance } = await import('i18next')
@@ -79,14 +86,31 @@ describe('channel management mobile primary actions', () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
+    const rootRoute = createRootRoute()
+    const authenticated = createRoute({
+      getParentRoute: () => rootRoute,
+      id: '_authenticated',
+    })
+    const channels = createRoute({
+      getParentRoute: () => authenticated,
+      path: '/channels/',
+      component: () => (
+        <ChannelsProvider>
+          <ChannelsPrimaryButtons />
+        </ChannelsProvider>
+      ),
+    })
+    const router = createRouter({
+      routeTree: rootRoute.addChildren([authenticated.addChildren([channels])]),
+      history: createMemoryHistory({ initialEntries: ['/channels/'] }),
+    })
+    await router.load()
 
     await act(async () =>
       root.render(
         <I18nextProvider i18n={i18n}>
           <QueryClientProvider client={queryClient}>
-            <ChannelsProvider>
-              <ChannelsPrimaryButtons />
-            </ChannelsProvider>
+            <RouterProvider router={router} />
           </QueryClientProvider>
         </I18nextProvider>
       )

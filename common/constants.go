@@ -136,6 +136,7 @@ var AutomaticEnableChannelEnabled = false
 var ChannelRouteCooldownEnabled = false
 var ChannelRouteCooldownSeconds = 60
 var ChannelRouteSameChannelRetries = 0
+var QuotaRemindEnabled = true
 var QuotaRemindThreshold = 1000
 
 // PreConsumedQuota is retained for old option clients; token reservations now
