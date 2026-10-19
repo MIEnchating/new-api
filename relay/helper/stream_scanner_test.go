@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -20,6 +21,85 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type headerCommitWriter struct {
+	*httptest.ResponseRecorder
+	headerStarted chan struct{}
+	once          sync.Once
+}
+
+func (w *headerCommitWriter) WriteHeader(code int) {
+	// Let the scanner start while the first keepalive snapshots the headers.
+	w.once.Do(func() { close(w.headerStarted) })
+	w.ResponseRecorder.WriteHeader(code)
+}
+
+func TestStreamScannerHandler_RequestKeepAliveHandoff(t *testing.T) {
+	settings := operation_setting.GetGeneralSetting()
+	previousEnabled, previousInterval := settings.PingIntervalEnabled, settings.PingIntervalSeconds
+	settings.PingIntervalEnabled, settings.PingIntervalSeconds = true, 60
+	t.Cleanup(func() {
+		settings.PingIntervalEnabled, settings.PingIntervalSeconds = previousEnabled, previousInterval
+	})
+
+	for _, test := range []struct {
+		name        string
+		interval    time.Duration
+		waitForPing bool
+	}{
+		{name: "before first keepalive", interval: time.Hour},
+		{name: "during header commit", interval: time.Millisecond, waitForPing: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			writer := &headerCommitWriter{
+				ResponseRecorder: httptest.NewRecorder(),
+				headerStarted:    make(chan struct{}),
+			}
+			c, _ := gin.CreateTestContext(writer)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+			c.Header(common.RequestIdKey, "local-request-id")
+			stop := StartStreamKeepAlive(c, test.interval)
+			defer stop()
+			if test.waitForPing {
+				select {
+				case <-writer.headerStarted:
+				case <-time.After(time.Second):
+					t.Fatal("keepalive did not start")
+				}
+			}
+
+			resp := &http.Response{
+				Header: http.Header{
+					"X-Reasoning-Included": {"true"},
+					"X-Codex-Turn-State":   {"turn-state"},
+				},
+				Body: io.NopCloser(strings.NewReader("data: chunk\n\ndata: [DONE]\n\n")),
+			}
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+			var received []string
+			StreamScannerHandler(c, resp, info, func(data string, _ *StreamResult) {
+				received = append(received, data)
+				assert.NoError(t, StringData(c, data))
+			})
+			stop()
+
+			require.NotNil(t, info.StreamStatus)
+			assert.True(t, info.StreamStatus.IsNormalEnd())
+			assert.Equal(t, []string{"chunk"}, received)
+			assert.True(t, strings.HasSuffix(writer.Body.String(), "data: chunk\n\n"))
+			assert.Equal(t, "local-request-id", writer.Result().Header.Get(common.RequestIdKey))
+			// This fork intentionally removed Codex-specific SSE header copying.
+			// Keep the handoff coverage without restoring that retired behavior.
+			assert.Empty(t, writer.Result().Header.Get("X-Reasoning-Included"))
+			assert.Empty(t, writer.Result().Header.Get("X-Codex-Turn-State"))
+			if test.waitForPing {
+				assert.True(t, strings.HasPrefix(writer.Body.String(), ": PING\n\n"))
+			} else {
+				assert.Equal(t, "data: chunk\n\n", writer.Body.String())
+			}
+		})
+	}
+}
 
 func init() {
 	gin.SetMode(gin.TestMode)

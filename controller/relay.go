@@ -125,6 +125,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 	}()
 
+	generalSettings := operation_setting.GetGeneralSetting()
+	if relayFormat == types.RelayFormatClaude && relayInfo.IsStream && generalSettings.PingIntervalEnabled {
+		stopKeepAlive := helper.StartStreamKeepAlive(c, time.Duration(generalSettings.PingIntervalSeconds)*time.Second)
+		defer stopKeepAlive()
+	}
+
 	if newAPIError = relay.PrepareRequestBilling(c, relayInfo); newAPIError != nil {
 		return
 	}
@@ -286,6 +292,8 @@ func writeRelayErrorResponse(c *gin.Context, ws *websocket.Conn, relayFormat typ
 		return
 	}
 
+	c.Header("Content-Type", "application/json; charset=utf-8")
+
 	if relayFormat == types.RelayFormatClaude {
 		c.JSON(err.StatusCode, gin.H{
 			"type":  "error",
@@ -302,6 +310,13 @@ func writeRelayStreamError(c *gin.Context, relayFormat types.RelayFormat, err *t
 	if c == nil || c.Writer == nil || c.Request == nil || c.Request.Context().Err() != nil {
 		return
 	}
+
+	status, _ := common.GetContextKeyType[*relaycommon.StreamStatus](c, constant.ContextKeyResponseStreamStatus)
+	if status == nil {
+		status = relaycommon.NewStreamStatus()
+		common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, status)
+	}
+	status.MarkFailed(string(err.GetErrorCode()), string(err.GetErrorType()), err.StatusCode)
 
 	var event string
 	var payload any
@@ -328,6 +343,9 @@ func writeRelayStreamError(c *gin.Context, relayFormat types.RelayFormat, err *t
 		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", data)
 	}
 	_ = helper.FlushWriter(c)
+	if event == "" {
+		helper.Done(c)
+	}
 }
 
 // CountClaudeTokens implements Anthropic's token-counting utility endpoint.

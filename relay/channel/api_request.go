@@ -9,14 +9,17 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	common2 "github.com/QuantumNous/new-api/common"
 	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -467,6 +470,17 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 			policy.Protocol,
 			policy.Shards,
 			policy.String())
+	}
+
+	if info.IsStream {
+		helper.SetEventStreamHeaders(c)
+		// 处理流式请求的 ping 保活
+		generalSettings := operation_setting.GetGeneralSetting()
+		if generalSettings.PingIntervalEnabled && !info.DisablePing {
+			pingInterval := time.Duration(generalSettings.PingIntervalSeconds) * time.Second
+			stopPinger := helper.StartStreamKeepAlive(c, pingInterval)
+			defer stopPinger()
+		}
 	}
 
 	common2.SetContextKey(c, appconstant.ContextKeyUpstreamRequestOrigin, req.URL.Scheme+"://"+req.URL.Host)
