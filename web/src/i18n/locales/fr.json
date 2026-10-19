@@ -492,6 +492,7 @@
     "Ali": "Alibaba Bailian",
     "Alipay": "Alipay",
     "All": "Tout",
+    "All amounts are configured in USD and displayed in the site currency.": "Tous les montants sont configurés en USD et affichés dans la devise du site.",
     "All API tokens": "Tous les jetons API",
     "All categories": "Toutes catégories",
     "All channel attempts failed and the request did not receive a successful response.": "Toutes les tentatives de canal ont échoué et la requête n’a reçu aucune réponse valide.",

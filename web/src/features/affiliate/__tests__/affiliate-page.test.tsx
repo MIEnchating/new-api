@@ -143,8 +143,15 @@ test('renders a translated referral summary and empty income state', async () =>
   })
 
   const summary = container.querySelector('[data-testid="affiliate-summary"]')
-  expect(summary?.classList.contains('sm:grid-cols-3')).toBe(true)
-  expect(summary?.querySelectorAll('[data-slot="card"]').length).toBe(3)
+  expect(summary?.classList.contains('grid-cols-2')).toBe(true)
+  expect(summary?.classList.contains('md:grid-cols-3')).toBe(true)
+  expect(summary?.querySelectorAll('[data-slot="card"]').length).toBe(4)
+  const balanceCard = summary?.querySelector('[data-slot="card"]')
+  expect(balanceCard?.classList.contains('col-span-2')).toBe(true)
+  expect(balanceCard?.classList.contains('md:row-span-2')).toBe(true)
+  const transfer = balanceCard?.querySelector<HTMLButtonElement>('button')
+  expect(transfer?.textContent).toContain(i18n.t('Transfer to Balance'))
+  expect(transfer?.disabled).toBe(false)
   const referralLink =
     container.querySelector<HTMLInputElement>('input[readonly]')
   expect(referralLink?.value).toContain('invite-code')
@@ -154,6 +161,12 @@ test('renders a translated referral summary and empty income state', async () =>
   )
   expect(copyButton?.textContent).toContain(i18n.t('Copy referral link'))
   expect(copyButton?.classList.contains('sm:w-auto')).toBe(true)
+  expect(copyButton?.classList.contains('whitespace-normal')).toBe(true)
+  const history = container.querySelector('table')
+  expect(history?.getAttribute('aria-label')).toBe(i18n.t('Invitation History'))
+  expect(history?.parentElement?.classList.contains('overflow-x-auto')).toBe(
+    true
+  )
   assert.match(container.textContent || '', /可转余额/)
   assert.match(container.textContent || '', /累计收入/)
   assert.match(container.textContent || '', /邀请人数/)

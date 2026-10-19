@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -237,27 +238,23 @@ type LotteryGrantFilter struct {
 
 func lotteryPrizePool() []LotteryPrize {
 	return []LotteryPrize{
-		{Type: LotteryPrizeOne, Name: "1 元额度", Amount: 1, Probability: 50},
-		{Type: LotteryPrizeFive, Name: "5 元额度", Amount: 5, Probability: 20},
-		{Type: LotteryPrizeEight, Name: "8 元额度", Amount: 8, Probability: 5},
-		{Type: LotteryPrizeNone, Name: "未中奖", Probability: 25},
+		{Type: LotteryPrizeOne, Name: "1 USD", Amount: 1, Probability: 50},
+		{Type: LotteryPrizeFive, Name: "5 USD", Amount: 5, Probability: 20},
+		{Type: LotteryPrizeEight, Name: "8 USD", Amount: 8, Probability: 5},
+		{Type: LotteryPrizeNone, Name: "No prize", Probability: 25},
 	}
 }
 
 func normalizeLotteryPrizeName(prize LotteryPrize) string {
 	name := strings.TrimSpace(prize.Name)
 	switch name {
-	case "1 quota":
-		return "1 元额度"
-	case "5 quota":
-		return "5 元额度"
-	case "8 quota":
-		return "8 元额度"
-	case "No prize":
-		return "未中奖"
+	case "1 quota", "5 quota", "8 quota", "1 元额度", "5 元额度", "8 元额度":
+		return fmt.Sprintf("%d USD", prize.Amount)
+	case "No prize", "未中奖":
+		return "No prize"
 	case "":
 		if prize.Amount <= 0 {
-			return "未中奖"
+			return "No prize"
 		}
 		return prize.Type
 	default:
@@ -491,6 +488,13 @@ func initializeLotteryCampaign() error {
 	return err
 }
 
+// Lottery amounts are USD wallet values, not individual API request charges.
+func lotteryAmountQuota(amount int) (int, error) {
+	return common.WalletQuotaFromDecimalStrict(
+		decimal.NewFromInt(int64(amount)).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+	)
+}
+
 func sumLotteryQuotaByDay(userId int, days []time.Time) ([]int, error) {
 	if len(days) == 0 {
 		return []int{}, nil
@@ -530,7 +534,11 @@ func sumLotteryQuotaByDay(userId int, days []time.Time) ([]int, error) {
 			return nil, err
 		}
 		for i, value := range values {
-			results[batchStart+i] = common.QuotaFromFloat(float64(value))
+			quota, err := common.WalletQuotaFromDecimalStrict(decimal.NewFromInt(value))
+			if err != nil {
+				return nil, err
+			}
+			results[batchStart+i] = quota
 		}
 	}
 	return results, nil
@@ -568,9 +576,10 @@ func syncLotteryActivity(userId int, now time.Time, campaign LotteryCampaign, ru
 	if err != nil {
 		return err
 	}
-	activeQuota := common.QuotaRound(
-		float64(rules.DailyActiveAmount) * common.QuotaPerUnit,
-	)
+	activeQuota, err := lotteryAmountQuota(rules.DailyActiveAmount)
+	if err != nil {
+		return err
+	}
 	nowUnix := now.Unix()
 	return DB.Transaction(func(tx *gorm.DB) error {
 		activities := make([]LotteryDailyActivity, len(days))
@@ -642,13 +651,13 @@ func expireLotteryGrants(tx *gorm.DB, userId int, nowUnix int64) error {
 		UpdateColumn("consumed", gorm.Expr("chances")).Error
 }
 
-func syncLotteryGrants(userId int, now time.Time, config LotteryConfig) error {
+func syncLotteryGrants(userId int, now time.Time, config LotteryConfig) ([]LotteryDailyActivity, error) {
 	campaign, err := ensureLotteryCampaign(now)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := syncLotteryActivity(userId, now, campaign, config.Rules); err != nil {
-		return err
+		return nil, err
 	}
 	campaignDate := lotteryDayStart(
 		time.Unix(campaign.StartedAt, 0),
@@ -657,46 +666,53 @@ func syncLotteryGrants(userId int, now time.Time, config LotteryConfig) error {
 	if err := DB.Where(
 		"user_id = ? AND activity_date >= ?", userId, campaignDate,
 	).Order("activity_date ASC").Find(&activities).Error; err != nil {
-		return err
+		return nil, err
 	}
 
-	weeklyStart := lotteryWeekStart(now).Format("2006-01-02")
 	today := lotteryDayStart(now).Format("2006-01-02")
-	weeklyQuota := 0
+	weeklyQuotas := make(map[string]int)
+	weeks := make([]string, 0)
 	for _, activity := range activities {
-		if activity.ActivityDate >= weeklyStart &&
-			activity.ActivityDate <= today {
-			weeklyQuota += activity.Quota
+		day, parseErr := time.ParseInLocation("2006-01-02", activity.ActivityDate, time.Local)
+		if parseErr != nil || activity.ActivityDate > today {
+			continue
 		}
+		year, week := day.ISOWeek()
+		weekKey := fmt.Sprintf("%04d-W%02d", year, week)
+		if _, exists := weeklyQuotas[weekKey]; !exists {
+			weeks = append(weeks, weekKey)
+		}
+		weeklyQuotas[weekKey] += activity.Quota
 	}
-	weeklyTarget := common.QuotaRound(float64(config.Rules.WeeklySpendAmount) * common.QuotaPerUnit)
-	weeklyEarned := 0
-	if weeklyTarget > 0 && config.Rules.WeeklyChanceLimit > 0 {
-		weeklyEarned = weeklyQuota / weeklyTarget
+	weeklyTarget, err := lotteryAmountQuota(config.Rules.WeeklySpendAmount)
+	if err != nil {
+		return nil, err
 	}
-	if weeklyEarned > config.Rules.WeeklyChanceLimit {
-		weeklyEarned = config.Rules.WeeklyChanceLimit
-	}
-	year, week := lotteryWeekStart(now).ISOWeek()
 	nowUnix := now.Unix()
 
-	return DB.Transaction(func(tx *gorm.DB) error {
-		if err := expireLotteryGrants(tx, userId, nowUnix); err != nil {
-			return err
-		}
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		// Refresh recharge expiry before reclaiming chances, including when
+		// the user returns after the campaign's previous deadline.
 		if err := syncLotteryRechargeGrants(tx, userId, config.GrantRules, nowUnix); err != nil {
 			return err
 		}
-		grants := make([]LotteryChanceGrant, 0, weeklyEarned+len(config.GrantRules))
-		for index := 1; index <= weeklyEarned; index++ {
-			grants = append(grants, LotteryChanceGrant{
-				EventKey: fmt.Sprintf(
-					"weekly:%04d-W%02d:%d:%d",
-					year, week, userId, index,
-				),
-				UserId: userId, Type: LotteryGrantTypeWeeklySpend,
-				Chances: 1, CreatedAt: nowUnix,
-			})
+		if err := expireLotteryGrants(tx, userId, nowUnix); err != nil {
+			return err
+		}
+		grants := make([]LotteryChanceGrant, 0, len(config.GrantRules))
+		if weeklyTarget > 0 && config.Rules.WeeklyChanceLimit > 0 {
+			// Historical weeks use the same keys as on-time grants so visiting
+			// late can catch up without reissuing already consumed chances.
+			for _, week := range weeks {
+				earned := min(weeklyQuotas[week]/weeklyTarget, config.Rules.WeeklyChanceLimit)
+				for index := 1; index <= earned; index++ {
+					grants = append(grants, LotteryChanceGrant{
+						EventKey: fmt.Sprintf("weekly:%s:%d:%d", week, userId, index),
+						UserId:   userId, Type: LotteryGrantTypeWeeklySpend,
+						Chances: 1, CreatedAt: nowUnix,
+					})
+				}
+			}
 		}
 
 		streak := 0
@@ -747,6 +763,7 @@ func syncLotteryGrants(userId int, now time.Time, config LotteryConfig) error {
 		}
 		return createLotteryGrantsIfAbsent(tx, grants...)
 	})
+	return activities, err
 }
 
 func lotteryGrantExpiry(rule LotteryChanceGrantRule) int64 {
@@ -816,6 +833,11 @@ func syncLotteryRechargeGrants(tx *gorm.DB, userId int, rules []LotteryChanceGra
 		return err
 	}
 	for _, rule := range rechargeRules {
+		if err := tx.Model(&LotteryChanceGrant{}).
+			Where("user_id = ? AND type = ?", userId, "recharge_"+rule.Id).
+			UpdateColumn("expires_at", rule.EndAt).Error; err != nil {
+			return err
+		}
 		limit := rule.Limit
 		if limit == "" {
 			limit = LotteryRechargeGrantCumulative
@@ -1016,7 +1038,8 @@ func getLotteryStatusAt(
 		return LotteryStatus{}, errors.New("invalid user")
 	}
 	config := GetLotteryConfig()
-	if err := syncLotteryGrants(userId, now, config); err != nil {
+	activities, err := syncLotteryGrants(userId, now, config)
+	if err != nil {
 		return LotteryStatus{}, err
 	}
 	var available int64
@@ -1026,13 +1049,9 @@ func getLotteryStatusAt(
 		Scan(&available).Error; err != nil {
 		return LotteryStatus{}, err
 	}
-	var recentActivity []LotteryDailyActivity
-	if err := DB.Where("user_id = ?", userId).
-		Order("activity_date DESC").
-		Limit(14).
-		Find(&recentActivity).Error; err != nil {
-		return LotteryStatus{}, err
-	}
+	slices.Reverse(activities)
+	currentStreak := lotteryCurrentStreak(activities, now)
+	recentActivity := activities[:min(14, len(activities))]
 	var recentDraws []LotteryDraw
 	if err := DB.Where("user_id = ?", userId).
 		Order("created_at DESC, id DESC").
@@ -1054,8 +1073,14 @@ func getLotteryStatusAt(
 			todayQuota = activity.Quota
 		}
 	}
-	weeklyTarget := common.QuotaRound(float64(config.Rules.WeeklySpendAmount) * common.QuotaPerUnit)
-	dailyTarget := common.QuotaRound(float64(config.Rules.DailyActiveAmount) * common.QuotaPerUnit)
+	weeklyTarget, err := lotteryAmountQuota(config.Rules.WeeklySpendAmount)
+	if err != nil {
+		return LotteryStatus{}, err
+	}
+	dailyTarget, err := lotteryAmountQuota(config.Rules.DailyActiveAmount)
+	if err != nil {
+		return LotteryStatus{}, err
+	}
 	weeklyEarned := 0
 	if weeklyTarget > 0 && config.Rules.WeeklyChanceLimit > 0 {
 		weeklyEarned = weeklyQuota / weeklyTarget
@@ -1082,7 +1107,7 @@ func getLotteryStatusAt(
 		TodaySpendQuota:     todayQuota,
 		DailyActiveQuota:    dailyTarget,
 		TodayActive:         todayQuota >= dailyTarget,
-		CurrentStreak:       lotteryCurrentStreak(recentActivity, now),
+		CurrentStreak:       currentStreak,
 		Prizes:              config.Prizes,
 		RecentDraws:         recentDraws,
 		RecentActivity:      recentActivity,
@@ -1109,9 +1134,10 @@ func drawLotteryAt(
 		return LotteryDrawResult{}, err
 	}
 	prize := lotteryPrizeForRoll(roll, statusBefore.Prizes)
-	prizeQuota := common.QuotaRound(
-		float64(prize.Amount) * common.QuotaPerUnit,
-	)
+	prizeQuota, err := lotteryAmountQuota(prize.Amount)
+	if err != nil {
+		return LotteryDrawResult{}, err
+	}
 	eventKey := "lottery-draw:" + common.GetUUID()
 	draw := LotteryDraw{
 		EventKey: eventKey, UserId: userId, Prize: prize.Type,

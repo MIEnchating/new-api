@@ -71,6 +71,39 @@ func createAffiliateRewardIfAbsent(tx *gorm.DB, reward *AffiliateReward) (bool, 
 	return result.RowsAffected > 0, nil
 }
 
+// creditAffiliateRewardTx records and credits a reward in the caller's transaction.
+// Both balance columns are bounded atomically, including concurrent rewards.
+func creditAffiliateRewardTx(tx *gorm.DB, reward *AffiliateReward) (bool, error) {
+	created, err := createAffiliateRewardIfAbsent(tx, reward)
+	if err != nil || !created {
+		return false, err
+	}
+	if reward.Quota > common.MaxWalletQuota {
+		return false, ErrWalletQuotaLimitExceeded
+	}
+	updates := map[string]any{
+		"aff_quota":   gorm.Expr("aff_quota + ?", reward.Quota),
+		"aff_history": gorm.Expr("aff_history + ?", reward.Quota),
+	}
+	if reward.Type == AffiliateRewardTypeRegistration {
+		updates["aff_count"] = gorm.Expr("aff_count + ?", 1)
+	}
+	result := tx.Model(&User{}).Where("id = ?", reward.InviterId).
+		Where("aff_quota <= ? AND aff_history <= ?", common.MaxWalletQuota-reward.Quota, common.MaxWalletQuota-reward.Quota).
+		Updates(updates)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		var inviter User
+		if err := tx.Select("id").First(&inviter, reward.InviterId).Error; err != nil {
+			return false, err
+		}
+		return false, ErrWalletQuotaLimitExceeded
+	}
+	return true, nil
+}
+
 func GetAffiliateRewards(inviterId int, pageInfo *common.PageInfo) ([]AffiliateRewardItem, int64, error) {
 	if inviterId <= 0 {
 		return nil, 0, fmt.Errorf("invalid inviter")

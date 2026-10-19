@@ -150,7 +150,7 @@ func completePendingTopUpTx(tx *gorm.DB, topUp *TopUp, quotaToAdd int, userUpdat
 	if !isFirstTopUp || user.InviterId <= 0 || rebateQuota <= 0 || !operation_setting.IsPaymentComplianceConfirmed() {
 		return nil, nil
 	}
-	created, err := createAffiliateRewardIfAbsent(tx, &AffiliateReward{
+	created, err := creditAffiliateRewardTx(tx, &AffiliateReward{
 		EventKey:  fmt.Sprintf("first-topup:%d", topUp.Id),
 		InviterId: user.InviterId,
 		InviteeId: topUp.UserId,
@@ -163,14 +163,6 @@ func completePendingTopUpTx(tx *gorm.DB, topUp *TopUp, quotaToAdd int, userUpdat
 	}
 	if !created {
 		return nil, nil
-	}
-
-	err = tx.Model(&User{}).Where("id = ?", user.InviterId).Updates(map[string]interface{}{
-		"aff_quota":   gorm.Expr("aff_quota + ?", rebateQuota),
-		"aff_history": gorm.Expr("aff_history + ?", rebateQuota),
-	}).Error
-	if err != nil {
-		return nil, err
 	}
 
 	return &inviteRechargeRebateResult{

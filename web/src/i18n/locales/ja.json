@@ -492,6 +492,7 @@
     "Ali": "アリババ百炼",
     "Alipay": "Alipay",
     "All": "すべて",
+    "All amounts are configured in USD and displayed in the site currency.": "金額はすべて米ドルで設定し、サイトの通貨で表示します。",
     "All API tokens": "すべての API キー",
     "All categories": "すべてのカテゴリ",
     "All channel attempts failed and the request did not receive a successful response.": "すべてのチャネル試行が失敗し、リクエストは正常なレスポンスを受信できませんでした。",

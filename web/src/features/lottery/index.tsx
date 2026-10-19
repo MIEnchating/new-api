@@ -43,6 +43,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { EmptyState } from '@/components/empty-state'
 import { Main } from '@/components/layout'
 import {
   CardStaggerContainer,
@@ -51,13 +52,6 @@ import {
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  Empty,
-  EmptyDescription,
-  EmptyHeader,
-  EmptyMedia,
-  EmptyTitle,
-} from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import {
@@ -82,6 +76,7 @@ import { useIsAdmin } from '@/hooks/use-admin'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import {
   drawLottery,
@@ -245,6 +240,7 @@ function grantStatusConfig(
 export function Lottery() {
   const { t } = useTranslation()
   const isAdmin = useIsAdmin()
+  const currencyConfig = useSystemConfigStore((store) => store.config.currency)
   const [status, setStatus] = useState<LotteryStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [drawing, setDrawing] = useState(false)
@@ -593,11 +589,15 @@ export function Lottery() {
   const grantTotalPages = Math.max(1, Math.ceil(grantTotal / ADMIN_PAGE_SIZE))
   const userTotalPages = Math.max(1, Math.ceil(userDrawTotal / USER_PAGE_SIZE))
   const recordColumnCount = showingGrantRecords ? 7 : showingAllRecords ? 7 : 4
+  const drawHint =
+    !loading && !status?.available_chances
+      ? t('No lottery chances available')
+      : t('One chance is consumed per draw')
 
   return (
     <Main>
-      <div className='min-h-0 flex-1 overflow-auto px-4 py-5 sm:px-6 sm:py-6'>
-        <CardStaggerContainer className='mx-auto flex w-full max-w-6xl flex-col gap-5 sm:gap-6'>
+      <div className='min-h-0 min-w-0 flex-1 overflow-auto px-4 py-5 sm:px-6 sm:py-8'>
+        <CardStaggerContainer className='mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-6'>
           <CardStaggerItem>
             <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
               <div className='flex min-w-0 items-start gap-3'>
@@ -620,7 +620,7 @@ export function Lottery() {
                   type='button'
                   variant='outline'
                   size='sm'
-                  className='h-10 shrink-0'
+                  className='min-h-11 shrink-0 whitespace-normal sm:w-auto'
                   disabled={loading}
                   onClick={() => setSettingsOpen(true)}
                 >
@@ -631,11 +631,14 @@ export function Lottery() {
             </div>
           </CardStaggerItem>
 
-          <div className='grid min-w-0 items-stretch gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]'>
+          <div
+            data-testid='lottery-overview'
+            className='grid min-w-0 items-stretch gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]'
+          >
             <CardStaggerItem className='h-full min-w-0'>
               <Card
                 data-card-hover='false'
-                className='h-full gap-0 overflow-hidden rounded-xl py-0'
+                className='bg-primary/[0.03] h-full gap-0 overflow-hidden rounded-2xl py-0'
                 data-testid='lottery-mystery-card'
               >
                 <CardHeader className='flex flex-row flex-wrap items-center justify-between gap-3 border-b px-5 py-5'>
@@ -643,28 +646,24 @@ export function Lottery() {
                     <Gift className='text-primary size-4' aria-hidden='true' />
                     {t('Mystery gifts')}
                   </CardTitle>
-                  <div className='bg-primary/10 flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm'>
-                    <Sparkles
-                      className='text-warning size-4'
-                      aria-hidden='true'
-                    />
-                    <span className='text-muted-foreground'>
+                  <div className='flex min-w-0 flex-col items-end gap-1'>
+                    <span className='text-muted-foreground text-xs'>
                       {t('Available chances')}
                     </span>
                     {loading ? (
-                      <Skeleton className='h-6 w-10' />
+                      <Skeleton className='h-8 w-10' />
                     ) : (
-                      <strong className='text-lg tabular-nums'>
+                      <strong className='text-primary text-3xl font-semibold tracking-tight tabular-nums'>
                         {status?.available_chances || 0}
                       </strong>
                     )}
                   </div>
                 </CardHeader>
-                <CardContent className='from-primary/[0.03] flex flex-1 flex-col items-center justify-center bg-gradient-to-b to-transparent px-4 py-6 sm:px-6 sm:py-8'>
+                <CardContent className='flex flex-1 flex-col items-center justify-center px-4 py-6 sm:px-6 sm:py-8'>
                   <div
                     role='group'
                     aria-label={t('Mystery gifts')}
-                    className='grid w-full max-w-sm grid-cols-3 gap-2.5 sm:gap-3'
+                    className='grid w-full max-w-xs grid-cols-3 gap-2.5 sm:gap-3'
                   >
                     {Array.from(
                       { length: LOTTERY_GRID_SIZE },
@@ -708,11 +707,15 @@ export function Lottery() {
                             }
                             onClick={() => void handleDraw()}
                             className={cn(
-                              'group border-border bg-background relative isolate flex aspect-square h-auto w-full min-w-0 items-center justify-center overflow-hidden rounded-xl border p-1.5 transition-[border-color,background-color,box-shadow,opacity] duration-300 outline-none sm:p-2',
+                              'group border-border bg-background relative isolate flex aspect-square h-auto w-full min-w-0 items-center justify-center overflow-hidden rounded-2xl border p-1.5 transition-[border-color,background-color,box-shadow,opacity] duration-300 outline-none sm:p-2',
                               'hover:border-primary/45 hover:bg-primary/[0.03] hover:shadow-sm focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
                               'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-100',
                               isCenter &&
-                                'border-primary/40 bg-primary/10 shadow-primary/10 shadow-sm',
+                                'border-primary bg-primary text-primary-foreground shadow-primary/15 shadow-md hover:bg-primary/90',
+                              isCenter &&
+                                !drawing &&
+                                !status?.available_chances &&
+                                'disabled:opacity-50',
                               selected &&
                                 drawing &&
                                 'border-primary bg-primary/10 ring-primary/25 shadow-primary/15 shadow-md ring-2',
@@ -725,7 +728,7 @@ export function Lottery() {
                               subdued && !isCenter && 'disabled:opacity-35'
                             )}
                           >
-                            <span className='relative z-10 flex min-h-16 items-center justify-center'>
+                            <span className='relative z-10 flex min-h-16 min-w-0 items-center justify-center'>
                               {revealed ? (
                                 <span className='motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75 flex flex-col items-center gap-1 text-center motion-safe:duration-500'>
                                   <span className='bg-success/10 flex size-8 items-center justify-center rounded-full'>
@@ -734,7 +737,7 @@ export function Lottery() {
                                       aria-hidden='true'
                                     />
                                   </span>
-                                  <strong className='text-sm leading-tight tabular-nums sm:text-base'>
+                                  <strong className='text-sm leading-tight [overflow-wrap:anywhere] whitespace-normal tabular-nums sm:text-base'>
                                     {latestDraw.quota > 0
                                       ? formatQuota(latestDraw.quota)
                                       : t('No prize')}
@@ -745,7 +748,7 @@ export function Lottery() {
                                   className={cn(
                                     'flex items-center justify-center rounded-full transition-colors duration-300',
                                     isCenter
-                                      ? 'bg-primary/10 size-12'
+                                      ? 'bg-primary-foreground/10 size-14 sm:size-16'
                                       : 'bg-muted group-hover:bg-primary/8 size-10 sm:size-11'
                                   )}
                                 >
@@ -753,13 +756,13 @@ export function Lottery() {
                                     <span className='flex flex-col items-center gap-1'>
                                       <Dices
                                         className={cn(
-                                          'text-primary size-6',
+                                          'text-primary-foreground size-6',
                                           drawing &&
                                             'motion-safe:animate-bounce'
                                         )}
                                         aria-hidden='true'
                                       />
-                                      <span className='text-primary text-[11px] font-medium'>
+                                      <span className='text-primary-foreground max-w-full text-center text-[11px] leading-3 font-semibold whitespace-normal'>
                                         {drawing
                                           ? t('Drawing...')
                                           : t('Draw now')}
@@ -784,12 +787,15 @@ export function Lottery() {
                       }
                     )}
                   </div>
-                  <div className='mt-4 flex min-h-5 items-center justify-center text-center text-sm font-medium'>
+                  <div
+                    role='status'
+                    aria-live='polite'
+                    aria-atomic='true'
+                    className='mt-5 flex min-h-6 items-center justify-center text-center text-sm font-medium'
+                  >
                     {drawing ? (
                       <span
                         className='text-primary inline-flex items-center gap-2'
-                        role='status'
-                        aria-live='polite'
                         data-testid='lottery-draw-progress'
                       >
                         <span>{t('Drawing...')}</span>
@@ -815,7 +821,7 @@ export function Lottery() {
                         {drawResultLabel(latestDraw, t)}
                       </span>
                     ) : (
-                      t('One chance is consumed per draw')
+                      drawHint
                     )}
                   </div>
                 </CardContent>
@@ -829,7 +835,7 @@ export function Lottery() {
               <CardStaggerItem className='h-full min-w-0'>
                 <Card
                   data-card-hover='false'
-                  className='h-full gap-0 rounded-xl py-0'
+                  className='h-full min-w-0 gap-0 rounded-2xl py-0'
                 >
                   <CardHeader className='border-b px-5 py-4'>
                     <CardTitle className='flex items-center gap-2 text-base'>
@@ -858,12 +864,18 @@ export function Lottery() {
                         })}
                       </StatusBadge>
                     </div>
-                    <Progress value={weeklyProgress} />
+                    <Progress
+                      aria-label={t('Weekly spending')}
+                      value={weeklyProgress}
+                    />
                     <p className='text-muted-foreground text-xs leading-5'>
                       {t(
                         'Earn 1 chance for every {{amount}} spent each week, up to {{limit}} chances.',
                         {
-                          amount: `${(status?.rules?.weekly_spend_amount ?? 50).toFixed(2)} ${t('Yuan')}`,
+                          amount: formatQuota(
+                            (status?.rules?.weekly_spend_amount ?? 50) *
+                              currencyConfig.quotaPerUnit
+                          ),
                           limit: status?.weekly_chance_limit ?? 0,
                         }
                       )}
@@ -875,7 +887,7 @@ export function Lottery() {
               <CardStaggerItem className='h-full min-w-0'>
                 <Card
                   data-card-hover='false'
-                  className='h-full gap-0 rounded-xl py-0'
+                  className='h-full min-w-0 gap-0 rounded-2xl py-0'
                 >
                   <CardHeader className='border-b px-5 py-4'>
                     <CardTitle className='flex items-center gap-2 text-base'>
@@ -906,12 +918,18 @@ export function Lottery() {
                           : t('Not active yet')}
                       </StatusBadge>
                     </div>
-                    <Progress value={dailyProgress} />
+                    <Progress
+                      aria-label={t('Today spent')}
+                      value={dailyProgress}
+                    />
                     <p className='text-muted-foreground text-xs'>
                       {t(
                         'Spend {{amount}} in a single day to mark that day as active.',
                         {
-                          amount: `${(status?.rules?.daily_active_amount ?? 20).toFixed(2)} ${t('Yuan')}`,
+                          amount: formatQuota(
+                            (status?.rules?.daily_active_amount ?? 20) *
+                              currencyConfig.quotaPerUnit
+                          ),
                         }
                       )}
                     </p>
@@ -922,7 +940,7 @@ export function Lottery() {
               <CardStaggerItem className='h-full min-w-0 sm:col-span-2'>
                 <Card
                   data-card-hover='false'
-                  className='h-full gap-0 rounded-xl py-0'
+                  className='h-full min-w-0 gap-0 rounded-2xl py-0'
                 >
                   <CardHeader className='flex flex-row flex-wrap items-center justify-between gap-3 border-b px-5 py-4'>
                     <CardTitle className='flex items-center gap-2 text-base'>
@@ -981,7 +999,7 @@ export function Lottery() {
                       {(status?.rules?.streak_rewards || []).map((reward) => (
                         <div
                           key={reward.days}
-                          className='bg-muted/30 rounded-lg px-3 py-2'
+                          className='bg-muted/30 rounded-xl border px-3 py-3'
                         >
                           <span className='text-sm font-medium'>
                             {t('{{days}}-day streak', { days: reward.days })}
@@ -1001,7 +1019,10 @@ export function Lottery() {
           </div>
 
           <CardStaggerItem>
-            <Card data-card-hover='false' className='gap-0 py-0'>
+            <Card
+              data-card-hover='false'
+              className='min-w-0 gap-0 rounded-2xl py-0'
+            >
               <CardHeader className='border-b px-5 py-4'>
                 <CardTitle className='flex items-center gap-2 text-base'>
                   <Sparkles className='text-warning size-4' />
@@ -1030,13 +1051,15 @@ export function Lottery() {
                             </StatusBadge>
                           </div>
                         </div>
-                        <div className='text-muted-foreground space-y-1 text-xs leading-5'>
+                        <div className='text-muted-foreground flex flex-col gap-1 text-xs leading-5'>
                           {rule.type === 'recharge' ? (
                             <>
                               <p>
                                 {t('Recharge threshold')}:{' '}
                                 <span className='text-foreground font-medium'>
-                                  {`${rule.threshold.toFixed(2)} ${t('Yuan')}`}
+                                  {formatQuota(
+                                    rule.threshold * currencyConfig.quotaPerUnit
+                                  )}
                                 </span>
                               </p>
                               <p>
@@ -1089,14 +1112,17 @@ export function Lottery() {
           </CardStaggerItem>
 
           <CardStaggerItem>
-            <Card data-card-hover='false' className='gap-0 py-0'>
+            <Card
+              data-card-hover='false'
+              className='min-w-0 gap-0 rounded-2xl py-0'
+            >
               <CardHeader className='flex flex-row flex-wrap items-center justify-between gap-3 border-b px-5 py-5'>
                 <CardTitle className='text-base'>
                   {showingGrantRecords
                     ? t('Chance grant records')
                     : t('Lottery records')}
                 </CardTitle>
-                <div className='flex flex-wrap items-center justify-end gap-2'>
+                <div className='flex min-w-0 flex-wrap items-center gap-2 sm:justify-end'>
                   {isAdmin ? (
                     <Tabs
                       value={recordView}
@@ -1170,7 +1196,7 @@ export function Lottery() {
               <CardContent className='p-0'>
                 {showingGrantRecords ? (
                   <form
-                    className='grid gap-2 border-b p-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_170px_150px_auto]'
+                    className='bg-muted/20 grid gap-3 border-b p-5 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_170px_150px_auto]'
                     onSubmit={handleGrantSearch}
                   >
                     <Input
@@ -1259,7 +1285,7 @@ export function Lottery() {
                   </form>
                 ) : isAdmin && recordScope === 'all' ? (
                   <form
-                    className='grid gap-2 border-b p-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px_auto]'
+                    className='bg-muted/20 grid gap-3 border-b p-5 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_180px_auto]'
                     onSubmit={handleDrawSearch}
                   >
                     <Input
@@ -1310,7 +1336,14 @@ export function Lottery() {
                     </div>
                   </form>
                 ) : null}
-                <Table>
+                <Table
+                  aria-label={
+                    showingGrantRecords
+                      ? t('Chance grant records')
+                      : t('Lottery records')
+                  }
+                  className='[&_th]:bg-muted/30 [&_td:first-child]:pl-5 [&_td:last-child]:pr-5 [&_th:first-child]:pl-5 [&_th:last-child]:pr-5'
+                >
                   <TableHeader>
                     {showingGrantRecords ? (
                       <TableRow>
@@ -1359,21 +1392,14 @@ export function Lottery() {
                             colSpan={recordColumnCount}
                             className='p-0'
                           >
-                            <Empty className='min-h-44 rounded-none py-8'>
-                              <EmptyHeader>
-                                <EmptyMedia variant='icon'>
-                                  <Gift className='size-4' aria-hidden='true' />
-                                </EmptyMedia>
-                                <EmptyTitle className='tracking-normal'>
-                                  {t('No chance grant records')}
-                                </EmptyTitle>
-                                <EmptyDescription>
-                                  {t(
-                                    'Issued lottery chances will appear here.'
-                                  )}
-                                </EmptyDescription>
-                              </EmptyHeader>
-                            </Empty>
+                            <EmptyState
+                              icon={Gift}
+                              title={t('No chance grant records')}
+                              description={t(
+                                'Issued lottery chances will appear here.'
+                              )}
+                              className='min-h-44 rounded-none py-10'
+                            />
                           </TableCell>
                         </TableRow>
                       ) : (
@@ -1457,21 +1483,14 @@ export function Lottery() {
                     ) : visibleDraws.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={recordColumnCount} className='p-0'>
-                          <Empty className='min-h-44 rounded-none py-8'>
-                            <EmptyHeader>
-                              <EmptyMedia variant='icon'>
-                                <Trophy className='size-4' aria-hidden='true' />
-                              </EmptyMedia>
-                              <EmptyTitle className='tracking-normal'>
-                                {t('No lottery results yet')}
-                              </EmptyTitle>
-                              <EmptyDescription>
-                                {t(
-                                  'Your lottery results will appear here after each draw.'
-                                )}
-                              </EmptyDescription>
-                            </EmptyHeader>
-                          </Empty>
+                          <EmptyState
+                            icon={Trophy}
+                            title={t('No lottery results yet')}
+                            description={t(
+                              'Your lottery results will appear here after each draw.'
+                            )}
+                            className='min-h-44 rounded-none py-10'
+                          />
                         </TableCell>
                       </TableRow>
                     ) : (
@@ -1563,7 +1582,7 @@ export function Lottery() {
                     : !recordsLoading
                 ) ? (
                   <div
-                    className='flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm'
+                    className='bg-muted/10 flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm'
                     data-testid='lottery-records-pagination'
                   >
                     <span className='text-muted-foreground tabular-nums'>

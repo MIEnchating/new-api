@@ -492,6 +492,7 @@
     "Ali": "Alibaba Байлянь",
     "Alipay": "Alipay",
     "All": "Все",
+    "All amounts are configured in USD and displayed in the site currency.": "Все суммы задаются в USD и отображаются в валюте сайта.",
     "All API tokens": "Все API-ключи",
     "All categories": "Все категории",
     "All channel attempts failed and the request did not receive a successful response.": "Все попытки обращения к каналам завершились неудачей, и запрос не получил успешного ответа.",

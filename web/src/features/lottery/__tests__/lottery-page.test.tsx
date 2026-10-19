@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 
 import { Window } from 'happy-dom'
-import { afterAll, beforeEach, describe, expect, test } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 const domWindow = new Window()
 for (const key of [
@@ -65,7 +65,10 @@ const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { api } = await import('@/lib/api')
 const { useAuthStore } = await import('@/stores/auth-store')
+const { DEFAULT_CURRENCY_CONFIG, useSystemConfigStore } =
+  await import('@/stores/system-config-store')
 const { Lottery } = await import('..')
+const { LotterySettingsDialog } = await import('../lottery-settings-dialog')
 
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
@@ -104,6 +107,11 @@ async function flushRequests() {
 
 describe('lottery center', () => {
   afterAll(() => domWindow.close())
+  afterEach(() => {
+    useSystemConfigStore.getState().setConfig({
+      currency: { ...DEFAULT_CURRENCY_CONFIG },
+    })
+  })
 
   beforeEach(() => {
     document.body.replaceChildren()
@@ -157,19 +165,38 @@ describe('lottery center', () => {
       )?.disabled,
       true
     )
-    assert.match(container.textContent || '', /50\.00 Yuan/)
-    assert.match(container.textContent || '', /20\.00 Yuan/)
+    assert.match(container.textContent || '', /every \$50 spent/)
+    assert.match(container.textContent || '', /Spend \$20 in a single day/)
     assert.ok(container.querySelector('[data-testid="lottery-mystery-card"]'))
     const rulesGrid = container.querySelector(
       '[data-testid="lottery-rules-grid"]'
     )
     assert.ok(rulesGrid)
     expect(rulesGrid.classList.contains('sm:grid-cols-2')).toBe(true)
+    const overview = container.querySelector('[data-testid="lottery-overview"]')
+    expect(
+      overview?.classList.contains(
+        'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]'
+      )
+    ).toBe(true)
+    expect(
+      container.querySelector(
+        '[role="progressbar"][aria-label="Weekly spending"]'
+      )
+    ).not.toBeNull()
+    expect(
+      container.querySelector('[role="progressbar"][aria-label="Today spent"]')
+    ).not.toBeNull()
+    const history = container.querySelector('table')
+    expect(history?.getAttribute('aria-label')).toBe('Lottery records')
+    expect(history?.parentElement?.classList.contains('overflow-x-auto')).toBe(
+      true
+    )
     const grid = container.querySelector(
       '[role="group"][aria-label="Mystery gifts"]'
     )
     expect(grid?.classList.contains('grid-cols-3')).toBe(true)
-    expect(grid?.classList.contains('max-w-sm')).toBe(true)
+    expect(grid?.classList.contains('max-w-xs')).toBe(true)
     expect(
       container
         .querySelector('[data-testid="lottery-draw-button"]')
@@ -180,11 +207,138 @@ describe('lottery center', () => {
     )
     assert.equal(streak?.textContent?.replaceAll(/\s/g, ''), '1day')
     assert.doesNotMatch(container.textContent || '', /1 days/)
+    expect(container.textContent).toContain('No lottery chances available')
+    const drawLabel = container.querySelector(
+      '[data-testid="lottery-draw-button"] span.whitespace-normal'
+    )
+    expect(drawLabel).not.toBeNull()
     assert.doesNotMatch(container.textContent || '', /1 Yuan|5 Yuan|8 Yuan/)
     assert.ok(
       container.querySelector('[data-testid="lottery-records-pagination"]')
     )
 
+    await act(async () => root.unmount())
+  })
+
+  test('converts USD earning thresholds to site currency and updates after a currency change', async () => {
+    useSystemConfigStore.getState().setConfig({
+      currency: {
+        ...DEFAULT_CURRENCY_CONFIG,
+        quotaDisplayType: 'CNY',
+        usdExchangeRate: 7,
+      },
+    })
+    api.defaults.adapter = async (config) => ({
+      data: {
+        success: true,
+        data: config.url?.includes('/draws/self')
+          ? { items: [], total: 0, page: 1, page_size: 10 }
+          : {
+              ...baseStatus,
+              active_grant_rules: [
+                {
+                  id: 'recharge',
+                  type: 'recharge',
+                  name: 'Recharge offer',
+                  threshold: 50,
+                  chances: 1,
+                  enabled: true,
+                  start_at: 0,
+                  end_at: 0,
+                },
+              ],
+            },
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    })
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <Lottery />
+        </I18nextProvider>
+      )
+      await flushRequests()
+    })
+
+    assert.match(container.textContent || '', /every ¥350 spent/)
+    assert.match(container.textContent || '', /Spend ¥140 in a single day/)
+    assert.match(container.textContent || '', /Recharge threshold:\s*¥350/)
+
+    await act(async () => {
+      useSystemConfigStore.getState().setConfig({
+        currency: { ...DEFAULT_CURRENCY_CONFIG },
+      })
+    })
+    assert.match(container.textContent || '', /every \$50 spent/)
+    assert.match(container.textContent || '', /Spend \$20 in a single day/)
+    assert.match(container.textContent || '', /Recharge threshold:\s*\$50/)
+    await act(async () => root.unmount())
+  })
+
+  test('labels prize amounts as USD even when the site displays CNY', async () => {
+    useSystemConfigStore.getState().setConfig({
+      currency: {
+        ...DEFAULT_CURRENCY_CONFIG,
+        quotaDisplayType: 'CNY',
+        usdExchangeRate: 7,
+      },
+    })
+    api.defaults.adapter = async (config) => ({
+      data: config.url?.endsWith('/config')
+        ? {
+            success: true,
+            data: {
+              rules: {
+                weekly_spend_amount: 50,
+                weekly_chance_limit: 5,
+                daily_active_amount: 20,
+                streak_rewards: [],
+              },
+              prizes: [
+                {
+                  type: 'quota_1',
+                  name: '1 元额度',
+                  amount: 1,
+                  probability: 50,
+                },
+                { type: 'none', name: 'No prize', amount: 0, probability: 50 },
+              ],
+              grant_rules: [],
+            },
+          }
+        : { success: true, data: baseStatus },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    })
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(
+        <I18nextProvider i18n={i18n}>
+          <LotterySettingsDialog
+            open
+            onOpenChange={() => {}}
+            onSaved={() => {}}
+          />
+        </I18nextProvider>
+      )
+      await flushRequests()
+    })
+    const dialog = document.querySelector('[role="dialog"]')
+    assert.ok(dialog)
+    assert.match(dialog.textContent || '', /USD/)
+    assert.doesNotMatch(dialog.textContent || '', /Yuan/)
+    assert.equal(dialog.querySelector('input')?.value, '1 USD')
     await act(async () => root.unmount())
   })
 
@@ -283,7 +437,9 @@ describe('lottery center', () => {
       '[data-testid="lottery-draw-progress"]'
     )
     assert.ok(drawProgress)
-    assert.equal(drawProgress.getAttribute('role'), 'status')
+    expect(
+      drawProgress.closest('[role="status"]')?.getAttribute('aria-live')
+    ).toBe('polite')
     assert.match(drawProgress.textContent || '', /Drawing/)
 
     await act(async () => {
@@ -310,6 +466,13 @@ describe('lottery center', () => {
       id: 1,
       username: 'admin',
       role: 10,
+    })
+    useSystemConfigStore.getState().setConfig({
+      currency: {
+        ...DEFAULT_CURRENCY_CONFIG,
+        quotaDisplayType: 'CNY',
+        usdExchangeRate: 7,
+      },
     })
     let resolveAllRecords: (() => void) | null = null
     let delayAllRecords = true
@@ -464,6 +627,9 @@ describe('lottery center', () => {
         .length,
       4
     )
+    const lotteryDialog = document.querySelector('[role="dialog"]')
+    assert.match(lotteryDialog?.textContent || '', /USD/)
+    assert.doesNotMatch(lotteryDialog?.textContent || '', /Yuan/)
     const cancelButton = [...document.querySelectorAll('button')].find(
       (button) => button.textContent?.includes('Cancel')
     )

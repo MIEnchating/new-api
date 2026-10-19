@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -9,6 +10,9 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func setLotteryPrizePoolForTest(t *testing.T, prizes []LotteryPrize) {
@@ -57,7 +61,15 @@ func setLotteryConfigForTest(t *testing.T, config LotteryConfig) {
 
 func setupLotteryTest(t *testing.T) (int, time.Time) {
 	t.Helper()
-	truncateTables(t)
+	t.Cleanup(func() {
+		for _, record := range []any{
+			&LotteryDraw{}, &LotteryChanceGrant{}, &LotteryDailyActivity{},
+			&LotteryProfile{}, &LotteryCampaign{}, &BillingTransaction{},
+			&AffiliateReward{}, &TopUp{}, &Log{}, &User{},
+		} {
+			require.NoError(t, DB.Unscoped().Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(record).Error)
+		}
+	})
 	oldQuotaPerUnit := common.QuotaPerUnit
 	common.QuotaPerUnit = 100
 	setLotteryPrizePoolForTest(t, lotteryPrizePool())
@@ -129,6 +141,165 @@ func TestLotteryWeeklySpendChancesAreCappedAtFive(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 5, status.WeeklyEarnedChances)
 	assert.Equal(t, 5, status.AvailableChances)
+}
+
+func TestLotteryAccountingRegressionsAcrossDatabases(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			if dialect != "sqlite" {
+				var driver gorm.Dialector
+				dsn := os.Getenv("TEST_MYSQL_DSN")
+				if dialect == "postgres" {
+					dsn = os.Getenv("TEST_POSTGRES_DSN")
+				}
+				if dsn == "" {
+					t.Skip("test database DSN is not configured")
+				}
+				if dialect == "mysql" {
+					driver = mysql.Open(dsn)
+				} else {
+					driver = postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true})
+				}
+				db, err := gorm.Open(driver, &gorm.Config{})
+				require.NoError(t, err)
+				sqlDB, err := db.DB()
+				require.NoError(t, err)
+				sqlDB.SetMaxOpenConns(1)
+				previousDB, previousLogDB := DB, LOG_DB
+				previousMainType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
+				DB, LOG_DB = db, db
+				common.SetDatabaseTypes(common.DatabaseType(dialect), common.DatabaseType(dialect))
+				initCol()
+				t.Cleanup(func() {
+					assert.NoError(t, sqlDB.Close())
+					DB, LOG_DB = previousDB, previousLogDB
+					common.SetDatabaseTypes(previousMainType, previousLogType)
+					initCol()
+				})
+				require.NoError(t, db.AutoMigrate(
+					&User{}, &Log{}, &TopUp{}, &BillingTransaction{}, &AffiliateReward{},
+					&LotteryCampaign{}, &LotteryProfile{}, &LotteryDailyActivity{}, &LotteryChanceGrant{}, &LotteryDraw{},
+				))
+			}
+			var version string
+			versionSQL := "SELECT version()"
+			if dialect == "sqlite" {
+				versionSQL = "SELECT sqlite_version()"
+			}
+			require.NoError(t, DB.Raw(versionSQL).Scan(&version).Error)
+			t.Logf("%s %s", dialect, version)
+
+			t.Run("missed weeks are awarded once with independent caps", func(t *testing.T) {
+				userID, sunday := setupLotteryTest(t)
+				config := defaultLotteryConfig()
+				config.Rules.StreakRewards = nil
+				setLotteryConfigForTest(t, config)
+				addLotteryConsumeLog(t, userID, sunday, 50*100)
+				addLotteryConsumeLog(t, userID, sunday.AddDate(0, 0, 7), 400*100)
+				now := sunday.AddDate(0, 0, 8)
+				for range 2 {
+					status, err := getLotteryStatusAt(userID, now)
+					require.NoError(t, err)
+					assert.Equal(t, 6, status.AvailableChances)
+					assert.Zero(t, status.WeeklyEarnedChances)
+				}
+				_, err := drawLotteryAt(userID, now, 99)
+				require.NoError(t, err)
+				status, err := getLotteryStatusAt(userID, now)
+				require.NoError(t, err)
+				assert.Equal(t, 5, status.AvailableChances)
+			})
+
+			t.Run("large prizes credit their full amount and reverse once", func(t *testing.T) {
+				userID, now := setupLotteryTest(t)
+				common.QuotaPerUnit = 500000
+				config := defaultLotteryConfig()
+				config.Prizes = []LotteryPrize{
+					{Type: "large_reward", Name: "5000 USD", Amount: 5000, Probability: 100},
+					{Type: LotteryPrizeNone, Name: "No prize"},
+				}
+				require.NoError(t, validateLotteryConfig(config))
+				setLotteryConfigForTest(t, config)
+				require.NoError(t, DB.Create(&LotteryChanceGrant{
+					EventKey: "large-prize", UserId: userID, Type: LotteryGrantTypeManual,
+					Chances: 1, CreatedAt: now.Unix(),
+				}).Error)
+				result, err := drawLotteryAt(userID, now, 0)
+				require.NoError(t, err)
+				assert.Equal(t, 2500000000, result.Draw.Quota)
+				var user User
+				require.NoError(t, DB.First(&user, userID).Error)
+				assert.Equal(t, 2500001000, user.Quota)
+				var entry BillingTransaction
+				require.NoError(t, DB.Where("event_key = ?", result.Draw.EventKey).First(&entry).Error)
+				assert.Equal(t, 2500000000, entry.Quota)
+				require.NoError(t, RevokeLotteryReward(result.Draw.Id, 99, "regression verification"))
+				assert.ErrorIs(t, RevokeLotteryReward(result.Draw.Id, 99, "retry reversal"), ErrLotteryDrawAlreadyRevoked)
+				require.NoError(t, DB.First(&user, userID).Error)
+				assert.Equal(t, 1000, user.Quota)
+			})
+
+			t.Run("cumulative recharge expiry follows campaign edits", func(t *testing.T) {
+				userID, now := setupLotteryTest(t)
+				config := defaultLotteryConfig()
+				config.GrantRules = []LotteryChanceGrantRule{{
+					Id: "expiry-update", Type: LotteryChanceGrantRuleRecharge, Name: "Recharge campaign",
+					Enabled: true, Threshold: 50, Chances: 2, Limit: LotteryRechargeGrantCumulative,
+					StartAt: now.Add(-time.Hour).Unix(), EndAt: now.Add(time.Hour).Unix(),
+				}}
+				setLotteryConfigForTest(t, config)
+				require.NoError(t, DB.Create(&TopUp{
+					UserId: userID, Amount: 50, Money: 50, TradeNo: "expiry-update-topup",
+					Status: common.TopUpStatusSuccess, CreateTime: now.Unix(), CompleteTime: now.Unix(),
+				}).Error)
+				initial, err := getLotteryStatusAt(userID, now)
+				require.NoError(t, err)
+				require.Equal(t, 2, initial.AvailableChances)
+				_, err = drawLotteryAt(userID, now, 99)
+				require.NoError(t, err)
+				config.GrantRules[0].EndAt = now.Add(4 * time.Hour).Unix()
+				setLotteryConfigForTest(t, config)
+				extended, err := getLotteryStatusAt(userID, now.Add(2*time.Hour))
+				require.NoError(t, err)
+				assert.Equal(t, 1, extended.AvailableChances)
+				config.GrantRules[0].EndAt = now.Add(3 * time.Hour).Unix()
+				setLotteryConfigForTest(t, config)
+				expired, err := getLotteryStatusAt(userID, now.Add(3*time.Hour))
+				require.NoError(t, err)
+				assert.Zero(t, expired.AvailableChances)
+				_, err = drawLotteryAt(userID, now.Add(3*time.Hour), 0)
+				assert.ErrorIs(t, err, ErrNoLotteryChances)
+				var grants []LotteryChanceGrant
+				require.NoError(t, DB.Where("user_id = ? AND type = ?", userID, "recharge_expiry-update").Find(&grants).Error)
+				require.Len(t, grants, 1)
+				assert.Equal(t, config.GrantRules[0].EndAt, grants[0].ExpiresAt)
+			})
+
+			t.Run("streak exceeds the recent activity window", func(t *testing.T) {
+				userID, now := setupLotteryTest(t)
+				start := lotteryDayStart(now).AddDate(0, 0, -19)
+				require.NoError(t, DB.Model(&LotteryCampaign{}).Where("id = ?", 1).Update("started_at", start.Unix()).Error)
+				config := defaultLotteryConfig()
+				config.Rules.WeeklyChanceLimit = 0
+				config.Rules.StreakRewards = []LotteryStreakReward{{Days: 20, Chances: 1}}
+				setLotteryConfigForTest(t, config)
+				for offset := range 20 {
+					addLotteryConsumeLog(t, userID, start.AddDate(0, 0, offset).Add(time.Hour), 20*100)
+				}
+				status, err := getLotteryStatusAt(userID, now)
+				require.NoError(t, err)
+				assert.Equal(t, 1, status.AvailableChances)
+				assert.Equal(t, 20, status.CurrentStreak)
+				assert.Len(t, status.RecentActivity, 14)
+				nextDay, err := getLotteryStatusAt(userID, now.AddDate(0, 0, 1))
+				require.NoError(t, err)
+				assert.Equal(t, 20, nextDay.CurrentStreak)
+				broken, err := getLotteryStatusAt(userID, now.AddDate(0, 0, 2))
+				require.NoError(t, err)
+				assert.Zero(t, broken.CurrentStreak)
+			})
+		})
+	}
 }
 
 func TestLotteryConfigurableBaseRules(t *testing.T) {

@@ -568,8 +568,8 @@ func GetUserById(id int, selectAll bool) (*User, error) {
 	return &user, err
 }
 
-// GetSelfUserById reads dashboard profile data and password existence in one
-// query. The password hash and management access token are never selected.
+// GetSelfUserById reads dashboard profile data without selecting the password
+// hash or management access token. Invitations are counted independently of rewards.
 func GetSelfUserById(id int) (*User, error) {
 	if id == 0 {
 		return nil, common.NewMessage("ID is empty!")
@@ -581,7 +581,10 @@ func GetSelfUserById(id int) (*User, error) {
 	err := DB.Model(&User{}).Select([]string{
 		"id", "username", "display_name", "role", "status", "email",
 		"github_id", "discord_id", "oidc_id", "wechat_id", "telegram_id",
-		"group", "quota", "used_quota", "request_count", "aff_code", "aff_count",
+		"group", "quota", "used_quota", "request_count", "aff_code",
+		// Include soft-deleted invitees: deletion does not undo a historical referral.
+		// The legacy aff_count only tracked registrations that paid a reward.
+		"(SELECT COUNT(*) FROM users AS invitees WHERE invitees.inviter_id = users.id) AS aff_count",
 		"aff_quota", "aff_history", "inviter_id", "linux_do_id", "setting",
 		"stripe_customer", "auth_version",
 		"CASE WHEN password <> '' THEN 1 ELSE 0 END AS has_password",
@@ -625,7 +628,7 @@ func inviteUser(inviterId int, inviteeId int) error {
 	}
 
 	return DB.Transaction(func(tx *gorm.DB) error {
-		created, err := createAffiliateRewardIfAbsent(tx, &AffiliateReward{
+		_, err := creditAffiliateRewardTx(tx, &AffiliateReward{
 			EventKey:  fmt.Sprintf("registration:%d", inviteeId),
 			InviterId: inviterId,
 			InviteeId: inviteeId,
@@ -633,21 +636,7 @@ func inviteUser(inviterId int, inviteeId int) error {
 			Quota:     common.QuotaForInviter,
 			SourceId:  int64(inviteeId),
 		})
-		if err != nil || !created {
-			return err
-		}
-		result := tx.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
-			"aff_count":   gorm.Expr("aff_count + ?", 1),
-			"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
-			"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
-		})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		return nil
+		return err
 	})
 }
 
@@ -675,9 +664,6 @@ func (user *User) TransferAffQuotaToQuota(quota int, reference string) error {
 	if err != nil {
 		return err
 	}
-	if user.Quota > common.MaxWalletQuota-quota {
-		return ErrWalletQuotaLimitExceeded
-	}
 	created, err := createBillingTransactionIfAbsent(tx, &BillingTransaction{
 		EventKey:      reference,
 		UserId:        user.Id,
@@ -696,6 +682,9 @@ func (user *User) TransferAffQuotaToQuota(quota int, reference string) error {
 			return err
 		}
 		return tx.Commit().Error
+	}
+	if user.Quota > common.MaxWalletQuota-quota {
+		return ErrWalletQuotaLimitExceeded
 	}
 
 	// 再次检查用户的AffQuota是否足够

@@ -69,14 +69,18 @@ const EMPTY_CONFIG: LotteryConfig = {
 
 function normalizeLotteryPrizeName(prize: LotteryPrize) {
   const legacyNames: Record<string, string> = {
-    '1 quota': '1 元额度',
-    '5 quota': '5 元额度',
-    '8 quota': '8 元额度',
-    'No prize': '未中奖',
+    '1 quota': `${prize.amount} USD`,
+    '5 quota': `${prize.amount} USD`,
+    '8 quota': `${prize.amount} USD`,
+    '1 元额度': `${prize.amount} USD`,
+    '5 元额度': `${prize.amount} USD`,
+    '8 元额度': `${prize.amount} USD`,
+    'No prize': 'No prize',
+    未中奖: 'No prize',
   }
   if (prize.name in legacyNames) return legacyNames[prize.name]
   if (prize.name) return prize.name
-  return prize.amount <= 0 ? '未中奖' : prize.type
+  return prize.amount <= 0 ? 'No prize' : prize.type
 }
 
 function normalizeConfig(value: Partial<LotteryConfig>): LotteryConfig {
@@ -289,6 +293,9 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
           <DialogDescription>
             {t(
               'Manage earning rules, chance grant campaigns, and the prize pool separately.'
+            )}{' '}
+            {t(
+              'All amounts are configured in USD and displayed in the site currency.'
             )}
           </DialogDescription>
         </DialogHeader>
@@ -319,7 +326,7 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                     label={t('Spend amount per chance')}
                     value={config.rules.weekly_spend_amount}
                     min={0}
-                    suffix={t('Yuan')}
+                    suffix={t('USD')}
                     onChange={(value) =>
                       setConfig((current) => ({
                         ...current,
@@ -343,7 +350,7 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                     label={t('Daily active spend')}
                     value={config.rules.daily_active_amount}
                     min={0}
-                    suffix={t('Yuan')}
+                    suffix={t('USD')}
                     onChange={(value) =>
                       setConfig((current) => ({
                         ...current,
@@ -645,7 +652,7 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                             value={rule.threshold}
                             min={0.01}
                             step={0.01}
-                            suffix={t('Yuan')}
+                            suffix={t('USD')}
                             onChange={(threshold) =>
                               patchGrant(index, { threshold })
                             }
@@ -753,7 +760,7 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                           hideLabelOnDesktop
                           value={prize.amount}
                           min={0}
-                          suffix={t('Yuan')}
+                          suffix={t('USD')}
                           onChange={(amount) => patchPrize(index, { amount })}
                         />
                         <NumberField
