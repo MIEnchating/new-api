@@ -43,9 +43,9 @@ func monitorHealth(value counters, thresholds perf_metrics_setting.HealthThresho
 		scoreSum += 0.2 * max(0, min(100, score))
 		weightSum += 0.2
 	}
-	// Cache rates are token-weighted where available; require enough eligible
-	// requests as well so one large prompt cannot masquerade as a large sample.
-	if value.cacheRequests >= thresholds.MinimumSample {
+	// Cache rates are token-weighted; require enough requests with measured
+	// input tokens so one large prompt cannot masquerade as a large sample.
+	if value.cacheTokenDenominator > 0 && value.cacheTokenRequests >= thresholds.MinimumSample {
 		rate := cacheHitRate(value)
 		result.Cache = "healthy"
 		if rate < thresholds.CriticalCacheRate {

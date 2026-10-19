@@ -40,7 +40,7 @@ type textQuotaSummary struct {
 	CompletionTokens       int
 	TotalTokens            int
 	CacheTokens            int
-	CacheInputTokens       int
+	CacheTotalInputTokens  int64
 	CacheCreationTokens    int
 	CacheCreationTokens5m  int
 	CacheCreationTokens1h  int
@@ -265,6 +265,22 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		relayInfo.ChannelType == constant.ChannelTypeOpenRouter &&
 		summary.IsClaudeUsageSemantic
 
+	// OpenAI/Gemini prompt counts already include cache tokens, even when
+	// cache-read and cache-write prefixes overlap. Native Claude and legacy
+	// Claude-derived usage report ordinary input separately. Capture this
+	// before the OpenRouter billing adjustment changes PromptTokens.
+	summary.CacheTotalInputTokens = int64(max(usage.PromptTokens, 0))
+	if legacyClaudeDerived || (summary.IsClaudeUsageSemantic &&
+		(!isOpenRouterClaudeBilling || usage.UsageSource == dto.BillingUsageSourceClaudeMessages)) {
+		for _, tokens := range []int{summary.CacheTokens, cacheWriteTokensTotal(summary)} {
+			if tokens < 0 || int64(tokens) > math.MaxInt64-summary.CacheTotalInputTokens {
+				summary.CacheTotalInputTokens = 0
+				break
+			}
+			summary.CacheTotalInputTokens += int64(tokens)
+		}
+	}
+
 	if isOpenRouterClaudeBilling {
 		summary.PromptTokens -= summary.CacheTokens
 		isUsingCustomSettings := relayInfo.PriceData.UsePrice || hasCustomModelRatio(summary.ModelName, relayInfo.PriceData.ModelRatio)
@@ -275,13 +291,6 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 			}
 		}
 		summary.PromptTokens -= summary.CacheCreationTokens
-	}
-	summary.CacheInputTokens = summary.PromptTokens
-	if !summary.IsClaudeUsageSemantic && !legacyClaudeDerived {
-		summary.CacheInputTokens -= summary.CacheTokens
-	}
-	if summary.CacheInputTokens < 0 {
-		summary.CacheInputTokens = 0
 	}
 
 	dPromptTokens := decimal.NewFromInt(int64(summary.PromptTokens))
@@ -579,6 +588,5 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	})
 	relayInfo.PerformanceOutputTokens = int64(summary.CompletionTokens)
 	relayInfo.PerformanceCachedTokens = int64(summary.CacheTokens)
-	relayInfo.PerformanceCacheInputTokens = int64(summary.CacheInputTokens)
-	relayInfo.PerformanceCacheCreationTokens = int64(cacheWriteTokensTotal(summary))
+	relayInfo.PerformanceCacheTotalInputTokens = summary.CacheTotalInputTokens
 }

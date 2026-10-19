@@ -22,6 +22,9 @@ func flushLoop() {
 }
 
 func flushCompletedBuckets() {
+	flushMu.Lock()
+	defer flushMu.Unlock()
+	flushGeneration++
 	currentBucket := bucketStart(perfMetricsNow().Unix())
 	hotBuckets.Range(func(key, value any) bool {
 		k := key.(bucketKey)

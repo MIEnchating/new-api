@@ -20,6 +20,17 @@ import (
 
 var hotBuckets sync.Map
 
+// Queries retry if a flush moves counters between memory and the database.
+// The mutex serializes flushes; recording samples never waits on database I/O.
+var flushMu sync.RWMutex
+var flushGeneration uint64
+
+func metricsFlushGeneration() uint64 {
+	flushMu.RLock()
+	defer flushMu.RUnlock()
+	return flushGeneration
+}
+
 // perfMetricsNow is replaceable in package tests so window-boundary behavior
 // remains deterministic while production uses the wall clock.
 var perfMetricsNow = time.Now
@@ -62,18 +73,17 @@ func RecordRelayResult(ctx context.Context, info *relaycommon.RelayInfo, apiErr 
 		generationMs = latencyMs
 	}
 	Record(Sample{
-		CacheEligible:       info.PerformanceCacheEligible,
-		CachedTokens:        info.PerformanceCachedTokens,
-		CacheInputTokens:    info.PerformanceCacheInputTokens,
-		CacheCreationTokens: info.PerformanceCacheCreationTokens,
-		Model:               info.OriginModelName,
-		Group:               info.UsingGroup,
-		LatencyMs:           latencyMs,
-		TtftMs:              ttftMs,
-		HasTtft:             hasTtft,
-		Success:             outcome == OutcomeSuccess,
-		OutputTokens:        info.PerformanceOutputTokens,
-		GenerationMs:        generationMs,
+		CacheEligible:         info.PerformanceCacheEligible,
+		CachedTokens:          info.PerformanceCachedTokens,
+		CacheTotalInputTokens: info.PerformanceCacheTotalInputTokens,
+		Model:                 info.OriginModelName,
+		Group:                 info.UsingGroup,
+		LatencyMs:             latencyMs,
+		TtftMs:                ttftMs,
+		HasTtft:               hasTtft,
+		Success:               outcome == OutcomeSuccess,
+		OutputTokens:          info.PerformanceOutputTokens,
+		GenerationMs:          generationMs,
 	})
 }
 
@@ -131,9 +141,11 @@ func Record(sample Sample) {
 	}
 	actual, _ := hotBuckets.LoadOrStore(key, &atomicBucket{})
 	actual.(*atomicBucket).add(sample)
-	gopool.Go(func() {
-		recordRedis(key, sample)
-	})
+	if common.RedisEnabled && common.RDB != nil {
+		gopool.Go(func() {
+			recordRedis(key, sample)
+		})
+	}
 }
 
 // queryWindow covers the current partial hour plus the preceding complete
@@ -148,250 +160,272 @@ func queryWindow(now time.Time, hours int) (int64, int64) {
 }
 
 func Query(params QueryParams) (QueryResult, error) {
-	startTs, endTs := queryWindow(perfMetricsNow(), params.Hours)
-	allowedGroups := allowedGroupSet(params.AllowedGroups)
+	for {
+		generation := metricsFlushGeneration()
+		startTs, endTs := queryWindow(perfMetricsNow(), params.Hours)
+		allowedGroups := allowedGroupSet(params.AllowedGroups)
 
-	merged := map[bucketKey]counters{}
-	rows, err := model.GetPerfMetrics(params.Model, params.Group, startTs, endTs)
-	if err != nil {
-		return QueryResult{}, err
-	}
-	for _, row := range rows {
-		if allowedGroups != nil {
-			if _, ok := allowedGroups[row.Group]; !ok {
-				continue
+		merged := map[bucketKey]counters{}
+		rows, err := model.GetPerfMetrics(params.Model, params.Group, startTs, endTs)
+		if err != nil {
+			return QueryResult{}, err
+		}
+		for _, row := range rows {
+			if allowedGroups != nil {
+				if _, ok := allowedGroups[row.Group]; !ok {
+					continue
+				}
 			}
+			mergeCounters(merged, bucketKey{
+				model:    row.ModelName,
+				group:    row.Group,
+				bucketTs: row.BucketTs,
+			}, counters{
+				requestCount:          row.RequestCount,
+				successCount:          row.SuccessCount,
+				totalLatencyMs:        row.TotalLatencyMs,
+				ttftSumMs:             row.TtftSumMs,
+				ttftCount:             row.TtftCount,
+				outputTokens:          row.OutputTokens,
+				generationMs:          row.GenerationMs,
+				cacheRequests:         row.CacheRequests,
+				cacheHits:             row.CacheHits,
+				cachedTokens:          row.CachedTokens,
+				cacheTokenReadTokens:  row.CacheTokenReadTokens,
+				cacheTokenDenominator: row.CacheTokenDenominator,
+			})
 		}
-		mergeCounters(merged, bucketKey{
-			model:    row.ModelName,
-			group:    row.Group,
-			bucketTs: row.BucketTs,
-		}, counters{
-			requestCount:          row.RequestCount,
-			successCount:          row.SuccessCount,
-			totalLatencyMs:        row.TotalLatencyMs,
-			ttftSumMs:             row.TtftSumMs,
-			ttftCount:             row.TtftCount,
-			outputTokens:          row.OutputTokens,
-			generationMs:          row.GenerationMs,
-			cacheRequests:         row.CacheRequests,
-			cacheHits:             row.CacheHits,
-			cachedTokens:          row.CachedTokens,
-			cacheTokenReadTokens:  row.CacheTokenReadTokens,
-			cacheTokenDenominator: row.CacheTokenDenominator,
-		})
-	}
 
-	hotBuckets.Range(func(key, value any) bool {
-		k := key.(bucketKey)
-		if k.model != params.Model || k.bucketTs < startTs || k.bucketTs > endTs {
-			return true
-		}
-		if params.Group != "" && k.group != params.Group {
-			return true
-		}
-		if allowedGroups != nil {
-			if _, ok := allowedGroups[k.group]; !ok {
+		hotBuckets.Range(func(key, value any) bool {
+			k := key.(bucketKey)
+			if k.model != params.Model || k.bucketTs < startTs || k.bucketTs > endTs {
 				return true
 			}
-		}
-		mergeCounters(merged, k, value.(*atomicBucket).snapshot())
-		return true
-	})
+			if params.Group != "" && k.group != params.Group {
+				return true
+			}
+			if allowedGroups != nil {
+				if _, ok := allowedGroups[k.group]; !ok {
+					return true
+				}
+			}
+			mergeCounters(merged, k, value.(*atomicBucket).snapshot())
+			return true
+		})
 
-	result := buildQueryResult(params.Model, merged)
-	result.WindowStart, result.WindowEnd = startTs, endTs
-	return result, nil
+		if metricsFlushGeneration() != generation {
+			continue
+		}
+
+		result := buildQueryResult(params.Model, merged)
+		result.WindowStart, result.WindowEnd = startTs, endTs
+		return result, nil
+	}
 }
 
 func QuerySummaryAll(hours int, groups []string, recentModels ...string) (SummaryAllResult, error) {
-	if len(recentModels) > MaxRecentModels {
-		return SummaryAllResult{}, common.NewMessage("Invalid parameters")
-	}
-	now := perfMetricsNow()
-	startTs, endTs := queryWindow(now, hours)
-	recentStartTs, _ := queryWindow(now, recentSuccessHistoryHours)
-	allowedGroups := allowedGroupSet(groups)
-	queryStartTs := startTs
+	for {
+		generation := metricsFlushGeneration()
+		if len(recentModels) > MaxRecentModels {
+			return SummaryAllResult{}, common.NewMessage("Invalid parameters")
+		}
+		now := perfMetricsNow()
+		startTs, endTs := queryWindow(now, hours)
+		recentStartTs, _ := queryWindow(now, recentSuccessHistoryHours)
+		allowedGroups := allowedGroupSet(groups)
+		queryStartTs := startTs
 
-	recentBuckets := make(map[string]map[int64]counters, len(recentModels))
-	for _, name := range recentModels {
-		if name == "" {
-			continue
+		recentBuckets := make(map[string]map[int64]counters, len(recentModels))
+		for _, name := range recentModels {
+			if name == "" {
+				continue
+			}
+			if _, exists := recentBuckets[name]; exists {
+				continue
+			}
+			recentBuckets[name] = map[int64]counters{}
+			buckets, err := model.GetRecentPerfMetricSuccessBuckets(name, recentStartTs, endTs, groups, recentSuccessSampleLimit)
+			if err != nil {
+				return SummaryAllResult{}, err
+			}
+			for _, bucket := range buckets {
+				queryStartTs = min(queryStartTs, bucket.BucketTs)
+				mergeModelBucket(recentBuckets, name, bucket.BucketTs, counters{
+					requestCount: bucket.RequestCount,
+					successCount: bucket.SuccessCount,
+				})
+			}
 		}
-		if _, exists := recentBuckets[name]; exists {
-			continue
-		}
-		recentBuckets[name] = map[int64]counters{}
-		buckets, err := model.GetRecentPerfMetricSuccessBuckets(name, recentStartTs, endTs, groups, recentSuccessSampleLimit)
+
+		rows, err := model.GetPerfMetricsSummaryBucketsAll(queryStartTs, endTs, groups)
 		if err != nil {
 			return SummaryAllResult{}, err
 		}
-		for _, bucket := range buckets {
-			queryStartTs = min(queryStartTs, bucket.BucketTs)
-			mergeModelBucket(recentBuckets, name, bucket.BucketTs, counters{
-				requestCount: bucket.RequestCount,
-				successCount: bucket.SuccessCount,
-			})
-		}
-	}
 
-	rows, err := model.GetPerfMetricsSummaryBucketsAll(queryStartTs, endTs, groups)
-	if err != nil {
-		return SummaryAllResult{}, err
-	}
-
-	modelBuckets := map[string]map[int64]counters{}
-	for _, row := range rows {
-		value := counters{
-			requestCount:   row.RequestCount,
-			successCount:   row.SuccessCount,
-			totalLatencyMs: row.TotalLatencyMs,
-			outputTokens:   row.OutputTokens,
-			generationMs:   row.GenerationMs,
+		modelBuckets := map[string]map[int64]counters{}
+		for _, row := range rows {
+			value := counters{
+				requestCount:   row.RequestCount,
+				successCount:   row.SuccessCount,
+				totalLatencyMs: row.TotalLatencyMs,
+				outputTokens:   row.OutputTokens,
+				generationMs:   row.GenerationMs,
+			}
+			mergeModelBucket(modelBuckets, row.ModelName, row.BucketTs, value)
 		}
-		mergeModelBucket(modelBuckets, row.ModelName, row.BucketTs, value)
-	}
 
-	hotBuckets.Range(func(key, value any) bool {
-		k := key.(bucketKey)
-		if k.bucketTs > endTs {
-			return true
-		}
-		if allowedGroups != nil {
-			if _, ok := allowedGroups[k.group]; !ok {
+		hotBuckets.Range(func(key, value any) bool {
+			k := key.(bucketKey)
+			if k.bucketTs > endTs {
 				return true
 			}
-		}
-		snap := value.(*atomicBucket).snapshot()
-		if snap.requestCount == 0 {
+			if allowedGroups != nil {
+				if _, ok := allowedGroups[k.group]; !ok {
+					return true
+				}
+			}
+			snap := value.(*atomicBucket).snapshot()
+			if snap.requestCount == 0 {
+				return true
+			}
+			if _, requested := recentBuckets[k.model]; requested && k.bucketTs >= recentStartTs {
+				mergeModelBucket(recentBuckets, k.model, k.bucketTs, snap)
+			}
+			if k.bucketTs < queryStartTs {
+				return true
+			}
+			mergeModelBucket(modelBuckets, k.model, k.bucketTs, snap)
 			return true
-		}
-		if _, requested := recentBuckets[k.model]; requested && k.bucketTs >= recentStartTs {
-			mergeModelBucket(recentBuckets, k.model, k.bucketTs, snap)
-		}
-		if k.bucketTs < queryStartTs {
-			return true
-		}
-		mergeModelBucket(modelBuckets, k.model, k.bucketTs, snap)
-		return true
-	})
+		})
 
-	recentSeries := make(map[string][]SuccessRatePoint, len(recentBuckets))
-	for name, buckets := range recentBuckets {
-		points := recentSuccessSeries(buckets)
-		if len(points) == 0 {
-			continue
-		}
-		recentSeries[name] = points[max(0, len(points)-recentSuccessSampleLimit):]
-	}
-
-	// Requested models are summarized over the same hours as their status samples.
-	totals := map[string]counters{}
-	for name, buckets := range modelBuckets {
-		fromTs := startTs
-		if points, ok := recentSeries[name]; ok {
-			fromTs = points[0].Ts
-		}
-		for bucketTs, value := range buckets {
-			if bucketTs < fromTs {
-				delete(buckets, bucketTs)
+		recentSeries := make(map[string][]SuccessRatePoint, len(recentBuckets))
+		for name, buckets := range recentBuckets {
+			points := recentSuccessSeries(buckets)
+			if len(points) == 0 {
 				continue
 			}
-			mergeModelTotals(totals, name, value)
+			recentSeries[name] = points[max(0, len(points)-recentSuccessSampleLimit):]
 		}
-	}
 
-	all := counters{}
-	models := make([]ModelSummary, 0, len(totals))
-	for name, total := range totals {
-		if total.requestCount == 0 {
+		// Requested models are summarized over the same hours as their status samples.
+		totals := map[string]counters{}
+		for name, buckets := range modelBuckets {
+			fromTs := startTs
+			if points, ok := recentSeries[name]; ok {
+				fromTs = points[0].Ts
+			}
+			for bucketTs, value := range buckets {
+				if bucketTs < fromTs {
+					delete(buckets, bucketTs)
+					continue
+				}
+				mergeModelTotals(totals, name, value)
+			}
+		}
+
+		all := counters{}
+		models := make([]ModelSummary, 0, len(totals))
+		for name, total := range totals {
+			if total.requestCount == 0 {
+				continue
+			}
+			all.requestCount += total.requestCount
+			all.successCount += total.successCount
+			all.totalLatencyMs += total.totalLatencyMs
+			all.outputTokens += total.outputTokens
+			all.generationMs += total.generationMs
+			avgLatency := total.totalLatencyMs / total.requestCount
+			successRate := float64(total.successCount) / float64(total.requestCount) * 100
+			avgTps := 0.0
+			if total.generationMs > 0 {
+				avgTps = float64(total.outputTokens) / (float64(total.generationMs) / 1000.0)
+			}
+			models = append(models, ModelSummary{
+				ModelName:           name,
+				AvgLatencyMs:        avgLatency,
+				SuccessRate:         math.Round(successRate*100) / 100,
+				AvgTps:              math.Round(avgTps*100) / 100,
+				RecentSuccessSeries: recentSuccessSeries(modelBuckets[name]),
+				RequestCount:        total.requestCount,
+			})
+		}
+		sort.Slice(models, func(i, j int) bool {
+			return models[i].RequestCount > models[j].RequestCount
+		})
+
+		if metricsFlushGeneration() != generation {
 			continue
 		}
-		all.requestCount += total.requestCount
-		all.successCount += total.successCount
-		all.totalLatencyMs += total.totalLatencyMs
-		all.outputTokens += total.outputTokens
-		all.generationMs += total.generationMs
-		avgLatency := total.totalLatencyMs / total.requestCount
-		successRate := float64(total.successCount) / float64(total.requestCount) * 100
-		avgTps := 0.0
-		if total.generationMs > 0 {
-			avgTps = float64(total.outputTokens) / (float64(total.generationMs) / 1000.0)
-		}
-		models = append(models, ModelSummary{
-			ModelName:           name,
-			AvgLatencyMs:        avgLatency,
-			SuccessRate:         math.Round(successRate*100) / 100,
-			AvgTps:              math.Round(avgTps*100) / 100,
-			RecentSuccessSeries: recentSuccessSeries(modelBuckets[name]),
-			RequestCount:        total.requestCount,
-		})
-	}
-	sort.Slice(models, func(i, j int) bool {
-		return models[i].RequestCount > models[j].RequestCount
-	})
 
-	return SummaryAllResult{
-		Summary: summarize(all), WindowStart: startTs, WindowEnd: endTs,
-		Models: models, RecentSuccessSeries: recentSeries,
-	}, nil
+		return SummaryAllResult{
+			Summary: summarize(all), WindowStart: startTs, WindowEnd: endTs,
+			Models: models, RecentSuccessSeries: recentSeries,
+		}, nil
+	}
 }
 
 func QueryCache(hours int, groups []string) (CacheQueryResult, error) {
-	if hours <= 0 {
-		hours = 24
-	}
-	if hours > 24*30 {
-		hours = 24 * 30
-	}
-	endTs := perfMetricsNow().Unix()
-	startTs := endTs - int64(hours)*3600
-	allowedGroups := allowedGroupSet(groups)
-	groupBuckets := map[string]map[int64]counters{}
-
-	rows, err := model.GetPerfMetricCacheBucketsAll(startTs, endTs, groups)
-	if err != nil {
-		return CacheQueryResult{}, err
-	}
-	for _, row := range rows {
-		mergeCacheGroupBucket(groupBuckets, row.Group, row.BucketTs, counters{
-			requestCount:          row.RequestCount,
-			successCount:          row.SuccessCount,
-			ttftSumMs:             row.TtftSumMs,
-			ttftCount:             row.TtftCount,
-			outputTokens:          row.OutputTokens,
-			generationMs:          row.GenerationMs,
-			cacheRequests:         row.CacheRequests,
-			cacheHits:             row.CacheHits,
-			cachedTokens:          row.CachedTokens,
-			cacheTokenReadTokens:  row.CacheTokenReadTokens,
-			cacheTokenDenominator: row.CacheTokenDenominator,
-		})
-	}
-
-	hotBuckets.Range(func(key, value any) bool {
-		k := key.(bucketKey)
-		if k.bucketTs < startTs || k.bucketTs > endTs {
-			return true
+	for {
+		generation := metricsFlushGeneration()
+		if hours <= 0 {
+			hours = 24
 		}
-		if allowedGroups != nil {
-			if _, ok := allowedGroups[k.group]; !ok {
+		if hours > 24*30 {
+			hours = 24 * 30
+		}
+		endTs := perfMetricsNow().Unix()
+		startTs := endTs - int64(hours)*3600
+		allowedGroups := allowedGroupSet(groups)
+		groupBuckets := map[string]map[int64]counters{}
+
+		rows, err := model.GetPerfMetricCacheBucketsAll(startTs, endTs, groups)
+		if err != nil {
+			return CacheQueryResult{}, err
+		}
+		for _, row := range rows {
+			mergeCacheGroupBucket(groupBuckets, row.Group, row.BucketTs, counters{
+				requestCount:          row.RequestCount,
+				successCount:          row.SuccessCount,
+				ttftSumMs:             row.TtftSumMs,
+				ttftCount:             row.TtftCount,
+				outputTokens:          row.OutputTokens,
+				generationMs:          row.GenerationMs,
+				cacheRequests:         row.CacheRequests,
+				cacheTokenRequests:    row.CacheTokenRequests,
+				cacheHits:             row.CacheHits,
+				cachedTokens:          row.CachedTokens,
+				cacheTokenReadTokens:  row.CacheTokenReadTokens,
+				cacheTokenDenominator: row.CacheTokenDenominator,
+			})
+		}
+
+		hotBuckets.Range(func(key, value any) bool {
+			k := key.(bucketKey)
+			if k.bucketTs < startTs || k.bucketTs > endTs {
 				return true
 			}
-		}
-		snapshot := value.(*atomicBucket).snapshot()
-		if snapshot.requestCount == 0 {
+			if allowedGroups != nil {
+				if _, ok := allowedGroups[k.group]; !ok {
+					return true
+				}
+			}
+			snapshot := value.(*atomicBucket).snapshot()
+			if snapshot.requestCount == 0 {
+				return true
+			}
+			mergeCacheGroupBucket(groupBuckets, k.group, k.bucketTs, snapshot)
 			return true
-		}
-		mergeCacheGroupBucket(groupBuckets, k.group, k.bucketTs, snapshot)
-		return true
-	})
+		})
 
-	result := buildCacheQueryResult(groupBuckets)
-	result.StartTs = startTs
-	result.EndTs = endTs
-	return result, nil
+		if metricsFlushGeneration() != generation {
+			continue
+		}
+
+		result := buildCacheQueryResult(groupBuckets)
+		result.StartTs = startTs
+		result.EndTs = endTs
+		return result, nil
+	}
 }
 
 func mergeModelTotals(totals map[string]counters, modelName string, value counters) {
@@ -448,6 +482,7 @@ func mergeCacheGroupBucket(groupBuckets map[string]map[int64]counters, group str
 	current.outputTokens += value.outputTokens
 	current.generationMs += value.generationMs
 	current.cacheRequests += value.cacheRequests
+	current.cacheTokenRequests += value.cacheTokenRequests
 	current.cacheHits += value.cacheHits
 	current.cachedTokens += value.cachedTokens
 	current.cacheTokenReadTokens += value.cacheTokenReadTokens
@@ -522,6 +557,7 @@ func mergeCounters(merged map[bucketKey]counters, key bucketKey, value counters)
 	current.outputTokens += value.outputTokens
 	current.generationMs += value.generationMs
 	current.cacheRequests += value.cacheRequests
+	current.cacheTokenRequests += value.cacheTokenRequests
 	current.cacheHits += value.cacheHits
 	current.cachedTokens += value.cachedTokens
 	current.cacheTokenReadTokens += value.cacheTokenReadTokens
@@ -576,6 +612,7 @@ func buildCacheGroupResult(group string, buckets map[int64]counters, thresholds 
 		total.outputTokens += value.outputTokens
 		total.generationMs += value.generationMs
 		total.cacheRequests += value.cacheRequests
+		total.cacheTokenRequests += value.cacheTokenRequests
 		total.cacheHits += value.cacheHits
 		total.cachedTokens += value.cachedTokens
 		total.cacheTokenReadTokens += value.cacheTokenReadTokens
@@ -588,7 +625,7 @@ func buildCacheGroupResult(group string, buckets map[int64]counters, thresholds 
 			CachedTokens: value.cachedTokens,
 			CacheHitRate: cacheHitRate(value),
 			AvgTps:       math.Round(avgTps(value)*100) / 100,
-			HasData:      value.cacheRequests > 0,
+			HasData:      value.cacheTokenDenominator > 0,
 		})
 	}
 
@@ -600,7 +637,7 @@ func buildCacheGroupResult(group string, buckets map[int64]counters, thresholds 
 		CachedTokens: total.cachedTokens,
 		CacheHitRate: cacheHitRate(total),
 		AvgTps:       math.Round(avgTps(total)*100) / 100,
-		HasData:      total.cacheRequests > 0,
+		HasData:      total.cacheTokenDenominator > 0,
 		Series:       series,
 	}
 }
@@ -776,11 +813,8 @@ func cacheHitRate(value counters) float64 {
 		rate := float64(value.cacheTokenReadTokens) / float64(value.cacheTokenDenominator) * 100
 		return math.Round(rate*100) / 100
 	}
-	if value.cacheRequests <= 0 {
-		return 0
-	}
-	rate := float64(value.cacheHits) / float64(value.cacheRequests) * 100
-	return math.Round(rate*100) / 100
+	// Legacy request-hit counters cannot establish a token read share.
+	return 0
 }
 
 func avgTps(value counters) float64 {
@@ -791,9 +825,6 @@ func avgTps(value counters) float64 {
 }
 
 func recordRedis(key bucketKey, sample Sample) {
-	if !common.RedisEnabled || common.RDB == nil {
-		return
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 

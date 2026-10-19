@@ -15,6 +15,7 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestClassifyRelayOutcome(t *testing.T) {
@@ -350,6 +351,75 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 				assert.Empty(t, history.RecentSuccessSeries["history-expired"])
 				assert.Empty(t, history.RecentSuccessSeries["history-hot-expired"])
 			})
+
+			t.Run("cache health counts only requests with token measurements", func(t *testing.T) {
+				for _, row := range []model.PerfMetric{
+					{ModelName: "cache-legacy", Group: "cache-samples", BucketTs: hour, RequestCount: 99, SuccessCount: 99, CacheRequests: 99, CacheHits: 90, CachedTokens: 9000},
+					{ModelName: "cache-measured", Group: "cache-samples", BucketTs: hour, RequestCount: 1, SuccessCount: 1, CacheRequests: 1, CacheHits: 1, CachedTokens: 90, CacheTokenReadTokens: 90, CacheTokenDenominator: 100},
+				} {
+					require.NoError(t, model.UpsertPerfMetric(&row))
+				}
+				result, err := QueryCache(24, []string{"cache-samples"})
+				require.NoError(t, err)
+				require.Len(t, result.Groups, 1)
+				assert.Equal(t, float64(90), result.Summary.CacheHitRate)
+				assert.Equal(t, "unknown", result.Summary.Health.Cache)
+				assert.Equal(t, "unknown", result.Groups[0].Health.Cache)
+				require.Len(t, result.Groups[0].Series, 1)
+				assert.Equal(t, "unknown", result.Groups[0].Series[0].Health.Cache)
+				assert.EqualValues(t, 100, result.Groups[0].RequestCount)
+			})
+
+			for _, query := range []string{"cache", "model", "summary", "failed flush"} {
+				t.Run(query+" query retains samples across a flush", func(t *testing.T) {
+					group := "flush-" + query
+					require.NoError(t, model.UpsertPerfMetric(&model.PerfMetric{
+						ModelName: "flush-model", Group: group, BucketTs: hour,
+						RequestCount: 1, CacheRequests: 1, CacheTokenDenominator: 100,
+					}))
+					pending := &atomicBucket{}
+					pending.add(Sample{Success: true, CacheEligible: true, CachedTokens: 100, CacheTotalInputTokens: 100})
+					hotBuckets.Store(bucketKey{model: "flush-model", group: group, bucketTs: hour}, pending)
+					if query == "failed flush" {
+						require.NoError(t, db.Callback().Create().Before("gorm:create").Register("perf:test-reject-flush", func(tx *gorm.DB) {
+							if tx.Statement.Table == "perf_metrics" {
+								tx.AddError(assert.AnError)
+							}
+						}))
+						t.Cleanup(func() { require.NoError(t, db.Callback().Create().Remove("perf:test-reject-flush")) })
+					}
+					flushed := false
+					// Force the real background operation between the database read
+					// and the in-memory read, without sleeps or a timing race.
+					require.NoError(t, db.Callback().Query().After("gorm:query").Register("perf:test-flush-after-read", func(tx *gorm.DB) {
+						if tx.Statement.Table == "perf_metrics" && !flushed {
+							flushed = true
+							flushCompletedBuckets()
+						}
+					}))
+					t.Cleanup(func() { require.NoError(t, db.Callback().Query().Remove("perf:test-flush-after-read")) })
+					switch query {
+					case "model":
+						result, err := Query(QueryParams{Model: "flush-model", Group: group, Hours: 24})
+						require.NoError(t, err)
+						require.NotNil(t, result.Summary)
+						assert.Equal(t, float64(50), result.Summary.SuccessRate)
+					case "summary":
+						result, err := QuerySummaryAll(24, []string{group}, "flush-model")
+						require.NoError(t, err)
+						require.NotNil(t, result.Summary)
+						assert.Equal(t, float64(50), result.Summary.SuccessRate)
+						require.Len(t, result.RecentSuccessSeries["flush-model"], 1)
+						assert.Equal(t, float64(50), result.RecentSuccessSeries["flush-model"][0].SuccessRate)
+					default:
+						result, err := QueryCache(24, []string{group})
+						require.NoError(t, err)
+						assert.Equal(t, float64(50), result.Summary.CacheHitRate)
+						require.Len(t, result.Groups, 1)
+						assert.EqualValues(t, 2, result.Groups[0].RequestCount)
+					}
+				})
+			}
 		})
 	}
 }

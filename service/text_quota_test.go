@@ -851,6 +851,94 @@ func TestCalculateTextQuotaSummaryBillsOpenAICacheWriteTokens(t *testing.T) {
 	})
 }
 
+func TestCacheMonitorUsesTotalInputByUsageSemantic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name        string
+		usage       *dto.Usage
+		wantTotal   int
+		channelType int
+		finalFormat types.RelayFormat
+	}{
+		{
+			name: "OpenAI cache read and write are subsets of input",
+			usage: &dto.Usage{BillingUsage: dto.NewOpenAIChatBillingUsage(&dto.Usage{
+				PromptTokens: 1000, CompletionTokens: 10,
+				PromptTokensDetails: dto.InputTokenDetails{CachedTokens: 600, CacheWriteTokens: 200},
+			})},
+			wantTotal: 1000,
+		},
+		{
+			name: "Responses overlapping cache prefixes do not inflate input",
+			usage: &dto.Usage{BillingUsage: dto.NewOpenAIResponsesBillingUsage(&dto.Usage{
+				InputTokens: 1000, OutputTokens: 10,
+				InputTokensDetails: &dto.InputTokenDetails{CachedTokens: 600, CacheWriteTokens: 900},
+			})},
+			wantTotal: 1000,
+		},
+		{
+			name: "Claude input excludes cache reads and writes",
+			usage: &dto.Usage{BillingUsage: dto.NewClaudeMessagesBillingUsage(&dto.ClaudeUsage{
+				InputTokens: 200, OutputTokens: 10, CacheReadInputTokens: 600, CacheCreationInputTokens: 200,
+			})},
+			wantTotal: 1000,
+		},
+		{
+			name: "Claude split cache writes are counted once",
+			usage: &dto.Usage{BillingUsage: dto.NewClaudeMessagesBillingUsage(&dto.ClaudeUsage{
+				InputTokens: 200, OutputTokens: 10, CacheReadInputTokens: 600, CacheCreationInputTokens: 200,
+				CacheCreation: &dto.ClaudeCacheCreationUsage{Ephemeral5mInputTokens: 50, Ephemeral1hInputTokens: 150},
+			})},
+			wantTotal: 1000,
+		},
+		{
+			name: "legacy Claude split writes without total are preserved",
+			usage: &dto.Usage{PromptTokens: 200, CompletionTokens: 10,
+				PromptTokensDetails:         dto.InputTokenDetails{CachedTokens: 600},
+				ClaudeCacheCreation5mTokens: 50, ClaudeCacheCreation1hTokens: 150,
+			},
+			wantTotal: 1000,
+		},
+		{
+			name: "Gemini cached input is already included in prompt count",
+			usage: &dto.Usage{BillingUsage: dto.NewGeminiChatBillingUsage(&dto.GeminiUsageMetadata{
+				PromptTokenCount: 1000, CandidatesTokenCount: 10, CachedContentTokenCount: 600,
+			})},
+			wantTotal: 1000,
+		},
+		{
+			name: "legacy OpenRouter Claude input is already a total",
+			usage: &dto.Usage{PromptTokens: 1000, CompletionTokens: 10,
+				PromptTokensDetails: dto.InputTokenDetails{CachedTokens: 600, CachedCreationTokens: 200},
+			},
+			wantTotal: 1000, channelType: constant.ChannelTypeOpenRouter, finalFormat: types.RelayFormatClaude,
+		},
+		{
+			name: "native Claude snapshot takes precedence on OpenRouter",
+			usage: &dto.Usage{BillingUsage: dto.NewClaudeMessagesBillingUsage(&dto.ClaudeUsage{
+				InputTokens: 200, OutputTokens: 10, CacheReadInputTokens: 600, CacheCreationInputTokens: 200,
+			})},
+			wantTotal: 1000, channelType: constant.ChannelTypeOpenRouter, finalFormat: types.RelayFormatClaude,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			info := &relaycommon.RelayInfo{
+				OriginModelName: "cache-monitor-test", RelayFormat: types.RelayFormatOpenAI, StartTime: time.Now(),
+				FinalRequestRelayFormat: tc.finalFormat,
+				ChannelMeta:             &relaycommon.ChannelMeta{ChannelType: tc.channelType},
+				PriceData: hosttypes.PriceData{
+					ModelRatio: 1, CompletionRatio: 1, CacheRatio: 0.1, CacheCreationRatio: 1.25,
+					GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1},
+				},
+			}
+			summary := calculateTextQuotaSummary(ctx, info, effectiveBillingUsage(tc.usage))
+			assert.Equal(t, int64(tc.wantTotal), summary.CacheTotalInputTokens)
+			assert.Equal(t, 600, summary.CacheTokens)
+		})
+	}
+}
+
 func TestCalculateTextQuotaSummarySeparatesOpenRouterCacheReadFromPromptBilling(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

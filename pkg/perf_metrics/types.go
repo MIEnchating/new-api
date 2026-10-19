@@ -1,6 +1,6 @@
 package perfmetrics
 
-import "sync/atomic"
+import "sync"
 
 type Store interface {
 	Record(sample Sample)
@@ -18,10 +18,9 @@ type Sample struct {
 	GenerationMs  int64
 	CacheEligible bool
 	CachedTokens  int64
-	// CacheInputTokens and CacheCreationTokens are the normalized uncached
-	// input and cache-write token counts used for Sub2API-compatible rates.
-	CacheInputTokens    int64
-	CacheCreationTokens int64
+	// CacheTotalInputTokens includes all input tokens exactly once, normalized
+	// for the upstream usage semantic before any billing adjustments.
+	CacheTotalInputTokens int64
 }
 
 type QueryParams struct {
@@ -167,126 +166,78 @@ type counters struct {
 	outputTokens          int64
 	generationMs          int64
 	cacheRequests         int64
+	cacheTokenRequests    int64
 	cacheHits             int64
 	cachedTokens          int64
 	cacheTokenReadTokens  int64
 	cacheTokenDenominator int64
 }
 
+// atomicBucket keeps all counters for one sample in a consistent snapshot.
 type atomicBucket struct {
-	requestCount          atomic.Int64
-	successCount          atomic.Int64
-	totalLatencyMs        atomic.Int64
-	ttftSumMs             atomic.Int64
-	ttftCount             atomic.Int64
-	outputTokens          atomic.Int64
-	generationMs          atomic.Int64
-	cacheRequests         atomic.Int64
-	cacheHits             atomic.Int64
-	cachedTokens          atomic.Int64
-	cacheTokenReadTokens  atomic.Int64
-	cacheTokenDenominator atomic.Int64
+	mu    sync.Mutex
+	value counters
 }
 
 func (b *atomicBucket) add(sample Sample) {
-	b.requestCount.Add(1)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.value.requestCount++
 	if sample.Success {
-		b.successCount.Add(1)
+		b.value.successCount++
 	}
 	if sample.LatencyMs > 0 {
-		b.totalLatencyMs.Add(sample.LatencyMs)
+		b.value.totalLatencyMs += sample.LatencyMs
 	}
 	if sample.HasTtft && sample.TtftMs >= 0 {
-		b.ttftSumMs.Add(sample.TtftMs)
-		b.ttftCount.Add(1)
+		b.value.ttftSumMs += sample.TtftMs
+		b.value.ttftCount++
 	}
 	if sample.OutputTokens > 0 && sample.GenerationMs > 0 {
-		b.outputTokens.Add(sample.OutputTokens)
-		b.generationMs.Add(sample.GenerationMs)
+		b.value.outputTokens += sample.OutputTokens
+		b.value.generationMs += sample.GenerationMs
 	}
-	if sample.CacheEligible {
-		b.cacheRequests.Add(1)
+	if sample.CacheEligible && sample.CacheTotalInputTokens > 0 &&
+		sample.CachedTokens >= 0 && sample.CachedTokens <= sample.CacheTotalInputTokens {
+		b.value.cacheRequests++
+		b.value.cacheTokenRequests++
 		if sample.CachedTokens > 0 {
-			b.cacheHits.Add(1)
-			b.cachedTokens.Add(sample.CachedTokens)
+			b.value.cacheHits++
+			b.value.cachedTokens += sample.CachedTokens
 		}
-		denominator := sample.CacheInputTokens + sample.CacheCreationTokens + sample.CachedTokens
-		if denominator > 0 {
-			b.cacheTokenReadTokens.Add(maxInt64(sample.CachedTokens, 0))
-			b.cacheTokenDenominator.Add(denominator)
-		}
+		b.value.cacheTokenReadTokens += sample.CachedTokens
+		b.value.cacheTokenDenominator += sample.CacheTotalInputTokens
 	}
 }
 
 func (b *atomicBucket) snapshot() counters {
-	return counters{
-		requestCount:          b.requestCount.Load(),
-		successCount:          b.successCount.Load(),
-		totalLatencyMs:        b.totalLatencyMs.Load(),
-		ttftSumMs:             b.ttftSumMs.Load(),
-		ttftCount:             b.ttftCount.Load(),
-		outputTokens:          b.outputTokens.Load(),
-		generationMs:          b.generationMs.Load(),
-		cacheRequests:         b.cacheRequests.Load(),
-		cacheHits:             b.cacheHits.Load(),
-		cachedTokens:          b.cachedTokens.Load(),
-		cacheTokenReadTokens:  b.cacheTokenReadTokens.Load(),
-		cacheTokenDenominator: b.cacheTokenDenominator.Load(),
-	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.value
 }
 
 func (b *atomicBucket) drain() counters {
-	return counters{
-		requestCount:          b.requestCount.Swap(0),
-		successCount:          b.successCount.Swap(0),
-		totalLatencyMs:        b.totalLatencyMs.Swap(0),
-		ttftSumMs:             b.ttftSumMs.Swap(0),
-		ttftCount:             b.ttftCount.Swap(0),
-		outputTokens:          b.outputTokens.Swap(0),
-		generationMs:          b.generationMs.Swap(0),
-		cacheRequests:         b.cacheRequests.Swap(0),
-		cacheHits:             b.cacheHits.Swap(0),
-		cachedTokens:          b.cachedTokens.Swap(0),
-		cacheTokenReadTokens:  b.cacheTokenReadTokens.Swap(0),
-		cacheTokenDenominator: b.cacheTokenDenominator.Swap(0),
-	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	value := b.value
+	b.value = counters{}
+	return value
 }
 
 func (b *atomicBucket) addCounters(c counters) {
-	if c.requestCount != 0 {
-		b.requestCount.Add(c.requestCount)
-	}
-	if c.successCount != 0 {
-		b.successCount.Add(c.successCount)
-	}
-	if c.totalLatencyMs != 0 {
-		b.totalLatencyMs.Add(c.totalLatencyMs)
-	}
-	if c.ttftSumMs != 0 {
-		b.ttftSumMs.Add(c.ttftSumMs)
-	}
-	if c.ttftCount != 0 {
-		b.ttftCount.Add(c.ttftCount)
-	}
-	if c.outputTokens != 0 {
-		b.outputTokens.Add(c.outputTokens)
-	}
-	if c.generationMs != 0 {
-		b.generationMs.Add(c.generationMs)
-	}
-	if c.cacheRequests != 0 {
-		b.cacheRequests.Add(c.cacheRequests)
-	}
-	if c.cacheHits != 0 {
-		b.cacheHits.Add(c.cacheHits)
-	}
-	if c.cachedTokens != 0 {
-		b.cachedTokens.Add(c.cachedTokens)
-	}
-	if c.cacheTokenReadTokens != 0 {
-		b.cacheTokenReadTokens.Add(c.cacheTokenReadTokens)
-	}
-	if c.cacheTokenDenominator != 0 {
-		b.cacheTokenDenominator.Add(c.cacheTokenDenominator)
-	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.value.requestCount += c.requestCount
+	b.value.successCount += c.successCount
+	b.value.totalLatencyMs += c.totalLatencyMs
+	b.value.ttftSumMs += c.ttftSumMs
+	b.value.ttftCount += c.ttftCount
+	b.value.outputTokens += c.outputTokens
+	b.value.generationMs += c.generationMs
+	b.value.cacheRequests += c.cacheRequests
+	b.value.cacheTokenRequests += c.cacheTokenRequests
+	b.value.cacheHits += c.cacheHits
+	b.value.cachedTokens += c.cachedTokens
+	b.value.cacheTokenReadTokens += c.cacheTokenReadTokens
+	b.value.cacheTokenDenominator += c.cacheTokenDenominator
 }

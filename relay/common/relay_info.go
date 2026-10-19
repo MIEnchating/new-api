@@ -218,12 +218,11 @@ type RelayInfo struct {
 	requestInferredToolKey string
 	// PerformanceOutputTokens is captured by settlement and sampled once at
 	// the request boundary, independently of billing success or failure.
-	PerformanceOutputTokens        int64
-	PerformanceCacheEligible       bool
-	PerformanceCachedTokens        int64
-	PerformanceCacheInputTokens    int64
-	PerformanceCacheCreationTokens int64
-	PerformanceBusinessRejection   bool
+	PerformanceOutputTokens          int64
+	PerformanceCacheEligible         bool
+	PerformanceCachedTokens          int64
+	PerformanceCacheTotalInputTokens int64
+	PerformanceBusinessRejection     bool
 
 	// convOptions caches the converter settings snapshot (see ConvOptions).
 	convOptions *convmeta.Options

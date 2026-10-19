@@ -8,26 +8,32 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAtomicBucketTracksOnlyCacheEligibleRequests(t *testing.T) {
+func TestAtomicBucketTracksOnlyValidCacheEligibleRequests(t *testing.T) {
 	bucket := &atomicBucket{}
-	bucket.add(Sample{CacheEligible: false, CachedTokens: 100})
-	bucket.add(Sample{CacheEligible: true})
+	bucket.add(Sample{CacheEligible: false, CachedTokens: 100, CacheTotalInputTokens: 100})
+	bucket.add(Sample{CacheEligible: true, CacheTotalInputTokens: 50})
+	bucket.add(Sample{CacheEligible: true, CachedTokens: 40, CacheTotalInputTokens: 100})
 	bucket.add(Sample{CacheEligible: true, CachedTokens: 40})
+	bucket.add(Sample{CacheEligible: true, CachedTokens: 101, CacheTotalInputTokens: 100})
+	bucket.add(Sample{CacheEligible: true, CachedTokens: -1, CacheTotalInputTokens: 100})
 
 	snapshot := bucket.snapshot()
 	assert.EqualValues(t, 2, snapshot.cacheRequests)
+	assert.EqualValues(t, 2, snapshot.cacheTokenRequests)
 	assert.EqualValues(t, 1, snapshot.cacheHits)
 	assert.EqualValues(t, 40, snapshot.cachedTokens)
+	assert.EqualValues(t, 40, snapshot.cacheTokenReadTokens)
+	assert.EqualValues(t, 150, snapshot.cacheTokenDenominator)
 }
 
 func TestBuildCacheQueryResultAggregatesModelsByGroup(t *testing.T) {
 	result := buildCacheQueryResult(map[string]map[int64]counters{
 		"default": {
-			100: {requestCount: 2, outputTokens: 30, generationMs: 1_000, cacheRequests: 2, cacheHits: 1, cachedTokens: 30},
-			200: {requestCount: 1, outputTokens: 30, generationMs: 1_000, cacheRequests: 1, cacheHits: 1, cachedTokens: 20},
+			100: {requestCount: 2, outputTokens: 30, generationMs: 1_000, cacheRequests: 2, cacheTokenRequests: 2, cacheHits: 1, cachedTokens: 30, cacheTokenReadTokens: 30, cacheTokenDenominator: 50},
+			200: {requestCount: 1, outputTokens: 30, generationMs: 1_000, cacheRequests: 1, cacheTokenRequests: 1, cacheHits: 1, cachedTokens: 20, cacheTokenReadTokens: 20, cacheTokenDenominator: 25},
 		},
 		"vip": {
-			100: {cacheRequests: 1, cachedTokens: 0},
+			100: {cacheRequests: 1, cacheTokenRequests: 1, cachedTokens: 0, cacheTokenDenominator: 10},
 		},
 	})
 
@@ -44,6 +50,7 @@ func TestBuildCacheQueryResultAggregatesModelsByGroup(t *testing.T) {
 	assert.EqualValues(t, 1, result.Groups[1].RequestCount)
 	assert.EqualValues(t, 0, result.Groups[1].HitCount)
 	assert.Equal(t, 0.0, result.Groups[1].CacheHitRate)
+	assert.True(t, result.Groups[1].HasData)
 }
 
 func TestCacheHitRateUsesTokenRatioWhenAvailable(t *testing.T) {
@@ -52,6 +59,7 @@ func TestCacheHitRateUsesTokenRatioWhenAvailable(t *testing.T) {
 			100: {
 				requestCount:          100,
 				cacheRequests:         100,
+				cacheTokenRequests:    100,
 				cacheHits:             94,
 				cachedTokens:          79,
 				cacheTokenReadTokens:  79,
@@ -64,15 +72,52 @@ func TestCacheHitRateUsesTokenRatioWhenAvailable(t *testing.T) {
 	assert.Equal(t, 79.0, result.Groups[0].CacheHitRate)
 }
 
+func TestCacheMonitorDoesNotTreatRequestHitsAsTokenShare(t *testing.T) {
+	result := buildCacheQueryResult(map[string]map[int64]counters{
+		"legacy": {100: {requestCount: 100, successCount: 100, cacheRequests: 100, cacheHits: 90, cachedTokens: 900}},
+	})
+	require.Len(t, result.Groups, 1)
+	group := result.Groups[0]
+	assert.False(t, group.HasData)
+	assert.Zero(t, group.CacheHitRate)
+	assert.Equal(t, "unknown", group.Health.Cache)
+	require.NotNil(t, group.Health.Score)
+	assert.Equal(t, float64(100), *group.Health.Score)
+	require.Len(t, group.Series, 1)
+	assert.False(t, group.Series[0].HasData)
+	assert.Equal(t, "unknown", group.Series[0].Health.Cache)
+	assert.False(t, result.Summary.HasData)
+	assert.Zero(t, result.Summary.CacheHitRate)
+	assert.Equal(t, "unknown", result.Summary.Health.Cache)
+}
+
+func TestCacheMonitorMixedHistoryKeepsTokenNumeratorAndDenominatorPaired(t *testing.T) {
+	result := buildCacheQueryResult(map[string]map[int64]counters{
+		"default": {
+			100: {requestCount: 100, cacheRequests: 100, cacheHits: 90, cachedTokens: 9000},
+			200: {requestCount: 50, cacheRequests: 50, cacheTokenRequests: 50, cacheHits: 30, cachedTokens: 600, cacheTokenReadTokens: 600, cacheTokenDenominator: 1000},
+		},
+	})
+	require.Len(t, result.Groups, 1)
+	group := result.Groups[0]
+	assert.Equal(t, float64(60), group.CacheHitRate)
+	assert.True(t, group.HasData)
+	require.Len(t, group.Series, 2)
+	assert.False(t, group.Series[0].HasData)
+	assert.Zero(t, group.Series[0].CacheHitRate)
+	assert.Equal(t, float64(60), group.Series[1].CacheHitRate)
+	assert.Equal(t, float64(60), result.Summary.CacheHitRate)
+}
+
 func TestCacheGroupsMergeModelBucketsWithoutLosingTokenWeights(t *testing.T) {
 	buckets := map[string]map[int64]counters{}
 	mergeCacheGroupBucket(buckets, "default", 3600, counters{
-		requestCount: 40, successCount: 38, ttftCount: 30, ttftSumMs: 90000, cacheRequests: 2, cacheHits: 1,
+		requestCount: 40, successCount: 38, ttftCount: 30, ttftSumMs: 90000, cacheRequests: 2, cacheTokenRequests: 2, cacheHits: 1,
 		cachedTokens: 30, cacheTokenReadTokens: 30, cacheTokenDenominator: 100,
 		outputTokens: 20, generationMs: 1000,
 	})
 	mergeCacheGroupBucket(buckets, "default", 3600, counters{
-		requestCount: 60, successCount: 52, ttftCount: 50, ttftSumMs: 250000, cacheRequests: 1, cacheHits: 1,
+		requestCount: 60, successCount: 52, ttftCount: 50, ttftSumMs: 250000, cacheRequests: 1, cacheTokenRequests: 1, cacheHits: 1,
 		cachedTokens: 70, cacheTokenReadTokens: 70, cacheTokenDenominator: 100,
 		outputTokens: 40, generationMs: 1000,
 	})
@@ -101,10 +146,11 @@ func TestMonitorHealthThresholdsAndSampleGating(t *testing.T) {
 		wantScore                                   float64
 	}{
 		{"insufficient samples", counters{requestCount: 49, successCount: 49, ttftCount: 49, cacheRequests: 49}, "unknown", "unknown", "unknown", "unknown", -1},
-		{"all signals healthy", counters{requestCount: 50, successCount: 50, ttftCount: 50, ttftSumMs: 150000, cacheRequests: 50, cacheHits: 50}, "healthy", "healthy", "healthy", "healthy", 100},
-		{"threshold boundaries", counters{requestCount: 100, successCount: 95, ttftCount: 100, ttftSumMs: 800000, cacheRequests: 100, cacheHits: 60}, "warning", "warning", "warning", "warning", 71.12},
+		{"all signals healthy", counters{requestCount: 50, successCount: 50, ttftCount: 50, ttftSumMs: 150000, cacheRequests: 50, cacheTokenRequests: 50, cacheHits: 50, cacheTokenReadTokens: 50, cacheTokenDenominator: 50}, "healthy", "healthy", "healthy", "healthy", 100},
+		{"threshold boundaries", counters{requestCount: 100, successCount: 95, ttftCount: 100, ttftSumMs: 800000, cacheRequests: 100, cacheTokenRequests: 100, cacheHits: 60, cacheTokenReadTokens: 60, cacheTokenDenominator: 100}, "warning", "warning", "warning", "warning", 71.12},
 		{"critical errors without cache or latency", counters{requestCount: 100, successCount: 80}, "critical", "critical", "unknown", "unknown", 0},
-		{"cache below critical", counters{cacheRequests: 100, cacheHits: 59}, "warning", "unknown", "unknown", "critical", 59},
+		{"cache below critical", counters{cacheRequests: 100, cacheTokenRequests: 100, cacheHits: 59, cacheTokenReadTokens: 59, cacheTokenDenominator: 100}, "warning", "unknown", "unknown", "critical", 59},
+		{"large prompt is still one sample", counters{cacheRequests: 1, cacheTokenRequests: 1, cacheTokenReadTokens: 900000, cacheTokenDenominator: 1000000}, "unknown", "unknown", "unknown", "unknown", -1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := monitorHealth(tc.sample, thresholds)
@@ -129,15 +175,15 @@ func TestMonitorHealthThresholdsAndSampleGating(t *testing.T) {
 	require.NotNil(t, result.Score)
 	assert.Equal(t, float64(50), *result.Score)
 	thresholds.WarningCacheRate, thresholds.CriticalCacheRate = 0, 0
-	result = monitorHealth(counters{cacheRequests: 1}, thresholds)
+	result = monitorHealth(counters{cacheRequests: 1, cacheTokenRequests: 1, cacheTokenDenominator: 100}, thresholds)
 	assert.Equal(t, "healthy", result.Cache)
 	assert.Equal(t, float64(100), *result.Score)
 }
 
 func TestMonitorSummaryWeightsSignalsAcrossDisplayedGroups(t *testing.T) {
 	result := buildCacheQueryResult(map[string]map[int64]counters{
-		"small": {100: {requestCount: 10, successCount: 5, ttftCount: 10, ttftSumMs: 10000, cacheRequests: 10, cacheTokenReadTokens: 90, cacheTokenDenominator: 100}},
-		"large": {100: {requestCount: 90, successCount: 90, ttftCount: 30, ttftSumMs: 150000, cacheRequests: 90, cacheTokenReadTokens: 90, cacheTokenDenominator: 900}},
+		"small": {100: {requestCount: 10, successCount: 5, ttftCount: 10, ttftSumMs: 10000, cacheRequests: 10, cacheTokenRequests: 10, cacheTokenReadTokens: 90, cacheTokenDenominator: 100}},
+		"large": {100: {requestCount: 90, successCount: 90, ttftCount: 30, ttftSumMs: 150000, cacheRequests: 90, cacheTokenRequests: 90, cacheTokenReadTokens: 90, cacheTokenDenominator: 900}},
 	})
 	require.NotNil(t, result.Summary.Health.ErrorRatePercent)
 	assert.Equal(t, float64(5), *result.Summary.Health.ErrorRatePercent)

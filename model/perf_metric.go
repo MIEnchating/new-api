@@ -66,6 +66,7 @@ type PerfMetricCacheBucket struct {
 	OutputTokens          int64  `json:"output_tokens"`
 	GenerationMs          int64  `json:"generation_ms"`
 	CacheRequests         int64  `json:"cache_requests"`
+	CacheTokenRequests    int64  `json:"-"`
 	CacheHits             int64  `json:"cache_hits"`
 	CachedTokens          int64  `json:"cached_tokens"`
 	CacheTokenReadTokens  int64  `json:"cache_token_read_tokens"`
@@ -75,7 +76,7 @@ type PerfMetricCacheBucket struct {
 func GetPerfMetricCacheBucketsAll(startTs int64, endTs int64, groups []string) ([]PerfMetricCacheBucket, error) {
 	var buckets []PerfMetricCacheBucket
 	query := DB.Model(&PerfMetric{}).
-		Select(commonGroupCol+" as group_name, bucket_ts, SUM(success_count) as success_count, SUM(ttft_sum_ms) as ttft_sum_ms, SUM(ttft_count) as ttft_count, SUM(request_count) as request_count, SUM(output_tokens) as output_tokens, SUM(generation_ms) as generation_ms, SUM(cache_requests) as cache_requests, SUM(cache_hits) as cache_hits, SUM(cached_tokens) as cached_tokens, SUM(cache_token_read_tokens) as cache_token_read_tokens, SUM(cache_token_denominator) as cache_token_denominator").
+		Select(commonGroupCol+" as group_name, bucket_ts, SUM(success_count) as success_count, SUM(ttft_sum_ms) as ttft_sum_ms, SUM(ttft_count) as ttft_count, SUM(request_count) as request_count, SUM(output_tokens) as output_tokens, SUM(generation_ms) as generation_ms, SUM(cache_requests) as cache_requests, SUM(CASE WHEN cache_token_denominator > 0 THEN cache_requests ELSE 0 END) as cache_token_requests, SUM(cache_hits) as cache_hits, SUM(cached_tokens) as cached_tokens, SUM(cache_token_read_tokens) as cache_token_read_tokens, SUM(cache_token_denominator) as cache_token_denominator").
 		Where("bucket_ts >= ? AND bucket_ts <= ?", startTs, endTs)
 	if groups != nil {
 		if len(groups) == 0 {

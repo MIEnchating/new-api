@@ -153,8 +153,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		relayInfo.PerformanceOutputTokens = 0
 		relayInfo.PerformanceCacheEligible = false
 		relayInfo.PerformanceCachedTokens = 0
-		relayInfo.PerformanceCacheInputTokens = 0
-		relayInfo.PerformanceCacheCreationTokens = 0
+		relayInfo.PerformanceCacheTotalInputTokens = 0
 		relayInfo.RetryIndex = retryParam.GetRetry()
 		relayInfo.ResetActualResponseModel()
 		var channel *model.Channel
