@@ -138,11 +138,13 @@ func auditLogIndexColumns(t *testing.T, db *gorm.DB, index gorm.Index) []string 
 	// index positions. Read the catalog order to verify the actual index layout.
 	var columns []string
 	require.NoError(t, db.Raw(`
-		SELECT pg_get_indexdef(indexrelid, column_no, true)
-		FROM pg_index
-		CROSS JOIN LATERAL generate_series(1, indnatts) AS column_no
-		WHERE indexrelid = to_regclass(?)
-		ORDER BY column_no`, index.Name()).Scan(&columns).Error)
+		SELECT attribute.attname
+		FROM pg_catalog.pg_index AS index_meta
+		CROSS JOIN LATERAL unnest(index_meta.indkey) WITH ORDINALITY AS index_column(attnum, ordinal_position)
+		JOIN pg_catalog.pg_attribute AS attribute
+		  ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = index_column.attnum
+		WHERE index_meta.indexrelid = to_regclass(?)
+		ORDER BY index_column.ordinal_position`, index.Name()).Scan(&columns).Error)
 	require.NotEmpty(t, columns, "index %s must have columns", index.Name())
 	return columns
 }
