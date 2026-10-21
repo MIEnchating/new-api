@@ -42,7 +42,7 @@ type DialogProps = React.ComponentProps<typeof DialogRoot> & {
   descriptionClassName?: string
   bodyClassName?: string
   footerClassName?: string
-  initialFocus?: boolean
+  initialFocus?: React.ComponentProps<typeof DialogContent>['initialFocus']
   showCloseButton?: boolean
 }
 

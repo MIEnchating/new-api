@@ -1000,12 +1000,14 @@ it('shows only compact result metadata and previews without channel IDs, record 
     const frames = await screen.findAllByTitle('Generated animation preview')
     expect(frames).toHaveLength(2)
     expect(screen.getByRole('tab', { name: 'default' })).toBeVisible()
-    expect(screen.queryByLabelText('Group: default')).not.toBeInTheDocument()
+    expect(screen.getAllByLabelText('Group: default')).toHaveLength(2)
     for (const channel of channels) {
       const label = screen.getByLabelText(`Model: ${channel.model}`)
       expect(label).toHaveTextContent(channel.model)
       expect(label).toHaveAttribute('title', channel.model)
       expect(label).toHaveClass('font-mono')
+      const card = label.closest('[data-slot=card]') as HTMLElement
+      expect(within(card).getByLabelText('Group: default')).toBeVisible()
     }
 
     for (const [index, frame] of frames.entries()) {
@@ -1045,7 +1047,9 @@ it('shows only compact result metadata and previews without channel IDs, record 
     const timestamps = view.container.querySelectorAll('time[datetime]')
     expect(timestamps).toHaveLength(2)
     expect(timestamps[0]).toHaveAttribute('title')
-    expect(timestamps[0].parentElement).toHaveTextContent('Pelican')
+    expect(timestamps[0].closest('[data-slot=card-header]')).toHaveTextContent(
+      'Pelican'
+    )
     expect(timestamps[0].parentElement).toHaveTextContent('seconds')
     const cards = frames.map((frame) => frame.closest('[data-slot=card]'))
     expect(cards[0]).not.toBe(cards[1])
@@ -1053,16 +1057,26 @@ it('shows only compact result metadata and previews without channel IDs, record 
       expect(card).toHaveClass('border', 'ring-0')
     }
     expect(cards[0]?.parentElement).toHaveClass(
-      'grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))]',
-      'overflow-x-hidden'
+      'grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))]'
+    )
+    expect(screen.getByRole('tabpanel')).toHaveClass(
+      'overflow-x-hidden',
+      'overflow-y-auto'
     )
     expect(
       cards[0]?.querySelector('[data-slot=card-header] > div')
-    ).toHaveClass('flex-wrap')
-    await userEvent.click(
-      screen.getAllByRole('button', { name: 'Enlarge preview' })[0]
-    )
+    ).toHaveClass('items-start', 'gap-3')
+    const enlargeButton = screen.getAllByRole('button', {
+      name: 'Enlarge preview',
+    })[0]
+    await userEvent.click(enlargeButton)
     const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveAccessibleDescription('default · test-model · Pelican')
+    await waitFor(() =>
+      expect(
+        within(dialog).getByText('Generated animation preview')
+      ).toHaveFocus()
+    )
     const enlarged = within(dialog).getByTitle('Generated animation preview')
     expect(enlarged).toHaveAttribute('sandbox', 'allow-scripts')
     expect(enlarged.getAttribute('srcdoc')).toContain("connect-src 'none'")
@@ -1070,6 +1084,7 @@ it('shows only compact result metadata and previews without channel IDs, record 
     await waitFor(() =>
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     )
+    expect(enlargeButton).toHaveFocus()
     expect(frames[0].closest('[data-preview-viewport]')).toHaveClass(
       'aspect-[6/5]',
       'overflow-hidden'
@@ -1426,6 +1441,24 @@ it('filters results and pending models by group with keyboard tabs and falls bac
     const all = await screen.findByRole('tab', { name: 'All' })
     expect(all).toHaveAttribute('aria-selected', 'true')
     expect(screen.getAllByLabelText('Model: shared-model')).toHaveLength(3)
+    for (const group of groups) {
+      const label = screen.getByLabelText(`Group: ${group.group}`)
+      expect(label).toBeVisible()
+      expect(label).toHaveTextContent(group.group)
+      const card = label.closest('[data-slot=card]') as HTMLElement
+      expect(within(card).getByLabelText('Model: shared-model')).toBeVisible()
+      if (group.group === 'default') {
+        expect(within(card).getByRole('alert')).toHaveTextContent(
+          'Example upstream error'
+        )
+      } else {
+        expect(
+          within(card).getByRole('progressbar', {
+            name: `Progress: ${group.group} · shared-model`,
+          })
+        ).toBeVisible()
+      }
+    }
     expect(screen.getByRole('tablist', { name: 'Group' })).toHaveClass(
       'overflow-x-auto',
       'flex-nowrap',
@@ -1523,6 +1556,18 @@ it('uses legacy task groups and discovers groups stored only on historical resul
     </QueryClientProvider>
   )
   try {
+    const legacyGroup = await screen.findByLabelText('Group: legacy')
+    expect(
+      within(
+        legacyGroup.closest('[data-slot=card]') as HTMLElement
+      ).getByLabelText('Model: legacy-model')
+    ).toBeVisible()
+    const archivedGroup = screen.getByLabelText('Group: archived')
+    expect(
+      within(
+        archivedGroup.closest('[data-slot=card]') as HTMLElement
+      ).getByLabelText('Model: archived-model')
+    ).toBeVisible()
     await user.click(await screen.findByRole('tab', { name: 'legacy' }))
     expect(screen.getByLabelText('Model: legacy-model')).toBeVisible()
     expect(
@@ -1538,6 +1583,52 @@ it('uses legacy task groups and discovers groups stored only on historical resul
     client.clear()
   }
 })
+
+it.each([
+  { group: '', label: 'Ungrouped' },
+  {
+    group: 'codex-pro-with-a-very-long-group-name-for-premium-model-testing',
+    label: 'codex-pro-with-a-very-long-group-name-for-premium-model-testing',
+  },
+])(
+  'identifies group "$label" on pending cards without overflowing the card',
+  async ({ group, label }) => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const task: IntelligenceTask = {
+      task_id: 'group-label',
+      status: 'pending',
+      created_at: 1791613858,
+      updated_at: 1791613858,
+      group,
+      model: 'test-model',
+      endpoint: 'openai-response',
+      error: '',
+    }
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: { history: [task] } },
+    })
+    const view = render(
+      <QueryClientProvider client={client}>
+        <IntelligenceMonitor />
+      </QueryClientProvider>
+    )
+    try {
+      const badge = await screen.findByLabelText(`Group: ${label}`)
+      expect(badge).toBeVisible()
+      expect(badge).toHaveAttribute('title', label)
+      expect(badge).toHaveClass('max-w-full', 'min-w-0')
+      expect(within(badge).getByText(label)).toHaveClass('truncate')
+      const card = badge.closest('[data-slot=card]') as HTMLElement
+      expect(within(card).getByLabelText('Model: test-model')).toBeVisible()
+      expect(within(card).getByText('Pending')).toBeVisible()
+    } finally {
+      view.unmount()
+      client.clear()
+    }
+  }
+)
 
 it('loads previews only in view, releases offscreen animations and restores cached results on return', async () => {
   let intersect: (visible: boolean) => void = () => undefined

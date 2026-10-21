@@ -49,6 +49,7 @@ type IntelligencePreviewProps = {
   group?: string
   model?: string
   questionIndex: number
+  label?: string
 }
 
 export const IntelligencePreview = memo(function IntelligencePreview(
@@ -92,6 +93,7 @@ function IntelligencePreviewContent(
   }
 ) {
   const { t } = useTranslation()
+  const dialogTitle = useRef<HTMLSpanElement>(null)
   // React Query shares one visibility listener across all preview cards.
   const pageVisible = useSyncExternalStore(
     focusManager.subscribe,
@@ -139,30 +141,35 @@ function IntelligencePreviewContent(
   }
 
   return (
-    <>
-      <div className='relative'>
-        <div className='pointer-events-none aspect-[6/5]' inert>
-          {pageVisible && !props.expanded && (
-            <IntelligenceAnimation document={previewDocument} />
-          )}
-        </div>
-        <Button
-          variant='ghost'
-          aria-label={t('Enlarge preview')}
-          className='absolute inset-0 h-full w-full rounded-none p-0 hover:bg-transparent active:translate-y-0'
-          onClick={() => props.onExpandedChange(true)}
-        >
-          <span className='bg-background/80 text-foreground absolute right-2 bottom-2 rounded-md border p-1.5'>
-            <Maximize2 aria-hidden='true' className='size-3.5' />
-          </span>
-        </Button>
+    <div className='relative'>
+      <div className='pointer-events-none aspect-[6/5]' inert>
+        {pageVisible && !props.expanded && (
+          <IntelligenceAnimation document={previewDocument} />
+        )}
       </div>
       <Dialog
         open={props.expanded}
         onOpenChange={props.onExpandedChange}
-        title={t('Generated animation preview')}
+        title={
+          <span ref={dialogTitle} tabIndex={-1}>
+            {t('Generated animation preview')}
+          </span>
+        }
+        initialFocus={dialogTitle}
+        description={props.label}
         contentClassName='sm:max-w-[min(64rem,95vw)]'
         bodyClassName='flex justify-center'
+        trigger={
+          <Button
+            variant='ghost'
+            aria-label={t('Enlarge preview')}
+            className='absolute inset-0 h-full w-full rounded-none p-0 hover:bg-transparent active:translate-y-0'
+          >
+            <span className='bg-background/80 text-foreground absolute right-2 bottom-2 rounded-md border p-1.5'>
+              <Maximize2 aria-hidden='true' className='size-3.5' />
+            </span>
+          </Button>
+        }
       >
         {props.expanded && (
           <div className='w-full max-w-[min(960px,84vh)]'>
@@ -172,7 +179,7 @@ function IntelligencePreviewContent(
           </div>
         )}
       </Dialog>
-    </>
+    </div>
   )
 }
 

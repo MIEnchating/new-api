@@ -30,12 +30,14 @@ export function RefreshControl(props: {
   refreshing: boolean
   lastUpdated: Date | null
   onRefresh: () => void
+  autoRefresh?: boolean
 }) {
   const { t } = useTranslation()
   const { loading, refreshing, lastUpdated, onRefresh } = props
   const [countdown, setCountdown] = useState(AUTO_REFRESH_SECONDS)
 
   useEffect(() => {
+    if (props.autoRefresh === false) return
     if (loading || refreshing) {
       setCountdown(AUTO_REFRESH_SECONDS)
       return
@@ -46,14 +48,21 @@ export function RefreshControl(props: {
     }, 1000)
 
     return () => window.clearInterval(timer)
-  }, [loading, refreshing])
+  }, [loading, refreshing, props.autoRefresh])
 
   useEffect(() => {
-    if (countdown !== 0 || loading || refreshing) return
+    if (
+      props.autoRefresh === false ||
+      countdown !== 0 ||
+      loading ||
+      refreshing
+    ) {
+      return
+    }
 
     setCountdown(AUTO_REFRESH_SECONDS)
     onRefresh()
-  }, [countdown, loading, onRefresh, refreshing])
+  }, [countdown, loading, onRefresh, refreshing, props.autoRefresh])
 
   const lastUpdatedText = lastUpdated
     ? t('Updated {{time}}', {
@@ -83,7 +92,7 @@ export function RefreshControl(props: {
       >
         <RotateCw className={cn('size-4', refreshing && 'animate-spin')} />
         {t('Refresh')}
-        {!loading ? (
+        {!loading && props.autoRefresh !== false ? (
           <span className='border-border min-w-8 border-l pl-2 text-right tabular-nums'>
             {countdown}s
           </span>
