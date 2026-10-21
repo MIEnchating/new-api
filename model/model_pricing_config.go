@@ -33,6 +33,8 @@ type ModelPricingChange struct {
 }
 
 type ModelPricingEntry struct {
+	// Reports whether the engine ships a default base price, even if overridden.
+	HasBuiltinPricing bool `json:"has_builtin_pricing"`
 	ModelPricingDescription
 	PluginVariants []ModelPricingPluginVariant          `json:"plugin_variants,omitempty"`
 	ModelName      string                               `json:"model_name"`
@@ -270,6 +272,11 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 		configured := modelPricingValues(values, name)
 		entry := ModelPricingEntry{ModelName: name, Version: ModelPricingVersion(configured), Configured: configured,
 			ModelPricingDescription: ModelPricingDescription{Effective: effectiveModelPricing(values, name)}}
+		_, builtinExpr := billing_setting.GetBuiltinBillingExpr(name)
+		alias := ratio_setting.FormatMatchingModelName(name)
+		_, builtinPrice := ratio_setting.GetDefaultModelPriceMap()[alias]
+		_, builtinRatio := ratio_setting.GetDefaultModelRatioMap()[alias]
+		entry.HasBuiltinPricing = builtinExpr || builtinPrice || builtinRatio
 		entry.CacheWriteMode = ResolveCacheWriteMode(name, configured)
 		entry.BillingDetails = ResolveLegacyBillingDetails(name, entry.Effective, configured)
 		if plugin, ok := generation.GetByModel(name); ok {

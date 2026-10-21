@@ -97,52 +97,54 @@ export function buildModelRatioColumns({
           isTaskModel && !hasConfiguredTaskPricing
 
         return (
-          <div className='flex min-w-0 flex-col items-start gap-1 font-medium'>
+          <div className='flex min-w-0 items-center gap-2 font-medium'>
             <TruncatedCell tabIndex={0} tooltipContent={row.original.name}>
               {row.original.name}
             </TruncatedCell>
-            {(showTieredBadge ||
-              showTaskPricingBadge ||
-              row.original.hasConflict ||
-              showUnconfiguredTaskBadge) && (
-              <div
-                className='flex max-w-full flex-wrap items-center gap-x-2 gap-y-1'
-                data-table-text='secondary'
-              >
-                {showTieredBadge ? (
-                  <StatusBadge
-                    label={t('Tiered')}
-                    variant='info'
-                    copyable={false}
-                    className='shrink-0'
-                  />
-                ) : null}
-                {showTaskPricingBadge ? (
-                  <StatusBadge
-                    label={t('Task pricing')}
-                    variant='info'
-                    copyable={false}
-                    className='shrink-0'
-                  />
-                ) : null}
-                {row.original.hasConflict && (
-                  <StatusBadge
-                    label={t('Conflict')}
-                    variant='danger'
-                    copyable={false}
-                    className='shrink-0'
-                  />
-                )}
-                {showUnconfiguredTaskBadge ? (
-                  <StatusBadge
-                    label={t('Task pricing not configured')}
-                    variant='warning'
-                    copyable={false}
-                    className='shrink-0'
-                  />
-                ) : null}
-              </div>
+            {row.original.hasBuiltinPricing !== undefined && (
+              <StatusBadge
+                label={
+                  row.original.hasBuiltinPricing
+                    ? t('Has built-in pricing')
+                    : t('No built-in pricing')
+                }
+                variant={row.original.hasBuiltinPricing ? 'info' : 'neutral'}
+                copyable={false}
+                className='shrink-0'
+              />
             )}
+            {showTieredBadge ? (
+              <StatusBadge
+                label={t('Tiered')}
+                variant='info'
+                copyable={false}
+                className='shrink-0'
+              />
+            ) : null}
+            {showTaskPricingBadge ? (
+              <StatusBadge
+                label={t('Task pricing')}
+                variant='info'
+                copyable={false}
+                className='shrink-0'
+              />
+            ) : null}
+            {row.original.hasConflict && (
+              <StatusBadge
+                label={t('Conflict')}
+                variant='danger'
+                copyable={false}
+                className='shrink-0'
+              />
+            )}
+            {showUnconfiguredTaskBadge ? (
+              <StatusBadge
+                label={t('Task pricing not configured')}
+                variant='warning'
+                copyable={false}
+                className='shrink-0'
+              />
+            ) : null}
           </div>
         )
       },
@@ -203,7 +205,7 @@ export function buildModelRatioColumns({
     },
     {
       id: 'actions',
-      header: () => <div className='text-right'>{t('Actions')}</div>,
+      header: () => <div>{t('Actions')}</div>,
       cell: ({ row }) => (
         <StaticRowActions
           editLabel={t('Edit')}

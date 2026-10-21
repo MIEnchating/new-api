@@ -403,18 +403,18 @@ function renderModelList(modelNames?: string[]) {
   return client
 }
 
-it('reclaims hidden column widths and keeps column sizing aligned when optional columns are shown', async () => {
+it('keeps upstream table sizing and visible column alignment when optional columns are shown', async () => {
   renderModelList()
   const user = userEvent.setup()
   const table = screen.getByRole('table')
-  expect(table).toHaveClass('min-w-[320px]', 'table-fixed')
+  expect(table).toHaveClass('min-w-[852px]', 'table-fixed')
   expect(table.querySelectorAll('col')).toHaveLength(3)
   expect(within(table).getAllByRole('columnheader')).toHaveLength(3)
   await user.click(screen.getByRole('button', { name: 'View' }))
   await user.click(screen.getByRole('menuitemcheckbox', { name: 'Mode' }))
   await user.keyboard('{Escape}')
   expect(table.querySelectorAll('col')).toHaveLength(4)
-  expect(table).toHaveClass('min-w-[440px]')
+  expect(table).toHaveClass('min-w-[852px]')
   await user.click(screen.getByRole('button', { name: 'View' }))
   await user.click(
     screen.getByRole('menuitemcheckbox', { name: 'Price summary' })
@@ -422,7 +422,7 @@ it('reclaims hidden column widths and keeps column sizing aligned when optional 
   await user.keyboard('{Escape}')
   expect(table.querySelectorAll('col')).toHaveLength(5)
   expect(within(table).getAllByRole('columnheader')).toHaveLength(5)
-  expect(table).toHaveClass('min-w-[680px]')
+  expect(table).toHaveClass('min-w-[852px]')
 })
 
 it('reveals the complete model identifier on keyboard focus without widening the list', async () => {
@@ -442,23 +442,21 @@ it('reveals the complete model identifier on keyboard focus without widening the
   await waitFor(() => expect(screen.getAllByText(name)).toHaveLength(1))
 })
 
-it('keeps narrow-list pagination outside the scroll area and navigates to the remaining model', async () => {
+it('keeps upstream pagination outside the scroll area and navigates to the remaining model', async () => {
   renderModelList(
     Array.from(
       { length: 21 },
       (_, index) => `model-${String(index + 1).padStart(2, '0')}`
     )
   )
-  const pagination = screen.getByRole('navigation', {
-    name: 'Page',
-  })
-  expect(pagination.parentElement).toHaveClass('@min-[560px]/model-list:hidden')
-  expect(within(pagination).getByText('1 / 2')).toBeVisible()
-  expect(screen.getByRole('table')).not.toContainElement(pagination)
-  await userEvent
-    .setup()
-    .click(within(pagination).getByRole('button', { name: 'Go to next page' }))
-  expect(within(pagination).getByText('2 / 2')).toBeVisible()
+  const nextPage = screen.getByRole('button', { name: 'Go to next page' })
+  expect(screen.getByRole('combobox')).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'Go to previous page' })
+  ).toBeDisabled()
+  expect(screen.getByRole('table')).not.toContainElement(nextPage)
+  await userEvent.setup().click(nextPage)
+  expect(nextPage).toBeDisabled()
   expect(within(screen.getByRole('table')).getByText('model-21')).toBeVisible()
   expect(
     within(screen.getByRole('table')).queryByText('model-01')

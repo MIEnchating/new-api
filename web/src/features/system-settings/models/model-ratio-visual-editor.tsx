@@ -55,7 +55,6 @@ import {
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { splitPluginBillingExprKey } from '@/features/pricing/lib/plugin-pricing'
 import { useMediaQuery } from '@/hooks'
-import { cn } from '@/lib/utils'
 
 import { safeJsonParse } from '../utils/json-parser'
 import type { PricingMode } from './model-pricing-core'
@@ -115,11 +114,11 @@ export type ModelRatioVisualEditorHandle = {
 
 const STORAGE_KEY = 'model-ratio-column-visibility'
 const MODEL_COLUMN_WIDTHS: Record<string, string> = {
-  select: 'w-10',
-  name: 'w-auto',
+  select: 'w-9',
+  name: 'w-[300px]',
   billingMode: 'w-[120px]',
-  priceSummary: 'w-[240px]',
-  actions: 'w-[72px]',
+  priceSummary: 'w-[300px]',
+  actions: 'w-auto',
 }
 
 const ModelRatioVisualEditorComponent = forwardRef<
@@ -162,6 +161,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
 ) {
   const { t } = useTranslation()
   const { models: pricingModels } = usePricingData()
+  const allPricingConfig = useModelPricing()
   const isMobile = useMediaQuery('(max-width: 767px)')
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
@@ -239,6 +239,17 @@ const ModelRatioVisualEditorComponent = forwardRef<
     [pricingModels]
   )
 
+  const builtinPricingByName = useMemo(
+    () =>
+      new Map(
+        allPricingConfig.data?.entries?.map((entry) => [
+          entry.model_name,
+          entry.has_builtin_pricing,
+        ])
+      ),
+    [allPricingConfig.data?.entries]
+  )
+
   const models = useMemo(() => {
     const savedRows = buildModelSnapshots({
       modelPrice: savedModelPrice,
@@ -287,6 +298,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
 
         return {
           ...displayed,
+          hasBuiltinPricing: builtinPricingByName.get(name),
           saved,
           draft,
           isDraftChanged: savedSignature !== draftSignature,
@@ -299,6 +311,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [
     candidateModelNames,
+    builtinPricingByName,
     filterMode,
     savedModelPrice,
     savedModelSecondPrice,
@@ -651,8 +664,21 @@ const ModelRatioVisualEditorComponent = forwardRef<
   )
 
   const hasRows = table.getRowModel().rows.length > 0
-  const showMode = table.getColumn('billingMode')?.getIsVisible()
-  const showPriceSummary = table.getColumn('priceSummary')?.getIsVisible()
+  const hasBuiltinPricing = editData
+    ? builtinPricingByName.get(editData.name)
+    : undefined
+  const pricingSourceNotice =
+    hasBuiltinPricing === undefined ? undefined : (
+      <p className='text-muted-foreground text-sm'>
+        {hasBuiltinPricing
+          ? t(
+              'This model has built-in default pricing and may have custom overrides. Built-in expressions take effect again when custom pricing is removed.'
+            )
+          : t(
+              'This model has no built-in default price. Removing its custom pricing may leave it unpriced.'
+            )}
+      </p>
+    )
 
   let emptyStateText = t('No models configured. Use Add model to get started.')
   if (table.getState().globalFilter) {
@@ -664,16 +690,15 @@ const ModelRatioVisualEditorComponent = forwardRef<
   }
 
   return (
-    <div className='flex min-h-0 min-w-0 flex-1 flex-col gap-4'>
+    <div className='flex min-h-0 flex-1 flex-col gap-4'>
       <div
         role='region'
         aria-label={t('Model prices')}
-        className='grid min-h-0 min-w-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4 md:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]'
+        className='grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)] gap-4 md:grid-cols-[minmax(300px,0.72fr)_minmax(520px,1.28fr)] xl:grid-cols-[minmax(320px,0.68fr)_minmax(640px,1.32fr)]'
       >
-        <div className='@container/model-list flex min-h-0 min-w-0 flex-col gap-3'>
+        <div className='flex min-h-0 min-w-0 flex-col gap-3'>
           <DataTableToolbar
             table={table}
-            className='shrink-0 [&_input]:w-auto [&_input]:min-w-0 [&_input]:flex-1 [&_input]:basis-40'
             searchPlaceholder={t('Search models...')}
             searchDebounceMs={250}
             filters={[
@@ -709,10 +734,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
                 ],
               },
             ]}
-            leftActions={
-              filterMode === 'unset' ? null : (
+            preActions={
+              filterMode === 'unset' ? undefined : (
                 <Button onClick={handleAdd}>
-                  <Plus data-icon='inline-start' aria-hidden='true' />
+                  <Plus data-icon='inline-start' />
                   {t('Add model')}
                 </Button>
               )
@@ -726,16 +751,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
           ) : (
             <DataTableView
               table={table}
-              containerClassName='min-h-0 flex-1 rounded-lg'
+              containerClassName='min-h-0 flex-1 rounded-md'
               tableContainerClassName='h-full'
-              tableClassName={cn(
-                'w-full min-w-[320px] table-fixed',
-                showMode && 'min-w-[440px]',
-                showPriceSummary && 'min-w-[560px]',
-                showMode && showPriceSummary && 'min-w-[680px]'
-              )}
+              tableClassName='min-w-[852px] table-fixed'
               tableHeaderClassName='[&_tr]:border-b-0'
-              tableBodyClassName='[&>tr]:h-12'
               splitHeaderScrollClassName='h-full'
               bodyContainerClassName='[scrollbar-gutter:stable]'
               splitHeader
@@ -780,16 +799,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
             />
           )}
 
-          {hasRows && (
-            <div className='shrink-0 border-t pt-3'>
-              <div className='@min-[560px]/model-list:hidden'>
-                <DataTablePagination table={table} compact />
-              </div>
-              <div className='hidden @min-[560px]/model-list:block'>
-                <DataTablePagination table={table} />
-              </div>
-            </div>
-          )}
+          {hasRows && <DataTablePagination table={table} />}
         </div>
 
         <div className='hidden min-h-0 min-w-0 md:block'>
@@ -797,6 +807,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
             <ModelPricingEditorPanel
               ref={editorPanelRef}
               editData={editData}
+              scrollHeader={pricingSourceNotice}
               pluginVariants={
                 pricingConfig.data?.entries.find(
                   (entry) => entry.model_name === editData?.name
@@ -844,6 +855,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       {isMobile && (
         <ModelPricingSheet
           ref={editorPanelRef}
+          scrollHeader={pricingSourceNotice}
           open={sheetOpen}
           onOpenChange={setSheetOpen}
           editData={editData}

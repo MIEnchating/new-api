@@ -62,6 +62,7 @@ export type ModelPricingSnapshot = {
 }
 
 export type ModelRow = ModelPricingSnapshot & {
+  hasBuiltinPricing?: boolean
   saved?: ModelPricingSnapshot
   draft?: ModelPricingSnapshot
   isDraftChanged: boolean
