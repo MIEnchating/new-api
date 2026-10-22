@@ -62,8 +62,9 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 	other.SetPublic("model_price", info.PriceData.ModelPrice)
 	if billingMode == billing_setting.BillingModePerSecond && info.TieredBillingSnapshot == nil {
 		other.SetPublic("billing_mode", billingMode)
-		if seconds, ok := info.PriceData.OtherRatios()["seconds"]; ok {
-			other.SetPublic("seconds", seconds)
+		other.SetPublic("seconds", info.PriceData.OtherRatios()["seconds"])
+		if snap := info.PriceData.SecondPriceSnapshot; snap != nil && snap.Resolution != "" {
+			other.SetPublic("resolution", snap.Resolution)
 		}
 	}
 	if info.PriceData.ModelRatio > 0 {
@@ -167,6 +168,12 @@ func taskBillingOther(task *model.Task) *model.LogOther {
 		other.SetPublic("model_price", bc.ModelPrice)
 		if bc.BillingMode != "" {
 			other.SetPublic("billing_mode", bc.BillingMode)
+		}
+		if bc.BillingMode == billing_setting.BillingModePerSecond {
+			other.SetPublic("seconds", bc.OtherRatios["seconds"])
+			if snap := bc.SecondPriceSnapshot; snap != nil && snap.Resolution != "" {
+				other.SetPublic("resolution", snap.Resolution)
+			}
 		}
 		if bc.ModelRatio > 0 {
 			other.SetPublic("model_ratio", bc.ModelRatio)
@@ -321,10 +328,19 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	if actualQuota < 0 {
 		return
 	}
+	updateBilling := task.UpdateQuota
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.BillingMode == billing_setting.BillingModePerSecond {
+		updateBilling = task.UpdateBilling
+	}
 	preConsumedQuota := task.Quota
 	quotaDelta := actualQuota - preConsumedQuota
 
 	if quotaDelta == 0 {
+		if bc := task.PrivateData.BillingContext; bc != nil && bc.BillingMode == billing_setting.BillingModePerSecond {
+			if err := updateBilling(); err != nil {
+				logger.LogError(ctx, common.LogText("failed to write back the settled task quota, task %s: %s", task.TaskID, err.Error()))
+			}
+		}
 		logger.LogInfo(ctx, common.LogText("task %s pre-consumed quota matches the actual quota (%s, %s)",
 			task.TaskID, logger.LogQuota(actualQuota), reason.Error()))
 		return
@@ -348,7 +364,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	taskAdjustTokenQuota(ctx, task, quotaDelta)
 
 	task.Quota = actualQuota
-	if err := task.UpdateQuota(); err != nil {
+	if err := updateBilling(); err != nil {
 		logger.LogError(ctx, common.LogText("failed to write back the settled task quota, task %s: %s", task.TaskID, err.Error()))
 	}
 
@@ -464,4 +480,30 @@ func EvaluateTaskCompletionUsage(snap *billingexpr.BillingSnapshot, facts map[st
 		err = fmt.Errorf("task completion expression produced an invalid cost")
 	}
 	return result, usage, err
+}
+
+// EvaluatePerSecondTaskUsage prices measured seconds using the frozen unit
+// price and group ratio. Missing or invalid measurements retain the reservation;
+// an explicit zero is valid and refunds the entire reservation.
+func EvaluatePerSecondTaskUsage(price, groupRatio float64, snapshot *types.SecondPriceSnapshot, facts map[string]any) (int, float64, float64, string, *common.QuotaClamp, bool) {
+	seconds, ok := facts["seconds"].(float64)
+	if !ok || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds < 0 || seconds > relaycommon.MaxTaskDurationSeconds {
+		return 0, 0, 0, "", nil, false
+	}
+	resolution := ""
+	if snapshot != nil {
+		resolution = snapshot.Resolution
+		if actual, ok := facts["resolution"].(string); ok && strings.TrimSpace(actual) != "" {
+			resolution = actual
+		}
+		price = snapshot.PriceFor(resolution)
+	}
+	if math.IsNaN(price) || math.IsInf(price, 0) || price < 0 || math.IsNaN(groupRatio) || math.IsInf(groupRatio, 0) || groupRatio < 0 {
+		return 0, 0, 0, "", nil, false
+	}
+	if seconds == 0 || price == 0 || groupRatio == 0 {
+		return 0, seconds, price, resolution, nil, true
+	}
+	quota, clamp := common.QuotaFromFloatChecked(price * common.QuotaPerUnit * groupRatio * seconds)
+	return quota, seconds, price, resolution, clamp, true
 }

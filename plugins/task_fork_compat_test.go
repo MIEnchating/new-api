@@ -34,12 +34,13 @@ func TestMigratedTaskPluginsPreservePerSecondBilling(t *testing.T) {
 		model       string
 		requestBody map[string]any
 		seconds     float64
+		resolution  string
 	}{
-		{key: "doubao", model: "doubao-seedance-1-0-pro-250528", requestBody: map[string]any{"duration": 10, "metadata": map[string]any{}}, seconds: 10},
-		{key: "hailuo", model: "MiniMax-Hailuo-2.3", requestBody: map[string]any{"duration": 10}, seconds: 10},
+		{key: "doubao", model: "doubao-seedance-1-0-pro-250528", requestBody: map[string]any{"duration": 10, "metadata": map[string]any{}}, seconds: 10, resolution: "1080p"},
+		{key: "hailuo", model: "MiniMax-Hailuo-2.3", requestBody: map[string]any{"duration": 10}, seconds: 10, resolution: "768P"},
 		{key: "jimeng", model: "jimeng_vgfm_t2v_l20", requestBody: map[string]any{"duration": 10}, seconds: 5},
 		{key: "kling", model: "kling-v1-6", requestBody: map[string]any{"duration": 10}, seconds: 10},
-		{key: "vidu", model: "vidu2.0", requestBody: map[string]any{"duration": 8}, seconds: 8},
+		{key: "vidu", model: "vidu2.0", requestBody: map[string]any{"duration": 8, "resolution": "720p"}, seconds: 8, resolution: "720p"},
 	}
 
 	for _, test := range tests {
@@ -60,6 +61,14 @@ func TestMigratedTaskPluginsPreservePerSecondBilling(t *testing.T) {
 			require.NoError(t, err)
 			ratios := pluginMap(t, value)
 			assert.Equal(t, test.seconds, ratios["seconds"])
+			baseContext["usagePurpose"] = "facts"
+			value, err = plugin.Engine.Call(t.Context(), "extractUsage", baseContext)
+			require.NoError(t, err)
+			facts := pluginMap(t, value)
+			assert.Equal(t, test.seconds, facts["seconds"])
+			if test.resolution != "" {
+				assert.Equal(t, test.resolution, facts["resolution"])
+			}
 		})
 	}
 }
@@ -150,4 +159,25 @@ func TestSoraPluginPreservesOfficialFieldCleanupAndH3Duration(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, float64(5), pluginMap(t, usage)["seconds"])
+	usage, err = plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
+		"upstreamModel": "sora-2-pro", "requestBody": map[string]any{"seconds": 8, "size": "1792x1024"}, "usagePurpose": "facts", "billingMode": "per_second",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"seconds": float64(8), "size": "1792x1024", "resolution": "1792x1024"}, pluginMap(t, usage))
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+		want map[string]any
+	}{
+		{"measured duration", map[string]any{"seconds": "3.5", "size": "1280x720"}, map[string]any{"seconds": 3.5, "size": "1280x720", "resolution": "1280x720"}},
+		{"explicit zero", map[string]any{"seconds": 0, "duration": 5}, map[string]any{"seconds": float64(0)}},
+		{"missing measurement", map[string]any{}, map[string]any{}},
+		{"oversized measurement", map[string]any{"seconds": 3601}, map[string]any{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{}, map[string]any{}, tc.body)
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, pluginMap(t, value))
+		})
+	}
 }

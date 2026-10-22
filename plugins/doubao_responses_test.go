@@ -439,6 +439,12 @@ func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 				facts, err := adaptor.ExtractUsageFactsValidated(c, info)
 				require.NoError(t, err)
 				assert.Equal(t, tc.wantTokens, facts["tokens"])
+				ratios, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
+					"model": tc.model, "requestBody": tc.request,
+					"usagePurpose": "billing_ratios", "billingMode": "per_second",
+				})
+				require.NoError(t, err)
+				assert.Equal(t, tc.wantTokens/21600, alibabaObject(t, ratios)["seconds"])
 			})
 		}
 
@@ -452,6 +458,26 @@ func TestDoubaoSeedanceUsageFacts(t *testing.T) {
 		assert.Equal(t, float64(-1), alibabaObject(t, value)["requestBody"].(map[string]any)["seconds"])
 		_, err = decode(map[string]any{"model": v20, "prompt": "a cat", "seconds": -2})
 		require.ErrorContains(t, err, "seconds must be -1 or between 1 and 3600")
+	})
+
+	t.Run("completion reports measured duration without inferring it from tokens", func(t *testing.T) {
+		for _, tc := range []struct {
+			name     string
+			duration any
+			want     map[string]any
+		}{
+			{"measured", 7.5, map[string]any{"seconds": 7.5}},
+			{"zero", 0.0, map[string]any{"seconds": 0.0}},
+			{"absent", nil, map[string]any{}},
+			{"automatic sentinel", -1.0, map[string]any{}},
+			{"oversized", 3601.0, map[string]any{}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"model": v25}, map[string]any{"status": "SUCCESS"}, map[string]any{"status": "succeeded", "duration": tc.duration})
+				require.NoError(t, err)
+				assert.Equal(t, tc.want, alibabaObject(t, value))
+			})
+		}
 	})
 
 	t.Run("completion overlays only resolutions the model offers", func(t *testing.T) {

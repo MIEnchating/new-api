@@ -870,9 +870,9 @@ export function extractUsage(ctx) {
       let seconds = Number(req.seconds || req.duration || metadata.duration || 0);
       if (!Number.isFinite(seconds) || seconds <= 0) {
         const frames = Number(metadata.frames);
-        seconds = Number.isFinite(frames) && frames > 0 ? Math.floor(frames / 24) : 15;
+        seconds = Number.isFinite(frames) && frames > 0 ? Math.floor(frames / 24) : videoProfile(ctx).maxDuration;
       }
-      ratios.seconds = Math.min(Math.max(seconds, 5), 3600);
+      ratios.seconds = Math.min(seconds, 3600);
     }
     return Object.keys(ratios).length ? ratios : null;
   }
@@ -888,6 +888,7 @@ export function extractUsage(ctx) {
   seconds = Math.min(seconds, 3600);
   const resolution = videoResolution(ctx);
   const facts = { tokens: estimateTokens(seconds, resolution), resolution: resolution };
+  if (ctx.billingMode === "per_second") facts.seconds = seconds;
   // Every model reports video_input, including those whose profile omits it:
   // expressions saved when all Seedance models declared the field then keep
   // matching their no-video tier.
@@ -979,6 +980,9 @@ export function extractUsageOnComplete(task, taskResult, body) {
   if (imageTask(task)) return imageUsage(body || {}, imageProfile(task));
   if (!body || body.status !== "succeeded") return {};
   const facts = {};
+  // Ark's task response reports the generated duration at the top level.
+  // Missing measurements keep the host reservation; never infer seconds from tokens.
+  if (typeof body.duration === "number" && Number.isFinite(body.duration) && body.duration >= 0 && body.duration <= 3600) facts.seconds = body.duration;
   const usage = body.usage || {};
   let tokens = Number(usage.completion_tokens);
   if (!Number.isFinite(tokens) || tokens <= 0) tokens = Number(usage.total_tokens);

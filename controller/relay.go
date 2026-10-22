@@ -992,14 +992,15 @@ func executeTaskSubmissionWith(
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.NodeName = common.NodeName
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
-		ModelPrice:      relayInfo.PriceData.ModelPrice,
-		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-		ModelRatio:      relayInfo.PriceData.ModelRatio,
-		OtherRatios:     relayInfo.PriceData.OtherRatios(),
-		OriginModelName: relayInfo.OriginModelName,
-		BillingMode:     billing_setting.GetBillingMode(relayInfo.OriginModelName),
-		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || billing_setting.GetBillingMode(relayInfo.OriginModelName) == billing_setting.BillingModePerRequest || (billing_setting.GetBillingMode(relayInfo.OriginModelName) == billing_setting.BillingModeRatio && relayInfo.PriceData.UsePrice),
-		TieredSnapshot:  relayInfo.TieredBillingSnapshot,
+		ModelPrice:          relayInfo.PriceData.ModelPrice,
+		GroupRatio:          relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:          relayInfo.PriceData.ModelRatio,
+		OtherRatios:         relayInfo.PriceData.OtherRatios(),
+		OriginModelName:     relayInfo.OriginModelName,
+		BillingMode:         billing_setting.GetBillingMode(relayInfo.OriginModelName),
+		PerCallBilling:      common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || billing_setting.GetBillingMode(relayInfo.OriginModelName) == billing_setting.BillingModePerRequest || (billing_setting.GetBillingMode(relayInfo.OriginModelName) == billing_setting.BillingModeRatio && relayInfo.PriceData.UsePrice),
+		TieredSnapshot:      relayInfo.TieredBillingSnapshot,
+		SecondPriceSnapshot: relayInfo.PriceData.SecondPriceSnapshot,
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

@@ -651,3 +651,83 @@ export function extractUsage() { return {seconds:2}; }
 		})
 	}
 }
+
+func TestPerSecondTaskSubmission(t *testing.T) {
+	service.InitHttpClient()
+	for _, tc := range []struct {
+		name                   string
+		request                any
+		usage                  string
+		immediate              bool
+		wantPrice, wantSeconds float64
+		wantError              bool
+	}{
+		{name: "plugin resolution overrides request fields", request: map[string]any{"size": "free", "seconds": 2.0}, usage: `{seconds:5,resolution:"1080P",resolution_ratio:4}`, wantPrice: .5, wantSeconds: 5},
+		{name: "unmapped provider fields use plugin facts", request: map[string]any{"clip_length": "2.5"}, usage: `{seconds:2.5,resolution:"1080p"}`, wantPrice: .5, wantSeconds: 2.5},
+		{name: "unknown resolution uses base price", request: map[string]any{}, usage: `{seconds:5,resolution:"4k"}`, wantPrice: .1, wantSeconds: 5},
+		{name: "missing plugin resolution ignores raw request", request: map[string]any{"size": "1080p"}, usage: `{seconds:5}`, wantPrice: .1, wantSeconds: 5},
+		{name: "duration too large", request: map[string]any{}, usage: `{seconds:3601}`, wantError: true},
+		{name: "negative duration", request: map[string]any{}, usage: `{seconds:-2}`, wantError: true},
+		{name: "invalid duration", request: map[string]any{}, usage: `{seconds:"NaN"}`, wantError: true},
+		{name: "missing duration meter", request: map[string]any{}, usage: `{resolution_ratio:4}`, wantError: true},
+		{name: "immediate actual seconds and resolution", request: map[string]any{}, usage: `{seconds:15}`, immediate: true, wantPrice: .5, wantSeconds: 3},
+		{name: "free estimate changes to paid resolution", request: map[string]any{}, usage: `{seconds:15,resolution:"free"}`, immediate: true, wantPrice: .5, wantSeconds: 3},
+		{name: "free resolution", request: map[string]any{}, usage: `{seconds:5,resolution:"free"}`, wantPrice: 0, wantSeconds: 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			saveBillingConfig(t)
+			oldPrices, oldOptions := ratio_setting.ModelPrice2JSONString(), common.OptionMap
+			t.Cleanup(func() {
+				require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(oldPrices))
+				common.OptionMap = oldOptions
+			})
+			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"declared-model":0.1}`))
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{"billing_setting.billing_mode": `{"declared-model":"per_second"}`, "billing_setting.plugin_billing_expr": `{}`, "group_ratio_setting.group_ratio": `{"default":1}`}))
+			priceConfig, err := common.Marshal(map[string]any{"declared-model": map[string]any{"duration_field": "ignored", "resolution_field": "ignored", "prices": map[string]float64{"1080p": .5, "free": 0}}})
+			require.NoError(t, err)
+			common.OptionMap = map[string]string{"ModelSecondPrice": string(priceConfig)}
+			source := billingFallbackPlugin + `export function extractUsage(){return ` + tc.usage + `;}`
+			if tc.immediate {
+				source = strings.Replace(source, `return {taskId:"1"};`, `return {taskId:"1",taskData:{seconds:3},immediate:{status:"SUCCESS"}};`, 1)
+				source += `export function extractUsageOnComplete(ctx,result,body){return {seconds:body.seconds,resolution:"1080p"};}`
+			}
+			received := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				received++
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			t.Cleanup(server.Close)
+			c, info := newTaskSubmitContext(t, "declared-model", "")
+			common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, server.URL)
+			c.Set("task_request", tc.request)
+			info.OriginModelName = "declared-model"
+			info.UserGroup, info.UsingGroup = "default", "default"
+			reservation := &imageReservation{limit: 1 << 30}
+			info.Billing = reservation
+			pinMappingOrderPlugin(t, c, source)
+			result, taskErr := RelayTaskSubmit(c, info)
+			if tc.wantError {
+				require.NotNil(t, taskErr)
+				assert.Equal(t, 400, taskErr.StatusCode)
+				assert.Zero(t, received)
+				return
+			}
+			require.Nil(t, taskErr, "%+v", taskErr)
+			require.NotNil(t, result)
+			assert.Equal(t, tc.wantPrice, info.PriceData.ModelPrice)
+			require.NotNil(t, info.PriceData.SecondPriceSnapshot)
+			assert.Equal(t, .1, info.PriceData.SecondPriceSnapshot.BasePrice)
+			assert.Equal(t, .5, info.PriceData.SecondPriceSnapshot.Prices["1080p"])
+			assert.Equal(t, common.QuotaFromFloat(tc.wantPrice*tc.wantSeconds*common.QuotaPerUnit), result.Quota)
+			assert.Equal(t, map[string]float64{"seconds": tc.wantSeconds}, info.PriceData.OtherRatios())
+			if tc.immediate {
+				if strings.Contains(tc.usage, `resolution:"free"`) {
+					assert.Zero(t, reservation.held)
+				} else {
+					assert.Equal(t, common.QuotaFromFloat(15*.1*common.QuotaPerUnit), reservation.held)
+				}
+			}
+		})
+	}
+}

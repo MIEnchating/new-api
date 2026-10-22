@@ -261,8 +261,6 @@ it('only offers legacy conversion in per-token and per-request modes', async () 
     billingMode: 'per-second',
     price: '0.35',
     secondPriceConfig: {
-      duration_field: 'seconds',
-      resolution_field: 'resolution',
       prices: { '1080p': 0.5 },
     },
   }
@@ -295,9 +293,9 @@ it('only offers legacy conversion in per-token and per-request modes', async () 
     ).toBeEnabled()
     await user.click(screen.getByRole('tab', { name: 'Per-second' }))
   }
-  expect(screen.getByRole('textbox', { name: 'Price per second' })).toHaveValue(
-    '0.35'
-  )
+  expect(
+    screen.getAllByRole('textbox', { name: 'Price per second' })[0]
+  ).toHaveValue('0.35')
   expect(await commit(editor.ref)).toMatchObject(data)
 })
 
@@ -1100,4 +1098,35 @@ it('preserves time billing on direct save and blocks incomplete local conditions
     billingExpr: expression.replace('>= 9', '>= 10'),
     requestRuleExpr,
   })
+})
+
+it('converts resolution prices between site currency and USD when switching and saving', async () => {
+  const editor = renderEditor({
+    billingMode: 'per-second',
+    price: '0.2',
+    secondPriceConfig: { prices: { '1080p': 0.5 } },
+  })
+  await selectCurrency('Site currency (CNY)')
+  const prices = screen.getAllByLabelText('Price per second')
+  expect(prices[0]).toHaveValue('1.4')
+  expect((prices[1] as HTMLInputElement).value).toBe('3.5')
+  fireEvent.change(prices[1], { target: { value: '7' } })
+  expect((await commit(editor.ref))?.secondPriceConfig?.prices['1080p']).toBe(1)
+  await selectCurrency('US dollar (USD)')
+  expect(
+    (screen.getAllByLabelText('Price per second')[1] as HTMLInputElement).value
+  ).toBe('1')
+})
+
+it('blocks saving an overflowing resolution price and preserves an explicit zero', async () => {
+  const editor = renderEditor({
+    billingMode: 'per-second',
+    price: '0.2',
+    secondPriceConfig: { prices: { '1080p': 0.5 } },
+  })
+  const price = screen.getAllByLabelText('Price per second')[1]
+  fireEvent.change(price, { target: { value: '9'.repeat(309) } })
+  expect(await commit(editor.ref)).toBeNull()
+  fireEvent.change(price, { target: { value: '0' } })
+  expect((await commit(editor.ref))?.secondPriceConfig?.prices['1080p']).toBe(0)
 })

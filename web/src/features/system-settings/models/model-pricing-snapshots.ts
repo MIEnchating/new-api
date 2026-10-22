@@ -23,8 +23,6 @@ import { safeJsonParse } from '../utils/json-parser'
 import { formatPricingNumber } from './pricing-format'
 
 type SecondPriceConfig = {
-  resolution_field?: string
-  duration_field?: string
   prices: Record<string, number>
 }
 

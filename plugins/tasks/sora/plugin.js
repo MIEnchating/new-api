@@ -135,15 +135,21 @@ export function extractUsage(ctx) {
   const defaultSeconds = model.startsWith("minimax-h3") ? 5 : 4;
   let seconds = Number(req.seconds || req.duration || defaultSeconds);
   if (!Number.isFinite(seconds) || seconds <= 0) seconds = defaultSeconds;
-  return { seconds: Math.min(seconds, 3600), size: req.size || "720x1280" };
+  const size = req.size || "720x1280";
+  if (ctx.billingMode === "per_second") return { seconds: Math.min(seconds, 3600), size: size, resolution: size };
+  return { seconds: Math.min(seconds, 3600), size: size };
 }
 
 export function extractUsageOnComplete(task, taskResult, body) {
   const facts = {};
-  const seconds = Number((body || {}).seconds || (body || {}).duration || 0);
-  if (Number.isFinite(seconds) && seconds > 0) facts.seconds = Math.min(seconds, 3600);
+  const measured = (body || {}).seconds ?? (body || {}).duration;
+  const seconds = typeof measured === "number" || (typeof measured === "string" && measured.trim() !== "") ? Number(measured) : NaN;
+  if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 3600) facts.seconds = seconds;
   const size = trimmed((body || {}).size);
-  if (["720x1280", "1280x720", "1792x1024", "1024x1792"].includes(size)) facts.size = size;
+  if (["720x1280", "1280x720", "1792x1024", "1024x1792"].includes(size)) {
+    facts.size = size;
+    facts.resolution = size;
+  }
   return facts;
 }
 

@@ -78,8 +78,6 @@ export type ModelRatioData = {
   billingExpr?: string
   requestRuleExpr?: string
   secondPriceConfig?: {
-    resolution_field?: string
-    duration_field?: string
     prices: Record<string, number>
   }
 }

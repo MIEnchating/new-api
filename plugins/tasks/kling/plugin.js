@@ -281,6 +281,7 @@ export function extractUsage(ctx) {
     return ctx.billingMode === "per_second" ? { seconds: Math.min(duration, 3600) } : null;
   }
   const mode = outboundMode(req, model);
+  if (ctx.billingMode === "per_second") return { seconds: duration, units: estimateUnits(model, mode, duration) };
   return { units: estimateUnits(model, mode, duration) };
 }
 

@@ -56,7 +56,6 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon } from '@/components/ui/input-group'
-import { Separator } from '@/components/ui/separator'
 import {
   Sheet,
   SheetContent,
@@ -256,8 +255,6 @@ export const ModelPricingEditorPanel = forwardRef<
   const [pluginExpressions, setPluginExpressions] = useState<
     Record<string, string>
   >({})
-  const [resolutionField, setResolutionField] = useState('')
-  const [durationField, setDurationField] = useState('')
   const [resolutionPrices, setResolutionPrices] = useState<
     ResolutionPriceRow[]
   >([])
@@ -395,8 +392,6 @@ export const ModelPricingEditorPanel = forwardRef<
       setPricingMode(initialPricingMode)
       setBillingExpr(initialBillingExpr)
       setRequestRuleExpr(editData.requestRuleExpr || '')
-      setResolutionField(editData.secondPriceConfig?.resolution_field || '')
-      setDurationField(editData.secondPriceConfig?.duration_field || '')
       setResolutionPrices(
         Object.entries(editData.secondPriceConfig?.prices || {}).map(
           ([resolution, price], index) => ({
@@ -421,8 +416,6 @@ export const ModelPricingEditorPanel = forwardRef<
       setPricingMode('tiered_expr')
       setBillingExpr(DEFAULT_TOKEN_BILLING_EXPR)
       setRequestRuleExpr('')
-      setResolutionField('')
-      setDurationField('')
       setResolutionPrices([])
     }
 
@@ -456,9 +449,6 @@ export const ModelPricingEditorPanel = forwardRef<
           pluginExpressions,
           editData?.pluginBillingExpr
         ) ||
-        resolutionField !==
-          (editData?.secondPriceConfig?.resolution_field ?? '') ||
-        durationField !== (editData?.secondPriceConfig?.duration_field ?? '') ||
         JSON.stringify(
           resolutionPrices.map(({ resolution, price }) => ({
             resolution,
@@ -481,8 +471,6 @@ export const ModelPricingEditorPanel = forwardRef<
     initialPricingMode,
     initialBillingExpr,
     pluginExpressions,
-    resolutionField,
-    durationField,
     resolutionPrices,
   ])
 
@@ -758,13 +746,8 @@ export const ModelPricingEditorPanel = forwardRef<
         data.billingExpr = resolvedBillingExpr
         data.requestRuleExpr = requestRuleExpr
       }
-      if (
-        pricingMode === 'per-second' &&
-        (resolutionField || durationField || resolutionPrices.length)
-      ) {
+      if (pricingMode === 'per-second' && resolutionPrices.length) {
         data.secondPriceConfig = {
-          resolution_field: resolutionField.trim() || undefined,
-          duration_field: durationField.trim() || undefined,
           prices: Object.fromEntries(
             resolutionPrices
               .filter((row) => row.resolution.trim() && row.price !== '')
@@ -782,8 +765,6 @@ export const ModelPricingEditorPanel = forwardRef<
       pluginExpressions,
       editData,
       pluginVariants,
-      resolutionField,
-      durationField,
       resolutionPrices,
     ]
   )
@@ -1264,41 +1245,6 @@ export const ModelPricingEditorPanel = forwardRef<
                                 'Configure different prices per second for each resolution.'
                               )}
                             />
-                            <div className='grid min-w-0 grid-cols-1 gap-3 @min-[480px]/pricing-fields:grid-cols-2'>
-                              <Field className='min-w-0'>
-                                <FieldLabel
-                                  htmlFor={`${resolutionPricingId}-resolution-field`}
-                                >
-                                  {t('Resolution field')}
-                                </FieldLabel>
-                                <Input
-                                  id={`${resolutionPricingId}-resolution-field`}
-                                  className='font-mono'
-                                  value={resolutionField}
-                                  placeholder='resolution'
-                                  onChange={(event) =>
-                                    setResolutionField(event.target.value)
-                                  }
-                                />
-                              </Field>
-                              <Field className='min-w-0'>
-                                <FieldLabel
-                                  htmlFor={`${resolutionPricingId}-duration-field`}
-                                >
-                                  {t('Duration field')}
-                                </FieldLabel>
-                                <Input
-                                  id={`${resolutionPricingId}-duration-field`}
-                                  className='font-mono'
-                                  value={durationField}
-                                  placeholder='seconds'
-                                  onChange={(event) =>
-                                    setDurationField(event.target.value)
-                                  }
-                                />
-                              </Field>
-                            </div>
-                            <Separator />
                             <div className='flex min-w-0 flex-col gap-3'>
                               {resolutionPrices.map((row) => (
                                 <div
@@ -1336,21 +1282,19 @@ export const ModelPricingEditorPanel = forwardRef<
                                     >
                                       {t('Price per second')}
                                     </FieldLabel>
-                                    <Input
+                                    <PricingAmountInput
                                       id={`${resolutionPricingId}-${row.id}-price`}
                                       className='tabular-nums'
                                       placeholder='0.01'
                                       value={row.price}
-                                      type='number'
-                                      min='0'
-                                      step='any'
-                                      onChange={(event) =>
+                                      currency={currency}
+                                      onChange={(price) =>
                                         setResolutionPrices((current) =>
                                           current.map((item) =>
                                             item.id === row.id
                                               ? {
                                                   ...item,
-                                                  price: event.target.value,
+                                                  price,
                                                 }
                                               : item
                                           )

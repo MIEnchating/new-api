@@ -335,6 +335,7 @@ export function extractUsage(ctx) {
   if (ctx.usagePurpose === "billing_ratios") {
     return ctx.billingMode === "per_second" ? { seconds: Math.min(outboundDuration(req, model), 3600) } : null;
   }
+  if (ctx.billingMode === "per_second") return { seconds: outboundDuration(req, model), duration: outboundDuration(req, model), resolution: outboundResolution(req, model) };
   return { duration: outboundDuration(req, model), resolution: outboundResolution(req, model) };
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/types"
 )
 
 type TaskStatus string
@@ -162,14 +163,15 @@ type TaskPluginAuthorSnapshot struct {
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
 type TaskBillingContext struct {
-	ModelPrice      float64                      `json:"model_price,omitempty"`       // 模型单价
-	GroupRatio      float64                      `json:"group_ratio,omitempty"`       // 分组倍率
-	ModelRatio      float64                      `json:"model_ratio,omitempty"`       // 模型倍率
-	OtherRatios     map[string]float64           `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
-	OriginModelName string                       `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
-	BillingMode     string                       `json:"billing_mode,omitempty"`      // ratio、per-request、per_second 或 tiered_expr
-	PerCallBilling  bool                         `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
-	TieredSnapshot  *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
+	SecondPriceSnapshot *types.SecondPriceSnapshot   `json:"second_price_snapshot,omitempty"`
+	ModelPrice          float64                      `json:"model_price,omitempty"`       // 模型单价
+	GroupRatio          float64                      `json:"group_ratio,omitempty"`       // 分组倍率
+	ModelRatio          float64                      `json:"model_ratio,omitempty"`       // 模型倍率
+	OtherRatios         map[string]float64           `json:"other_ratios,omitempty"`      // 附加倍率（时长、分辨率等）
+	OriginModelName     string                       `json:"origin_model_name,omitempty"` // 模型名称，必须为OriginModelName
+	BillingMode         string                       `json:"billing_mode,omitempty"`      // ratio、per-request、per_second 或 tiered_expr
+	PerCallBilling      bool                         `json:"per_call_billing,omitempty"`  // 按次计费：跳过轮询阶段的差额结算
+	TieredSnapshot      *billingexpr.BillingSnapshot `json:"tiered_snapshot,omitempty"`
 }
 
 // ResultRetrievable reports whether retrieval surfaces (native query routes,
@@ -544,6 +546,11 @@ func (Task *Task) Update() error {
 
 func (t *Task) UpdateQuota() error {
 	return DB.Model(t).Update("quota", t.Quota).Error
+}
+
+// UpdateBilling persists the settled quota and its frozen billing facts together.
+func (t *Task) UpdateBilling() error {
+	return DB.Model(t).Updates(map[string]any{"quota": t.Quota, "private_data": t.PrivateData}).Error
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).

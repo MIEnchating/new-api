@@ -248,18 +248,12 @@ it('stacks per-second fields in narrow panels and enables paired fields in wide 
   await userEvent.setup().click(screen.getByRole('tab', { name: 'Per-second' }))
   const panel = screen.getByRole('tabpanel', { name: 'Per-second' })
   expect(panel).toHaveClass('@container/pricing-fields', 'min-w-0')
-  const resolution = within(panel).getByRole('textbox', {
-    name: 'Resolution field',
-  })
-  const duration = within(panel).getByRole('textbox', {
-    name: 'Duration field',
-  })
-  const mapping = resolution.closest('[data-slot=field]')?.parentElement
-  expect(mapping).toContainElement(duration)
-  expect(mapping).toHaveClass(
-    'grid-cols-1',
-    '@min-[480px]/pricing-fields:grid-cols-2'
-  )
+  expect(
+    within(panel).queryByRole('textbox', { name: 'Resolution field' })
+  ).not.toBeInTheDocument()
+  expect(
+    within(panel).queryByRole('textbox', { name: 'Duration field' })
+  ).not.toBeInTheDocument()
   await userEvent
     .setup()
     .click(screen.getByRole('button', { name: 'Add resolution price' }))
@@ -279,7 +273,7 @@ it('keeps resolution prices associated with their labels when another row is rem
   await user.click(screen.getByRole('button', { name: 'Add resolution price' }))
   await user.type(screen.getByRole('textbox', { name: 'Resolution' }), '720p')
   await user.type(
-    screen.getByRole('spinbutton', { name: 'Price per second' }),
+    screen.getAllByRole('textbox', { name: 'Price per second' })[1],
     '0.01'
   )
   await user.click(screen.getByRole('button', { name: 'Add resolution price' }))
@@ -288,7 +282,7 @@ it('keeps resolution prices associated with their labels when another row is rem
     '1080p'
   )
   await user.type(
-    screen.getAllByRole('spinbutton', { name: 'Price per second' })[1],
+    screen.getAllByRole('textbox', { name: 'Price per second' })[2],
     '0.02'
   )
   await user.click(screen.getAllByRole('button', { name: 'Remove' })[0])
@@ -296,8 +290,8 @@ it('keeps resolution prices associated with their labels when another row is rem
     '1080p'
   )
   expect(
-    screen.getByRole('spinbutton', { name: 'Price per second' })
-  ).toHaveValue(0.02)
+    screen.getAllByRole('textbox', { name: 'Price per second' })[1]
+  ).toHaveValue('0.02')
 })
 
 it('updates the preview for explicit zero and disabled prices and explains dependent audio controls', async () => {

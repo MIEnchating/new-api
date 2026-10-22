@@ -707,6 +707,22 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		RecalculateTaskQuota(ctx, task, result.ActualQuotaAfterGroup, common.NewMessage("Settled by the task usage expression"), result.Clamp)
 		return true
 	}
+	if billingMode == billing_setting.BillingModePerSecond {
+		if task.Status != model.TaskStatusSuccess {
+			return false
+		}
+		bc := task.PrivateData.BillingContext
+		quota, seconds, price, resolution, clamp, ok := EvaluatePerSecondTaskUsage(bc.ModelPrice, bc.GroupRatio, bc.SecondPriceSnapshot, taskResult.UsageFacts)
+		if ok {
+			bc.ModelPrice = price
+			if bc.SecondPriceSnapshot != nil {
+				bc.SecondPriceSnapshot.Resolution = resolution
+			}
+			bc.OtherRatios = map[string]float64{"seconds": seconds}
+			RecalculateTaskQuota(ctx, task, quota, common.NewMessage("Adjusted by the channel adaptor"), clamp)
+		}
+		return true
+	}
 	// 按次计费的成功任务保持预扣；失败任务由调用方全额退款。
 	if bc := task.PrivateData.BillingContext; bc != nil && (bc.PerCallBilling || billingMode == billing_setting.BillingModePerRequest) {
 		logger.LogInfo(ctx, common.LogText("task %s is billed per request, skipping difference settlement", task.TaskID))

@@ -308,7 +308,19 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	// 5. 计费估算：让适配器根据用户请求提供 OtherRatios（时长、分辨率等）
 	//    必须在 ModelPriceHelperPerCall 之后调用（它会重建 PriceData）。
 	//    ResolveOriginTask 可能已在 remix 路径中预设了 OtherRatios，此处合并。
-	if info.TieredBillingSnapshot == nil {
+	if info.TieredBillingSnapshot == nil && billing_setting.GetBillingMode(modelName) == billing_setting.BillingModePerSecond {
+		provider, ok := adaptor.(channel.TaskValidatedUsageFactsProvider)
+		if !ok {
+			return nil, service.TaskErrorWrapperLocal(errors.New("per-second billing requires plugin usage facts"), "plugin_usage_invalid", http.StatusBadRequest)
+		}
+		facts, err := provider.ExtractUsageFactsValidated(c, info)
+		if err != nil {
+			return nil, service.TaskErrorWrapperLocal(err, "plugin_usage_invalid", http.StatusBadRequest)
+		}
+		if err := helper.ApplyPerSecondTaskBilling(info, facts); err != nil {
+			return nil, service.TaskErrorWrapperLocal(err, "invalid_seconds", http.StatusBadRequest)
+		}
+	} else if info.TieredBillingSnapshot == nil {
 		var estimatedRatios map[string]float64
 		if validatedProvider, ok := adaptor.(channel.TaskValidatedBillingProvider); ok {
 			estimatedRatios, err = validatedProvider.EstimateBillingValidated(c, info)
@@ -326,7 +338,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 6. 将 OtherRatios 应用到基础额度（饱和转换，防止溢出成负数）
-	if info.TieredBillingSnapshot == nil && (!common.StringsContains(constant.TaskPricePatches, modelName) || billing_setting.GetBillingMode(modelName) == billing_setting.BillingModePerSecond) {
+	if info.TieredBillingSnapshot == nil && billing_setting.GetBillingMode(modelName) != billing_setting.BillingModePerSecond && !common.StringsContains(constant.TaskPricePatches, modelName) {
 		quotaWithRatios := info.PriceData.ApplyOtherRatiosToFloat(float64(info.PriceData.Quota))
 		quota, clamp := common.QuotaFromFloatChecked(quotaWithRatios)
 		info.PriceData.Quota = quota
@@ -335,7 +347,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 
 	// 7. 预扣费：首次尝试创建计费会话；重试时会话已存在，换到更贵的渠道要在
 	//    发起上游请求前补足预扣，余额不足就不发请求。
-	if info.Billing != nil || !info.PriceData.FreeModel {
+	if info.Billing != nil || !info.PriceData.FreeModel || info.PriceData.SecondPriceSnapshot != nil {
 		info.ForcePreConsume = true
 		if apiErr := service.PreConsumeBilling(c, info.PriceData.Quota, info); apiErr != nil {
 			return nil, service.TaskErrorFromAPIError(apiErr)
@@ -388,6 +400,17 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 				snap.UsageFacts = facts
 				snap.EstimatedTier = settlement.MatchedTier
 				noteTaskQuotaClamp(info, settlement.Clamp)
+			}
+		}
+	} else if billing_setting.GetBillingMode(modelName) == billing_setting.BillingModePerSecond {
+		if parsed.Immediate != nil && parsed.Immediate.Status == model.TaskStatusSuccess {
+			quota, seconds, price, resolution, clamp, ok := service.EvaluatePerSecondTaskUsage(info.PriceData.ModelPrice, info.PriceData.GroupRatioInfo.GroupRatio, info.PriceData.SecondPriceSnapshot, parsed.Immediate.UsageFacts)
+			if ok {
+				finalQuota = quota
+				info.PriceData.ModelPrice = price
+				info.PriceData.SecondPriceSnapshot.Resolution = resolution
+				info.PriceData.ReplaceOtherRatios(map[string]float64{"seconds": seconds})
+				noteTaskQuotaClamp(info, clamp)
 			}
 		}
 	} else {

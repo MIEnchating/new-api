@@ -3,6 +3,7 @@ package helper
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -218,25 +219,11 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 	groupRatioInfo := HandleGroupRatio(c, info)
 
 	modelPrice, success := ratio_setting.GetModelPrice(info.OriginModelName, true)
-	if req, err := relaycommon.GetTaskRequest(c); err == nil {
-		resolution := req.Size
-		if config, configured := model.GetModelSecondPriceConfig(info.GetOriginModelName()); configured && config.ResolutionField != "" {
-			if value, ok := req.Metadata[config.ResolutionField].(string); ok {
-				resolution = value
-			}
-		}
-		if resolution == "" {
-			if value, ok := req.Metadata["resolution"].(string); ok {
-				resolution = value
-			}
-		}
-		if configured, ok := model.GetModelSecondPrice(info.GetOriginModelName(), resolution); ok {
-			modelPrice = configured
-			success = true
-		}
-	}
 	usePrice := success
 	var modelRatio float64
+	if !success && billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModePerSecond {
+		return hosttypes.PriceData{}, modelPriceNotConfiguredError(c, info.OriginModelName, info.UserId)
+	}
 
 	if !success {
 		defaultPrice, ok := ratio_setting.GetDefaultModelPriceMap()[info.OriginModelName]
@@ -297,6 +284,30 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 		GroupRatioInfo: groupRatioInfo,
 	}
 	return priceData, nil
+}
+
+// ApplyPerSecondTaskBilling prices standardized plugin facts and freezes the
+// full price table so completion can select the actual resolution's price.
+func ApplyPerSecondTaskBilling(info *relaycommon.RelayInfo, facts map[string]any) error {
+	seconds, _ := facts["seconds"].(float64)
+	config, _ := model.GetModelSecondPriceConfig(info.OriginModelName)
+	if math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 || seconds > relaycommon.MaxTaskDurationSeconds {
+		return fmt.Errorf("per-second billing requires a duration greater than 0 and at most %d seconds", relaycommon.MaxTaskDurationSeconds)
+	}
+	resolution, _ := facts["resolution"].(string)
+	snapshot := &hosttypes.SecondPriceSnapshot{BasePrice: info.PriceData.ModelPrice, Prices: config.Prices, Resolution: resolution}
+	price := snapshot.PriceFor(resolution)
+	if math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+		return fmt.Errorf("per-second billing requires a finite non-negative price")
+	}
+	info.PriceData.SecondPriceSnapshot = snapshot
+	info.PriceData.ModelPrice = price
+	info.PriceData.FreeModel = !operation_setting.GetQuotaSetting().EnableFreeModelPreConsume && (price == 0 || info.PriceData.GroupRatioInfo.GroupRatio == 0)
+	info.PriceData.ReplaceOtherRatios(map[string]float64{"seconds": seconds})
+	quota, clamp := common.QuotaFromFloatChecked(info.PriceData.ModelPrice * common.QuotaPerUnit * info.PriceData.GroupRatioInfo.GroupRatio * seconds)
+	info.PriceData.Quota = quota
+	info.QuotaClamp = clamp
+	return nil
 }
 
 func HasModelBillingConfig(modelName string) bool {

@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/shopspring/decimal"
 )
@@ -14,6 +15,7 @@ type GroupRatioInfo struct {
 }
 
 type PriceData struct {
+	SecondPriceSnapshot  *SecondPriceSnapshot
 	FreeModel            bool
 	ModelPrice           float64
 	ModelRatio           float64
@@ -30,6 +32,26 @@ type PriceData struct {
 	Quota                int // 按次计费的最终额度（MJ / Task）
 	QuotaToPreConsume    int // 按量计费的预消耗额度
 	GroupRatioInfo       GroupRatioInfo
+}
+
+// SecondPriceSnapshot freezes the administrator's per-second price table.
+type SecondPriceSnapshot struct {
+	BasePrice  float64            `json:"base_price"`
+	Prices     map[string]float64 `json:"prices,omitempty"`
+	Resolution string             `json:"resolution,omitempty"`
+}
+
+func (s *SecondPriceSnapshot) PriceFor(resolution string) float64 {
+	resolution = strings.TrimSpace(resolution)
+	if resolution == "" {
+		return s.BasePrice
+	}
+	for key, price := range s.Prices {
+		if strings.EqualFold(strings.TrimSpace(key), resolution) {
+			return price
+		}
+	}
+	return s.BasePrice
 }
 
 func (p *PriceData) AddOtherRatio(key string, ratio float64) {

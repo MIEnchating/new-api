@@ -27,6 +27,8 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -1852,6 +1854,175 @@ func TestSettle_TokenRecalcFallsBackToCompletionTokens(t *testing.T) {
 
 			assert.Equal(t, testCase.wantSettled, settled)
 			assert.Equal(t, testCase.wantQuota, task.Quota)
+		})
+	}
+}
+
+func TestPerSecondTaskSettlement(t *testing.T) {
+	for _, dialect := range []struct {
+		name   common.DatabaseType
+		env    string
+		logEnv string
+	}{
+		{common.DatabaseTypeSQLite, "", ""},
+		{common.DatabaseTypeMySQL, "TEST_SECONDS_MYSQL_DSN", "TEST_SECONDS_MYSQL_LOG_DSN"},
+		{common.DatabaseTypePostgreSQL, "TEST_SECONDS_POSTGRES_DSN", "TEST_SECONDS_POSTGRES_LOG_DSN"},
+	} {
+		t.Run(string(dialect.name), func(t *testing.T) {
+			var driver gorm.Dialector = sqlite.Open(":memory:")
+			if dialect.env != "" {
+				dsn := os.Getenv(dialect.env)
+				if dsn == "" {
+					t.Skip(dialect.env + " is not configured")
+				}
+				if dialect.name == common.DatabaseTypeMySQL {
+					driver = mysql.Open(dsn)
+				} else {
+					driver = postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true})
+				}
+			}
+			db, err := gorm.Open(driver, &gorm.Config{})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+			t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+			logDB := db
+			if logDSN := os.Getenv(dialect.logEnv); logDSN != "" || dialect.name == common.DatabaseTypeSQLite {
+				var logDriver gorm.Dialector = sqlite.Open(":memory:")
+				if dialect.name == common.DatabaseTypeMySQL {
+					logDriver = mysql.Open(logDSN)
+				} else if dialect.name == common.DatabaseTypePostgreSQL {
+					logDriver = postgres.New(postgres.Config{DSN: logDSN, PreferSimpleProtocol: true})
+				}
+				logDB, err = gorm.Open(logDriver, &gorm.Config{})
+				require.NoError(t, err)
+				logSQL, err := logDB.DB()
+				require.NoError(t, err)
+				logSQL.SetMaxOpenConns(1)
+				t.Cleanup(func() { require.NoError(t, logSQL.Close()) })
+			}
+			oldDB, oldLogDB := model.DB, model.LOG_DB
+			oldMainType, oldLogType := common.MainDatabaseType(), common.LogDatabaseType()
+			model.DB, model.LOG_DB = db, logDB
+			common.SetDatabaseTypes(dialect.name, dialect.name)
+			t.Cleanup(func() { model.DB, model.LOG_DB = oldDB, oldLogDB; common.SetDatabaseTypes(oldMainType, oldLogType) })
+			require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.Channel{}, &model.Task{}, &model.UserSubscription{}))
+			require.NoError(t, logDB.AutoMigrate(&model.Log{}))
+			versionQuery := "select version()"
+			if dialect.name == common.DatabaseTypeSQLite {
+				versionQuery = "select sqlite_version()"
+			}
+			var version string
+			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+			t.Logf("database: %s", version)
+			runPerSecondTaskSettlementCases(t, db, logDB)
+		})
+	}
+}
+
+func runPerSecondTaskSettlementCases(t *testing.T, db, logDB *gorm.DB) {
+	t.Helper()
+	for _, tc := range []struct {
+		name         string
+		seconds      any
+		failed       bool
+		subscription bool
+		wantQuota    int
+		resolution   string
+		snapshot     bool
+		groupRatio   float64
+		wantPrice    float64
+	}{
+		{name: "refund measured duration", seconds: 5.0, wantQuota: 250000},
+		{name: "charge longer duration", seconds: 20.0, wantQuota: 1000000},
+		{name: "unchanged duration", seconds: 15.0, wantQuota: 750000},
+		{name: "subscription refund", seconds: 5.0, subscription: true, wantQuota: 250000},
+		{name: "zero actual duration", seconds: 0.0, wantQuota: 0},
+		{name: "fractional actual duration", seconds: 2.5, wantQuota: 125000},
+		{name: "missing duration", wantQuota: 750000},
+		{name: "invalid negative duration", seconds: -1.0, wantQuota: 750000},
+		{name: "invalid oversized duration", seconds: 3601.0, wantQuota: 750000},
+		{name: "invalid nonfinite duration", seconds: math.NaN(), wantQuota: 750000},
+		{name: "failed tasks retain normal refund path", seconds: 5.0, failed: true, wantQuota: 0},
+		{name: "actual resolution selects frozen price", seconds: 5.0, resolution: "1080P", snapshot: true, wantPrice: .3, wantQuota: 750000},
+		{name: "missing resolution retains estimated tier", seconds: 5.0, snapshot: true, wantPrice: .1, wantQuota: 250000},
+		{name: "unknown resolution uses frozen base", seconds: 5.0, resolution: "unknown", snapshot: true, wantPrice: .2, wantQuota: 500000},
+		{name: "explicit free tier", seconds: 5.0, resolution: "free", snapshot: true, wantQuota: 0},
+		{name: "frozen group ratio", seconds: 5.0, resolution: "1080p", snapshot: true, groupRatio: .5, wantPrice: .3, wantQuota: 375000},
+		{name: "resolution without actual duration retains reservation", resolution: "1080p", snapshot: true, wantPrice: .1, wantQuota: 750000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(func() {
+				for _, entity := range []any{&model.Task{}, &model.User{}, &model.Token{}, &model.Channel{}, &model.UserSubscription{}} {
+					require.NoError(t, db.Unscoped().Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(entity).Error)
+				}
+				require.NoError(t, logDB.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Log{}).Error)
+			})
+			seedUser(t, 71, 10000000)
+			seedToken(t, 71, 71, "sk-seconds-test", 10000000)
+			seedChannel(t, 71)
+			task := makeTask(71, 71, 750000, 71, BillingSourceWallet, 0)
+			if tc.subscription {
+				seedSubscription(t, 71, 71, 20000000, 750000)
+				task.PrivateData.BillingSource = BillingSourceSubscription
+				task.PrivateData.SubscriptionId = 71
+			}
+			seedChargedAccounting(t, 71, 71, 71, 750000, 1)
+			task.TaskID = "per-second-test"
+			task.Status = model.TaskStatusSuccess
+			if tc.failed {
+				task.Status = model.TaskStatusFailure
+			}
+			task.PrivateData.BillingContext = &model.TaskBillingContext{ModelPrice: .1, GroupRatio: 1, BillingMode: billing_setting.BillingModePerSecond, PerCallBilling: true, OtherRatios: map[string]float64{"seconds": 15}}
+			if tc.snapshot {
+				task.PrivateData.BillingContext.SecondPriceSnapshot = &types.SecondPriceSnapshot{BasePrice: .2, Prices: map[string]float64{"720p": .1, "1080p": .3, "free": 0}, Resolution: "720p"}
+			}
+			if tc.groupRatio != 0 {
+				task.PrivateData.BillingContext.GroupRatio = tc.groupRatio
+			}
+			require.NoError(t, model.DB.Create(task).Error)
+			// Settle the serialized snapshot after a reload, even if live prices changed.
+			require.NoError(t, model.DB.First(task, task.ID).Error)
+			oldOptions := common.OptionMap
+			common.OptionMap = map[string]string{"ModelSecondPrice": `{"test-model":{"prices":{"1080p":99}}}`}
+			t.Cleanup(func() { common.OptionMap = oldOptions })
+			result := &relaycommon.TaskInfo{UsageFacts: map[string]any{"seconds": tc.seconds}, TotalTokens: 99999}
+			if tc.resolution != "" {
+				result.UsageFacts["resolution"] = tc.resolution
+			}
+			settled := settleTaskBillingOnComplete(context.Background(), &mockAdaptor{}, task, result)
+			assert.Equal(t, !tc.failed, settled)
+			if tc.failed {
+				require.True(t, RefundTaskQuota(t.Context(), task, "upstream failed"))
+			}
+			assert.Equal(t, tc.wantQuota, task.Quota)
+			if tc.subscription {
+				assert.Equal(t, 10000000, getUserQuota(t, 71))
+				assert.Equal(t, int64(tc.wantQuota), getSubscriptionUsed(t, 71))
+			} else {
+				assert.Equal(t, 10000000+750000-tc.wantQuota, getUserQuota(t, 71))
+			}
+			assert.Equal(t, 10000000+750000-tc.wantQuota, getTokenRemainQuota(t, 71))
+			var saved model.Task
+			require.NoError(t, model.DB.First(&saved, task.ID).Error)
+			assert.Equal(t, tc.wantQuota, saved.Quota)
+			if tc.snapshot {
+				assert.Equal(t, tc.wantPrice, saved.PrivateData.BillingContext.ModelPrice)
+				require.NotNil(t, saved.PrivateData.BillingContext.SecondPriceSnapshot)
+				assert.Equal(t, .3, saved.PrivateData.BillingContext.SecondPriceSnapshot.Prices["1080p"])
+			}
+			if actual, ok := tc.seconds.(float64); ok && actual >= 0 && actual <= relaycommon.MaxTaskDurationSeconds && !tc.failed {
+				assert.Equal(t, actual, saved.PrivateData.BillingContext.OtherRatios["seconds"])
+			}
+			if tc.wantQuota != 750000 && !tc.failed {
+				log := getLastLog(t)
+				require.NotNil(t, log)
+				var other map[string]any
+				require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+				assert.Equal(t, tc.seconds, other["seconds"])
+				assert.Equal(t, "per_second", other["billing_mode"])
+			}
 		})
 	}
 }
