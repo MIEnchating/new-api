@@ -149,6 +149,14 @@ type RecentRequestStats struct {
 	ThirtyMinutes RequestWindowStats            `json:"30m"`
 	OneHour       RequestWindowStats            `json:"1h"`
 	ByGroup       map[string]RecentRequestStats `json:"by_group,omitempty"`
+	// Samples are internal, bounded timeline data; never expose request IDs.
+	Samples []RequestSample `json:"-"`
+}
+
+type RequestSample struct {
+	Time      int64
+	LatencyMs int
+	Success   bool
 }
 
 type bucketKey struct {

@@ -117,7 +117,7 @@ it('places restrictive CSP before generated scripts and removes embedded pages a
     parsed.querySelector('base, iframe, object, meta[http-equiv="refresh"]')
   ).toBeNull()
   expect(parsed.querySelector('a')?.hasAttribute('href')).toBe(false)
-  expect(parsed.querySelector('script')?.textContent).toBe(
+  expect([...parsed.querySelectorAll('script')].at(-1)?.textContent).toBe(
     'requestAnimationFrame(()=>{})'
   )
   expect(parsed.querySelector('svg')).not.toBeNull()
@@ -1630,7 +1630,7 @@ it.each([
   }
 )
 
-it('loads previews only in view, releases offscreen animations and restores cached results on return', async () => {
+it('loads previews only in view and retains the same paused document when leaving and returning', async () => {
   let intersect: (visible: boolean) => void = () => undefined
   const disconnect = vi.fn()
   vi.stubGlobal(
@@ -1683,24 +1683,40 @@ it('loads previews only in view, releases offscreen animations and restores cach
       screen.queryByTitle('Generated animation preview')
     ).not.toBeInTheDocument()
     act(() => intersect(true))
+    expect(get).not.toHaveBeenCalled()
+    act(() => intersect(false))
+    expect(get).not.toHaveBeenCalled()
+    act(() => intersect(true))
     const frame = await screen.findByTitle('Generated animation preview')
     expect(frame).toHaveAttribute('sandbox', 'allow-scripts')
     expect(frame.getAttribute('srcdoc')).toContain("connect-src 'none'")
+    const sendPlayback = vi.spyOn(
+      (frame as HTMLIFrameElement).contentWindow as Window,
+      'postMessage'
+    )
+    const parse = vi.spyOn(DOMParser.prototype, 'parseFromString')
     act(() => intersect(false))
-    expect(
-      screen.queryByTitle('Generated animation preview')
-    ).not.toBeInTheDocument()
+    expect(screen.getByTitle('Generated animation preview')).toBe(frame)
+    expect(sendPlayback).toHaveBeenLastCalledWith(
+      { type: 'new-api:intelligence-playback', active: false },
+      '*'
+    )
     expect(view.container.firstElementChild).toHaveClass('aspect-[6/5]')
     act(() => intersect(true))
-    expect(
-      await screen.findByTitle('Generated animation preview')
-    ).toBeVisible()
+    expect(await screen.findByTitle('Generated animation preview')).toBe(frame)
+    await waitFor(() =>
+      expect(sendPlayback).toHaveBeenLastCalledWith(
+        { type: 'new-api:intelligence-playback', active: true },
+        '*'
+      )
+    )
     expect(get).toHaveBeenCalledTimes(1)
+    expect(parse).not.toHaveBeenCalled()
     await userEvent.click(
       screen.getByRole('button', { name: 'Enlarge preview' })
     )
     const dialog = await screen.findByRole('dialog')
-    expect(document.querySelectorAll('iframe')).toHaveLength(1)
+    expect(document.querySelectorAll('iframe')).toHaveLength(2)
     expect(
       within(dialog).getByTitle('Generated animation preview')
     ).toBeVisible()
@@ -1712,7 +1728,7 @@ it('loads previews only in view, releases offscreen animations and restores cach
     await waitFor(() =>
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     )
-    expect(document.querySelectorAll('iframe')).toHaveLength(0)
+    expect(document.querySelectorAll('iframe')).toHaveLength(1)
   } finally {
     view.unmount()
     client.clear()
@@ -1721,7 +1737,7 @@ it('loads previews only in view, releases offscreen animations and restores cach
   expect(disconnect).toHaveBeenCalled()
 })
 
-it('releases hidden-page animations and restores the open enlarged preview from cache', async () => {
+it('keeps hidden-page documents mounted and resumes the same enlarged preview', async () => {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -1764,14 +1780,15 @@ it('releases hidden-page animations and restores the open enlarged preview from 
     expect(
       within(dialog).getByTitle('Generated animation preview')
     ).toBeVisible()
+    const enlarged = within(dialog).getByTitle('Generated animation preview')
     act(() => focusManager.setFocused(false))
-    expect(document.querySelectorAll('iframe')).toHaveLength(0)
+    expect(document.querySelectorAll('iframe')).toHaveLength(2)
     expect(dialog).toBeInTheDocument()
     act(() => focusManager.setFocused(true))
     expect(
       await within(dialog).findByTitle('Generated animation preview')
-    ).toBeVisible()
-    expect(document.querySelectorAll('iframe')).toHaveLength(1)
+    ).toBe(enlarged)
+    expect(document.querySelectorAll('iframe')).toHaveLength(2)
     expect(get).toHaveBeenCalledTimes(1)
     await userEvent.keyboard('{Escape}')
     await waitFor(() =>
@@ -1781,7 +1798,7 @@ it('releases hidden-page animations and restores the open enlarged preview from 
       await screen.findByTitle('Generated animation preview')
     ).toBeVisible()
     act(() => focusManager.setFocused(false))
-    expect(document.querySelectorAll('iframe')).toHaveLength(0)
+    expect(document.querySelectorAll('iframe')).toHaveLength(1)
   } finally {
     view.unmount()
     client.clear()

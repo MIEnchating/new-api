@@ -53,12 +53,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { getUptimeStatus } from '@/features/dashboard/api'
+import { getSiteRequestStatus } from '@/features/dashboard/api'
 import type {
   UptimeGroupResult,
   UptimeHeartbeat,
   UptimeMonitor,
 } from '@/features/dashboard/types'
+import { useStatus } from '@/hooks/use-status'
+import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
@@ -98,7 +100,7 @@ const STATUS_META: Record<number, MonitorStatusMeta> = {
     variant: 'danger',
   },
   2: {
-    label: 'Retry',
+    label: 'Degraded performance',
     icon: CircleDashed,
     dotClassName: 'bg-warning',
     textClassName: 'text-status-warning',
@@ -225,7 +227,7 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
   if (heartbeats.length === 0) {
     return (
       <div className='bg-muted/30 text-muted-foreground flex h-12 items-center justify-center rounded-md border border-dashed text-xs'>
-        {t('No heartbeat data')}
+        {t('No requests recorded in the past hour.')}
       </div>
     )
   }
@@ -238,9 +240,9 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
           style={{
             gridTemplateColumns: `repeat(${heartbeats.length}, minmax(0, 1fr))`,
           }}
-          aria-label={t('Heartbeat timeline')}
+          aria-label={t('Request history')}
         >
-          {heartbeats.map((heartbeat) => {
+          {heartbeats.map((heartbeat, index) => {
             const meta = getStatusMeta(heartbeat.status)
             const hasPing =
               typeof heartbeat.ping === 'number' &&
@@ -260,9 +262,7 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
               .join(' · ')
 
             return (
-              <Tooltip
-                key={`${heartbeat.time ?? 'heartbeat'}-${heartbeat.status}-${heartbeat.ping ?? 'na'}-${heartbeat.msg ?? ''}`}
-              >
+              <Tooltip key={`${heartbeat.time ?? 'request'}-${index}`}>
                 <TooltipTrigger
                   render={
                     <span
@@ -374,27 +374,23 @@ const MonitorRow = memo(function MonitorRow(props: {
 
         <div className='mt-4 grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 border-t pt-3 @min-[23rem]:grid-cols-3'>
           <MetricItem
-            label={t('30-minute uptime')}
+            label={t('5-minute success rate')}
+            value={formatOptionalUptime(props.monitor.uptime5m)}
+          />
+          <MetricItem
+            label={t('30-minute success rate')}
             value={formatOptionalUptime(props.monitor.uptime30m)}
           />
           <MetricItem
-            label={t('1-hour uptime')}
+            label={t('1-hour success rate')}
             value={formatOptionalUptime(props.monitor.uptime1h)}
           />
           <MetricItem
-            label={t('24-hour uptime')}
-            value={formatUptime(props.monitor.uptime24 ?? props.monitor.uptime)}
-          />
-          <MetricItem
-            label={t('7-day uptime')}
-            value={formatOptionalUptime(props.monitor.uptime7)}
-          />
-          <MetricItem
-            label={t('Latency')}
+            label={t('5-minute average latency')}
             value={formatPing(props.monitor.ping)}
           />
           <MetricItem
-            label={t('Last check')}
+            label={t('Last request')}
             value={getRelativeTime(props.monitor.lastChecked, t)}
           />
         </div>
@@ -449,20 +445,48 @@ function LoadingState() {
 
 export function SiteStatus() {
   const { t } = useTranslation()
-  const [activeTab, setActiveTab] = useState('intelligence')
+  const { status } = useStatus()
+  const access = parseHeaderNavModulesFromStatus(status).siteStatus
+  const visibleTabs = [
+    {
+      value: 'intelligence',
+      enabled: access.tabs.intelligence,
+      label: t('Intelligence testing'),
+      icon: Brain,
+    },
+    {
+      value: 'site-status',
+      enabled: access.tabs.uptime,
+      label: t('Site status'),
+      icon: Activity,
+    },
+    {
+      value: 'official-status',
+      enabled: access.tabs.official,
+      label: t('Official status'),
+      icon: Radio,
+    },
+  ].filter((tab) => access.enabled && tab.enabled)
+  const [preferredTab, setActiveTab] = useState('intelligence')
+  const activeTab =
+    visibleTabs.find((tab) => tab.value === preferredTab)?.value ??
+    visibleTabs[0]?.value
+
   const officialQuery = useQuery({
     queryKey: ['official-provider-status'],
     queryFn: async () =>
       requireServerSuccess(await getOfficialProviderStatuses()),
-    enabled: activeTab === 'official-status',
+    enabled:
+      access.enabled && access.tabs.official && activeTab === 'official-status',
     staleTime: 60_000,
     retry: false,
     meta: { errorToast: false },
   })
   const { refetch: refetchOfficialStatus } = officialQuery
   const uptimeQuery = useQuery({
-    queryKey: ['site-uptime-status'],
-    queryFn: async () => requireServerSuccess(await getUptimeStatus()),
+    queryKey: ['site-request-status'],
+    enabled: access.enabled && access.tabs.uptime,
+    queryFn: async () => requireServerSuccess(await getSiteRequestStatus()),
     staleTime: 15_000,
     retry: false,
     meta: { errorToast: false },
@@ -551,7 +575,7 @@ export function SiteStatus() {
 
   const handleManualRefresh = useCallback(() => {
     if (activeTab === 'official-status') void refetchOfficialStatus()
-    else void refetchUptime()
+    else if (activeTab === 'site-status') void refetchUptime()
   }, [activeTab, refetchUptime, refetchOfficialStatus])
 
   const handleMonitorSelect = useCallback((key: string) => {
@@ -573,7 +597,7 @@ export function SiteStatus() {
       />
     )
   } else if (!groups.length || monitors.length === 0) {
-    content = <EmptyState title={t('No uptime monitoring configured')} />
+    content = <EmptyState title={t('No requests recorded in the past hour.')} />
   } else {
     content = (
       <Tabs
@@ -654,6 +678,14 @@ export function SiteStatus() {
     )
   }
 
+  if (!access.enabled) {
+    return (
+      <PublicLayout>
+        <EmptyState title={t('The site status page is unavailable.')} />
+      </PublicLayout>
+    )
+  }
+
   let refreshLoading = loading
   let refreshInProgress = uptimeQuery.isFetching && !loading
   let refreshedAt = uptimeQuery.dataUpdatedAt
@@ -685,23 +717,18 @@ export function SiteStatus() {
             >
               <div className='flex shrink-0 flex-col justify-between gap-3 sm:flex-row sm:items-center'>
                 <TabsList className='max-w-full shrink-0 gap-1 overflow-x-auto p-1 group-data-horizontal/tabs:h-auto'>
-                  <TabsTrigger value='intelligence' className='h-9 gap-2 px-3'>
-                    <Brain className='size-4' />
-                    {t('Intelligence testing')}
-                  </TabsTrigger>
-                  <TabsTrigger value='site-status' className='h-9 gap-2 px-3'>
-                    <Activity className='size-4' />
-                    {t('Site status')}
-                  </TabsTrigger>
-                  <TabsTrigger
-                    value='official-status'
-                    className='h-9 gap-2 px-3'
-                  >
-                    <Radio className='size-4' />
-                    {t('Official status')}
-                  </TabsTrigger>
+                  {visibleTabs.map((tab) => (
+                    <TabsTrigger
+                      key={tab.value}
+                      value={tab.value}
+                      className='h-9 gap-2 px-3'
+                    >
+                      <tab.icon className='size-4' />
+                      {tab.label}
+                    </TabsTrigger>
+                  ))}
                 </TabsList>
-                {activeTab !== 'intelligence' && (
+                {activeTab && activeTab !== 'intelligence' && (
                   <RefreshControl
                     key={activeTab}
                     loading={refreshLoading}
@@ -711,62 +738,77 @@ export function SiteStatus() {
                   />
                 )}
               </div>
-              <TabsContent
-                value='site-status'
-                className='flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden'
-              >
-                {!loading && monitors.length > 0 && (failed || degraded) ? (
-                  <Alert className='shrink-0' variant='destructive'>
-                    <AlertTriangle aria-hidden='true' />
-                    <AlertDescription>
-                      {failed
-                        ? t('Refresh failed. Showing the last available data.')
-                        : t('Some monitors could not be loaded.')}
-                    </AlertDescription>
-                  </Alert>
-                ) : null}
-                {loading || monitors.length === 0 ? (
-                  <div
-                    className={cn(
-                      'min-h-0 flex-1',
-                      loading ? 'overflow-clip' : 'overflow-y-auto'
+              {access.enabled && access.tabs.uptime && (
+                <TabsContent
+                  value='site-status'
+                  className='flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden'
+                >
+                  <p className='text-muted-foreground shrink-0 text-xs'>
+                    {t(
+                      'Based on up to 5,000 recent request logs from the past hour. Model tests are excluded. Status uses the last 5 minutes; no recent requests means unknown.'
                     )}
-                  >
-                    {content}
-                  </div>
-                ) : (
-                  content
-                )}
-              </TabsContent>
-              <TabsContent
-                value='official-status'
-                className={cn(
-                  'min-h-0 min-w-0 overscroll-contain overflow-x-hidden pb-2',
-                  officialQuery.isPending ? 'overflow-clip' : 'overflow-y-auto'
-                )}
-              >
-                <OfficialProviderStatuses
-                  response={officialQuery.data ?? null}
-                  loading={officialQuery.isPending}
-                  failed={officialQuery.isError}
-                  onRetry={handleManualRefresh}
-                  compact
-                />
-              </TabsContent>
-              <TabsContent
-                value='intelligence'
-                className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
-              >
-                <Suspense fallback={<PanelLoadingState />}>
-                  <IntelligenceMonitor />
-                </Suspense>
-              </TabsContent>
+                  </p>
+                  {!loading && monitors.length > 0 && (failed || degraded) ? (
+                    <Alert className='shrink-0' variant='destructive'>
+                      <AlertTriangle aria-hidden='true' />
+                      <AlertDescription>
+                        {failed
+                          ? t(
+                              'Refresh failed. Showing the last available data.'
+                            )
+                          : t('Some monitors could not be loaded.')}
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                  {loading || monitors.length === 0 ? (
+                    <div
+                      className={cn(
+                        'min-h-0 flex-1',
+                        loading ? 'overflow-clip' : 'overflow-y-auto'
+                      )}
+                    >
+                      {content}
+                    </div>
+                  ) : (
+                    content
+                  )}
+                </TabsContent>
+              )}
+              {access.enabled && access.tabs.official && (
+                <TabsContent
+                  value='official-status'
+                  className={cn(
+                    'min-h-0 min-w-0 overscroll-contain overflow-x-hidden pb-2',
+                    officialQuery.isPending
+                      ? 'overflow-clip'
+                      : 'overflow-y-auto'
+                  )}
+                >
+                  <OfficialProviderStatuses
+                    response={officialQuery.data ?? null}
+                    loading={officialQuery.isPending}
+                    failed={officialQuery.isError}
+                    onRetry={handleManualRefresh}
+                    compact
+                  />
+                </TabsContent>
+              )}
+              {access.enabled && access.tabs.intelligence && (
+                <TabsContent
+                  value='intelligence'
+                  className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
+                >
+                  <Suspense fallback={<PanelLoadingState />}>
+                    <IntelligenceMonitor />
+                  </Suspense>
+                </TabsContent>
+              )}
             </Tabs>
           </main>
         </div>
       </PublicLayout>
       <MonitorDetailsDrawer
-        open={selectedMonitor !== null}
+        open={access.enabled && access.tabs.uptime && selectedMonitor !== null}
         monitor={selectedMonitor}
         requestStats={getMonitorRequestStats(
           requestStats,

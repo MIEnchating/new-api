@@ -55,6 +55,9 @@ const headerNavSchema = z.object({
   pricingRequireAuth: z.boolean(),
   siteStatusEnabled: z.boolean(),
   siteStatusRequireAuth: z.boolean(),
+  siteStatusIntelligence: z.boolean(),
+  siteStatusUptime: z.boolean(),
+  siteStatusOfficial: z.boolean(),
   rankingsEnabled: z.boolean(),
   rankingsRequireAuth: z.boolean(),
   docs: z.boolean(),
@@ -88,6 +91,9 @@ const toFormValues = (config: HeaderNavModulesConfig): HeaderNavFormValues => ({
     config.siteStatus?.enabled ?? HEADER_NAV_DEFAULT.siteStatus.enabled,
   siteStatusRequireAuth:
     config.siteStatus?.requireAuth ?? HEADER_NAV_DEFAULT.siteStatus.requireAuth,
+  siteStatusIntelligence: config.siteStatus.tabs.intelligence,
+  siteStatusUptime: config.siteStatus.tabs.uptime,
+  siteStatusOfficial: config.siteStatus.tabs.official,
   rankingsEnabled:
     config.rankings?.enabled === undefined
       ? HEADER_NAV_DEFAULT.rankings.enabled
@@ -136,6 +142,11 @@ export function HeaderNavigationSection({
       siteStatus: {
         enabled: values.siteStatusEnabled,
         requireAuth: values.siteStatusRequireAuth,
+        tabs: {
+          intelligence: values.siteStatusIntelligence,
+          uptime: values.siteStatusUptime,
+          official: values.siteStatusOfficial,
+        },
       },
       rankings: {
         ...(config.rankings ?? HEADER_NAV_DEFAULT.rankings),
@@ -233,6 +244,12 @@ export function HeaderNavigationSection({
     },
   ]
 
+  const siteStatusTabs: Array<{ key: HeaderNavBooleanField; title: string }> = [
+    { key: 'siteStatusIntelligence', title: t('Show intelligence testing') },
+    { key: 'siteStatusUptime', title: t('Show site status') },
+    { key: 'siteStatusOfficial', title: t('Show official status') },
+  ]
+
   return (
     <SettingsSection title={t('Header navigation')}>
       <Form {...form}>
@@ -316,6 +333,37 @@ export function HeaderNavigationSection({
                     </SettingsControlChildren>
                   )}
                 />
+                {module.enabledKey === 'siteStatusEnabled' && (
+                  <SettingsControlChildren>
+                    {siteStatusTabs.map((tab) => (
+                      <FormField
+                        key={tab.key}
+                        control={form.control}
+                        name={tab.key}
+                        render={({ field }) => (
+                          <SettingsSwitchItem className='py-2'>
+                            <SettingsSwitchContent>
+                              <FormLabel>{tab.title}</FormLabel>
+                            </SettingsSwitchContent>
+                            <FormControl>
+                              <Switch
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                                disabled={!form.watch('siteStatusEnabled')}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </SettingsSwitchItem>
+                        )}
+                      />
+                    ))}
+                    <p className='text-muted-foreground pb-2 text-sm'>
+                      {t(
+                        'The site status page is hidden when all tabs are disabled.'
+                      )}
+                    </p>
+                  </SettingsControlChildren>
+                )}
               </SettingsControlGroup>
             ))}
           </div>

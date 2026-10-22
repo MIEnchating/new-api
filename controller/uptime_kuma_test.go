@@ -473,3 +473,77 @@ func TestRequestStatsLoaderCachesForUptimeTTL(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), calls.Load())
 }
+
+func TestSiteRequestStatusIgnoresProbesAndKeepsIdleGroupsUnknown(t *testing.T) {
+	settings := console_setting.GetConsoleSetting()
+	previousGroups := settings.UptimeKumaGroups
+	defaultSiteRequestStatsLoader.mu.Lock()
+	previousEntry := defaultSiteRequestStatsLoader.entry
+	defaultSiteRequestStatsLoader.mu.Unlock()
+	t.Cleanup(func() {
+		settings.UptimeKumaGroups = previousGroups
+		defaultSiteRequestStatsLoader.mu.Lock()
+		defaultSiteRequestStatsLoader.entry = previousEntry
+		defaultSiteRequestStatsLoader.mu.Unlock()
+	})
+	var probeCalls atomic.Int32
+	probe := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probeCalls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(probe.Close)
+	encoded, err := common.Marshal([]map[string]string{{"url": probe.URL, "slug": "probe", "categoryName": "Probe"}})
+	require.NoError(t, err)
+	settings.UptimeKumaGroups = string(encoded)
+	for _, tc := range []struct {
+		name   string
+		window perfmetrics.RequestWindowStats
+		status int
+	}{
+		{"success", perfmetrics.RequestWindowStats{RequestCount: 1, SuccessCount: 1, SuccessRate: 100, AvgLatencyMs: 2500, LastRequestAt: 200, HasData: true}, 1},
+		{"failure", perfmetrics.RequestWindowStats{RequestCount: 1, FailureCount: 1, HasData: true}, 0},
+		{"mixed", perfmetrics.RequestWindowStats{RequestCount: 2, SuccessCount: 1, FailureCount: 1, SuccessRate: 50, HasData: true}, 2},
+		{"idle", perfmetrics.RequestWindowStats{}, -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defaultSiteRequestStatsLoader.mu.Lock()
+			defaultSiteRequestStatsLoader.entry = requestStatsCacheEntry{
+				expiresAt: time.Now().Add(time.Hour),
+				stats: perfmetrics.RecentRequestStats{ByGroup: map[string]perfmetrics.RecentRequestStats{
+					"real-group": {
+						FiveMinutes: tc.window,
+						OneHour:     perfmetrics.RequestWindowStats{RequestCount: 2, SuccessCount: 1, FailureCount: 1, SuccessRate: 50, LastRequestAt: 200, HasData: true},
+						Samples:     []perfmetrics.RequestSample{{Time: 200, LatencyMs: 2500, Success: true}, {Time: 100, LatencyMs: 3000}},
+					},
+				}},
+			}
+			defaultSiteRequestStatsLoader.mu.Unlock()
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/api/uptime/status?source=requests", nil)
+			GetUptimeKumaStatus(c)
+			var response struct {
+				Data     []UptimeGroupResult `json:"data"`
+				Degraded bool                `json:"degraded"`
+			}
+			require.Equal(t, http.StatusOK, recorder.Code)
+			require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+			require.Len(t, response.Data, 1)
+			require.Len(t, response.Data[0].Monitors, 1)
+			monitor := response.Data[0].Monitors[0]
+			assert.Equal(t, "real-group", monitor.Name)
+			assert.Equal(t, tc.status, monitor.Status)
+			assert.False(t, response.Degraded)
+			require.Len(t, monitor.Heartbeats, 2)
+			assert.Equal(t, time.Unix(100, 0).UTC().Format(time.RFC3339), monitor.Heartbeats[0].Time)
+			assert.Equal(t, 0, monitor.Heartbeats[0].Status)
+			assert.Equal(t, 1, monitor.Heartbeats[1].Status)
+			assert.Equal(t, 2500, *monitor.Heartbeats[1].Ping)
+			assert.Equal(t, tc.window.HasData, monitor.Uptime5m != nil)
+			assert.Equal(t, tc.window.HasData, monitor.Ping != nil)
+			assert.NotContains(t, recorder.Body.String(), "Samples")
+			assert.NotContains(t, recorder.Body.String(), "request_id")
+		})
+	}
+	assert.Zero(t, probeCalls.Load())
+}

@@ -2,14 +2,88 @@ package model
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+func TestRecentRelayRequestSamplesExcludeProbesAcrossDatabases(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			dbType := common.DatabaseTypeSQLite
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(":memory:")
+			case "mysql":
+				dsn := os.Getenv("TEST_SITE_MYSQL_DSN")
+				if dsn == "" {
+					t.Skip("TEST_SITE_MYSQL_DSN is unset")
+				}
+				driver, dbType = mysql.Open(dsn), common.DatabaseTypeMySQL
+			case "postgres":
+				dsn := os.Getenv("TEST_SITE_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("TEST_SITE_POSTGRES_DSN is unset")
+				}
+				driver, dbType = postgres.Open(dsn), common.DatabaseTypePostgreSQL
+			}
+			db, err := gorm.Open(driver, &gorm.Config{})
+			require.NoError(t, err)
+			connection, err := db.DB()
+			require.NoError(t, err)
+			previousDB, previousType := LOG_DB, common.LogDatabaseType()
+			LOG_DB = db
+			common.SetLogDatabaseType(dbType)
+			initCol()
+			t.Cleanup(func() {
+				LOG_DB = previousDB
+				common.SetLogDatabaseType(previousType)
+				initCol()
+				require.NoError(t, connection.Close())
+			})
+			var version string
+			query := "SELECT version()"
+			if dialect == "sqlite" {
+				query = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(query).Scan(&version).Error)
+			t.Logf("%s: %s", dialect, version)
+			require.NoError(t, db.AutoMigrate(&Log{}))
+			require.NoError(t, db.Where("1 = 1").Delete(&Log{}).Error)
+			const now int64 = 10000
+			rows, err := GetRecentRelayRequestSamples(now)
+			require.NoError(t, err)
+			assert.Empty(t, rows)
+			logs := []Log{
+				{CreatedAt: now - 60, Type: LogTypeConsume, RequestId: "real", Group: "primary", UseTime: 2},
+				{CreatedAt: now - 60, Type: LogTypeError, RequestId: "failed", Group: "primary", UseTime: 4},
+				{CreatedAt: now - 60, Type: LogTypeConsume, RequestId: "probe", TokenName: "Model test", Group: "primary"},
+				{CreatedAt: now - 60, Type: LogTypeConsume, RequestId: "named-token", TokenName: "Model test", TokenId: 1, Group: "backup"},
+				{CreatedAt: now - 60, Type: LogTypeError, RequestId: "retry", Other: `{"user_visible":false}`},
+				{CreatedAt: now - 3601, Type: LogTypeConsume, RequestId: "expired"},
+				{CreatedAt: now + 1, Type: LogTypeConsume, RequestId: "future"},
+				{CreatedAt: now, Type: LogTypeTopup, RequestId: "topup"},
+				{CreatedAt: now, Type: LogTypeConsume},
+			}
+			require.NoError(t, db.Create(&logs).Error)
+			rows, err = GetRecentRelayRequestSamples(now)
+			require.NoError(t, err)
+			assert.Equal(t, []RelayRequestSample{
+				{CreatedAt: now - 60, Type: LogTypeConsume, RequestId: "named-token", Group: "backup"},
+				{CreatedAt: now - 60, Type: LogTypeError, RequestId: "failed", Group: "primary", UseTime: 4},
+				{CreatedAt: now - 60, Type: LogTypeConsume, RequestId: "real", Group: "primary", UseTime: 2},
+			}, rows)
+		})
+	}
+}
 
 func TestGetRecentRelayRequestCountsUsesFinalVisibleRequests(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})

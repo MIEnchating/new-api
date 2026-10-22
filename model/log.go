@@ -101,6 +101,31 @@ type RecentRelayRequestGroupCounts struct {
 
 const recentRelayRequestSampleLimit = 5000
 
+// RelayRequestSample contains only the fields needed for public traffic health.
+// RequestId is used to deduplicate final results and must never be published.
+type RelayRequestSample struct {
+	CreatedAt int64
+	Type      int
+	RequestId string
+	UseTime   int
+	Group     string
+}
+
+func GetRecentRelayRequestSamples(now int64) ([]RelayRequestSample, error) {
+	var samples []RelayRequestSample
+	order := "created_at DESC, id DESC"
+	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
+		order = clickHouseLogOrder("")
+	}
+	err := applyUserVisibleLogFilter(LOG_DB.Model(&Log{}), "other").
+		Select("created_at", "type", "request_id", "use_time", "group").
+		Where("created_at >= ? AND created_at <= ? AND type IN ? AND request_id <> ''", now-3600, now, []int{LogTypeConsume, LogTypeError}).
+		Where("token_id > 0 OR token_name IS NULL OR token_name <> ?", "Model test").
+		Order(order).Limit(recentRelayRequestSampleLimit).
+		Find(&samples).Error
+	return samples, err
+}
+
 func GetRecentRelayRequestCounts(now int64) (RecentRelayRequestCounts, error) {
 	if now <= 0 {
 		now = common.GetTimestamp()

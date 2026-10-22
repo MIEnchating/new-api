@@ -22,17 +22,30 @@ import { readCachedStatus, statusQueryOptions } from '@/lib/status-query'
 
 export type ModuleAccess = { enabled: boolean; requireAuth: boolean }
 
+export type SiteStatusTabs = {
+  intelligence: boolean
+  uptime: boolean
+  official: boolean
+}
+export type SiteStatusAccess = ModuleAccess & { tabs: SiteStatusTabs }
+
+export const DEFAULT_SITE_STATUS_TABS: SiteStatusTabs = {
+  intelligence: true,
+  uptime: true,
+  official: true,
+}
+
 export type HeaderNavModule = 'rankings' | 'pricing' | 'siteStatus'
 
 export type HeaderNavModules = {
   home: boolean
   console: boolean
   pricing: ModuleAccess
-  siteStatus: ModuleAccess
+  siteStatus: SiteStatusAccess
   rankings: ModuleAccess
   docs: boolean
   about: boolean
-  [key: string]: boolean | ModuleAccess
+  [key: string]: boolean | ModuleAccess | SiteStatusAccess
 }
 
 const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
@@ -40,7 +53,11 @@ const DEFAULT_HEADER_NAV_MODULES: HeaderNavModules = {
   console: true,
   pricing: { enabled: true, requireAuth: false },
   rankings: { enabled: true, requireAuth: false },
-  siteStatus: { enabled: true, requireAuth: false },
+  siteStatus: {
+    enabled: true,
+    requireAuth: false,
+    tabs: { ...DEFAULT_SITE_STATUS_TABS },
+  },
   docs: true,
   about: true,
 }
@@ -56,7 +73,10 @@ function cloneHeaderNavDefaults(): HeaderNavModules {
     ...DEFAULT_HEADER_NAV_MODULES,
     pricing: { ...DEFAULT_HEADER_NAV_MODULES.pricing },
     rankings: { ...DEFAULT_HEADER_NAV_MODULES.rankings },
-    siteStatus: { ...DEFAULT_HEADER_NAV_MODULES.siteStatus },
+    siteStatus: {
+      ...DEFAULT_HEADER_NAV_MODULES.siteStatus,
+      tabs: { ...DEFAULT_SITE_STATUS_TABS },
+    },
   }
 }
 
@@ -96,6 +116,24 @@ function parseAccess(raw: unknown, fallback: ModuleAccess): ModuleAccess {
   return { ...fallback }
 }
 
+export function parseSiteStatusAccess(raw: unknown): SiteStatusAccess {
+  const access = parseAccess(raw, { enabled: true, requireAuth: false })
+  const tabs = { ...DEFAULT_SITE_STATUS_TABS }
+  if (
+    raw &&
+    typeof raw === 'object' &&
+    'tabs' in raw &&
+    raw.tabs &&
+    typeof raw.tabs === 'object'
+  ) {
+    const stored = raw.tabs as Record<string, unknown>
+    for (const key of Object.keys(tabs) as Array<keyof SiteStatusTabs>) {
+      tabs[key] = parseHeaderNavBoolean(stored[key], true)
+    }
+  }
+  return { ...access, tabs }
+}
+
 function parseHeaderNavRecord(raw: unknown): Record<string, unknown> | null {
   if (!raw || String(raw).trim() === '') return null
   if (raw && typeof raw === 'object') return raw as Record<string, unknown>
@@ -118,7 +156,11 @@ function parseHeaderNavModules(raw: unknown): HeaderNavModules {
       return
     }
     if (key === 'siteStatus') {
-      result.siteStatus = parseAccess(value, result.siteStatus)
+      const access = parseSiteStatusAccess(value)
+      result.siteStatus = {
+        ...access,
+        enabled: access.enabled && Object.values(access.tabs).some(Boolean),
+      }
       return
     }
     if (key === 'rankings') {

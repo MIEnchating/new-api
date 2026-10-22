@@ -47,6 +47,51 @@ function NavigationSettings() {
 }
 
 describe('site status navigation settings', () => {
+  it('saves individual tabs and preserves their choices while the entire page is hidden', async () => {
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true } })
+    const client = new QueryClient({
+      defaultOptions: { mutations: { retry: false } },
+    })
+    const user = userEvent.setup()
+    render(
+      <QueryClientProvider client={client}>
+        <NavigationSettings />
+      </QueryClientProvider>
+    )
+    const intelligence = screen.getByRole('switch', {
+      name: 'Show intelligence testing',
+    })
+    const uptime = screen.getByRole('switch', { name: 'Show site status' })
+    const official = screen.getByRole('switch', {
+      name: 'Show official status',
+    })
+    await user.click(intelligence)
+    await user.click(official)
+    await user.click(screen.getByRole('switch', { name: 'Site status' }))
+    for (const control of [intelligence, uptime, official]) {
+      expect(control).toHaveAttribute('aria-disabled', 'true')
+    }
+    await user.click(screen.getByRole('button', { name: 'Save navigation' }))
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    const saved = JSON.parse((put.mock.calls[0][1] as { value: string }).value)
+    expect(saved.siteStatus).toEqual({
+      enabled: false,
+      requireAuth: false,
+      tabs: { intelligence: false, uptime: true, official: false },
+    })
+    await user.click(screen.getByRole('switch', { name: 'Site status' }))
+    expect(intelligence).not.toBeChecked()
+    expect(uptime).toBeChecked()
+    expect(official).not.toBeChecked()
+    await user.click(screen.getByRole('button', { name: 'Reset to default' }))
+    for (const control of [intelligence, uptime, official]) {
+      expect(control).toBeChecked()
+    }
+    client.clear()
+  })
+
   it('saving site status visibility and login controls preserves other navigation modules', async () => {
     const put = vi
       .spyOn(api, 'put')
@@ -76,11 +121,33 @@ describe('site status navigation settings', () => {
         key: 'HeaderNavModules',
         value: serializeHeaderNavModules({
           ...parseHeaderNavModules(null),
-          siteStatus: { enabled: false, requireAuth: true },
+          siteStatus: {
+            ...parseHeaderNavModules(null).siteStatus,
+            enabled: false,
+            requireAuth: true,
+          },
         }),
       })
     )
     client.clear()
+  })
+
+  it('stored tab choices survive serialization even when every tab is hidden', () => {
+    const siteStatus = {
+      enabled: true,
+      requireAuth: true,
+      tabs: {
+        intelligence: false,
+        uptime: false,
+        official: false,
+      },
+    }
+    const config = parseHeaderNavModules(JSON.stringify({ siteStatus }))
+    expect(config.siteStatus).toEqual(siteStatus)
+    const runtime = parseHeaderNavModulesFromStatus({
+      HeaderNavModules: serializeHeaderNavModules(config),
+    })
+    expect(runtime.siteStatus).toEqual({ ...siteStatus, enabled: false })
   })
 
   it.each([
@@ -99,7 +166,10 @@ describe('site status navigation settings', () => {
       expect(
         parseHeaderNavModulesFromStatus({ HeaderNavModules: serialized })
           .siteStatus
-      ).toEqual(expected)
+      ).toEqual({
+        ...expected,
+        tabs: { intelligence: true, uptime: true, official: true },
+      })
     }
   )
 })

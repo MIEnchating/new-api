@@ -72,11 +72,13 @@ type requestStatsLoader struct {
 }
 
 var defaultRequestStatsLoader requestStatsLoader
+var defaultSiteRequestStatsLoader requestStatsLoader
 
 type Monitor struct {
 	ID          int         `json:"id"`
 	Name        string      `json:"name"`
 	Uptime      float64     `json:"uptime"`
+	Uptime5m    *float64    `json:"uptime5m,omitempty"`
 	Uptime30m   *float64    `json:"uptime30m,omitempty"`
 	Uptime1h    *float64    `json:"uptime1h,omitempty"`
 	Uptime24    float64     `json:"uptime24"`
@@ -511,6 +513,7 @@ func (loader *requestStatsLoader) currentTime() time.Time {
 
 func cloneRecentRequestStats(stats perfmetrics.RecentRequestStats) perfmetrics.RecentRequestStats {
 	cloned := stats
+	cloned.Samples = append([]perfmetrics.RequestSample(nil), stats.Samples...)
 	if stats.ByGroup != nil {
 		cloned.ByGroup = make(map[string]perfmetrics.RecentRequestStats, len(stats.ByGroup))
 		for group, groupStats := range stats.ByGroup {
@@ -570,6 +573,10 @@ func (loader *requestStatsLoader) load(
 }
 
 func GetUptimeKumaStatus(c *gin.Context) {
+	if c.Query("source") == "requests" {
+		getSiteRequestStatus(c)
+		return
+	}
 	requestStats, statsErr := defaultRequestStatsLoader.load(
 		c.Request.Context(),
 		perfmetrics.QueryRecentRequestStats,
@@ -610,5 +617,51 @@ func GetUptimeKumaStatus(c *gin.Context) {
 		"request_stats":             requestStats,
 		"request_stats_unavailable": statsErr != nil,
 		"degraded":                  snapshot.Degraded,
+	})
+}
+
+func getSiteRequestStatus(c *gin.Context) {
+	stats, err := defaultSiteRequestStatsLoader.load(c.Request.Context(), perfmetrics.QueryRecentRequestStatus)
+	if err != nil {
+		common.SysError("failed to load recent relay request statistics: " + err.Error())
+	}
+	groups := make([]UptimeGroupResult, 0, len(stats.ByGroup))
+	for group, value := range stats.ByGroup {
+		monitor := Monitor{Name: group, Group: group, Status: -1, Uptime: value.OneHour.SuccessRate / 100}
+		if value.FiveMinutes.HasData {
+			monitor.Uptime5m = float64Ptr(value.FiveMinutes.SuccessRate / 100)
+			ping := int(value.FiveMinutes.AvgLatencyMs)
+			monitor.Ping = &ping
+			monitor.Status = 2
+			if value.FiveMinutes.FailureCount == 0 {
+				monitor.Status = 1
+			} else if value.FiveMinutes.SuccessCount == 0 {
+				monitor.Status = 0
+			}
+		}
+		if value.ThirtyMinutes.HasData {
+			monitor.Uptime30m = float64Ptr(value.ThirtyMinutes.SuccessRate / 100)
+		}
+		if value.OneHour.HasData {
+			monitor.Uptime1h = float64Ptr(value.OneHour.SuccessRate / 100)
+			monitor.LastChecked = time.Unix(value.OneHour.LastRequestAt, 0).UTC().Format(time.RFC3339)
+		}
+		for i := len(value.Samples) - 1; i >= 0; i-- {
+			sample := value.Samples[i]
+			status := 0
+			if sample.Success {
+				status = 1
+			}
+			ping := sample.LatencyMs
+			monitor.Heartbeats = append(monitor.Heartbeats, Heartbeat{
+				Status: status, Time: time.Unix(sample.Time, 0).UTC().Format(time.RFC3339), Ping: &ping,
+			})
+		}
+		groups = append(groups, UptimeGroupResult{CategoryName: group, Monitors: []Monitor{monitor}})
+	}
+	sort.Slice(groups, func(i, j int) bool { return groups[i].CategoryName < groups[j].CategoryName })
+	c.JSON(http.StatusOK, gin.H{
+		"success": true, "message": "", "data": groups, "request_stats": stats,
+		"degraded": err != nil, "request_stats_unavailable": err != nil,
 	})
 }

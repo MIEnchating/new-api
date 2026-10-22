@@ -38,7 +38,7 @@ func withHeaderNavModules(t *testing.T, raw string) {
 	})
 }
 
-func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticated bool) *httptest.ResponseRecorder {
+func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticated bool, roles ...int) *httptest.ResponseRecorder {
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
@@ -68,6 +68,9 @@ func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticate
 			Status:      common.UserStatusEnabled,
 			Group:       "default",
 			AuthVersion: 1,
+		}
+		if len(roles) > 0 {
+			user.Role = roles[0]
 		}
 		user.SetAccessToken(accessToken)
 		require.NoError(t, db.Create(&user).Error)
@@ -254,6 +257,7 @@ func TestHeaderNavPublicRouteRejectsExpiredInternalAccessToken(t *testing.T) {
 	}{
 		{"pricing", HeaderNavModuleAuth("pricing")},
 		{"site status", HeaderNavModulePublicOrUserAuth("siteStatus")},
+		{"site status tab", SiteStatusTabAuth("intelligence")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			router := gin.New()
@@ -293,5 +297,52 @@ func TestSiteStatusAccess(t *testing.T) {
 			response := performHeaderNavRequest(t, HeaderNavModulePublicOrUserAuth("siteStatus"), tc.authenticated)
 			assert.Equal(t, tc.want, response.Code)
 		})
+	}
+}
+
+func TestSiteStatusTabVisibility(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		config        string
+		authenticated bool
+		role          int
+		want          int
+	}{
+		{"legacy config stays public", `{"siteStatus":true}`, false, 0, http.StatusOK},
+		{"missing tab stays public", `{"siteStatus":{"tabs":{"official":false}}}`, false, 0, http.StatusOK},
+		{"hidden tab blocks visitors", `{"siteStatus":{"tabs":{"intelligence":false}}}`, false, 0, http.StatusUnauthorized},
+		{"hidden tab blocks ordinary users", `{"siteStatus":{"tabs":{"intelligence":false}}}`, true, common.RoleCommonUser, http.StatusForbidden},
+		{"hidden tab stays manageable", `{"siteStatus":{"tabs":{"intelligence":false}}}`, true, common.RoleAdminUser, http.StatusOK},
+		{"hidden page blocks visitors", `{"siteStatus":false}`, false, 0, http.StatusUnauthorized},
+		{"hidden page blocks ordinary users", `{"siteStatus":false}`, true, common.RoleCommonUser, http.StatusForbidden},
+		{"hidden page stays manageable", `{"siteStatus":false}`, true, common.RoleAdminUser, http.StatusOK},
+		{"visible private tab requires login", `{"siteStatus":{"requireAuth":true}}`, false, 0, http.StatusUnauthorized},
+		{"visible private tab allows users", `{"siteStatus":{"requireAuth":true}}`, true, common.RoleCommonUser, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			withHeaderNavModules(t, tc.config)
+			response := performHeaderNavRequest(t, SiteStatusTabAuth("intelligence"), tc.authenticated, tc.role)
+			assert.Equal(t, tc.want, response.Code)
+		})
+	}
+}
+
+func TestSiteStatusUptimeVisibilityPreservesDashboardProbeFeed(t *testing.T) {
+	withHeaderNavModules(t, `{"siteStatus":{"enabled":true,"tabs":{"uptime":false}}}`)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/uptime/status", SiteStatusTabAuth("uptime"), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{"/api/uptime/status", http.StatusOK},
+		{"/api/uptime/status?source=requests", http.StatusUnauthorized},
+	} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		assert.Equal(t, tc.want, response.Code)
 	}
 }

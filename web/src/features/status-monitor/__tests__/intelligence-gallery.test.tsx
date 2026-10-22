@@ -21,7 +21,14 @@ import {
   QueryClient,
   QueryClientProvider,
 } from '@tanstack/react-query'
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 
@@ -32,6 +39,7 @@ import {
   intelligenceResultsQueryKey,
 } from '../intelligence-api'
 import { IntelligenceMonitor } from '../intelligence-monitor'
+import { buildIntelligenceCards } from '../intelligence-results'
 
 function historyTask(index: number, group = 'standard'): IntelligenceTask {
   return {
@@ -57,7 +65,7 @@ function historyTask(index: number, group = 'standard'): IntelligenceTask {
   }
 }
 
-it('keeps cached cards and filters available when refresh fails, and recovers on retry', async () => {
+it('keeps cached cards and group tabs available when refresh fails, and recovers on retry', async () => {
   const user = userEvent.setup()
   const task = historyTask(1)
   const get = vi.spyOn(api, 'get').mockResolvedValue({
@@ -116,7 +124,15 @@ it('stops automatic history requests while the page is hidden', async () => {
       await vi.advanceTimersByTimeAsync(65000)
     })
     expect(get).toHaveBeenCalledTimes(1)
-    act(() => focusManager.setFocused(true))
+    // Resume with explicitly stale data; interval-only fake timers do not
+    // advance the wall clock used to decide whether focus should refetch.
+    await act(async () => {
+      await client.invalidateQueries({
+        queryKey: intelligenceResultsQueryKey,
+        refetchType: 'none',
+      })
+    })
+    await act(async () => focusManager.setFocused(true))
     await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
   } finally {
     view.unmount()
@@ -126,9 +142,8 @@ it('stops automatic history requests while the page is hidden', async () => {
   }
 })
 
-it('searches every result in a multi-model run and clears search with focus preserved', async () => {
-  const user = userEvent.setup()
-  const channels = Array.from({ length: 25 }, (_, index) => ({
+it('limits each group to 20 cards without search or status controls', async () => {
+  const channels = Array.from({ length: 24 }, (_, index) => ({
     group: 'standard',
     model: `model-${index}`,
     endpoint: 'openai-response',
@@ -154,29 +169,23 @@ it('searches every result in a multi-model run and clears search with focus pres
   )
   try {
     await screen.findByLabelText('Model: model-0')
-    expect(screen.getAllByLabelText(/^Model: /)).toHaveLength(25)
-    expect(screen.getByLabelText('Model: model-24')).toBeVisible()
-    const search = screen.getByRole('searchbox', {
-      name: 'Search test results',
-    })
-    await user.type(search, 'MODEL-24')
-    expect(screen.getAllByLabelText(/^Model: /)).toHaveLength(1)
-    expect(screen.getByLabelText('Model: model-24')).toBeVisible()
-    await user.click(screen.getByRole('button', { name: 'Clear search' }))
-    expect(search).toHaveFocus()
-    expect(screen.getAllByLabelText(/^Model: /)).toHaveLength(25)
-    await user.type(search, 'missing')
-    expect(await screen.findByText('No matching results')).toBeVisible()
-    await user.keyboard('{Escape}')
-    expect(search).toHaveValue('')
-    expect(screen.getAllByLabelText(/^Model: /)).toHaveLength(25)
+    expect(screen.getAllByLabelText(/^Model: /)).toHaveLength(20)
+    expect(screen.queryByLabelText('Model: model-23')).not.toBeInTheDocument()
+    expect(screen.queryByRole('searchbox')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('combobox', { name: 'Status' })
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'standard' })).toHaveTextContent(
+      '20'
+    )
+    expect(screen.getByRole('tab', { name: 'All' })).toHaveTextContent('20')
   } finally {
     view.unmount()
     client.clear()
   }
 })
 
-it('filters by a card group with the keyboard and combines status and question search', async () => {
+it('filters by a card group with the keyboard and returns to all groups', async () => {
   const user = userEvent.setup()
   const pending = {
     ...historyTask(2, 'premium'),
@@ -211,23 +220,121 @@ it('filters by a card group with the keyboard and combines status and question s
     )
     expect(screen.queryByLabelText('Model: model-1')).not.toBeInTheDocument()
     expect(screen.getAllByLabelText(/^Model: /)).toHaveLength(2)
-    await user.click(screen.getByRole('combobox', { name: 'Status' }))
-    await user.click(screen.getByRole('option', { name: 'Pending' }))
     expect(screen.getByLabelText('Model: model-2')).toBeVisible()
-    expect(screen.queryByLabelText('Model: model-3')).not.toBeInTheDocument()
-    await user.click(screen.getByRole('combobox', { name: 'Status' }))
-    await user.click(screen.getByRole('option', { name: 'All statuses' }))
-    await user.type(
-      screen.getByRole('searchbox', { name: 'Search test results' }),
-      'pelican'
-    )
     const card = screen
       .getByLabelText('Model: model-3')
       .closest('[data-slot=card]') as HTMLElement
     expect(within(card).getByText('Pelican')).toBeVisible()
-    expect(screen.queryByLabelText('Model: model-2')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: 'All' }))
+    expect(screen.getAllByLabelText(/^Model: /)).toHaveLength(3)
   } finally {
     view.unmount()
     client.clear()
+  }
+})
+
+it('caps groups independently after expanding multi-model runs, retaining newest results', () => {
+  const history = Array.from({ length: 12 }, (_, index) => {
+    const channels = ['standard', 'premium'].flatMap((group) =>
+      ['a', 'b'].map((model, channel_id) => ({
+        group,
+        model,
+        channel_id,
+        endpoint: 'openai-response',
+        question_index: 0,
+        question_name: 'Pelican',
+        latency_ms: 100,
+        error: '',
+      }))
+    )
+    return { ...historyTask(index), groups: channels, result: { channels } }
+  })
+  const result = buildIntelligenceCards(history)
+  expect(result.cards).toHaveLength(40)
+  expect([...result.groupCounts]).toEqual([
+    ['standard', 20],
+    ['premium', 20],
+  ])
+  expect(result.cards.some((card) => card.task.task_id === 'gallery-9')).toBe(
+    true
+  )
+  expect(result.cards.some((card) => card.task.task_id === 'gallery-10')).toBe(
+    false
+  )
+})
+
+it('defers new preview requests during scrolling and preserves an already visible document', async () => {
+  let intersect: (visible: boolean) => void = () => undefined
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      constructor(callback: IntersectionObserverCallback) {
+        intersect = (visible) =>
+          callback(
+            [{ isIntersecting: visible } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver
+          )
+      }
+      observe() {}
+      disconnect() {}
+    }
+  )
+  const task = historyTask(0)
+  task.result = {
+    channels: [
+      {
+        channel_id: 0,
+        question_index: 0,
+        question_name: 'Pelican',
+        latency_ms: 100,
+        error: '',
+        html: '<html><body>Preview</body></html>',
+      },
+    ],
+  }
+  const get = vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+    data: {
+      success: true,
+      data: url.endsWith('/gallery-0') ? task : { history: [task] },
+    },
+  }))
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligenceMonitor />
+    </QueryClientProvider>
+  )
+  try {
+    await screen.findByLabelText('Model: model-0')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const panel = screen.getByRole('tabpanel')
+    fireEvent.scroll(panel)
+    act(() => intersect(true))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(160)
+    })
+    expect(get.mock.calls.map(([url]) => url)).toEqual([
+      '/api/status-monitor/intelligence/results',
+    ])
+    expect(
+      screen.queryByTitle('Generated animation preview')
+    ).not.toBeInTheDocument()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20)
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1)
+    })
+    vi.useRealTimers()
+    const frame = await screen.findByTitle('Generated animation preview')
+    fireEvent.scroll(panel)
+    expect(screen.getByTitle('Generated animation preview')).toBe(frame)
+  } finally {
+    view.unmount()
+    client.clear()
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
   }
 })

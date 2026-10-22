@@ -12,6 +12,7 @@ import (
 type headerNavAccess struct {
 	Enabled     bool
 	RequireAuth bool
+	Tabs        map[string]bool
 }
 
 func getHeaderNavAccess(module string) headerNavAccess {
@@ -60,6 +61,12 @@ func parseHeaderNavAccess(raw any, fallback headerNavAccess) headerNavAccess {
 		}
 		if requireAuth, ok := value["requireAuth"]; ok {
 			access.RequireAuth = parseHeaderNavBool(requireAuth, fallback.RequireAuth)
+		}
+		if tabs, ok := value["tabs"].(map[string]any); ok {
+			access.Tabs = make(map[string]bool, 3)
+			for _, key := range []string{"intelligence", "uptime", "official"} {
+				access.Tabs[key] = parseHeaderNavBool(tabs[key], true)
+			}
 		}
 		return access
 	default:
@@ -135,6 +142,32 @@ func HeaderNavModulePublicOrUserAuth(module string) gin.HandlerFunc {
 			return
 		}
 
+		TryUserAuth()(c)
+	}
+}
+
+// SiteStatusTabAuth applies public-page visibility to each data endpoint.
+// Hidden sections remain readable by administrators in the management console.
+// The dashboard's legacy probe feed keeps its existing access policy.
+func SiteStatusTabAuth(tab string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if tab == "uptime" && c.Query("source") != "requests" {
+			HeaderNavModulePublicOrUserAuth("siteStatus")(c)
+			return
+		}
+		access := getHeaderNavAccess("siteStatus")
+		visible := true
+		if enabled, ok := access.Tabs[tab]; ok {
+			visible = enabled
+		}
+		if !access.Enabled || !visible {
+			AdminAuth()(c)
+			return
+		}
+		if access.RequireAuth {
+			UserAuth()(c)
+			return
+		}
 		TryUserAuth()(c)
 	}
 }

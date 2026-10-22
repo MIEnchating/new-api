@@ -92,3 +92,11 @@ export function getUptimeStatus() {
     .get<UptimeStatusResponse>('/api/uptime/status')
     .then((res) => res.data)
 }
+
+export function getSiteRequestStatus() {
+  return api
+    .get<UptimeStatusResponse>('/api/uptime/status', {
+      params: { source: 'requests' },
+    })
+    .then((res) => res.data)
+}

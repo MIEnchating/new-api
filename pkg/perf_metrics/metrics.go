@@ -786,6 +786,63 @@ func QueryRecentRequestStats() (RecentRequestStats, error) {
 	return stats, nil
 }
 
+// QueryRecentRequestStatus uses final request logs, including existing history,
+// independently of performance sampling and external uptime monitors.
+func QueryRecentRequestStatus() (RecentRequestStats, error) {
+	now := perfMetricsNow().Unix()
+	rows, err := model.GetRecentRelayRequestSamples(now)
+	if err != nil {
+		return RecentRequestStats{}, err
+	}
+	return buildRecentRequestStatus(rows, now), nil
+}
+
+func buildRecentRequestStatus(rows []model.RelayRequestSample, now int64) RecentRequestStats {
+	stats := RecentRequestStats{ByGroup: make(map[string]RecentRequestStats)}
+	seen := make(map[string]struct{}, len(rows))
+	// Rows are newest first. Keep the final log for each request, so retries
+	// and duplicate log records never inflate the rate or the timeline.
+	for _, row := range rows {
+		if _, exists := seen[row.RequestId]; exists {
+			continue
+		}
+		seen[row.RequestId] = struct{}{}
+		group := row.Group
+		if group == "" {
+			group = "default"
+		}
+		groupStats := stats.ByGroup[group]
+		for _, target := range []*RecentRequestStats{&stats, &groupStats} {
+			for _, window := range []struct {
+				seconds int64
+				stats   *RequestWindowStats
+			}{{300, &target.FiveMinutes}, {1800, &target.ThirtyMinutes}, {3600, &target.OneHour}} {
+				if row.CreatedAt < now-window.seconds {
+					continue
+				}
+				value := window.stats
+				value.RequestCount++
+				if row.Type == model.LogTypeConsume {
+					value.SuccessCount++
+				} else {
+					value.FailureCount++
+				}
+				value.AvgLatencyMs += (float64(max(row.UseTime, 0))*1000 - value.AvgLatencyMs) / float64(value.RequestCount)
+				value.LastRequestAt = max(value.LastRequestAt, row.CreatedAt)
+				value.HasData = true
+				value.SuccessRate = float64(value.SuccessCount) / float64(value.RequestCount) * 100
+			}
+		}
+		if len(groupStats.Samples) < 288 {
+			groupStats.Samples = append(groupStats.Samples, RequestSample{
+				Time: row.CreatedAt, LatencyMs: max(row.UseTime, 0) * 1000, Success: row.Type == model.LogTypeConsume,
+			})
+		}
+		stats.ByGroup[group] = groupStats
+	}
+	return stats
+}
+
 func buildRequestWindowStats(requests int64, successes int64, avgUseTimeSeconds float64, lastRequestAt int64) RequestWindowStats {
 	result := RequestWindowStats{
 		RequestCount:  requests,

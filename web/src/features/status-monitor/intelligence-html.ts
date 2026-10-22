@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { installIntelligencePlayback } from './intelligence-playback'
+
 export function inspectIntelligenceHtml(source: string) {
   const document = new DOMParser().parseFromString(source, 'text/html')
   const externalAttributes = [
@@ -71,6 +73,8 @@ export function intelligencePreviewDocument(source: string): string {
   policy.httpEquiv = 'Content-Security-Policy'
   policy.content =
     "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
-  document.head.prepend(policy)
+  const playback = document.createElement('script')
+  playback.textContent = `(${installIntelligencePlayback.toString()})()`
+  document.head.prepend(policy, playback)
   return `<!DOCTYPE html>\n${document.documentElement.outerHTML}`
 }

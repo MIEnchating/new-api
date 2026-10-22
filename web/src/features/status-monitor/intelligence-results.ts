@@ -98,8 +98,13 @@ export function buildIntelligenceCards(history: IntelligenceTask[]): {
       })
     }
   }
-  for (const card of cards) {
-    groupCounts.set(card.group, (groupCounts.get(card.group) ?? 0) + 1)
-  }
-  return { cards, groupCounts }
+  // History is newest first. A run may expand into several model/question
+  // results, so the API's 20-run limit is not a per-group card limit.
+  const latestCards = cards.filter((card) => {
+    const count = groupCounts.get(card.group) ?? 0
+    if (count >= 20) return false
+    groupCounts.set(card.group, count + 1)
+    return true
+  })
+  return { cards: latestCards, groupCounts }
 }

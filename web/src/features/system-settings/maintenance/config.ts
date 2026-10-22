@@ -16,6 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import {
+  DEFAULT_SITE_STATUS_TABS,
+  parseSiteStatusAccess,
+  type SiteStatusAccess,
+} from '@/lib/nav-modules'
+
 type HeaderNavAccessConfig = {
   enabled: boolean
   requireAuth: boolean
@@ -25,11 +31,11 @@ export type HeaderNavModulesConfig = {
   home: boolean
   console: boolean
   pricing: HeaderNavAccessConfig
-  siteStatus: HeaderNavAccessConfig
+  siteStatus: SiteStatusAccess
   rankings: HeaderNavAccessConfig
   docs: boolean
   about: boolean
-  [key: string]: boolean | HeaderNavAccessConfig
+  [key: string]: boolean | HeaderNavAccessConfig | SiteStatusAccess
 }
 
 type SidebarSectionConfig = {
@@ -50,7 +56,11 @@ export const HEADER_NAV_DEFAULT: HeaderNavModulesConfig = {
     enabled: true,
     requireAuth: false,
   },
-  siteStatus: { enabled: true, requireAuth: false },
+  siteStatus: {
+    enabled: true,
+    requireAuth: false,
+    tabs: { ...DEFAULT_SITE_STATUS_TABS },
+  },
   docs: true,
   about: true,
 }
@@ -106,7 +116,10 @@ const cloneHeaderNavDefault = (): HeaderNavModulesConfig => ({
   ...HEADER_NAV_DEFAULT,
   pricing: { ...HEADER_NAV_DEFAULT.pricing },
   rankings: { ...HEADER_NAV_DEFAULT.rankings },
-  siteStatus: { ...HEADER_NAV_DEFAULT.siteStatus },
+  siteStatus: {
+    ...HEADER_NAV_DEFAULT.siteStatus,
+    tabs: { ...DEFAULT_SITE_STATUS_TABS },
+  },
 })
 
 const parseAccessModule = (
@@ -164,7 +177,7 @@ export function parseHeaderNavModules(
         return
       }
       if (key === 'siteStatus') {
-        result.siteStatus = parseAccessModule(raw, base.siteStatus)
+        result.siteStatus = parseSiteStatusAccess(raw)
         return
       }
       if (key === 'rankings') {

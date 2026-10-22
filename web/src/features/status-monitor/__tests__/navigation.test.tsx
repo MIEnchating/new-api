@@ -25,6 +25,7 @@ import {
   RouterProvider,
 } from '@tanstack/react-router'
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -46,7 +47,11 @@ import { SiteStatus } from '../site-status'
 import { defaultHealthThresholds, type CacheMetricsResponse } from '../types'
 
 async function renderSiteStatus(
-  access = { enabled: true, requireAuth: false },
+  access: {
+    enabled: boolean
+    requireAuth: boolean
+    tabs?: Partial<Record<'intelligence' | 'uptime' | 'official', boolean>>
+  } = { enabled: true, requireAuth: false },
   initialTab: 'site-status' | 'intelligence' = 'site-status'
 ) {
   const client = new QueryClient({
@@ -92,10 +97,175 @@ async function renderSiteStatus(
     const tab = screen.queryByRole('tab', { name: 'Site status' })
     if (tab) fireEvent.click(tab)
   }
-  return { ...view, router }
+  return { ...view, router, client }
 }
 
 describe('status page separation', () => {
+  it.each([
+    ['uptime', 'Site status', '/api/uptime/status'],
+    ['official', 'Official status', '/api/status-monitor/providers'],
+    [
+      'intelligence',
+      'Intelligence testing',
+      '/api/status-monitor/intelligence/results',
+    ],
+  ] as const)(
+    'only the enabled %s tab is displayed and fetches data',
+    async (tab, label, endpoint) => {
+      const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
+        let data: unknown = { history: [], providers: [] }
+        if (url === '/api/notice') data = ''
+        if (url === '/api/uptime/status') data = []
+        return { data: { success: true, data } }
+      })
+      await renderSiteStatus(
+        {
+          enabled: true,
+          requireAuth: false,
+          tabs: {
+            intelligence: false,
+            uptime: false,
+            official: false,
+            [tab]: true,
+          },
+        },
+        'intelligence'
+      )
+      expect(screen.getByRole('tab', { name: label })).toHaveAttribute(
+        'aria-selected',
+        'true'
+      )
+      for (const other of [
+        'Site status',
+        'Official status',
+        'Intelligence testing',
+      ].filter((value) => value !== label)) {
+        expect(
+          screen.queryByRole('tab', { name: other })
+        ).not.toBeInTheDocument()
+      }
+      await waitFor(() =>
+        expect(get.mock.calls.some(([url]) => url === endpoint)).toBe(true)
+      )
+      expect(
+        get.mock.calls
+          .map(([url]) => url)
+          .filter(
+            (url) =>
+              url.startsWith('/api/status-monitor/') ||
+              url === '/api/uptime/status'
+          )
+      ).toEqual([endpoint])
+    }
+  )
+
+  it('disabling every tab removes access to the page and fetches no monitor data', async () => {
+    const get = vi
+      .spyOn(api, 'get')
+      .mockResolvedValue({ data: { success: true, data: '' } })
+    const rendered = await renderSiteStatus({
+      enabled: true,
+      requireAuth: false,
+      tabs: { intelligence: false, uptime: false, official: false },
+    })
+    expect(rendered.router.state.location.pathname).toBe('/')
+    expect(
+      get.mock.calls.some(
+        ([url]) =>
+          url.startsWith('/api/status-monitor/') || url === '/api/uptime/status'
+      )
+    ).toBe(false)
+  })
+
+  it('hiding the selected tab switches to the first visible tab; hiding the page removes its content', async () => {
+    vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+      data: { success: true, data: url === '/api/notice' ? '' : [] },
+    }))
+    const rendered = await renderSiteStatus()
+    expect(screen.getByRole('tab', { name: 'Site status' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    act(() => {
+      rendered.client.setQueryData(['status'], {
+        HeaderNavModules: {
+          siteStatus: {
+            enabled: true,
+            requireAuth: false,
+            tabs: { intelligence: true, uptime: false, official: false },
+          },
+        },
+      })
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByRole('tab', { name: 'Intelligence testing' })
+      ).toHaveAttribute('aria-selected', 'true')
+    )
+    expect(
+      screen.queryByRole('tab', { name: 'Site status' })
+    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    act(() => {
+      rendered.client.setQueryData(['status'], {
+        HeaderNavModules: { siteStatus: false },
+      })
+    })
+    await waitFor(() =>
+      expect(screen.queryByRole('tab')).not.toBeInTheDocument()
+    )
+    expect(
+      screen.getByText('The site status page is unavailable.')
+    ).toBeVisible()
+  })
+
+  it('site status requests real traffic and shows success rates instead of probe uptime', async () => {
+    const get = vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+      data: {
+        success: true,
+        data:
+          url === '/api/notice'
+            ? ''
+            : [
+                {
+                  categoryName: 'requests',
+                  monitors: [
+                    {
+                      name: 'default',
+                      group: 'default',
+                      status: 2,
+                      uptime: 0.8,
+                      uptime5m: 0.5,
+                      uptime30m: 0.75,
+                      uptime1h: 0.8,
+                      ping: 1500,
+                      lastChecked: '2026-10-22T00:00:00Z',
+                      heartbeats: [
+                        { time: '2026-10-22T00:00:00Z', status: 1, ping: 1000 },
+                        { time: '2026-10-22T00:00:00Z', status: 0, ping: 1000 },
+                      ],
+                    },
+                  ],
+                },
+              ],
+      },
+    }))
+    await renderSiteStatus()
+    const card = await screen.findByRole('article')
+    expect(get).toHaveBeenCalledWith('/api/uptime/status', {
+      params: { source: 'requests' },
+    })
+    expect(within(card).getByText('5-minute success rate')).toBeVisible()
+    expect(within(card).getByText('50.00%')).toBeVisible()
+    expect(within(card).getByText('30-minute success rate')).toBeVisible()
+    expect(within(card).getByText('75.00%')).toBeVisible()
+    expect(within(card).getByText('1-hour success rate')).toBeVisible()
+    expect(within(card).getByText('80.00%')).toBeVisible()
+    expect(within(card).getByText('Degraded performance')).toBeVisible()
+    expect(within(card).queryByText('24-hour uptime')).not.toBeInTheDocument()
+    expect(within(card).getByLabelText('Request history')).toBeVisible()
+  })
+
   beforeEach(() => {
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
     useAuthStore.getState().auth.reset()
@@ -135,7 +305,9 @@ describe('status page separation', () => {
       main.querySelector('[data-slot="site-status-skeleton"]')
     ).not.toBeInTheDocument()
     await waitFor(() =>
-      expect(screen.getByText('No uptime monitoring configured')).toBeVisible()
+      expect(
+        screen.getByText('No requests recorded in the past hour.')
+      ).toBeVisible()
     )
   })
 
@@ -198,7 +370,9 @@ describe('status page separation', () => {
 
     expect(screen.getByRole('main', { name: 'Site status' })).toBeVisible()
     await waitFor(() =>
-      expect(screen.getByText('No uptime monitoring configured')).toBeVisible()
+      expect(
+        screen.getByText('No requests recorded in the past hour.')
+      ).toBeVisible()
     )
     expect(
       screen.queryByRole('tab', { name: 'Cache analytics' })
@@ -331,7 +505,9 @@ describe('status page separation', () => {
     ).not.toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: 'Site status' }))
     await waitFor(() =>
-      expect(screen.getByText('No uptime monitoring configured')).toBeVisible()
+      expect(
+        screen.getByText('No requests recorded in the past hour.')
+      ).toBeVisible()
     )
   })
 
@@ -357,7 +533,9 @@ describe('status page separation', () => {
     )
     await user.click(screen.getByRole('tab', { name: 'Site status' }))
     await waitFor(() =>
-      expect(screen.getByText('No uptime monitoring configured')).toBeVisible()
+      expect(
+        screen.getByText('No requests recorded in the past hour.')
+      ).toBeVisible()
     )
   })
 
@@ -572,7 +750,7 @@ describe('status page separation', () => {
       await screen.findByText('Failed to load status monitoring data')
     ).toBeVisible()
     expect(
-      screen.queryByText('No uptime monitoring configured')
+      screen.queryByText('No requests recorded in the past hour.')
     ).not.toBeInTheDocument()
   })
 
@@ -642,7 +820,9 @@ describe('status page separation', () => {
     get.mockResolvedValue({ data: { success: true, data: [] } })
     await user.click(screen.getByRole('button', { name: /Refresh/ }))
     await waitFor(() =>
-      expect(screen.getByText('No uptime monitoring configured')).toBeVisible()
+      expect(
+        screen.getByText('No requests recorded in the past hour.')
+      ).toBeVisible()
     )
   })
 })

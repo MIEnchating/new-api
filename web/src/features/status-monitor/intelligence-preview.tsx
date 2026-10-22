@@ -19,12 +19,16 @@ For commercial licensing, please contact support@quantumnous.com
 import { focusManager, useQuery } from '@tanstack/react-query'
 import { Maximize2 } from 'lucide-react'
 import {
+  createContext,
   memo,
+  useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -43,6 +47,19 @@ import {
 } from './intelligence-api'
 import { intelligencePreviewDocument } from './intelligence-html'
 
+const IntelligencePreviewScrollingContext = createContext(false)
+
+export function IntelligencePreviewScrollProvider(props: {
+  scrolling: boolean
+  children: ReactNode
+}) {
+  return (
+    <IntelligencePreviewScrollingContext.Provider value={props.scrolling}>
+      {props.children}
+    </IntelligencePreviewScrollingContext.Provider>
+  )
+}
+
 type IntelligencePreviewProps = {
   taskId: string
   channelId: number
@@ -59,25 +76,39 @@ export const IntelligencePreview = memo(function IntelligencePreview(
   const [visible, setVisible] = useState(
     () => typeof IntersectionObserver === 'undefined'
   )
+  const [visited, setVisited] = useState(visible)
   const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
     const element = viewport.current
     if (!element || typeof IntersectionObserver === 'undefined') return
-    // Unmount offscreen documents, including their scripts and query observers.
-    // CSS visibility and iframe lazy loading do not stop an already loaded page.
+    let enterTimer: ReturnType<typeof setTimeout>
+    // Ignore cards crossed during a fast scroll. Once visited, keep the
+    // document mounted and pause its playback when it leaves the viewport.
     const observer = new IntersectionObserver(([entry]) => {
-      setVisible(entry.isIntersecting)
+      clearTimeout(enterTimer)
+      if (!entry.isIntersecting) {
+        setVisible(false)
+        return
+      }
+      enterTimer = setTimeout(() => {
+        setVisible(true)
+        setVisited(true)
+      }, 150)
     })
     observer.observe(element)
-    return () => observer.disconnect()
+    return () => {
+      clearTimeout(enterTimer)
+      observer.disconnect()
+    }
   }, [])
 
   return (
     <div ref={viewport} className='bg-muted relative aspect-[6/5] border-t'>
-      {(visible || expanded) && (
+      {(visited || expanded) && (
         <IntelligencePreviewContent
           {...props}
+          visible={visible}
           expanded={expanded}
           onExpandedChange={setExpanded}
         />
@@ -88,11 +119,13 @@ export const IntelligencePreview = memo(function IntelligencePreview(
 
 function IntelligencePreviewContent(
   props: IntelligencePreviewProps & {
+    visible: boolean
     expanded: boolean
     onExpandedChange: (expanded: boolean) => void
   }
 ) {
   const { t } = useTranslation()
+  const scrolling = useContext(IntelligencePreviewScrollingContext)
   const dialogTitle = useRef<HTMLSpanElement>(null)
   // React Query shares one visibility listener across all preview cards.
   const pageVisible = useSyncExternalStore(
@@ -103,7 +136,7 @@ function IntelligencePreviewContent(
   const query = useQuery({
     queryKey: ['status-monitor', 'intelligence-result', props.taskId],
     queryFn: () => getIntelligenceResult(props.taskId),
-    enabled: pageVisible,
+    enabled: pageVisible && (props.expanded || (props.visible && !scrolling)),
     staleTime: (query) =>
       findIntelligencePreview(query.state.data, props)?.html ||
       query.state.data?.status === 'succeeded' ||
@@ -111,6 +144,7 @@ function IntelligencePreviewContent(
         ? Infinity
         : 0,
     refetchInterval: (query) =>
+      (props.expanded || (props.visible && !scrolling)) &&
       !findIntelligencePreview(query.state.data, props)?.html &&
       (query.state.data?.status === 'running' ||
         query.state.data?.status === 'pending')
@@ -143,9 +177,10 @@ function IntelligencePreviewContent(
   return (
     <div className='relative'>
       <div className='pointer-events-none aspect-[6/5]' inert>
-        {pageVisible && !props.expanded && (
-          <IntelligenceAnimation document={previewDocument} />
-        )}
+        <IntelligenceAnimation
+          document={previewDocument}
+          active={pageVisible && props.visible && !props.expanded && !scrolling}
+        />
       </div>
       <Dialog
         open={props.expanded}
@@ -173,9 +208,10 @@ function IntelligencePreviewContent(
       >
         {props.expanded && (
           <div className='w-full max-w-[min(960px,84vh)]'>
-            {pageVisible && (
-              <IntelligenceAnimation document={previewDocument} />
-            )}
+            <IntelligenceAnimation
+              document={previewDocument}
+              active={pageVisible}
+            />
           </div>
         )}
       </Dialog>
@@ -196,39 +232,56 @@ function findIntelligencePreview(
   )
 }
 
-function IntelligenceAnimation(props: { document: string }) {
+function IntelligenceAnimation(props: { document: string; active: boolean }) {
   const { t } = useTranslation()
   const viewport = useRef<HTMLDivElement>(null)
-  const [scale, setScale] = useState(1)
+  const frame = useRef<HTMLIFrameElement>(null)
+  const [scale, setScale] = useState(0)
+  const [mounted, setMounted] = useState(props.active)
+  useEffect(() => {
+    if (props.active) setMounted(true)
+  }, [props.active])
+  const updatePlayback = useCallback(() => {
+    // Opaque-origin sandboxed frames require '*'. Send only playback state;
+    // the injected receiver accepts commands exclusively from its parent.
+    frame.current?.contentWindow?.postMessage(
+      { type: 'new-api:intelligence-playback', active: props.active },
+      '*'
+    )
+  }, [props.active])
+  useEffect(updatePlayback, [updatePlayback])
   useEffect(() => {
     const element = viewport.current
     if (!element) return
     // Keep the generated page at a consistent desktop viewport, then fit the
     // whole scene into the card instead of cropping a full-width document.
-    setScale(element.getBoundingClientRect().width / 960)
     const observer = new ResizeObserver(([entry]) => {
       setScale(entry.contentRect.width / 960)
     })
     observer.observe(element)
     return () => observer.disconnect()
-  }, [props.document])
+  }, [])
 
   return (
     <div
       ref={viewport}
       data-preview-viewport
-      className='bg-muted relative aspect-[6/5] overflow-hidden'
+      className='bg-muted relative aspect-[6/5] overflow-hidden [contain:layout_paint]'
     >
       <WebPreview
         className='absolute top-0 left-0 h-[800px] w-[960px] origin-top-left rounded-none border-0'
         style={{ transform: `scale(${scale})` }}
       >
-        <WebPreviewBody
-          srcDoc={props.document}
-          sandbox='allow-scripts'
-          referrerPolicy='no-referrer'
-          title={t('Generated animation preview')}
-        />
+        {mounted && (
+          <WebPreviewBody
+            ref={frame}
+            onLoad={updatePlayback}
+            srcDoc={props.document}
+            sandbox='allow-scripts'
+            referrerPolicy='no-referrer'
+            title={t('Generated animation preview')}
+          />
+        )}
       </WebPreview>
     </div>
   )

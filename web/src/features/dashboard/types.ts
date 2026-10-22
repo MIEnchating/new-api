@@ -181,6 +181,7 @@ export interface UptimeMonitor {
   id?: number
   name: string
   uptime: number
+  uptime5m?: number
   uptime30m?: number
   uptime1h?: number
   uptime24?: number
