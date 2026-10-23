@@ -670,7 +670,6 @@ function buildSettingJSON(formData: ChannelFormValues): string {
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,
     proxy: formData.proxy?.trim() || '',
-    // Legacy advanced custom channels keep their channel-wide setting until disabled.
     pass_through_body_enabled: formData.pass_through_body_enabled === true,
     responses_websocket_enabled:
       supportsResponsesWebSocket(formData.type) &&

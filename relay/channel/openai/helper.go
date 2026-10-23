@@ -261,10 +261,3 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 		}
 	}
 }
-
-func sendResponsesStreamData(c *gin.Context, streamResponse dto.ResponsesStreamResponse, data string) error {
-	if data == "" {
-		return nil
-	}
-	return helper.ResponseChunkData(c, streamResponse, data)
-}

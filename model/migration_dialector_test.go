@@ -116,7 +116,7 @@ func TestMigrationSchemaStability(t *testing.T) {
 					ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 					defer cancel()
 					db := db.WithContext(ctx)
-					t.Cleanup(func() {
+					cleanupOptions := func() {
 						tables, err := db.WithContext(context.Background()).Migrator().GetTables()
 						require.NoError(t, err)
 						for _, table := range tables {
@@ -124,7 +124,11 @@ func TestMigrationSchemaStability(t *testing.T) {
 								require.NoError(t, db.WithContext(context.Background()).Migrator().DropTable(table))
 							}
 						}
-					})
+					}
+					t.Cleanup(cleanupOptions)
+					// Shared test databases can retain options from earlier startup tests.
+					// Every scenario must begin with its own schema and rows.
+					cleanupOptions()
 					rows := []Option{{Key: "ModelPrice", Value: `{"custom-model":0.125}`}, {Key: "GroupRatio", Value: `{"custom-group":0.75}`}}
 					switch scenario {
 					case "released":

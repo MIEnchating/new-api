@@ -110,7 +110,7 @@ function PriceField({
 }
 
 type TierPriceFieldsProps = {
-  imageCountMultiplier?: boolean
+  imageCount?: boolean
   billingUnit?: 'token' | 'request'
   fixedPrice?: string
   onBillingUnitChange?: (unit: 'token' | 'request') => void
@@ -137,35 +137,39 @@ export function TierPriceFields(props: TierPriceFieldsProps) {
   const renderPriceVariable = (variable: {
     key: VisualPrice['variable']
     label: string
-  }) => (
-    <PriceField
-      key={variable.key}
-      currency={props.currency}
-      label={
-        variable.key === 'cc' && props.prices.cc1h !== undefined
-          ? t('Cache Creation (5m)')
-          : t(variable.label)
-      }
-      value={props.prices[variable.key] ?? 0}
-      onChange={(value) => props.onChange(variable.key, value)}
-      included={
-        props.onInclude ? props.prices[variable.key] !== undefined : undefined
-      }
-      onInclude={
-        props.onInclude
-          ? (included) => props.onInclude?.(variable.key, included)
-          : undefined
-      }
-      invalid={props.invalidVariables?.includes(variable.key)}
-    />
-  )
+  }) => {
+    let label = t(variable.label)
+    if (variable.key === 'cc' && props.prices.cc1h !== undefined) {
+      label = t('Cache Creation (5m)')
+    } else if (variable.key === 'cc' && props.prices.cc12h !== undefined) {
+      label = t('Cache Creation (30m)')
+    }
+    return (
+      <PriceField
+        key={variable.key}
+        currency={props.currency}
+        label={label}
+        value={props.prices[variable.key] ?? 0}
+        onChange={(value) => props.onChange(variable.key, value)}
+        included={
+          props.onInclude ? props.prices[variable.key] !== undefined : undefined
+        }
+        onInclude={
+          props.onInclude
+            ? (included) => props.onInclude?.(variable.key, included)
+            : undefined
+        }
+        invalid={props.invalidVariables?.includes(variable.key)}
+      />
+    )
+  }
   const billingControl = props.onBillingUnitChange && (
     <Select
       items={[
         { value: 'token', label: t('Per token') },
         {
           value: 'request',
-          label: props.imageCountMultiplier ? t('Per image') : t('Per-call'),
+          label: props.imageCount ? t('Price per image') : t('Per-call'),
         },
       ]}
       value={props.billingUnit ?? 'token'}
@@ -186,7 +190,7 @@ export function TierPriceFields(props: TierPriceFieldsProps) {
         <SelectGroup>
           <SelectItem value='token'>{t('Per token')}</SelectItem>
           <SelectItem value='request'>
-            {props.imageCountMultiplier ? t('Per image') : t('Per-call')}
+            {props.imageCount ? t('Price per image') : t('Per-call')}
           </SelectItem>
         </SelectGroup>
       </SelectContent>
@@ -199,13 +203,11 @@ export function TierPriceFields(props: TierPriceFieldsProps) {
         <PriceField
           currency={props.currency}
           label={
-            props.imageCountMultiplier
-              ? t('Price per image')
-              : t('Price per request')
+            props.imageCount ? t('Price per image') : t('Price per request')
           }
           value={props.fixedPrice ?? ''}
           onChange={(value) => props.onFixedPriceChange?.(value)}
-          hint={`${props.currency.symbol}/${props.imageCountMultiplier ? t('image') : t('request')}`}
+          hint={`${props.currency.symbol}/${props.imageCount ? t('image') : t('request')}`}
           invalid={props.invalidVariables?.includes('fixed')}
         />
       </>

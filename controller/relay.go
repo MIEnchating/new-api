@@ -336,7 +336,6 @@ func writeRelayStreamError(c *gin.Context, relayFormat types.RelayFormat, err *t
 		logger.LogError(c, "failed to marshal stream error: "+marshalErr.Error())
 		return
 	}
-	helper.ExtendWriteDeadline(c)
 	if event != "" {
 		_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, data)
 	} else {

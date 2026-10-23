@@ -60,7 +60,7 @@ export type VisualPricingNode =
 export type VisualBillingDocument = {
   source: string
   root: VisualPricingNode
-  imageCountMultiplier?: { pricingOrigin: ExpressionNode }
+  imageCount?: boolean
 }
 export type VisualBillingIssue = { id: string; message: string }
 export type VisualBillingSerialization =
@@ -205,31 +205,26 @@ function readVisualPricing(node: ExpressionNode): VisualPricingNode | null {
   }
 }
 
+function imageCountPricingRoot(node: ExpressionNode): ExpressionNode | null {
+  if (node.kind !== 'binary' || node.operator !== '*') return null
+  if (node.right.kind === 'variable' && node.right.name === 'image_count') {
+    return node.left
+  }
+  if (node.left.kind === 'variable' && node.left.name === 'image_count') {
+    return node.right
+  }
+  return null
+}
+
 export function parseVisualBillingDocument(
   source: string
 ): VisualBillingDocument | null {
   const compiled = compileBillingExpression(source)
   if (compiled.status !== 'ready') return null
-  let pricing = compiled.ast
-  let imageCountMultiplier: VisualBillingDocument['imageCountMultiplier']
-  if (pricing.kind === 'binary' && pricing.operator === '*') {
-    if (
-      pricing.right.kind === 'variable' &&
-      pricing.right.name === 'image_count'
-    ) {
-      pricing = pricing.left
-      imageCountMultiplier = { pricingOrigin: pricing }
-    } else if (
-      pricing.left.kind === 'variable' &&
-      pricing.left.name === 'image_count'
-    ) {
-      pricing = pricing.right
-      imageCountMultiplier = { pricingOrigin: pricing }
-    }
-  }
+  const pricing = imageCountPricingRoot(compiled.ast) ?? compiled.ast
   const root = readVisualPricing(pricing)
   if (!root) return null
-  const document = { source, root, imageCountMultiplier }
+  const document = { source, root, imageCount: pricing !== compiled.ast }
   return serializeVisualBillingDocument(document).ok ? document : null
 }
 
@@ -486,7 +481,14 @@ export function serializeVisualBillingDocument(
   document: VisualBillingDocument
 ): VisualBillingSerialization {
   const issues: VisualBillingIssue[] = []
-  const body = writeVisualPricing(document.root, document.source, issues)
+  let body = writeVisualPricing(document.root, document.source, issues)
+  if (
+    document.imageCount &&
+    document.root.kind === 'branch' &&
+    document.root.origin?.kind !== 'conditional'
+  ) {
+    body = `(${body})`
+  }
   if (issues.length > 0) return { ok: false, issues }
   const original = compileBillingExpression(document.source)
   if (original.status !== 'ready') {
@@ -501,22 +503,25 @@ export function serializeVisualBillingDocument(
       ],
     }
   }
-  let expression = body
-  if (document.imageCountMultiplier) {
-    const pricingOrigin = document.imageCountMultiplier.pricingOrigin
-    // Replaced branches must stay inside the image-count multiplication too.
-    const text =
-      document.root.kind === 'branch' && document.root.origin !== pricingOrigin
-        ? `(${body})`
-        : body
-    expression = patchSource(document.source, original.ast, [
-      { node: pricingOrigin, text },
-    ])
+  const pricingOrigin = document.imageCount
+    ? imageCountPricingRoot(original.ast)
+    : original.ast
+  if (!pricingOrigin) {
+    return {
+      ok: false,
+      issues: [
+        {
+          id: document.root.id,
+          message:
+            'This expression cannot be edited visually without losing information.',
+        },
+      ],
+    }
   }
   const source =
-    document.source.slice(0, original.ast.start) +
-    expression +
-    document.source.slice(original.ast.end)
+    document.source.slice(0, pricingOrigin.start) +
+    body +
+    document.source.slice(pricingOrigin.end)
   if (compileBillingExpression(source).status !== 'ready') {
     return {
       ok: false,
