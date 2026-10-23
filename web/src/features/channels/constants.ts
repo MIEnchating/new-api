@@ -521,7 +521,6 @@ export const MODEL_FETCHABLE_TYPES = new Set([
   43,
   47,
   48,
-  55,
   57,
   58,
   59,

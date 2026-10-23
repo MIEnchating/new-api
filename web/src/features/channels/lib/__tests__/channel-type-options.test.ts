@@ -29,8 +29,8 @@ import {
   transformFormDataToCreatePayload,
 } from '../channel-form'
 
-test('Sora supports model discovery and retains configured upstream detection settings', () => {
-  expect(MODEL_FETCHABLE_TYPES.has(55)).toBe(true)
+test('Sora form excludes model discovery and upstream detection settings', () => {
+  expect(MODEL_FETCHABLE_TYPES.has(55)).toBe(false)
 
   const payload = transformFormDataToCreatePayload({
     ...CHANNEL_FORM_DEFAULT_VALUES,
@@ -42,11 +42,10 @@ test('Sora supports model discovery and retains configured upstream detection se
     upstream_model_update_ignored_models: 'unsupported-video',
   })
 
-  expect(JSON.parse(payload.channel.settings || '{}')).toMatchObject({
-    upstream_model_update_check_enabled: true,
-    upstream_model_update_auto_sync_enabled: false,
-    upstream_model_update_ignored_models: ['unsupported-video'],
-  })
+  const settings = JSON.parse(payload.channel.settings || '{}')
+  expect(settings).not.toHaveProperty('upstream_model_update_check_enabled')
+  expect(settings).not.toHaveProperty('upstream_model_update_auto_sync_enabled')
+  expect(settings).not.toHaveProperty('upstream_model_update_ignored_models')
 })
 
 test('Task Plugin channels support model discovery', () => {

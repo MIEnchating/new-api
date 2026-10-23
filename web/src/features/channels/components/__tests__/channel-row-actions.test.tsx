@@ -59,10 +59,13 @@ const channel: Channel = {
 
 const data = [channel]
 
-function RowActionsFixture(props: { layout: ChannelRowActionsLayout }) {
+function RowActionsFixture(props: {
+  layout: ChannelRowActionsLayout
+  data?: Channel[]
+}) {
   const channels = useChannels()
   const table = useReactTable({
-    data,
+    data: props.data ?? data,
     columns: [],
     getCoreRowModel: getCoreRowModel(),
   })
@@ -76,7 +79,7 @@ function RowActionsFixture(props: { layout: ChannelRowActionsLayout }) {
   )
 }
 
-describe('channel row edit action', () => {
+describe('channel row actions', () => {
   let queryClient: QueryClient
 
   beforeEach(() => {
@@ -89,6 +92,36 @@ describe('channel row edit action', () => {
     queryClient.clear()
     localStorage.clear()
   })
+
+  it.each([
+    { type: 55, name: 'Sora', upstreamUpdatesVisible: false },
+    { type: 1, name: 'OpenAI', upstreamUpdatesVisible: true },
+  ])(
+    '$name retains Fetch Models with upstream update visibility $upstreamUpdatesVisible',
+    async ({ type, upstreamUpdatesVisible }) => {
+      const user = userEvent.setup()
+      render(
+        <QueryClientProvider client={queryClient}>
+          <ChannelsProvider>
+            <RowActionsFixture layout='table' data={[{ ...channel, type }]} />
+          </ChannelsProvider>
+        </QueryClientProvider>
+      )
+
+      await user.click(screen.getByRole('button', { name: 'Open menu' }))
+      expect(
+        screen.getByRole('menuitem', { name: 'Fetch Models' })
+      ).toBeInTheDocument()
+      const upstreamUpdates = screen.queryByRole('menuitem', {
+        name: 'Upstream Updates',
+      })
+      if (upstreamUpdatesVisible) {
+        expect(upstreamUpdates).toBeInTheDocument()
+      } else {
+        expect(upstreamUpdates).not.toBeInTheDocument()
+      }
+    }
+  )
 
   it.each([
     { layout: 'card', interaction: 'pointer' },
