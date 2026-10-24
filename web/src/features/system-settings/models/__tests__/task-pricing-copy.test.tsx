@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { act, render, screen, within } from '@testing-library/react'
+import { act, cleanup, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
 import { useState } from 'react'
@@ -54,7 +54,10 @@ function renderPricing(unitLabel?: Record<string, string>) {
 }
 
 afterEach(async () => {
-  await act(() => i18next.changeLanguage('en'))
+  // Unmount before resetting the language so a pending render cannot block
+  // teardown or leave the previous model's pricing fields in the next test.
+  cleanup()
+  await i18next.changeLanguage('en')
 })
 
 it('shows localized schema explanations in the price table and calculator', async () => {

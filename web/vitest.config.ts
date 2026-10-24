@@ -35,6 +35,10 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
+    // Keep per-file isolation without fork/IPC startup stalls under Bun.
+    pool: 'threads',
+    // Collect jsdom heaps promptly on memory-constrained validation runners.
+    execArgv: process.versions.bun ? ['--smol'] : [],
     server: {
       // Bun marks Zod's ESM namespace as __esModule, so Vitest's external
       // CJS interop unwraps its default export and loses the named `z` export.
