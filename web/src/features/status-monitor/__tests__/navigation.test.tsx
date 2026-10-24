@@ -968,9 +968,9 @@ describe('user channel monitor', () => {
     const cells = within(rows[1]).getAllByRole('cell')
     expect(cells.map((cell) => cell.textContent)).toEqual([
       'Active',
-      '70.0%',
-      '1.0 s',
-      '95.0%',
+      'Success rate70.0%',
+      'Average TTFT1.0 s',
+      'Cache rate95.0%',
       '',
     ])
     const pulses = cells[4]

@@ -109,6 +109,12 @@ describe('channel monitoring overview', () => {
     renderMonitor()
     const metric = screen.getByRole('article', { name: 'Success rate' })
     expect(metric.parentElement).toHaveClass('grid-cols-3')
+    expect(metric.closest('section')).toHaveClass(
+      '[@media(max-height:700px)]:overflow-y-auto'
+    )
+    expect(
+      screen.getByRole('tablist', { name: 'View' }).closest('[data-slot=tabs]')
+    ).toHaveClass('[@media(max-height:700px)]:min-h-[28rem]')
     const matrix = screen.getByRole('region', { name: 'Availability trends' })
     expect(matrix).toHaveClass('overflow-auto', 'min-h-0')
     expect(matrix).not.toContainElement(metric)
@@ -119,7 +125,7 @@ describe('channel monitoring overview', () => {
       screen.getByText(
         'Each row is a monitored group. Each block is a time interval; hover or focus for details.'
       )
-    ).toHaveClass('@min-[60rem]/trends:block')
+    ).toHaveClass('sm:block')
     expect(screen.getByText('Reset zoom')).toHaveClass(
       '@min-[60rem]/trends:not-sr-only'
     )
@@ -132,6 +138,40 @@ describe('channel monitoring overview', () => {
       .closest('[role=row]')
     expect(header).not.toHaveClass('sticky')
     expect(header).toHaveClass('@min-[48rem]:sticky')
+  })
+
+  it('narrow layouts wrap the search and timeline controls and label each group metric', () => {
+    renderMonitor()
+    const search = screen.getByRole('searchbox', { name: 'Search groups...' })
+    const toolbar = search.closest('[data-monitor-toolbar]')
+    expect(toolbar).toHaveClass('flex-wrap')
+    const zoom = screen.getByRole('group', { name: 'Zoom' })
+    expect(toolbar).toContainElement(zoom)
+    expect(zoom.parentElement).toHaveClass('w-full', 'sm:w-auto')
+    const row = screen
+      .getByRole('cell', { name: /Primary/ })
+      .closest('[role=row]')
+    expect(row).not.toBeNull()
+    for (const label of ['Success rate', 'Average TTFT', 'Cache rate']) {
+      expect(within(row as HTMLElement).getByText(label)).toHaveClass(
+        '@min-[48rem]:hidden'
+      )
+    }
+  })
+
+  it('an unmatched group search offers a clear action that restores the configured groups', async () => {
+    renderMonitor()
+    const user = userEvent.setup()
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Search groups...' }),
+      'missing'
+    )
+    await user.click(screen.getByRole('button', { name: 'Clear search' }))
+    expect(
+      screen.getByRole('searchbox', { name: 'Search groups...' })
+    ).toHaveValue('')
+    expect(screen.getByRole('cell', { name: /Primary/ })).toBeVisible()
+    expect(screen.getByRole('cell', { name: /Backup/ })).toBeVisible()
   })
 
   it('groups with requests but no cache samples retain success and latency while cache stays unknown', () => {
@@ -149,7 +189,13 @@ describe('channel monitoring overview', () => {
       within(row)
         .getAllByRole('cell')
         .map((cell) => cell.textContent)
-    ).toEqual(['Primary', '100.0%', '1.0 s', '--', ''])
+    ).toEqual([
+      'Primary',
+      'Success rate100.0%',
+      'Average TTFT1.0 s',
+      'Cache rate--',
+      '',
+    ])
     expect(
       within(row).getByRole('img', { name: /Health score: 100/ })
     ).toHaveAccessibleName(/Success rate: 100.0%/)
@@ -214,6 +260,76 @@ describe('channel monitoring overview', () => {
     await waitFor(() =>
       expect(screen.getByText('No data or insufficient samples')).toBeVisible()
     )
+  })
+
+  it('line chart legend wraps with explicit units and preserves a readable plot height', () => {
+    const summary = cacheResponse().data.summary
+    if (!summary?.series) throw new Error('Summary series fixture is missing')
+    render(<ChannelTrend points={summary.series} />)
+    const chart = screen.getByRole('region', { name: 'Overall channel trend' })
+    expect(chart).toHaveClass('min-h-96', 'flex-col')
+    expect(within(chart).getByRole('group')).toHaveClass('flex-wrap')
+    expect(
+      within(chart).getByRole('button', { name: 'Cache rate' })
+    ).toHaveTextContent('%')
+    expect(
+      within(chart).getByRole('button', { name: 'Health score' })
+    ).toHaveTextContent('/100')
+    expect(
+      within(chart).getByRole('button', { name: 'Average TTFT' })
+    ).toHaveTextContent('s')
+    expect(chart.querySelector('[data-slot=chart]')).toHaveClass('min-h-64')
+  })
+
+  it('line chart legend hides and restores a series with pointer and keyboard input', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(
+      new DOMRect(0, 0, 640, 360)
+    )
+    const series = cacheResponse().data.summary?.series
+    if (!series) throw new Error('Summary series fixture is missing')
+    const points = [3600, 7200].map((ts) => ({
+      ...series[0],
+      ts,
+      has_data: true,
+      cache_hit_rate: 85,
+    }))
+    render(<ChannelTrend points={points} />)
+    const user = userEvent.setup()
+    const cache = screen.getByRole('button', { name: 'Cache rate' })
+    const chart = screen.getByRole('region', { name: 'Overall channel trend' })
+    await waitFor(() =>
+      expect(chart.querySelectorAll('.recharts-line-curve')).toHaveLength(4)
+    )
+    await user.click(cache)
+    expect(cache).toHaveAttribute('aria-pressed', 'false')
+    await waitFor(() =>
+      expect(chart.querySelectorAll('.recharts-line-curve')).toHaveLength(3)
+    )
+    cache.focus()
+    await user.keyboard(' ')
+    expect(cache).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() =>
+      expect(chart.querySelectorAll('.recharts-line-curve')).toHaveLength(4)
+    )
+  })
+
+  it('line chart keeps one metric selected and reports missing data for that selection', async () => {
+    const summary = cacheResponse().data.summary
+    if (!summary?.series) throw new Error('Summary series fixture is missing')
+    render(<ChannelTrend points={summary.series} />)
+    const user = userEvent.setup()
+    for (const name of ['Success rate', 'Health score', 'Average TTFT']) {
+      await user.click(screen.getByRole('button', { name }))
+    }
+    const cache = screen.getByRole('button', { name: 'Cache rate' })
+    expect(cache).toBeDisabled()
+    expect(cache).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByText('No data or insufficient samples')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Success rate' }))
+    expect(cache).not.toBeDisabled()
+    expect(
+      screen.queryByText('No data or insufficient samples')
+    ).not.toBeInTheDocument()
   })
 
   it('line chart keeps error-only intervals even when no cache requests were recorded', async () => {

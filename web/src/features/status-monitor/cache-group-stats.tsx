@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import {
   ChevronLeft,
   ChevronRight,
+  ChartNoAxesCombined,
   Grid2X2,
   RotateCcw,
   Search,
@@ -29,6 +30,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ButtonGroup } from '@/components/ui/button-group'
 import {
@@ -36,6 +38,7 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
+  CardFooter,
   CardTitle,
 } from '@/components/ui/card'
 import {
@@ -132,29 +135,26 @@ export function CacheGroupStats(props: {
     <Tabs
       value={view}
       onValueChange={setView}
-      className='min-h-0 min-w-0 flex-1 overflow-hidden'
+      className='min-h-0 min-w-0 flex-1 overflow-hidden [@media(max-height:700px)]:min-h-[28rem]'
     >
       <Card
         data-card-hover='false'
-        className='@container/trends min-h-0 min-w-0 flex-1 gap-3 overflow-hidden rounded-xl py-3 shadow-none ring-inset max-[359px]:gap-2 sm:py-4'
+        className='@container/trends min-h-0 min-w-0 flex-1 gap-0 overflow-hidden rounded-xl py-0 shadow-none ring-inset'
       >
-        <CardHeader className='flex shrink-0 flex-row flex-wrap items-center justify-between gap-3 px-3 sm:px-4'>
-          <div className='space-y-1'>
-            <CardTitle className='flex items-center gap-2 text-sm'>
-              <Grid2X2
-                className='text-muted-foreground size-4 max-[359px]:hidden'
-                aria-hidden='true'
-              />
-              <span className='max-[359px]:sr-only'>
-                {t('Availability trends')}
-              </span>
-              <span className='bg-muted text-muted-foreground rounded-full px-2 py-1 text-[10px] font-normal sm:text-[11px]'>
+        <CardHeader className='flex shrink-0 flex-row flex-wrap items-center justify-between gap-3 border-b px-3 py-3 sm:px-5 sm:py-4'>
+          <div className='flex min-w-0 flex-col gap-1.5'>
+            <CardTitle className='flex flex-wrap items-center gap-2 text-sm font-semibold'>
+              {t('Availability trends')}
+              <Badge
+                variant='secondary'
+                className='text-[10px] font-normal sm:text-xs'
+              >
                 {t('{{minutes}} min intervals', {
                   minutes: props.bucketSeconds / 60,
                 })}
-              </span>
+              </Badge>
             </CardTitle>
-            <CardDescription className='hidden text-xs @min-[60rem]/trends:block'>
+            <CardDescription className='hidden text-xs sm:block'>
               {view === 'pulse'
                 ? t(
                     'Each row is a monitored group. Each block is a time interval; hover or focus for details.'
@@ -164,20 +164,29 @@ export function CacheGroupStats(props: {
                   )}
             </CardDescription>
           </div>
-          <div className='flex min-w-0 flex-wrap items-center gap-2 sm:gap-3'>
+          <div className='flex min-w-0 shrink-0 items-center gap-2'>
             <TabsList aria-label={t('View')}>
-              <TabsTrigger value='pulse'>{t('Pulse matrix')}</TabsTrigger>
-              <TabsTrigger value='line'>{t('Line chart')}</TabsTrigger>
+              <TabsTrigger value='pulse' className='gap-2 px-3'>
+                <Grid2X2 aria-hidden='true' />
+                {t('Pulse matrix')}
+              </TabsTrigger>
+              <TabsTrigger value='line' className='gap-2 px-3'>
+                <ChartNoAxesCombined aria-hidden='true' />
+                {t('Line chart')}
+              </TabsTrigger>
             </TabsList>
           </div>
         </CardHeader>
-        <CardContent className='@container flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden px-3 sm:px-4'>
+        <CardContent className='@container flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-0'>
           <TabsContent
             value='pulse'
-            className='flex min-h-0 flex-1 flex-col gap-3 overflow-hidden max-[359px]:gap-2'
+            className='flex min-h-0 flex-1 flex-col overflow-hidden'
           >
-            <div className='flex shrink-0 items-center gap-3'>
-              <InputGroup className='min-w-0 flex-1 sm:max-w-64'>
+            <div
+              data-monitor-toolbar
+              className='flex shrink-0 flex-wrap items-center gap-2.5 px-3 py-3 sm:gap-3 sm:px-5'
+            >
+              <InputGroup className='min-w-0 flex-1 sm:max-w-72'>
                 <InputGroupAddon>
                   <Search aria-hidden='true' />
                 </InputGroupAddon>
@@ -189,10 +198,10 @@ export function CacheGroupStats(props: {
                   onChange={(event) => setSearch(event.target.value)}
                 />
               </InputGroup>
-              <span className='text-muted-foreground hidden shrink-0 text-xs tabular-nums @min-[30rem]/trends:inline'>
-                {visibleRows.length} / {rows.length}
-              </span>
-              <div className='ml-auto shrink-0'>
+              <Badge variant='secondary' className='tabular-nums'>
+                {visibleRows.length} / {rows.length} {t('Groups')}
+              </Badge>
+              <div className='flex w-full shrink-0 items-center justify-end sm:ml-auto sm:w-auto'>
                 <ButtonGroup aria-label={t('Zoom')}>
                   <Button
                     size='icon-sm'
@@ -273,7 +282,7 @@ export function CacheGroupStats(props: {
               </div>
             </div>
             <div
-              className='min-h-0 flex-1 [scrollbar-width:thin] overflow-auto overscroll-contain rounded-xl'
+              className='min-h-0 flex-1 [scrollbar-width:thin] overflow-auto overscroll-contain border-t'
               role='region'
               aria-label={t('Availability trends')}
               tabIndex={0}
@@ -282,16 +291,25 @@ export function CacheGroupStats(props: {
                 <EmptyState
                   title={t('No results found')}
                   className='min-h-40'
+                  action={
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      onClick={() => setSearch('')}
+                    >
+                      {t('Clear search')}
+                    </Button>
+                  }
                 />
               ) : (
                 <div
                   role='table'
                   aria-label={t('Channel health')}
-                  className='grid min-w-0 grid-cols-3 text-xs @min-[48rem]:grid-cols-[minmax(130px,1.2fr)_80px_95px_75px_minmax(180px,3fr)]'
+                  className='grid min-w-0 grid-cols-3 text-xs @min-[48rem]:grid-cols-[minmax(130px,1.2fr)_90px_100px_85px_minmax(180px,3fr)]'
                 >
                   <div
                     role='row'
-                    className='bg-muted text-muted-foreground z-20 col-span-3 grid grid-cols-subgrid items-center gap-x-3 px-3 py-3 text-[11px] font-medium max-[359px]:py-2 @min-[48rem]:sticky @min-[48rem]:top-0 @min-[48rem]:col-span-5'
+                    className='bg-muted text-muted-foreground z-20 col-span-3 grid grid-cols-subgrid items-center gap-x-4 px-3 py-2.5 text-[11px] font-medium sm:px-5 @min-[48rem]:sticky @min-[48rem]:top-0 @min-[48rem]:col-span-5'
                   >
                     <span
                       role='columnheader'
@@ -301,25 +319,25 @@ export function CacheGroupStats(props: {
                     </span>
                     <span
                       role='columnheader'
-                      className='whitespace-nowrap max-[359px]:sr-only'
+                      className='hidden whitespace-nowrap @min-[48rem]:block'
                     >
                       {t('Success rate')}
                     </span>
                     <span
                       role='columnheader'
-                      className='whitespace-nowrap max-[359px]:sr-only'
+                      className='hidden whitespace-nowrap @min-[48rem]:block'
                     >
                       {t('Average TTFT')}
                     </span>
                     <span
                       role='columnheader'
-                      className='whitespace-nowrap max-[359px]:sr-only'
+                      className='hidden whitespace-nowrap @min-[48rem]:block'
                     >
                       {t('Cache rate')}
                     </span>
                     <span
                       role='columnheader'
-                      className='col-span-3 mt-2 flex justify-between gap-3 text-[10px] tabular-nums max-[359px]:mt-0 @min-[48rem]:col-span-1 @min-[48rem]:mt-0'
+                      className='col-span-3 flex justify-between gap-3 text-[10px] tabular-nums @min-[48rem]:col-span-1'
                       aria-live='polite'
                     >
                       <span>
@@ -338,11 +356,11 @@ export function CacheGroupStats(props: {
                     <div
                       key={group.group}
                       role='row'
-                      className='border-border/40 odd:bg-muted/15 hover:bg-muted/30 col-span-3 grid grid-cols-subgrid items-center gap-x-3 gap-y-2 border-b px-3 py-3 last:border-b-0 max-[359px]:py-2 @min-[48rem]:col-span-5 @min-[48rem]:py-2'
+                      className='border-border/60 hover:bg-muted/30 col-span-3 grid grid-cols-subgrid items-center gap-x-4 gap-y-3 border-b px-3 py-4 transition-colors last:border-b-0 sm:px-5 @min-[48rem]:col-span-5'
                     >
                       <div
                         role='cell'
-                        className='col-span-3 flex min-w-0 items-center gap-2 font-semibold @min-[48rem]:col-span-1'
+                        className='col-span-3 flex min-w-0 items-center gap-2.5 text-sm font-medium @min-[48rem]:col-span-1'
                       >
                         <span
                           role='img'
@@ -360,21 +378,45 @@ export function CacheGroupStats(props: {
                           {group.group}
                         </span>
                       </div>
-                      <span role='cell' className='tabular-nums'>
-                        {formatMonitorPercent(
-                          group.health?.error_rate_percent == null
-                            ? null
-                            : 100 - group.health.error_rate_percent
-                        )}
-                      </span>
-                      <span role='cell' className='tabular-nums'>
-                        {formatMonitorLatency(group.health?.avg_ttft_ms)}
-                      </span>
-                      <span role='cell' className='tabular-nums'>
-                        {formatMonitorPercent(
-                          group.has_data ? group.cache_hit_rate : null
-                        )}
-                      </span>
+                      <div
+                        role='cell'
+                        className='flex min-w-0 flex-col gap-1 tabular-nums'
+                      >
+                        <span className='text-muted-foreground text-[10px] @min-[48rem]:hidden'>
+                          {t('Success rate')}
+                        </span>
+                        <span className='font-medium'>
+                          {formatMonitorPercent(
+                            group.health?.error_rate_percent == null
+                              ? null
+                              : 100 - group.health.error_rate_percent
+                          )}
+                        </span>
+                      </div>
+                      <div
+                        role='cell'
+                        className='flex min-w-0 flex-col gap-1 tabular-nums'
+                      >
+                        <span className='text-muted-foreground text-[10px] @min-[48rem]:hidden'>
+                          {t('Average TTFT')}
+                        </span>
+                        <span className='font-medium'>
+                          {formatMonitorLatency(group.health?.avg_ttft_ms)}
+                        </span>
+                      </div>
+                      <div
+                        role='cell'
+                        className='flex min-w-0 flex-col gap-1 tabular-nums'
+                      >
+                        <span className='text-muted-foreground text-[10px] @min-[48rem]:hidden'>
+                          {t('Cache rate')}
+                        </span>
+                        <span className='font-medium'>
+                          {formatMonitorPercent(
+                            group.has_data ? group.cache_hit_rate : null
+                          )}
+                        </span>
+                      </div>
                       <div
                         role='cell'
                         data-monitor-pulses
@@ -412,7 +454,7 @@ export function CacheGroupStats(props: {
                                 <TooltipTrigger
                                   render={<span role='img' tabIndex={0} />}
                                   aria-label={details.join('\n')}
-                                  className='focus-visible:outline-ring h-4 min-w-0 rounded-[2px] outline-offset-2 focus-visible:outline-2'
+                                  className='focus-visible:outline-ring h-6 min-w-0 rounded-[3px] outline-offset-2 transition-opacity hover:opacity-75 focus-visible:outline-2'
                                   style={{
                                     backgroundColor: monitorScoreColor(score),
                                   }}
@@ -432,33 +474,33 @@ export function CacheGroupStats(props: {
           </TabsContent>
           <TabsContent
             value='line'
-            className='min-h-0 flex-1 overflow-auto overscroll-contain'
+            className='min-h-0 flex-1 overflow-auto overscroll-contain p-3 sm:p-5'
           >
             <ChannelTrend points={summaryPoints} />
           </TabsContent>
-          {view === 'pulse' ? (
-            <div className='text-muted-foreground shrink-0 space-y-2 text-[10px] sm:text-[11px]'>
-              <div className='flex flex-wrap gap-x-4 gap-y-2'>
-                <span className='flex items-center gap-1.5'>
-                  <i className='bg-success size-2 rounded-full' />
-                  {t('Healthy (≥80)')}
-                </span>
-                <span className='flex items-center gap-1.5'>
-                  <i className='bg-warning size-2 rounded-full' />
-                  {t('Needs attention (50–79)')}
-                </span>
-                <span className='flex items-center gap-1.5'>
-                  <i className='bg-destructive size-2 rounded-full' />
-                  {t('Unhealthy (<50)')}
-                </span>
-                <span className='flex items-center gap-1.5'>
-                  <i className='bg-muted-foreground/25 size-2 rounded-full' />
-                  {t('No data or insufficient samples')}
-                </span>
-              </div>
-            </div>
-          ) : null}
         </CardContent>
+        {view === 'pulse' ? (
+          <CardFooter className='text-muted-foreground shrink-0 px-3 py-3 text-[10px] sm:px-5 sm:text-[11px]'>
+            <div className='flex flex-wrap gap-x-5 gap-y-2'>
+              <span className='flex items-center gap-1.5'>
+                <i className='bg-success size-2 rounded-full' />
+                {t('Healthy (≥80)')}
+              </span>
+              <span className='flex items-center gap-1.5'>
+                <i className='bg-warning size-2 rounded-full' />
+                {t('Needs attention (50–79)')}
+              </span>
+              <span className='flex items-center gap-1.5'>
+                <i className='bg-destructive size-2 rounded-full' />
+                {t('Unhealthy (<50)')}
+              </span>
+              <span className='flex items-center gap-1.5'>
+                <i className='bg-muted-foreground/25 size-2 rounded-full' />
+                {t('No data or insufficient samples')}
+              </span>
+            </div>
+          </CardFooter>
+        ) : null}
       </Card>
     </Tabs>
   )

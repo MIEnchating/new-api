@@ -175,19 +175,23 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
       >
         <TabsList
           aria-label={t('Intelligence testing')}
-          className='h-auto min-h-9 max-w-full flex-wrap'
+          className='min-h-9 max-w-full flex-wrap group-data-horizontal/tabs:h-auto'
         >
-          <TabsTrigger value='settings' className='px-4'>
+          <TabsTrigger value='settings' className='h-8 px-4'>
             {t('Settings')}
           </TabsTrigger>
-          <TabsTrigger value='questions' className='px-4'>
+          <TabsTrigger value='questions' className='h-8 px-4'>
             {t('Question bank')}
           </TabsTrigger>
-          <TabsTrigger value='history' className='px-4'>
+          <TabsTrigger value='history' className='h-8 px-4'>
             {t('Intelligence test history')}
           </TabsTrigger>
         </TabsList>
-        <SettingsForm onSubmit={onSubmit} className='@container gap-y-4'>
+        <SettingsForm
+          onSubmit={onSubmit}
+          hidden={activeTab === 'history'}
+          className='@container gap-y-4'
+        >
           {activeTab !== 'history' && (
             <>
               <SettingsPageFormActions

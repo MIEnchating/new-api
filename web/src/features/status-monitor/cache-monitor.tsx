@@ -16,13 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Activity, DatabaseZap, Timer, type LucideIcon } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
+import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
+import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
 
@@ -38,10 +41,19 @@ function MonitorMetric(props: {
   label: string
   value: string
   description: string
+  icon: LucideIcon
   status?: MonitorHealth['overall']
 }) {
   const { t } = useTranslation()
   const status = props.status ?? 'unknown'
+  const Icon = props.icon
+  const tone: IconBadgeTone = {
+    healthy: 'success' as const,
+    warning: 'warning' as const,
+    critical: 'destructive' as const,
+    unknown: 'neutral' as const,
+  }[status]
+  const badgeVariant: StatusVariant = tone === 'destructive' ? 'danger' : tone
   const statusLabel = {
     healthy: t('Healthy'),
     warning: t('Warning'),
@@ -53,28 +65,31 @@ function MonitorMetric(props: {
       data-card-hover='false'
       role='article'
       aria-label={props.label}
-      className='min-w-0 gap-1.5 rounded-xl py-3 shadow-none ring-inset sm:gap-2 sm:py-4'
+      className='relative min-w-0 gap-2 rounded-xl py-3 shadow-none ring-inset sm:gap-4 sm:py-5'
     >
-      <CardHeader className='relative px-2.5 pl-5 sm:pl-8'>
-        <span
-          aria-label={statusLabel}
-          role='img'
-          className={cn(
-            'absolute left-2.5 top-1 size-1.5 rounded-full sm:left-4',
-            status === 'healthy' && 'bg-success',
-            status === 'warning' && 'bg-warning',
-            status === 'critical' && 'bg-destructive',
-            status === 'unknown' && 'bg-muted-foreground/40'
-          )}
-        />
-        <CardTitle className='text-muted-foreground min-h-8 text-[11px] leading-4 font-medium min-[360px]:min-h-0 sm:text-xs'>
+      <CardHeader className='flex min-w-0 flex-row items-start justify-between gap-2 px-3 sm:items-center sm:px-5'>
+        <CardTitle className='text-muted-foreground flex min-h-8 items-start gap-1.5 text-[11px] leading-4 font-medium sm:min-h-0 sm:text-sm'>
+          <span
+            role='img'
+            aria-label={statusLabel}
+            className={cn(
+              'mt-1 size-1.5 shrink-0 rounded-full sm:hidden',
+              status === 'healthy' && 'bg-success',
+              status === 'warning' && 'bg-warning',
+              status === 'critical' && 'bg-destructive',
+              status === 'unknown' && 'bg-muted-foreground/40'
+            )}
+          />
           {props.label}
         </CardTitle>
+        <IconBadge tone={tone} size='sm' className='hidden sm:flex'>
+          <Icon />
+        </IconBadge>
       </CardHeader>
-      <CardContent className='space-y-1 px-2.5 sm:pl-8'>
+      <CardContent className='flex min-w-0 flex-col gap-2 px-3 sm:gap-3 sm:px-5'>
         <p
           className={cn(
-            'text-lg font-semibold tracking-tight tabular-nums sm:text-2xl',
+            'text-xl leading-none font-semibold tracking-tight tabular-nums sm:text-3xl',
             status === 'healthy' && 'text-success',
             status === 'warning' && 'text-warning',
             status === 'critical' && 'text-destructive',
@@ -83,9 +98,19 @@ function MonitorMetric(props: {
         >
           {props.value}
         </p>
-        <p className='text-muted-foreground sr-only text-[10px] leading-4 sm:not-sr-only sm:text-xs'>
-          {props.description}
-        </p>
+        <div className='flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1'>
+          <p className='text-muted-foreground sr-only text-[10px] leading-4 sm:not-sr-only sm:text-xs'>
+            {props.description}
+          </p>
+          <StatusBadge
+            label={statusLabel}
+            variant={badgeVariant}
+            type='text'
+            copyable={false}
+            showDot
+            className='hidden text-xs sm:inline-flex'
+          />
+        </div>
       </CardContent>
     </Card>
   )
@@ -122,9 +147,9 @@ export function CacheMonitor(props: {
         className='flex h-full min-h-0 flex-col gap-5 overflow-hidden'
         aria-busy='true'
       >
-        <div className='grid shrink-0 grid-cols-3 gap-2 sm:gap-3'>
+        <div className='grid shrink-0 grid-cols-3 gap-2 sm:gap-4'>
           {['success', 'ttft', 'cache'].map((key) => (
-            <Skeleton key={key} className='h-24 rounded-xl' />
+            <Skeleton key={key} className='h-24 rounded-xl sm:h-40' />
           ))}
         </div>
         <Skeleton className='min-h-0 flex-1 rounded-2xl' />
@@ -141,7 +166,7 @@ export function CacheMonitor(props: {
   }
   if (groups.length === 0) return <EmptyState title={t('No data')} />
   return (
-    <section className='flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-hidden py-1 max-[359px]:gap-2'>
+    <section className='flex h-full min-h-0 min-w-0 flex-col gap-3 overflow-hidden py-1 sm:gap-4 [@media(max-height:700px)]:overflow-y-auto'>
       {props.failed ? (
         <Alert className='shrink-0' variant='destructive'>
           <AlertDescription>
@@ -149,8 +174,9 @@ export function CacheMonitor(props: {
           </AlertDescription>
         </Alert>
       ) : null}
-      <div className='grid shrink-0 grid-cols-3 gap-2 sm:gap-3'>
+      <div className='grid shrink-0 grid-cols-3 gap-2 sm:gap-4'>
         <MonitorMetric
+          icon={Activity}
           label={t('Success rate')}
           value={formatMonitorPercent(
             errorRate == null ? null : 100 - errorRate
@@ -159,12 +185,14 @@ export function CacheMonitor(props: {
           status={summary?.health.error_rate}
         />
         <MonitorMetric
+          icon={Timer}
           label={t('Average TTFT')}
           value={formatMonitorLatency(summary?.health.avg_ttft_ms)}
           description={t('Time to first token')}
           status={summary?.health.ttft}
         />
         <MonitorMetric
+          icon={DatabaseZap}
           label={t('Cache rate')}
           value={formatMonitorPercent(
             summary?.has_data ? summary.cache_hit_rate : null

@@ -318,6 +318,12 @@ it('separates settings from records and preserves unsaved edits across tabs', as
       'true'
     )
     expect(
+      screen.getByRole('tablist', { name: 'Intelligence testing' })
+    ).toHaveClass('flex-wrap', 'group-data-horizontal/tabs:h-auto')
+    for (const tab of screen.getAllByRole('tab')) {
+      expect(tab).toHaveClass('h-8')
+    }
+    expect(
       screen.queryByRole('region', { name: 'Question bank' })
     ).not.toBeInTheDocument()
     await user.click(screen.getByRole('tab', { name: 'Question bank' }))
@@ -334,6 +340,9 @@ it('separates settings from records and preserves unsaved edits across tabs', as
     ).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('run-1')).toBeVisible()
     expect(screen.getByLabelText('Prompt')).not.toBeVisible()
+    expect(screen.getByLabelText('Prompt').closest('form')).toHaveAttribute(
+      'hidden'
+    )
     expect(
       screen.queryByRole('button', { name: 'Save' })
     ).not.toBeInTheDocument()
@@ -343,6 +352,9 @@ it('separates settings from records and preserves unsaved edits across tabs', as
 
     await user.click(screen.getByRole('tab', { name: 'Question bank' }))
     expect(screen.getByLabelText('Prompt')).toHaveValue('Edited prompt')
+    expect(screen.getByLabelText('Prompt').closest('form')).not.toHaveAttribute(
+      'hidden'
+    )
     expect(screen.getByRole('button', { name: 'Save' })).toBeVisible()
     expect(screen.queryByText('run-1')).not.toBeInTheDocument()
   } finally {
@@ -1158,6 +1170,11 @@ it('shows admin request IDs and confirms deletion while protecting active runs',
     expect(screen.getByText('request-123')).toBeVisible()
     expect(screen.getByText('upstream-456')).toBeVisible()
     expect(screen.getByText('Not recorded')).toBeVisible()
+    for (const requests of screen.getAllByRole('list', {
+      name: 'Test requests',
+    })) {
+      expect(requests).not.toHaveClass('@min-[44rem]/history:grid-cols-2')
+    }
     expect(screen.getAllByRole('button', { name: 'Delete' })[1]).toBeDisabled()
     await user.click(screen.getAllByRole('button', { name: 'Delete' })[0])
     let dialog = await screen.findByRole('alertdialog')
@@ -1178,6 +1195,101 @@ it('shows admin request IDs and confirms deletion while protecting active runs',
     expect(invalidate).toHaveBeenCalledWith({
       queryKey: ['status-monitor', 'intelligence'],
     })
+  } finally {
+    view.unmount()
+    client.clear()
+  }
+})
+
+it('keeps history requests in responsive groups and long identifiers copyable', async () => {
+  const client = new QueryClient()
+  const user = userEvent.setup()
+  const clipboard = vi.spyOn(navigator.clipboard, 'writeText')
+  const requestId = 'request-with-a-long-unbroken-identifier-'.repeat(6)
+  const model = 'model-with-a-long-unbroken-name-'.repeat(5)
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligenceHistory
+        history={[
+          {
+            task_id: 'history-layout-run',
+            status: 'succeeded',
+            created_at: 1791613858,
+            updated_at: 1791613858,
+            group: 'default',
+            model,
+            endpoint: 'openai',
+            error: '',
+            result: {
+              channels: [
+                {
+                  channel_id: 108,
+                  question_index: 0,
+                  question_name: 'Pelican',
+                  latency_ms: 116740,
+                  request_id: requestId,
+                  error: '',
+                },
+                {
+                  channel_id: 177,
+                  question_index: 1,
+                  question_name: 'Clock',
+                  latency_ms: 128380,
+                  error: 'Upstream request failed',
+                },
+              ],
+            },
+          },
+        ]}
+      />
+    </QueryClientProvider>
+  )
+  try {
+    const requests = screen.getByRole('list', { name: 'Test requests' })
+    const runHeader = requests
+      .closest('[data-slot=card]')
+      ?.querySelector('[data-slot=card-header]')
+    expect(runHeader?.firstElementChild).toHaveClass('w-full', 'min-w-0')
+    expect(requests).toHaveClass(
+      'grid-cols-1',
+      '@min-[44rem]/history:grid-cols-2'
+    )
+    expect(requests).not.toHaveClass('@min-[76rem]/history:grid-cols-3')
+    expect(within(requests).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(requests).getByText('Pelican')).toBeVisible()
+    expect(within(requests).getByText('Clock')).toBeVisible()
+    expect(within(requests).getByText('Upstream request failed')).toBeVisible()
+    for (const name of within(requests).getAllByText(model)) {
+      expect(name).toHaveClass('break-all')
+    }
+    expect(within(requests).getByText(requestId)).toHaveClass('truncate')
+    await user.click(
+      within(requests).getByRole('button', { name: 'Request ID' })
+    )
+    expect(clipboard).toHaveBeenCalledWith(requestId)
+    await user.click(screen.getByRole('button', { name: 'Detail' }))
+    expect(
+      await screen.findByRole('dialog', { name: 'Intelligence test details' })
+    ).toBeVisible()
+  } finally {
+    view.unmount()
+    client.clear()
+  }
+})
+
+it('shows an empty history state without a table or run actions', () => {
+  const client = new QueryClient()
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligenceHistory history={[]} />
+    </QueryClientProvider>
+  )
+  try {
+    expect(screen.getByText('No intelligence test results yet')).toBeVisible()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Delete' })
+    ).not.toBeInTheDocument()
   } finally {
     view.unmount()
     client.clear()

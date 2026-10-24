@@ -16,10 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Activity } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
+import { IconBadge } from '@/components/ui/icon-badge'
 
 import { getCacheMetrics } from './api'
 import { CacheMonitor } from './cache-monitor'
@@ -67,7 +69,10 @@ export function StatusMonitor() {
   return (
     <SectionPageLayout fixedContent stackActionsOnMobile>
       <SectionPageLayout.Title>
-        <span className='text-lg font-bold sm:text-2xl'>
+        <span className='flex items-center gap-2.5 text-lg font-semibold sm:text-xl'>
+          <IconBadge tone='primary' size='title'>
+            <Activity />
+          </IconBadge>
           {t('Channel Monitor')}
         </span>
       </SectionPageLayout.Title>
