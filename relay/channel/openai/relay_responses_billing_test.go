@@ -485,7 +485,7 @@ func TestOaiResponsesHandlersKeepCacheWriteTTLSplit(t *testing.T) {
 		constant.StreamingTimeout = oldTimeout
 	})
 
-	const usage = `"usage":{"input_tokens":12000,"output_tokens":0,"total_tokens":12000,"input_tokens_details":{"cached_tokens":4000,"cache_write_tokens":7000,"cache_write_tokens_details":{"ttl_30m_tokens":3000,"ttl_12h_tokens":4000}}}`
+	const usage = `"usage":{"input_tokens":12000,"output_tokens":0,"total_tokens":12000,"input_tokens_details":{"cached_tokens":4000,"cache_write_tokens":7000,"cache_creation_input_tokens":6500,"cache_write_tokens_details":{"ttl_30m_tokens":3000,"ttl_12h_tokens":4000}}}`
 	const response = `{"id":"resp_1","object":"response","model":"gpt-6-astra","status":"completed","output":[],` + usage + `}`
 	for _, tt := range []struct {
 		name, contentType, body string
@@ -523,6 +523,7 @@ func TestOaiResponsesHandlersKeepCacheWriteTTLSplit(t *testing.T) {
 			require.NotNil(t, usage)
 			assert.Equal(t, 12000, usage.PromptTokens)
 			assert.Equal(t, 4000, usage.PromptTokensDetails.CachedTokens)
+			assert.Equal(t, 6500, usage.PromptTokensDetails.CacheCreationInputTokens)
 			assert.Equal(t, 7000, usage.PromptTokensDetails.CacheCreationTokensTotal())
 			assert.Equal(t, 4000, usage.PromptTokensDetails.CacheWrite12hTokens())
 		})

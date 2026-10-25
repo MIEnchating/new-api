@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { act, renderHook } from '@testing-library/react'
+import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { resolveThemeColor, useThemeColor } from '../theme-color'
@@ -43,6 +43,9 @@ describe('useThemeColor', () => {
   })
 
   afterEach(() => {
+    // Disconnect the hook's MutationObserver before resetting the attributes
+    // it watches, or teardown can schedule a React update after the test ends.
+    cleanup()
     document.documentElement.classList.remove('dark')
     document.body.removeAttribute('data-theme-preset')
     vi.restoreAllMocks()
