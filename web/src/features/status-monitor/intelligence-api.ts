@@ -135,6 +135,7 @@ export type IntelligenceTask = {
       model?: string
       endpoint?: string
       attempts?: IntelligenceAttempt[]
+      retry_count?: number
       http_status?: number
       request_id?: string
       upstream_request_id?: string

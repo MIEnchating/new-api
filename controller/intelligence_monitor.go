@@ -261,6 +261,7 @@ func publishedIntelligenceTask(task *model.SystemTask, includeHTML bool, admin b
 	for _, channel := range result.Channels {
 		row := gin.H{"channel_id": channel.ChannelID, "question_index": channel.QuestionIndex,
 			"question_name": channel.QuestionName, "latency_ms": channel.LatencyMs, "error": "", "group": channel.Group, "model": channel.Model, "endpoint": channel.Endpoint}
+		row["retry_count"] = max(0, len(channel.Attempts)-1)
 		if admin {
 			row["request_id"] = channel.RequestID
 			row["upstream_request_id"] = channel.UpstreamRequestID

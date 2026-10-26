@@ -47,6 +47,7 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
     ? getIntelligenceQuestionName(props.channel.question_name, t)
     : ''
   const active = props.status === 'running' || props.status === 'pending'
+  const retryCount = props.channel?.retry_count ?? 0
   const percent =
     props.counts && props.counts.total > 0
       ? Math.min(
@@ -130,6 +131,11 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
               hour12: false,
             })}
           </time>
+          {retryCount > 0 ? (
+            <span>
+              {t('Retry Times')}: {formatNumber(retryCount, locale)}
+            </span>
+          ) : null}
           {props.channel && (
             <span
               className='inline-flex shrink-0 items-center gap-1'

@@ -771,6 +771,39 @@ func TestIntelligencePublicResultHidesInternalErrors(t *testing.T) {
 	}
 }
 
+func TestIntelligencePublishedRetryCount(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		attempts int
+		want     int
+	}{
+		{"legacy record", 0, 0},
+		{"first attempt", 1, 0},
+		{"retried twice", 3, 2},
+		{"retry limit", 6, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := common.Marshal(intelligenceResult{Channels: []intelligenceChannelResult{{
+				Attempts: make([]intelligenceAttempt, tc.attempts),
+			}}})
+			require.NoError(t, err)
+			task := &model.SystemTask{Payload: `{}`, Result: string(result)}
+			for _, admin := range []bool{false, true} {
+				response, err := publishedIntelligenceTask(task, false, admin)
+				require.NoError(t, err)
+				encoded, err := common.Marshal(response)
+				require.NoError(t, err)
+				count := gjson.GetBytes(encoded, "result.channels.0.retry_count")
+				assert.True(t, count.Exists())
+				assert.EqualValues(t, tc.want, count.Int())
+				if !admin {
+					assert.False(t, gjson.GetBytes(encoded, "result.channels.0.attempts").Exists())
+				}
+			}
+		})
+	}
+}
+
 func TestIntelligenceDailySchedule(t *testing.T) {
 	config := intelligenceConfig{Questions: []intelligenceQuestion{{Name: "test", Prompt: "test"}}, Groups: []intelligenceGroup{
 		{Group: "a", Model: "m", Endpoint: "openai", Enabled: true, Times: []string{"09:00", "15:00", "21:00"}},

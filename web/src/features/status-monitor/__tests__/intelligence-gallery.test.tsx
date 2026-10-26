@@ -39,6 +39,7 @@ import {
   intelligenceResultsQueryKey,
 } from '../intelligence-api'
 import { IntelligenceMonitor } from '../intelligence-monitor'
+import { IntelligenceResultCard } from '../intelligence-result-card'
 import { buildIntelligenceCards } from '../intelligence-results'
 
 function historyTask(index: number, group = 'standard'): IntelligenceTask {
@@ -64,6 +65,51 @@ function historyTask(index: number, group = 'standard'): IntelligenceTask {
     },
   }
 }
+
+it.each([
+  { retryCount: undefined, error: 'Example upstream error' },
+  { retryCount: 0, error: '' },
+  { retryCount: 1, error: '' },
+  { retryCount: 5, error: 'Example upstream error' },
+])(
+  'shows only positive retry counts ($retryCount) on result cards',
+  ({ retryCount, error }) => {
+    const task = historyTask(1)
+    if (!task.result) throw new Error('Expected a result fixture')
+    const channel = {
+      ...task.result.channels[0],
+      retry_count: retryCount,
+      error,
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { enabled: false, retry: false } },
+    })
+    const view = render(
+      <QueryClientProvider client={client}>
+        <IntelligenceResultCard
+          id='retry-result'
+          task={task}
+          channel={channel}
+          group={task.group}
+          model={task.model}
+          status={error ? 'failed' : 'succeeded'}
+          showGroup={false}
+          onGroupSelect={() => {}}
+        />
+      </QueryClientProvider>
+    )
+    try {
+      if (retryCount && retryCount > 0) {
+        expect(screen.getByText(`Retry Times: ${retryCount}`)).toBeVisible()
+      } else {
+        expect(screen.queryByText(/Retry Times/)).not.toBeInTheDocument()
+      }
+    } finally {
+      view.unmount()
+      client.clear()
+    }
+  }
+)
 
 it('keeps cached cards and group tabs available when refresh fails, and recovers on retry', async () => {
   const user = userEvent.setup()
