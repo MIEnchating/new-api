@@ -29,6 +29,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import type { IntelligenceTask } from '@/features/status-monitor/intelligence-api'
 import { IntelligenceDetails } from '@/features/status-monitor/intelligence-details'
 import { getIntelligenceQuestionName } from '@/features/status-monitor/intelligence-labels'
+import { IntelligencePreview } from '@/features/status-monitor/intelligence-preview'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
@@ -42,6 +43,13 @@ export function IntelligenceHistoryRun(props: {
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const task = props.task
   const channels = task.result?.channels ?? []
+  const groupedChannels = new Map<string, typeof channels>()
+  for (const row of channels) {
+    const group = row.group || task.group || t('Ungrouped')
+    const rows = groupedChannels.get(group) ?? []
+    rows.push(row)
+    groupedChannels.set(group, rows)
+  }
   const createdAt = new Date(task.created_at * 1000)
   let status = t('Pending')
   let variant: StatusVariant = 'warning'
@@ -120,66 +128,98 @@ export function IntelligenceHistoryRun(props: {
           </Alert>
         )}
         {channels.length > 0 ? (
-          <ul
-            aria-label={t('Test requests')}
-            className={cn(
-              'grid min-w-0 grid-cols-1 gap-3',
-              channels.length > 1 && '@min-[44rem]/history:grid-cols-2',
-              channels.length > 2 && '@min-[76rem]/history:grid-cols-3'
-            )}
-          >
-            {channels.map((row) => (
-              <li
-                key={`${row.group}-${row.model}-${row.channel_id}-${row.question_index}`}
-                className='bg-muted/20 flex min-w-0 flex-col gap-2 rounded-lg border p-3'
+          <div className='flex min-w-0 flex-col gap-4'>
+            {[...groupedChannels.entries()].map(([group, rows]) => (
+              <section
+                key={group}
+                aria-label={`${t('Group')}: ${group}`}
+                className='flex min-w-0 flex-col gap-2'
               >
-                <div className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1'>
-                  <p className='max-w-full min-w-0 text-sm font-medium break-all'>
-                    {row.model || task.model || t('Not recorded')}
-                  </p>
-                  <p className='text-muted-foreground max-w-full min-w-0 text-xs break-all'>
-                    {row.group || task.group || t('Not recorded')}
-                  </p>
-                </div>
-                <div className='flex flex-wrap items-center gap-x-2 gap-y-1'>
-                  <Badge
-                    variant='outline'
-                    className='text-xs font-normal tabular-nums'
-                  >
-                    {t('Channel')} #{formatNumber(row.channel_id, locale)}
+                <div className='flex items-center gap-2 px-1'>
+                  <span className='text-muted-foreground text-xs'>
+                    {t('Group')}
+                  </span>
+                  <Badge variant='secondary' className='max-w-full break-all'>
+                    {group}
                   </Badge>
-                  <span className='text-muted-foreground min-w-0 text-xs break-all'>
-                    {getIntelligenceQuestionName(row.question_name, t)}
-                  </span>
-                  <span className='text-muted-foreground inline-flex items-center gap-1 text-xs tabular-nums'>
-                    <HugeiconsIcon
-                      icon={Clock01Icon}
-                      className='size-3.5'
-                      aria-hidden='true'
-                    />
-                    {formatNumber(row.latency_ms / 1000, locale)} {t('seconds')}
+                  <span className='text-muted-foreground text-xs tabular-nums'>
+                    {formatNumber(rows.length, locale)}
                   </span>
                 </div>
-                <div className='mt-auto flex min-w-0 flex-col gap-1'>
-                  <HistoryIdentifier
-                    label={t('Request ID')}
-                    value={row.request_id}
-                  />
-                  {row.upstream_request_id && (
-                    <HistoryIdentifier
-                      label={t('Upstream Request ID')}
-                      value={row.upstream_request_id}
-                    />
+                <ul
+                  aria-label={t('Test requests')}
+                  className={cn(
+                    'grid min-w-0 grid-cols-1 gap-3',
+                    rows.length > 1 && '@min-[44rem]/history:grid-cols-2',
+                    rows.length > 2 && '@min-[76rem]/history:grid-cols-3'
                   )}
-                </div>
-                {row.error && (
-                  <p className='text-destructive text-xs break-all whitespace-pre-wrap'>
-                    {t(row.error)}
-                  </p>
-                )}
-              </li>
+                >
+                  {rows.map((row) => (
+                    <li
+                      key={`${row.group}-${row.model}-${row.channel_id}-${row.question_index}`}
+                      className='bg-muted/20 flex min-w-0 flex-col gap-2 rounded-lg border p-3'
+                    >
+                      <div className='flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1'>
+                        <p className='max-w-full min-w-0 text-sm font-medium break-all'>
+                          {row.model || task.model || t('Not recorded')}
+                        </p>
+                      </div>
+                      <div className='flex flex-wrap items-center gap-x-2 gap-y-1'>
+                        <Badge
+                          variant='outline'
+                          className='text-xs font-normal tabular-nums'
+                        >
+                          {t('Channel')} #{formatNumber(row.channel_id, locale)}
+                        </Badge>
+                        <span className='text-muted-foreground min-w-0 text-xs break-all'>
+                          {getIntelligenceQuestionName(row.question_name, t)}
+                        </span>
+                        <span className='text-muted-foreground inline-flex items-center gap-1 text-xs tabular-nums'>
+                          <HugeiconsIcon
+                            icon={Clock01Icon}
+                            className='size-3.5'
+                            aria-hidden='true'
+                          />
+                          {formatNumber(row.latency_ms / 1000, locale)}{' '}
+                          {t('seconds')}
+                        </span>
+                      </div>
+                      <div className='mt-auto flex min-w-0 flex-col gap-1'>
+                        <HistoryIdentifier
+                          label={t('Request ID')}
+                          value={row.request_id}
+                        />
+                        {row.upstream_request_id && (
+                          <HistoryIdentifier
+                            label={t('Upstream Request ID')}
+                            value={row.upstream_request_id}
+                          />
+                        )}
+                      </div>
+                      {row.error && (
+                        <p className='text-destructive text-xs break-all whitespace-pre-wrap'>
+                          {t(row.error)}
+                        </p>
+                      )}
+                      {!row.error && (
+                        <div className='flex justify-end'>
+                          <IntelligencePreview
+                            variant='button'
+                            taskId={task.task_id}
+                            channelId={row.channel_id}
+                            group={row.group}
+                            model={row.model}
+                            questionIndex={row.question_index}
+                            label={`${row.group || task.group || t('Ungrouped')} · ${row.model || task.model || t('Not recorded')} · ${getIntelligenceQuestionName(row.question_name, t)}`}
+                          />
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
         ) : (
           <p className='text-muted-foreground bg-muted/20 rounded-lg border border-dashed px-3 py-5 text-center text-xs'>
             {t('No request records yet')}

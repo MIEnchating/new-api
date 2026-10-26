@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { focusManager, useQuery } from '@tanstack/react-query'
-import { Maximize2 } from 'lucide-react'
+import { Eye, Maximize2 } from 'lucide-react'
 import {
   createContext,
   memo,
@@ -67,6 +67,7 @@ type IntelligencePreviewProps = {
   model?: string
   questionIndex: number
   label?: string
+  variant?: 'inline' | 'button'
 }
 
 export const IntelligencePreview = memo(function IntelligencePreview(
@@ -81,7 +82,13 @@ export const IntelligencePreview = memo(function IntelligencePreview(
 
   useEffect(() => {
     const element = viewport.current
-    if (!element || typeof IntersectionObserver === 'undefined') return
+    if (
+      props.variant === 'button' ||
+      !element ||
+      typeof IntersectionObserver === 'undefined'
+    ) {
+      return
+    }
     let enterTimer: ReturnType<typeof setTimeout>
     // Ignore cards crossed during a fast scroll. Once visited, keep the
     // document mounted and pause its playback when it leaves the viewport.
@@ -101,7 +108,18 @@ export const IntelligencePreview = memo(function IntelligencePreview(
       clearTimeout(enterTimer)
       observer.disconnect()
     }
-  }, [])
+  }, [props.variant])
+
+  if (props.variant === 'button') {
+    return (
+      <IntelligencePreviewContent
+        {...props}
+        visible={false}
+        expanded={expanded}
+        onExpandedChange={setExpanded}
+      />
+    )
+  }
 
   return (
     <div ref={viewport} className='bg-muted relative aspect-[6/5] border-t'>
@@ -159,14 +177,15 @@ function IntelligencePreviewContent(
     [html]
   )
 
-  if (query.isPending) return <LoadingState className='aspect-[6/5] min-h-0' />
-  if (query.isError) {
-    return (
+  let feedback: ReactNode = null
+  if (query.isPending) {
+    feedback = <LoadingState className='aspect-[6/5] min-h-0' />
+  } else if (query.isError) {
+    feedback = (
       <ErrorState className='min-h-48' onRetry={() => void query.refetch()} />
     )
-  }
-  if (!html) {
-    return (
+  } else if (!html) {
+    feedback = (
       <ErrorState
         className='min-h-48'
         title={t('Intelligence test returned no output')}
@@ -174,14 +193,20 @@ function IntelligencePreviewContent(
     )
   }
 
+  if (props.variant !== 'button' && feedback) return feedback
+
   return (
     <div className='relative'>
-      <div className='pointer-events-none aspect-[6/5]' inert>
-        <IntelligenceAnimation
-          document={previewDocument}
-          active={pageVisible && props.visible && !props.expanded && !scrolling}
-        />
-      </div>
+      {props.variant !== 'button' && (
+        <div className='pointer-events-none aspect-[6/5]' inert>
+          <IntelligenceAnimation
+            document={previewDocument}
+            active={
+              pageVisible && props.visible && !props.expanded && !scrolling
+            }
+          />
+        </div>
+      )}
       <Dialog
         open={props.expanded}
         onOpenChange={props.onExpandedChange}
@@ -195,23 +220,32 @@ function IntelligencePreviewContent(
         contentClassName='sm:max-w-[min(64rem,95vw)]'
         bodyClassName='flex justify-center'
         trigger={
-          <Button
-            variant='ghost'
-            aria-label={t('Enlarge preview')}
-            className='absolute inset-0 h-full w-full rounded-none p-0 hover:bg-transparent active:translate-y-0'
-          >
-            <span className='bg-background/80 text-foreground absolute right-2 bottom-2 rounded-md border p-1.5'>
-              <Maximize2 aria-hidden='true' className='size-3.5' />
-            </span>
-          </Button>
+          props.variant === 'button' ? (
+            <Button type='button' variant='outline' size='sm'>
+              <Eye aria-hidden='true' data-icon='inline-start' />
+              {t('View result')}
+            </Button>
+          ) : (
+            <Button
+              variant='ghost'
+              aria-label={t('Enlarge preview')}
+              className='absolute inset-0 h-full w-full rounded-none p-0 hover:bg-transparent active:translate-y-0'
+            >
+              <span className='bg-background/80 text-foreground absolute right-2 bottom-2 rounded-md border p-1.5'>
+                <Maximize2 aria-hidden='true' className='size-3.5' />
+              </span>
+            </Button>
+          )
         }
       >
         {props.expanded && (
           <div className='w-full max-w-[min(960px,84vh)]'>
-            <IntelligenceAnimation
-              document={previewDocument}
-              active={pageVisible}
-            />
+            {feedback || (
+              <IntelligenceAnimation
+                document={previewDocument}
+                active={pageVisible}
+              />
+            )}
           </div>
         )}
       </Dialog>
