@@ -495,6 +495,9 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 	keyWriter, _ := createMiddlewareScopedToken(t, admin.Id, 0, "api_key:write")
 	monitor, _ := createMiddlewareScopedToken(t, admin.Id, 0, "monitor:write")
 	wallet, _ := createMiddlewareScopedToken(t, admin.Id, 0, "wallet:read")
+	walletWriter, _ := createMiddlewareScopedToken(t, admin.Id, 0, "wallet:write")
+	billingReader, _ := createMiddlewareScopedToken(t, admin.Id, 0, "billing:read")
+	billingWriter, _ := createMiddlewareScopedToken(t, admin.Id, 0, "billing:write")
 	_, err := service.NormalizeAccessTokenScopes(admin.Id, common.RoleAdminUser, []string{"monitor:write"})
 	require.NoError(t, err)
 	_, err = service.NormalizeAccessTokenScopes(admin.Id, common.RoleCommonUser, []string{"monitor:write"})
@@ -511,6 +514,11 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 	router.PUT("/api/token/:id/route", UserAuth(), ok)
 	router.PUT("/api/status-monitor/cache/baseline", AdminAuth(), ok)
 	router.GET("/api/user/billing/self", UserAuth(), ok)
+	router.GET("/api/user/invoices/self", UserAuth(), ok)
+	router.GET("/api/user/invoices/eligible", UserAuth(), ok)
+	router.POST("/api/user/invoices", UserAuth(), ok)
+	router.GET("/api/user/invoices", AdminAuth(), ok)
+	router.PUT("/api/user/invoices/:id", AdminAuth(), ok)
 	router.POST("/api/user/lottery/draw", UserAuth(), ok)
 	router.POST("/api/sso/chatgpt2api/authorize", UserAuth(), ok)
 
@@ -533,6 +541,17 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 		{name: "admin changes monitoring baseline", method: http.MethodPut, path: "/api/status-monitor/cache/baseline", token: monitor, status: http.StatusOK},
 		{name: "unrelated scope cannot change monitoring", method: http.MethodPut, path: "/api/status-monitor/cache/baseline", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "read personal billing", path: "/api/user/billing/self", token: wallet, status: http.StatusOK},
+		{name: "read personal invoices", path: "/api/user/invoices/self", token: wallet, status: http.StatusOK},
+		{name: "read eligible invoice orders", path: "/api/user/invoices/eligible", token: wallet, status: http.StatusOK},
+		{name: "profile cannot read invoices", path: "/api/user/invoices/self", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "profile cannot read eligible orders", path: "/api/user/invoices/eligible", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "apply for invoice", method: http.MethodPost, path: "/api/user/invoices", token: walletWriter, status: http.StatusOK},
+		{name: "read wallet cannot apply for invoice", method: http.MethodPost, path: "/api/user/invoices", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "admin reads all invoices", path: "/api/user/invoices", token: billingReader, status: http.StatusOK},
+		{name: "wallet cannot read all invoices", path: "/api/user/invoices", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "admin processes invoice", method: http.MethodPut, path: "/api/user/invoices/4", token: billingWriter, status: http.StatusOK},
+		{name: "read billing cannot process invoice", method: http.MethodPut, path: "/api/user/invoices/4", token: billingReader, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "wallet writer cannot process invoice", method: http.MethodPut, path: "/api/user/invoices/4", token: walletWriter, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "read wallet cannot draw lottery", method: http.MethodPost, path: "/api/user/lottery/draw", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "PAT cannot authorize browser SSO", method: http.MethodPost, path: "/api/sso/chatgpt2api/authorize", token: profile, status: http.StatusForbidden, code: "AUTH_SESSION_REQUIRED", reason: "session_required"},
 	} {
@@ -566,8 +585,18 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 		})
 	}
 
-	// A retained monitoring grant cannot bypass a subsequent role demotion.
+	// Retained administrative grants cannot bypass a subsequent role demotion.
 	require.NoError(t, model.DB.Model(admin).Update("role", common.RoleCommonUser).Error)
+	for _, route := range []struct{ method, path, token string }{
+		{http.MethodGet, "/api/user/invoices", billingReader},
+		{http.MethodPut, "/api/user/invoices/4", billingWriter},
+	} {
+		request := httptest.NewRequest(route.method, route.path, nil)
+		request.Header.Set("Authorization", "Bearer "+route.token)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		assert.Equal(t, http.StatusForbidden, response.Code, "demoted user cannot access %s", route.path)
+	}
 	request := httptest.NewRequest(http.MethodPut, "/api/status-monitor/cache/baseline", nil)
 	request.Header.Set("Authorization", "Bearer "+monitor)
 	denied := httptest.NewRecorder()
