@@ -321,6 +321,8 @@ func migrateDB() error {
 		&Midjourney{},
 		&TopUp{},
 		&BillingTransaction{},
+		&InvoiceRequest{},
+		&InvoiceRequestOrder{},
 		&AffiliateReward{},
 		&LotteryCampaign{},
 		&LotteryProfile{},

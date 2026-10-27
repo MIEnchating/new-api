@@ -39,6 +39,7 @@ import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { InvoicesButton } from '@/features/invoices'
 import { useMediaQuery } from '@/hooks'
 import dayjs from '@/lib/dayjs'
 import { handleServerError } from '@/lib/handle-server-error'
@@ -460,6 +461,9 @@ export function TopUpStats() {
         <SectionPageLayout.Title>
           {t('Order Management')}
         </SectionPageLayout.Title>
+        <SectionPageLayout.Actions>
+          <InvoicesButton admin />
+        </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <div className='h-full min-h-0'>
             <DataTablePage
