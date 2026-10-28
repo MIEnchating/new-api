@@ -3800,6 +3800,7 @@
     "Invoice applications": "Demandes de facture",
     "Invoice details": "Informations de facturation",
     "Invoice email": "E-mail de facturation",
+    "Invoice email address is invalid": "L’adresse e-mail de réception de la facture est invalide",
     "Invoice email could not be sent. Please try again later": "Envoi de la facture impossible. Réessayez plus tard",
     "Invoice email sent": "Facture envoyée par e-mail",
     "Invoice file": "Fichier de facture",

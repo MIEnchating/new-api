@@ -3800,6 +3800,7 @@
     "Invoice applications": "开票申请",
     "Invoice details": "开票资料",
     "Invoice email": "发票接收邮箱",
+    "Invoice email address is invalid": "发票接收邮箱地址无效",
     "Invoice email could not be sent. Please try again later": "发票邮件发送失败，请稍后重试",
     "Invoice email sent": "发票邮件已发送",
     "Invoice file": "发票文件",

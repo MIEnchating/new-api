@@ -83,6 +83,9 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/user/aff":                            accessTokenScopeRule("wallet:read"),
 	"GET /api/user/topup/info":                     accessTokenScopeRule("wallet:read"),
 	"GET /api/user/topup/self":                     accessTokenScopeRule("wallet:read"),
+	"GET /api/user/invoices/self":                  accessTokenScopeRule("wallet:read"),
+	"GET /api/user/invoices/eligible":              accessTokenScopeRule("wallet:read"),
+	"POST /api/user/invoices":                      accessTokenScopeRule("wallet:write"),
 	"POST /api/user/topup":                         accessTokenScopeRule("wallet:write"),
 	"POST /api/user/pay":                           accessTokenScopeRule("wallet:write"),
 	"POST /api/user/amount":                        accessTokenScopeRule("wallet:read"),
@@ -108,6 +111,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	// router/api-router.go: /api/user (admin)
 	"GET /api/user/":                                   accessTokenScopeRule("user:read"),
 	"GET /api/user/topup":                              accessTokenScopeRule("billing:read"),
+	"GET /api/user/invoices":                           accessTokenScopeRule("billing:read"),
+	"PUT /api/user/invoices/:id":                       accessTokenScopeRule("billing:write"),
 	"POST /api/user/topup/complete":                    accessTokenScopeRule("billing:write"),
 	"GET /api/user/search":                             accessTokenScopeRule("user:read"),
 	"GET /api/user/:id/oauth/bindings":                 accessTokenScopeRule("user:read"),

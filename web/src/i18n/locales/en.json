@@ -3800,6 +3800,7 @@
     "Invoice applications": "Invoice applications",
     "Invoice details": "Invoice details",
     "Invoice email": "Invoice email",
+    "Invoice email address is invalid": "Invoice email address is invalid",
     "Invoice email could not be sent. Please try again later": "Invoice email could not be sent. Please try again later",
     "Invoice email sent": "Invoice email sent",
     "Invoice file": "Invoice file",

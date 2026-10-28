@@ -3800,6 +3800,7 @@
     "Invoice applications": "Yêu cầu xuất hóa đơn",
     "Invoice details": "Thông tin xuất hóa đơn",
     "Invoice email": "Email nhận hóa đơn",
+    "Invoice email address is invalid": "Địa chỉ email nhận hóa đơn không hợp lệ",
     "Invoice email could not be sent. Please try again later": "Không thể gửi email hóa đơn. Vui lòng thử lại sau",
     "Invoice email sent": "Đã gửi hóa đơn qua email",
     "Invoice file": "Tệp hóa đơn",

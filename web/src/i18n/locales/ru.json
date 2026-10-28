@@ -3800,6 +3800,7 @@
     "Invoice applications": "Заявки на счета",
     "Invoice details": "Реквизиты для счёта",
     "Invoice email": "Email для счёта",
+    "Invoice email address is invalid": "Недопустимый адрес электронной почты для получения счёта",
     "Invoice email could not be sent. Please try again later": "Не удалось отправить счёт. Повторите позже",
     "Invoice email sent": "Счёт отправлен по почте",
     "Invoice file": "Файл счёта",

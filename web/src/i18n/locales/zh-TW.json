@@ -3800,6 +3800,7 @@
     "Invoice applications": "開票申請",
     "Invoice details": "開票資料",
     "Invoice email": "發票接收信箱",
+    "Invoice email address is invalid": "發票接收電子郵件地址無效",
     "Invoice email could not be sent. Please try again later": "發票郵件傳送失敗，請稍後重試",
     "Invoice email sent": "發票郵件已寄送",
     "Invoice file": "發票檔案",

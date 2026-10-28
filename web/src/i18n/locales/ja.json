@@ -3800,6 +3800,7 @@
     "Invoice applications": "請求書発行申請",
     "Invoice details": "請求書情報",
     "Invoice email": "請求書の送付先メール",
+    "Invoice email address is invalid": "請求書の送付先メールアドレスが無効です",
     "Invoice email could not be sent. Please try again later": "請求書メールを送信できません。後でもう一度お試しください",
     "Invoice email sent": "請求書メールを送信しました",
     "Invoice file": "請求書ファイル",

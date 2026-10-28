@@ -297,13 +297,19 @@ it('loads administrator notification recipients and saves the selected administr
 
 it('keeps selections across pages and submits all selected orders with validated company details', async () => {
   const user = userEvent.setup()
-  vi.spyOn(api, 'get').mockImplementation(async (_url, config) => ({
-    data: {
-      success: true,
+  vi.spyOn(api, 'get').mockImplementation(async (_url, config) => {
+    const params = config?.params
+    const secondPage =
+      typeof params === 'object' &&
+      params !== null &&
+      'p' in params &&
+      params.p === 2
+    return {
       data: {
-        total: 11,
-        items:
-          config?.params.p === 2
+        success: true,
+        data: {
+          total: 11,
+          items: secondPage
             ? [{ id: 11, trade_no: 'order-eleven', money: 20.1 }]
             : [
                 {
@@ -316,9 +322,10 @@ it('keeps selections across pages and submits all selected orders with validated
                   complete_time: 1793110060,
                 },
               ],
+        },
       },
-    },
-  }))
+    }
+  })
   const post = vi
     .spyOn(api, 'post')
     .mockResolvedValue({ data: { success: true, data: pending } })
