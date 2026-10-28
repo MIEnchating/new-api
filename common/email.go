@@ -1,10 +1,14 @@
 package common
 
 import (
+	"bytes"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
+	"mime"
+	"mime/multipart"
 	"net/smtp"
+	"net/textproto"
 	"slices"
 	"strings"
 	"time"
@@ -75,7 +79,13 @@ func newSMTPClient(addr string) (*smtp.Client, error) {
 	return client, nil
 }
 
-func SendEmail(subject string, receiver string, content string) error {
+type EmailAttachment struct {
+	Filename    string `json:"filename"`
+	Content     []byte `json:"content"`
+	ContentType string `json:"content_type"`
+}
+
+func SendEmail(subject string, receiver string, content string, attachments ...EmailAttachment) error {
 	OptionMapRWMutex.RLock()
 	provider := OptionMap["EmailProvider"]
 	resendKey := OptionMap["ResendApiKey"]
@@ -85,7 +95,7 @@ func SendEmail(subject string, receiver string, content string) error {
 	// a failed response does not prove that the first provider did not send.
 	switch provider {
 	case "resend":
-		return sendResendEmail(resendKey, resendFrom, subject, receiver, content)
+		return sendResendEmail(resendKey, resendFrom, subject, receiver, content, attachments...)
 	case "", "smtp": // Preserve existing installations without a selector.
 	default:
 		return NewMessage("Email sending method must be SMTP or Resend")
@@ -108,6 +118,14 @@ func SendEmail(subject string, receiver string, content string) error {
 		"Message-ID: %s\r\n"+ // 添加 Message-ID 头
 		"Content-Type: text/html; charset=UTF-8\r\n\r\n%s\r\n",
 		receiver, SystemName, SMTPFrom, encodedSubject, time.Now().Format(time.RFC1123Z), id, content))
+	if len(attachments) > 0 {
+		body, contentType, err := buildEmailAttachments(content, attachments)
+		if err != nil {
+			return err
+		}
+		mail = []byte(fmt.Sprintf("To: %s\r\nFrom: %s <%s>\r\nSubject: %s\r\nDate: %s\r\nMessage-ID: %s\r\nMIME-Version: 1.0\r\nContent-Type: %s\r\n\r\n", receiver, SystemName, SMTPFrom, encodedSubject, time.Now().Format(time.RFC1123Z), id, contentType))
+		mail = append(mail, body...)
+	}
 	auth := getSMTPAuth()
 	addr := fmt.Sprintf("%s:%d", SMTPServer, SMTPPort)
 	to := strings.Split(receiver, ";")
@@ -147,4 +165,34 @@ func SendEmail(subject string, receiver string, content string) error {
 		SysError(LogText("failed to send email to %s: %v", receiver, err))
 	}
 	return err
+}
+
+func buildEmailAttachments(content string, attachments []EmailAttachment) ([]byte, string, error) {
+	var buffer bytes.Buffer
+	writer := multipart.NewWriter(&buffer)
+	parts := append([]EmailAttachment{{Content: []byte(content), ContentType: "text/html; charset=UTF-8"}}, attachments...)
+	for _, attachment := range parts {
+		header := make(textproto.MIMEHeader)
+		header.Set("Content-Type", attachment.ContentType)
+		header.Set("Content-Transfer-Encoding", "base64")
+		if attachment.Filename != "" {
+			header.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": attachment.Filename}))
+		}
+		part, err := writer.CreatePart(header)
+		if err != nil {
+			return nil, "", err
+		}
+		encoded := base64.StdEncoding.EncodeToString(attachment.Content)
+		for len(encoded) > 0 {
+			n := min(76, len(encoded))
+			if _, err := fmt.Fprint(part, encoded[:n]+"\r\n"); err != nil {
+				return nil, "", err
+			}
+			encoded = encoded[n:]
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, "", err
+	}
+	return buffer.Bytes(), mime.FormatMediaType("multipart/mixed", map[string]string{"boundary": writer.Boundary()}), nil
 }

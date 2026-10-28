@@ -41,6 +41,9 @@ import { Route as AuthenticatedChatChatIdRouteImport } from './routes/_authentic
 import { Route as AuthenticatedDashboardIndexRouteImport } from './routes/_authenticated/dashboard/index'
 import { Route as AuthenticatedDashboardSectionRouteImport } from './routes/_authenticated/dashboard/$section'
 import { Route as AuthenticatedErrorsErrorRouteImport } from './routes/_authenticated/errors/$error'
+import { Route as AuthenticatedInvoiceRequestsIndexRouteImport } from './routes/_authenticated/invoice-requests/index'
+import { Route as AuthenticatedInvoicesIndexRouteImport } from './routes/_authenticated/invoices/index'
+import { Route as AuthenticatedInvoicesApplyRouteImport } from './routes/_authenticated/invoices/apply'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
 import { Route as AuthenticatedLotteryIndexRouteImport } from './routes/_authenticated/lottery/index'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
@@ -242,6 +245,24 @@ const AuthenticatedErrorsErrorRoute =
   AuthenticatedErrorsErrorRouteImport.update({
     id: '/errors/$error',
     path: '/errors/$error',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedInvoiceRequestsIndexRoute =
+  AuthenticatedInvoiceRequestsIndexRouteImport.update({
+    id: '/invoice-requests/',
+    path: '/invoice-requests/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedInvoicesIndexRoute =
+  AuthenticatedInvoicesIndexRouteImport.update({
+    id: '/invoices/',
+    path: '/invoices/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedInvoicesApplyRoute =
+  AuthenticatedInvoicesApplyRouteImport.update({
+    id: '/invoices/apply',
+    path: '/invoices/apply',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedKeysIndexRoute = AuthenticatedKeysIndexRouteImport.update({
@@ -498,6 +519,7 @@ export interface FileRoutesByFullPath {
   '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/invoices/apply': typeof AuthenticatedInvoicesApplyRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/pages/$pageId': typeof AuthenticatedPagesPageIdRoute
   '/sso/chatgpt2api': typeof AuthenticatedSsoChatgpt2apiRoute
@@ -506,6 +528,8 @@ export interface FileRoutesByFullPath {
   '/affiliate/': typeof AuthenticatedAffiliateIndexRoute
   '/channels/': typeof AuthenticatedChannelsIndexRoute
   '/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/invoice-requests/': typeof AuthenticatedInvoiceRequestsIndexRoute
+  '/invoices/': typeof AuthenticatedInvoicesIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/lottery/': typeof AuthenticatedLotteryIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
@@ -567,6 +591,7 @@ export interface FileRoutesByTo {
   '/chat/$chatId': typeof AuthenticatedChatChatIdRoute
   '/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/invoices/apply': typeof AuthenticatedInvoicesApplyRoute
   '/models/$section': typeof AuthenticatedModelsSectionRoute
   '/pages/$pageId': typeof AuthenticatedPagesPageIdRoute
   '/sso/chatgpt2api': typeof AuthenticatedSsoChatgpt2apiRoute
@@ -575,6 +600,8 @@ export interface FileRoutesByTo {
   '/affiliate': typeof AuthenticatedAffiliateIndexRoute
   '/channels': typeof AuthenticatedChannelsIndexRoute
   '/dashboard': typeof AuthenticatedDashboardIndexRoute
+  '/invoice-requests': typeof AuthenticatedInvoiceRequestsIndexRoute
+  '/invoices': typeof AuthenticatedInvoicesIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/lottery': typeof AuthenticatedLotteryIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
@@ -640,6 +667,7 @@ export interface FileRoutesById {
   '/_authenticated/chat/$chatId': typeof AuthenticatedChatChatIdRoute
   '/_authenticated/dashboard/$section': typeof AuthenticatedDashboardSectionRoute
   '/_authenticated/errors/$error': typeof AuthenticatedErrorsErrorRoute
+  '/_authenticated/invoices/apply': typeof AuthenticatedInvoicesApplyRoute
   '/_authenticated/models/$section': typeof AuthenticatedModelsSectionRoute
   '/_authenticated/pages/$pageId': typeof AuthenticatedPagesPageIdRoute
   '/_authenticated/sso/chatgpt2api': typeof AuthenticatedSsoChatgpt2apiRoute
@@ -648,6 +676,8 @@ export interface FileRoutesById {
   '/_authenticated/affiliate/': typeof AuthenticatedAffiliateIndexRoute
   '/_authenticated/channels/': typeof AuthenticatedChannelsIndexRoute
   '/_authenticated/dashboard/': typeof AuthenticatedDashboardIndexRoute
+  '/_authenticated/invoice-requests/': typeof AuthenticatedInvoiceRequestsIndexRoute
+  '/_authenticated/invoices/': typeof AuthenticatedInvoicesIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/lottery/': typeof AuthenticatedLotteryIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
@@ -712,6 +742,7 @@ export interface FileRouteTypes {
     | '/chat/$chatId'
     | '/dashboard/$section'
     | '/errors/$error'
+    | '/invoices/apply'
     | '/models/$section'
     | '/pages/$pageId'
     | '/sso/chatgpt2api'
@@ -720,6 +751,8 @@ export interface FileRouteTypes {
     | '/affiliate/'
     | '/channels/'
     | '/dashboard/'
+    | '/invoice-requests/'
+    | '/invoices/'
     | '/keys/'
     | '/lottery/'
     | '/models/'
@@ -781,6 +814,7 @@ export interface FileRouteTypes {
     | '/chat/$chatId'
     | '/dashboard/$section'
     | '/errors/$error'
+    | '/invoices/apply'
     | '/models/$section'
     | '/pages/$pageId'
     | '/sso/chatgpt2api'
@@ -789,6 +823,8 @@ export interface FileRouteTypes {
     | '/affiliate'
     | '/channels'
     | '/dashboard'
+    | '/invoice-requests'
+    | '/invoices'
     | '/keys'
     | '/lottery'
     | '/models'
@@ -853,6 +889,7 @@ export interface FileRouteTypes {
     | '/_authenticated/chat/$chatId'
     | '/_authenticated/dashboard/$section'
     | '/_authenticated/errors/$error'
+    | '/_authenticated/invoices/apply'
     | '/_authenticated/models/$section'
     | '/_authenticated/pages/$pageId'
     | '/_authenticated/sso/chatgpt2api'
@@ -861,6 +898,8 @@ export interface FileRouteTypes {
     | '/_authenticated/affiliate/'
     | '/_authenticated/channels/'
     | '/_authenticated/dashboard/'
+    | '/_authenticated/invoice-requests/'
+    | '/_authenticated/invoices/'
     | '/_authenticated/keys/'
     | '/_authenticated/lottery/'
     | '/_authenticated/models/'
@@ -1140,6 +1179,27 @@ declare module '@tanstack/react-router' {
       path: '/errors/$error'
       fullPath: '/errors/$error'
       preLoaderRoute: typeof AuthenticatedErrorsErrorRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/invoice-requests/': {
+      id: '/_authenticated/invoice-requests/'
+      path: '/invoice-requests'
+      fullPath: '/invoice-requests/'
+      preLoaderRoute: typeof AuthenticatedInvoiceRequestsIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/invoices/': {
+      id: '/_authenticated/invoices/'
+      path: '/invoices'
+      fullPath: '/invoices/'
+      preLoaderRoute: typeof AuthenticatedInvoicesIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/invoices/apply': {
+      id: '/_authenticated/invoices/apply'
+      path: '/invoices/apply'
+      fullPath: '/invoices/apply'
+      preLoaderRoute: typeof AuthenticatedInvoicesApplyRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/keys/': {
@@ -1506,6 +1566,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedChatChatIdRoute: typeof AuthenticatedChatChatIdRoute
   AuthenticatedDashboardSectionRoute: typeof AuthenticatedDashboardSectionRoute
   AuthenticatedErrorsErrorRoute: typeof AuthenticatedErrorsErrorRoute
+  AuthenticatedInvoicesApplyRoute: typeof AuthenticatedInvoicesApplyRoute
   AuthenticatedModelsSectionRoute: typeof AuthenticatedModelsSectionRoute
   AuthenticatedPagesPageIdRoute: typeof AuthenticatedPagesPageIdRoute
   AuthenticatedSsoChatgpt2apiRoute: typeof AuthenticatedSsoChatgpt2apiRoute
@@ -1514,6 +1575,8 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedAffiliateIndexRoute: typeof AuthenticatedAffiliateIndexRoute
   AuthenticatedChannelsIndexRoute: typeof AuthenticatedChannelsIndexRoute
   AuthenticatedDashboardIndexRoute: typeof AuthenticatedDashboardIndexRoute
+  AuthenticatedInvoiceRequestsIndexRoute: typeof AuthenticatedInvoiceRequestsIndexRoute
+  AuthenticatedInvoicesIndexRoute: typeof AuthenticatedInvoicesIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedLotteryIndexRoute: typeof AuthenticatedLotteryIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
@@ -1538,6 +1601,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedChatChatIdRoute: AuthenticatedChatChatIdRoute,
   AuthenticatedDashboardSectionRoute: AuthenticatedDashboardSectionRoute,
   AuthenticatedErrorsErrorRoute: AuthenticatedErrorsErrorRoute,
+  AuthenticatedInvoicesApplyRoute: AuthenticatedInvoicesApplyRoute,
   AuthenticatedModelsSectionRoute: AuthenticatedModelsSectionRoute,
   AuthenticatedPagesPageIdRoute: AuthenticatedPagesPageIdRoute,
   AuthenticatedSsoChatgpt2apiRoute: AuthenticatedSsoChatgpt2apiRoute,
@@ -1546,6 +1610,9 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedAffiliateIndexRoute: AuthenticatedAffiliateIndexRoute,
   AuthenticatedChannelsIndexRoute: AuthenticatedChannelsIndexRoute,
   AuthenticatedDashboardIndexRoute: AuthenticatedDashboardIndexRoute,
+  AuthenticatedInvoiceRequestsIndexRoute:
+    AuthenticatedInvoiceRequestsIndexRoute,
+  AuthenticatedInvoicesIndexRoute: AuthenticatedInvoicesIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedLotteryIndexRoute: AuthenticatedLotteryIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,

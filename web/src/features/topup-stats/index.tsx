@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import type {
   ColumnFiltersState,
   PaginationState,
@@ -39,7 +40,6 @@ import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { InvoicesButton } from '@/features/invoices'
 import { useMediaQuery } from '@/hooks'
 import dayjs from '@/lib/dayjs'
 import { handleServerError } from '@/lib/handle-server-error'
@@ -462,7 +462,9 @@ export function TopUpStats() {
           {t('Order Management')}
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>
-          <InvoicesButton admin />
+          <Button variant='outline' render={<Link to='/invoice-requests' />}>
+            {t('Invoice applications')}
+          </Button>
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <div className='h-full min-h-0'>
@@ -584,7 +586,7 @@ export function TopUpStats() {
                     columnId: 'type',
                     title: t('Type'),
                     className:
-                      'min-w-0 flex-1 justify-start max-sm:w-full sm:min-w-[190px]',
+                      'min-w-0 justify-start max-sm:w-full sm:min-w-[190px] sm:flex-1',
                     options: [
                       {
                         label: t('Online Top-up'),
@@ -612,7 +614,7 @@ export function TopUpStats() {
                     columnId: 'invoice_status',
                     title: t('Invoice status'),
                     className:
-                      'min-w-0 flex-1 justify-start max-sm:w-full sm:min-w-[180px]',
+                      'min-w-0 justify-start max-sm:w-full sm:min-w-[180px] sm:flex-1',
                     options: [
                       { label: t('Not invoiced'), value: '0' },
                       { label: t('Invoiced'), value: '1' },
@@ -621,7 +623,7 @@ export function TopUpStats() {
                   },
                 ],
                 expandable: (
-                  <div className='grid min-w-0 grid-cols-1 gap-2 sm:contents'>
+                  <div className='grid w-full min-w-0 grid-cols-1 gap-2 sm:contents'>
                     <Input
                       value={globalFilter}
                       onChange={(event) => setGlobalFilter(event.target.value)}
@@ -631,7 +633,7 @@ export function TopUpStats() {
                     <DataTableFacetedFilter
                       column={table.getColumn('status')}
                       title={t('Order status')}
-                      className='min-w-0 flex-1 justify-start max-sm:w-full sm:min-w-[180px]'
+                      className='min-w-0 justify-start max-sm:w-full sm:min-w-[180px] sm:flex-1'
                       options={[
                         { label: t('Success'), value: 'success' },
                         { label: t('Pending'), value: 'pending' },
@@ -642,7 +644,7 @@ export function TopUpStats() {
                     <DataTableFacetedFilter
                       column={table.getColumn('payment_method')}
                       title={t('Top-up method')}
-                      className='min-w-0 flex-1 justify-start max-sm:w-full sm:min-w-[180px]'
+                      className='min-w-0 justify-start max-sm:w-full sm:min-w-[180px] sm:flex-1'
                       options={[
                         { label: t('Alipay'), value: 'alipay' },
                         { label: t('WeChat Pay'), value: 'wxpay' },

@@ -187,6 +187,7 @@ interface BuildCCSwitchURLParams {
   apiKey: string
   serverAddress: string
   endpoint: string
+  iconUrl?: string
   language?: string
 }
 
@@ -233,6 +234,7 @@ export function buildCCSwitchURL({
   apiKey,
   serverAddress: rawServerAddress,
   endpoint: rawEndpoint,
+  iconUrl,
   language,
 }: BuildCCSwitchURLParams): string {
   const serverAddress = normalizeServerAddress(rawServerAddress)
@@ -248,6 +250,16 @@ export function buildCCSwitchURL({
     if (value) params.set(key, value)
   }
   params.set('homepage', serverAddress)
+  if (iconUrl) {
+    try {
+      const url = new URL(iconUrl, `${serverAddress}/`)
+      if (url.protocol === 'https:' && !url.username && !url.password) {
+        params.set('iconUrl', url.href)
+      }
+    } catch {
+      // An invalid site logo must not prevent importing the provider.
+    }
+  }
   params.set('enabled', 'true')
   params.set('usageEnabled', 'true')
   const usageScript = CC_SWITCH_USAGE_SCRIPT.replace(

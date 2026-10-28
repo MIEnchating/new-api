@@ -7,10 +7,15 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
+	"mime"
+	"mime/multipart"
 	"net"
+	"net/mail"
 	"net/smtp"
 	"strconv"
 	"strings"
@@ -19,6 +24,43 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestSendInvoiceAttachmentThroughSMTP(t *testing.T) {
+	server := newFakeSMTPServer(t)
+	defer server.close()
+	withSMTPSettings(t)
+	OptionMapRWMutex.Lock()
+	originalOptions := OptionMap
+	OptionMap = map[string]string{"EmailProvider": "smtp"}
+	OptionMapRWMutex.Unlock()
+	t.Cleanup(func() { OptionMapRWMutex.Lock(); OptionMap = originalOptions; OptionMapRWMutex.Unlock() })
+	SMTPServer, SMTPPort = server.host, server.port
+	SMTPSSLEnabled, SMTPStartTLSEnabled = false, false
+	SMTPAccount, SMTPToken, SMTPFrom = "", "", "sender@example.com"
+	pdf := []byte("%PDF-1.7\ninvoice content")
+	require.NoError(t, SendEmail("Invoice", "receiver@example.com", "<p>Invoice attached</p>", EmailAttachment{Filename: "invoice-1.pdf", Content: pdf, ContentType: "application/pdf"}))
+	message := <-server.messages
+	parsed, err := mail.ReadMessage(strings.NewReader(message))
+	require.NoError(t, err)
+	mediaType, params, err := mime.ParseMediaType(parsed.Header.Get("Content-Type"))
+	require.NoError(t, err)
+	require.Equal(t, "multipart/mixed", mediaType)
+	reader := multipart.NewReader(parsed.Body, params["boundary"])
+	body, err := reader.NextPart()
+	require.NoError(t, err)
+	decoded, err := io.ReadAll(base64.NewDecoder(base64.StdEncoding, body))
+	require.NoError(t, err)
+	require.Equal(t, "<p>Invoice attached</p>", string(decoded))
+	file, err := reader.NextPart()
+	require.NoError(t, err)
+	require.Equal(t, "invoice-1.pdf", file.FileName())
+	require.Equal(t, "application/pdf", file.Header.Get("Content-Type"))
+	decoded, err = io.ReadAll(base64.NewDecoder(base64.StdEncoding, file))
+	require.NoError(t, err)
+	require.Equal(t, pdf, decoded)
+	_, err = reader.NextPart()
+	require.ErrorIs(t, err, io.EOF)
+}
 
 type fakeSMTPServer struct {
 	listener          net.Listener

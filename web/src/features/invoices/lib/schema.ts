@@ -25,6 +25,10 @@ export const invoiceApplicationSchema = z
     title: z.string().trim().min(1).max(200),
     tax_id: z.string().trim().max(32),
     email: z.email().max(254),
+    invoice_address: z.string().trim().max(300),
+    invoice_phone: z.string().trim().max(50),
+    bank_name: z.string().trim().max(100),
+    bank_account: z.string().trim().max(64),
     remark: z.string().trim().max(1000),
   })
   .refine(
@@ -52,6 +56,7 @@ export const invoiceProcessSchema = z
         }
       }),
     note: z.string().trim().max(1000),
+    send_email: z.boolean(),
   })
   .refine((value) =>
     value.status === 'issued'

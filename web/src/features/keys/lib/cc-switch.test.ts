@@ -57,6 +57,36 @@ function getUsageConfig() {
 }
 
 describe('CC Switch provider import', () => {
+  test.each([
+    [
+      'https://cdn.example.com/logo.svg?v=2',
+      'https://cdn.example.com/logo.svg?v=2',
+    ],
+    ['/logo.png', 'https://example.com/logo.png'],
+    ['http://example.com/logo.png', null],
+    ['data:image/png;base64,AA==', null],
+    ['https://user:password@example.com/logo.png', null],
+    ['https://[invalid', null],
+    [undefined, null],
+  ])(
+    'imports logo %s without blocking provider import',
+    (iconUrl, expected) => {
+      const url = new URL(
+        buildCCSwitchURL({
+          app: 'codex',
+          name: 'Example Codex',
+          models: { model: 'gpt-5.4' },
+          apiKey: 'sk-test-key',
+          serverAddress: 'https://example.com',
+          endpoint: 'https://example.com/v1',
+          iconUrl,
+        })
+      )
+      assert.equal(url.searchParams.get('iconUrl'), expected)
+      assert.equal(url.searchParams.get('name'), 'Example Codex')
+    }
+  )
+
   test('links to the official latest release page', () => {
     const url = new URL(CC_SWITCH_LATEST_RELEASE_URL)
     assert.equal(url.hostname, 'github.com')

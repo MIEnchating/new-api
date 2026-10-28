@@ -21,14 +21,11 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { STATUS_QUERY_KEY } from '@/lib/status-query'
+
 import { CCSwitchDialog } from '../cc-switch-dialog'
 
 let queryClient: QueryClient
-
-vi.mock('@/hooks/use-status', () => {
-  const status = {}
-  return { useStatus: () => ({ status }) }
-})
 
 beforeEach(() => {
   queryClient = new QueryClient({
@@ -42,7 +39,15 @@ afterEach(() => {
   queryClient.clear()
 })
 
-function renderDialog(models = ['gpt-5.4', 'claude-sonnet-4-6']) {
+function renderDialog(
+  models = ['gpt-5.4', 'claude-sonnet-4-6'],
+  siteTitle = '测试站点'
+) {
+  queryClient.setQueryData(STATUS_QUERY_KEY, {
+    system_name: siteTitle,
+    server_address: 'https://example.com',
+    logo: '/site-logo.png',
+  })
   queryClient.setQueryData(['api-key-models-ccswitch', 42], {
     success: true,
     data: models,
@@ -60,6 +65,48 @@ function renderDialog(models = ['gpt-5.4', 'claude-sonnet-4-6']) {
 }
 
 describe('CC Switch model selection', () => {
+  it('uses the site title and selected app type as the imported provider name', async () => {
+    renderDialog()
+    const user = userEvent.setup()
+    const input = screen.getByRole('textbox', { name: 'Name' })
+    expect(input).toHaveValue('测试站点 Claude Code')
+
+    for (const app of [
+      'Codex',
+      'Gemini CLI',
+      'Grok Build',
+      'OpenCode',
+      'OpenClaw',
+      'Hermes',
+      'Claude Code',
+    ]) {
+      await user.click(screen.getByRole('radio', { name: app }))
+      expect(input).toHaveValue(`测试站点 ${app}`)
+    }
+
+    await user.type(
+      screen.getByRole('combobox', { name: 'Primary Model' }),
+      'claude-sonnet-4-6'
+    )
+    await user.click(screen.getByRole('option', { name: 'claude-sonnet-4-6' }))
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
+    expect(open).toHaveBeenCalledOnce()
+    expect(
+      new URL(String(open.mock.calls[0][0])).searchParams.get('name')
+    ).toBe('测试站点 Claude Code')
+    expect(
+      new URL(String(open.mock.calls[0][0])).searchParams.get('iconUrl')
+    ).toBe('https://example.com/site-logo.png')
+  })
+
+  it('uses the default site title when the configured title is blank', () => {
+    renderDialog([], '   ')
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue(
+      'New API Claude Code'
+    )
+  })
+
   it.each(['Claude Code', 'Codex', 'Gemini CLI'])(
     'opens %s models outside the clipping dialog and keeps the dialog open after selection',
     async (app) => {

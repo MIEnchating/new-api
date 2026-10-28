@@ -85,6 +85,7 @@ describe('security sidebar visibility', () => {
         ?.items.map((item) => item.title)
     ).toEqual([
       'Wallet',
+      'Invoice applications',
       'Profile',
       'Security & Access',
       'Invitation Rebates',
@@ -184,5 +185,32 @@ describe('audit log sidebar entry', () => {
       .map((item) => item.title)
     expect(titles).not.toContain('Usage Logs')
     expect(titles).toContain('Audit Logs')
+  })
+})
+
+describe('invoice page navigation', () => {
+  it('offers separate personal and administrator pages', () => {
+    const { result } = sidebarFor()
+    expect(
+      result.current.find((group) => group.id === 'personal')?.items
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ url: '/invoices' })])
+    )
+    expect(result.current.find((group) => group.id === 'admin')?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ url: '/invoice-requests', requiredRole: 10 }),
+      ])
+    )
+  })
+  it('hides invoice entries with the corresponding wallet and order settings', () => {
+    const { result } = sidebarFor({
+      personal: { enabled: true, topup: false },
+      admin: { enabled: true, topup_stats: false },
+    })
+    const urls = result.current
+      .flatMap((group) => group.items)
+      .map((item) => ('url' in item ? item.url : undefined))
+    expect(urls).not.toContain('/invoices')
+    expect(urls).not.toContain('/invoice-requests')
   })
 })

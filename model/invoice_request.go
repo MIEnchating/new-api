@@ -5,6 +5,7 @@ import (
 	"net/mail"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -13,9 +14,10 @@ import (
 )
 
 const (
-	InvoiceRequestPending  = "pending"
-	InvoiceRequestIssued   = "issued"
-	InvoiceRequestRejected = "rejected"
+	InvoiceRequestPending   = "pending"
+	InvoiceRequestIssued    = "issued"
+	InvoiceRequestRejected  = "rejected"
+	InvoiceRequestWithdrawn = "withdrawn"
 )
 
 var (
@@ -26,21 +28,27 @@ var (
 )
 
 type InvoiceRequest struct {
-	Id            int                   `json:"id"`
-	UserId        int                   `json:"user_id" gorm:"index"`
-	TitleType     string                `json:"title_type" gorm:"type:varchar(16)"`
-	Title         string                `json:"title" gorm:"type:varchar(200)"`
-	TaxId         string                `json:"tax_id" gorm:"type:varchar(32)"`
-	Email         string                `json:"email" gorm:"type:varchar(254)"`
-	Remark        string                `json:"remark" gorm:"type:text"`
-	Status        string                `json:"status" gorm:"type:varchar(16);index"`
-	CreatedAt     int64                 `json:"created_at" gorm:"autoCreateTime:false"`
-	ProcessedAt   int64                 `json:"processed_at"`
-	ProcessedBy   int                   `json:"processed_by"`
-	InvoiceNumber string                `json:"invoice_number" gorm:"type:varchar(100)"`
-	InvoiceURL    string                `json:"invoice_url" gorm:"type:text"`
-	ProcessNote   string                `json:"process_note" gorm:"type:text"`
-	Orders        []InvoiceRequestOrder `json:"orders" gorm:"foreignKey:RequestId"`
+	Id             int                   `json:"id"`
+	UserId         int                   `json:"user_id" gorm:"index"`
+	TitleType      string                `json:"title_type" gorm:"type:varchar(16)"`
+	Title          string                `json:"title" gorm:"type:varchar(200)"`
+	TaxId          string                `json:"tax_id" gorm:"type:varchar(32)"`
+	Email          string                `json:"email" gorm:"type:varchar(254)"`
+	InvoiceAddress string                `json:"invoice_address" gorm:"type:varchar(300)"`
+	InvoicePhone   string                `json:"invoice_phone" gorm:"type:varchar(50)"`
+	BankName       string                `json:"bank_name" gorm:"type:varchar(100)"`
+	BankAccount    string                `json:"bank_account" gorm:"type:varchar(64)"`
+	Remark         string                `json:"remark" gorm:"type:text"`
+	Status         string                `json:"status" gorm:"type:varchar(16);index"`
+	CreatedAt      int64                 `json:"created_at" gorm:"autoCreateTime:false"`
+	ProcessedAt    int64                 `json:"processed_at"`
+	ProcessedBy    int                   `json:"processed_by"`
+	InvoiceNumber  string                `json:"invoice_number" gorm:"type:varchar(100)"`
+	InvoiceURL     string                `json:"invoice_url" gorm:"type:text"`
+	ProcessNote    string                `json:"process_note" gorm:"type:text"`
+	Orders         []InvoiceRequestOrder `json:"orders" gorm:"foreignKey:RequestId"`
+	Username       string                `json:"username,omitempty" gorm:"-"`
+	DisplayName    string                `json:"display_name,omitempty" gorm:"-"`
 }
 
 // ActiveTopUpId is populated only while pending. Its nullable unique index
@@ -56,21 +64,29 @@ type InvoiceRequestOrder struct {
 }
 
 type InvoiceApplicationInput struct {
-	OrderIds  []int  `json:"order_ids"`
-	TitleType string `json:"title_type"`
-	Title     string `json:"title"`
-	TaxId     string `json:"tax_id"`
-	Email     string `json:"email"`
-	Remark    string `json:"remark"`
+	OrderIds       []int  `json:"order_ids"`
+	TitleType      string `json:"title_type"`
+	Title          string `json:"title"`
+	TaxId          string `json:"tax_id"`
+	Email          string `json:"email"`
+	InvoiceAddress string `json:"invoice_address"`
+	InvoicePhone   string `json:"invoice_phone"`
+	BankName       string `json:"bank_name"`
+	BankAccount    string `json:"bank_account"`
+	Remark         string `json:"remark"`
 }
 
 func CreateInvoiceRequest(userId int, input InvoiceApplicationInput) (*InvoiceRequest, error) {
 	input.Title = strings.TrimSpace(input.Title)
 	input.TaxId = strings.TrimSpace(input.TaxId)
 	input.Email = strings.TrimSpace(input.Email)
+	input.InvoiceAddress = strings.TrimSpace(input.InvoiceAddress)
+	input.InvoicePhone = strings.TrimSpace(input.InvoicePhone)
+	input.BankName = strings.TrimSpace(input.BankName)
+	input.BankAccount = strings.TrimSpace(input.BankAccount)
 	input.Remark = strings.TrimSpace(input.Remark)
 	address, err := mail.ParseAddress(input.Email)
-	if err != nil || address.Address != input.Email || len(input.Email) > 254 || input.Title == "" || utf8.RuneCountInString(input.Title) > 200 || len(input.TaxId) > 32 || utf8.RuneCountInString(input.Remark) > 1000 {
+	if err != nil || address.Address != input.Email || len(input.Email) > 254 || input.Title == "" || utf8.RuneCountInString(input.Title) > 200 || len(input.TaxId) > 32 || utf8.RuneCountInString(input.InvoiceAddress) > 300 || utf8.RuneCountInString(input.InvoicePhone) > 50 || utf8.RuneCountInString(input.BankName) > 100 || utf8.RuneCountInString(input.BankAccount) > 64 || utf8.RuneCountInString(input.Remark) > 1000 {
 		return nil, ErrInvoiceRequestInput
 	}
 	if input.TitleType != "personal" && input.TitleType != "company" || input.TitleType == "company" && input.TaxId == "" {
@@ -84,7 +100,7 @@ func CreateInvoiceRequest(userId int, input InvoiceApplicationInput) (*InvoiceRe
 	if ids[0] <= 0 || len(slices.Compact(ids)) != len(input.OrderIds) {
 		return nil, ErrInvoiceRequestOrders
 	}
-	request := &InvoiceRequest{UserId: userId, TitleType: input.TitleType, Title: input.Title, TaxId: input.TaxId, Email: input.Email, Remark: input.Remark, Status: InvoiceRequestPending, CreatedAt: common.GetTimestamp()}
+	request := &InvoiceRequest{UserId: userId, TitleType: input.TitleType, Title: input.Title, TaxId: input.TaxId, Email: input.Email, InvoiceAddress: input.InvoiceAddress, InvoicePhone: input.InvoicePhone, BankName: input.BankName, BankAccount: input.BankAccount, Remark: input.Remark, Status: InvoiceRequestPending, CreatedAt: common.GetTimestamp()}
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		var orders []TopUp
 		if err := lockForUpdate(tx).Where("id IN ? AND user_id = ?", ids, userId).Order("id ASC").Find(&orders).Error; err != nil {
@@ -113,6 +129,39 @@ func CreateInvoiceRequest(userId int, input InvoiceApplicationInput) (*InvoiceRe
 			request.Orders = append(request.Orders, InvoiceRequestOrder{RequestId: request.Id, TopUpId: id, ActiveTopUpId: &id, TradeNo: order.TradeNo, Money: order.Money})
 		}
 		return tx.Create(&request.Orders).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return request, nil
+}
+
+// WithdrawInvoiceRequest lets an applicant withdraw only their own pending
+// application and releases its order claims while preserving its history.
+func WithdrawInvoiceRequest(id, userId int) (*InvoiceRequest, error) {
+	if id <= 0 || userId <= 0 {
+		return nil, ErrInvoiceRequestProcessed
+	}
+	request := &InvoiceRequest{}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where("id = ? AND user_id = ? AND status = ?", id, userId, InvoiceRequestPending).First(request).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return ErrInvoiceRequestProcessed
+			}
+			return err
+		}
+		if err := tx.Where("request_id = ?", id).Order("top_up_id ASC").Find(&request.Orders).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&InvoiceRequestOrder{}).Where("request_id = ?", id).Update("active_top_up_id", nil).Error; err != nil {
+			return err
+		}
+		request.Status = InvoiceRequestWithdrawn
+		request.ProcessedAt = common.GetTimestamp()
+		return tx.Model(request).Updates(map[string]any{
+			"status":       request.Status,
+			"processed_at": request.ProcessedAt,
+		}).Error
 	})
 	if err != nil {
 		return nil, err
@@ -155,6 +204,10 @@ func ProcessInvoiceRequest(id, operatorId int, input InvoiceProcessInput) (*Invo
 			return err
 		}
 		if input.Status == InvoiceRequestIssued {
+			// An uploaded file is attached separately; an empty link preserves it.
+			if input.InvoiceURL == "" || strings.HasPrefix(request.InvoiceURL, "invoice-file:") {
+				input.InvoiceURL = request.InvoiceURL
+			}
 			ids := make([]int, 0, len(request.Orders))
 			for _, order := range request.Orders {
 				ids = append(ids, order.TopUpId)
@@ -175,7 +228,8 @@ func ProcessInvoiceRequest(id, operatorId int, input InvoiceProcessInput) (*Invo
 				return err
 			}
 		} else {
-			input.InvoiceNumber, input.InvoiceURL = "", ""
+			// Retain attachments for the administrator's application history.
+			input.InvoiceNumber, input.InvoiceURL = "", request.InvoiceURL
 		}
 		request.Status, request.InvoiceNumber, request.InvoiceURL, request.ProcessNote = input.Status, input.InvoiceNumber, input.InvoiceURL, input.Note
 		request.ProcessedAt, request.ProcessedBy = common.GetTimestamp(), operatorId
@@ -190,10 +244,37 @@ func ProcessInvoiceRequest(id, operatorId int, input InvoiceProcessInput) (*Invo
 	return request, nil
 }
 
-func GetInvoiceEligibleOrders(userId int, page *common.PageInfo) error {
+type InvoiceSearch struct {
+	Keyword   string `form:"keyword"`
+	User      string `form:"user"`
+	TitleType string `form:"title_type"`
+	Start     int64  `form:"start_timestamp"`
+	End       int64  `form:"end_timestamp"`
+}
+
+func (filter InvoiceSearch) Validate() error {
+	if filter.Start < 0 || filter.End < 0 || filter.End > 0 && filter.Start > filter.End || len(filter.Keyword) > 200 || len(filter.User) > 100 || filter.TitleType != "" && filter.TitleType != "personal" && filter.TitleType != "company" {
+		return ErrInvoiceRequestInput
+	}
+	return nil
+}
+
+func GetInvoiceEligibleOrders(userId int, page *common.PageInfo, filter InvoiceSearch) error {
+	if err := filter.Validate(); err != nil {
+		return err
+	}
 	pending := DB.Model(&InvoiceRequestOrder{}).Select("active_top_up_id").Where("active_top_up_id IS NOT NULL")
 	query := DB.Model(&TopUp{}).Where("user_id = ? AND status = ? AND money > 0", userId, common.TopUpStatusSuccess).
 		Where("(invoice_status IS NULL OR invoice_status <> ?)", TopUpInvoiceStatusIssued).Where("id NOT IN (?)", pending)
+	if filter.Start > 0 {
+		query = query.Where("create_time >= ?", filter.Start)
+	}
+	if filter.End > 0 {
+		query = query.Where("create_time <= ?", filter.End)
+	}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		query = query.Where("trade_no LIKE ?", "%"+keyword+"%")
+	}
 	var count int64
 	if err := query.Count(&count).Error; err != nil {
 		return err
@@ -208,16 +289,41 @@ func GetInvoiceEligibleOrders(userId int, page *common.PageInfo) error {
 }
 
 // userId = 0 is reserved for the administrator list handler.
-func ListInvoiceRequests(userId int, status string, page *common.PageInfo) error {
+func ListInvoiceRequests(userId int, status string, page *common.PageInfo, filter InvoiceSearch) error {
+	if err := filter.Validate(); err != nil {
+		return err
+	}
 	query := DB.Model(&InvoiceRequest{})
 	if userId > 0 {
 		query = query.Where("user_id = ?", userId)
 	}
 	if status != "" {
-		if status != InvoiceRequestPending && status != InvoiceRequestIssued && status != InvoiceRequestRejected {
+		if status != InvoiceRequestPending && status != InvoiceRequestIssued && status != InvoiceRequestRejected && status != InvoiceRequestWithdrawn {
 			return ErrInvoiceRequestInput
 		}
 		query = query.Where("status = ?", status)
+	}
+	if filter.Start > 0 {
+		query = query.Where("created_at >= ?", filter.Start)
+	}
+	if filter.End > 0 {
+		query = query.Where("created_at <= ?", filter.End)
+	}
+	if filter.TitleType != "" {
+		query = query.Where("title_type = ?", filter.TitleType)
+	}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		orders := DB.Model(&InvoiceRequestOrder{}).Select("request_id").Where("trade_no LIKE ?", like)
+		query = query.Where("(title LIKE ? OR email LIKE ? OR tax_id LIKE ? OR invoice_number LIKE ? OR id IN (?))", like, like, like, like, orders)
+	}
+	if userId == 0 && strings.TrimSpace(filter.User) != "" {
+		name := strings.TrimSpace(filter.User)
+		users := DB.Model(&User{}).Select("id").Where("(username LIKE ? OR display_name LIKE ?)", "%"+name+"%", "%"+name+"%")
+		if id, err := strconv.Atoi(name); err == nil && id > 0 {
+			users = users.Or("id = ?", id)
+		}
+		query = query.Where("user_id IN (?)", users)
 	}
 	var count int64
 	if err := query.Count(&count).Error; err != nil {
@@ -226,6 +332,24 @@ func ListInvoiceRequests(userId int, status string, page *common.PageInfo) error
 	requests := make([]InvoiceRequest, 0)
 	if err := query.Preload("Orders").Order("id DESC").Offset(page.GetStartIdx()).Limit(page.GetPageSize()).Find(&requests).Error; err != nil {
 		return err
+	}
+	if userId == 0 && len(requests) > 0 {
+		ids := make([]int, 0, len(requests))
+		for _, request := range requests {
+			ids = append(ids, request.UserId)
+		}
+		var users []User
+		if err := DB.Select("id", "username", "display_name").Where("id IN ?", ids).Find(&users).Error; err != nil {
+			return err
+		}
+		byID := make(map[int]User, len(users))
+		for _, user := range users {
+			byID[user.Id] = user
+		}
+		for i := range requests {
+			user := byID[requests[i].UserId]
+			requests[i].Username, requests[i].DisplayName = user.Username, user.DisplayName
+		}
 	}
 	page.SetTotal(int(count))
 	page.SetItems(requests)

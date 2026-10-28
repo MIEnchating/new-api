@@ -45,7 +45,9 @@ import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { useStatus } from '@/hooks/use-status'
 import { getBgColorClass } from '@/lib/colors'
+import { DEFAULT_SYSTEM_NAME } from '@/lib/constants'
 import { requireServerSuccess } from '@/lib/server-error-message'
+import { normalizeSystemLogo } from '@/lib/system-branding'
 import { cn } from '@/lib/utils'
 
 import { getApiKeyModels } from '../../api'
@@ -253,7 +255,10 @@ export function CCSwitchDialog(props: Props) {
     [status]
   )
   const [app, setApp] = useState<AppType>('claude')
-  const [name, setName] = useState<string>(APP_CONFIGS.claude.defaultName)
+  const [customName, setCustomName] = useState<string | null>(null)
+  const siteTitle = status?.system_name?.trim() || DEFAULT_SYSTEM_NAME
+  const defaultName = `${siteTitle} ${APP_CONFIGS[app].defaultName}`
+  const name = customName ?? defaultName
   const [models, setModels] = useState<Record<string, string>>({})
   const [endpointAddress, setEndpointAddress] = useState<string>(
     endpointInfo[0].url
@@ -279,7 +284,7 @@ export function CCSwitchDialog(props: Props) {
 
       setApp('claude')
 
-      setName(APP_CONFIGS.claude.defaultName)
+      setCustomName(null)
 
       setEndpointAddress(endpointInfo[0].url)
     }
@@ -301,7 +306,7 @@ export function CCSwitchDialog(props: Props) {
   const handleAppChange = (val: string) => {
     const appVal = val as AppType
     setApp(appVal)
-    setName(APP_CONFIGS[appVal].defaultName)
+    setCustomName(null)
     setModels({})
   }
 
@@ -319,6 +324,7 @@ export function CCSwitchDialog(props: Props) {
       models,
       apiKey: key,
       serverAddress,
+      iconUrl: normalizeSystemLogo(status?.logo),
       endpoint: getDefaultCCSwitchEndpoint(app, endpointAddress),
       language: i18n.resolvedLanguage || i18n.language,
     })
@@ -384,8 +390,8 @@ export function CCSwitchDialog(props: Props) {
             <Input
               id='cc-switch-name'
               value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder={currentConfig.defaultName}
+              onChange={(event) => setCustomName(event.target.value)}
+              placeholder={defaultName}
               className='bg-background h-9 min-w-0'
             />
           </div>

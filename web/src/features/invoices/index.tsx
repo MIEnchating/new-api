@@ -16,51 +16,44 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Plus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { Dialog } from '@/components/dialog'
+import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 import { InvoiceApplicationForm } from './components/application-form'
+import { InvoiceNotificationDialog } from './components/notification-settings'
 import { InvoiceRequestList } from './components/request-list'
 
-export function InvoicesButton(props: { admin?: boolean }) {
+export function InvoicesPage(props: { admin?: boolean }) {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState('apply')
+  const [applying, setApplying] = useState(false)
   return (
-    <>
-      <Button variant='outline' onClick={() => setOpen(true)}>
-        {t('Invoice applications')}
-      </Button>
-      <Dialog
-        open={open}
-        onOpenChange={setOpen}
-        title={t('Invoice applications')}
-        contentClassName='max-h-[calc(100dvh-2rem)] max-sm:w-[calc(100vw-1.5rem)] sm:max-w-3xl'
-      >
-        {open &&
-          (props.admin ? (
-            <InvoiceRequestList admin />
-          ) : (
-            <Tabs value={tab} onValueChange={(value) => setTab(String(value))}>
-              <TabsList>
-                <TabsTrigger value='apply'>{t('Request invoice')}</TabsTrigger>
-                <TabsTrigger value='history'>
-                  {t('Application history')}
-                </TabsTrigger>
-              </TabsList>
-              <TabsContent value='apply'>
-                <InvoiceApplicationForm onSubmitted={() => setTab('history')} />
-              </TabsContent>
-              <TabsContent value='history'>
-                <InvoiceRequestList admin={false} />
-              </TabsContent>
-            </Tabs>
-          ))}
-      </Dialog>
-    </>
+    <SectionPageLayout fixedContent>
+      <SectionPageLayout.Title>
+        {props.admin ? t('Invoice management') : t('Invoice applications')}
+      </SectionPageLayout.Title>
+      <SectionPageLayout.Actions>
+        {props.admin && <InvoiceNotificationDialog />}
+        {!props.admin && (
+          <InvoiceApplicationForm
+            open={applying}
+            onOpenChange={setApplying}
+            onSubmitted={() => setApplying(false)}
+            trigger={
+              <Button>
+                <Plus aria-hidden='true' />
+                {t('Request invoice')}
+              </Button>
+            }
+          />
+        )}
+      </SectionPageLayout.Actions>
+      <SectionPageLayout.Content>
+        <InvoiceRequestList admin={Boolean(props.admin)} />
+      </SectionPageLayout.Content>
+    </SectionPageLayout>
   )
 }

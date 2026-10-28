@@ -21,10 +21,14 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 
 import type { InvoiceApplication } from './lib/schema'
 import type {
-  InvoiceOrder,
+  EligibleInvoiceOrder,
   InvoicePage,
   InvoiceProcessInput,
+  InvoiceProcessResult,
+  InvoiceUploadResult,
   InvoiceRequest,
+  InvoiceSearch,
+  InvoiceNotificationSettings,
 } from './types'
 
 interface Response<T> {
@@ -33,24 +37,80 @@ interface Response<T> {
 }
 
 export async function getInvoiceOrders(
-  page: number
-): Promise<InvoicePage<InvoiceOrder>> {
-  const response = await api.get<Response<InvoicePage<InvoiceOrder>>>(
+  page: number,
+  pageSize = 10,
+  filters: InvoiceSearch = {}
+): Promise<InvoicePage<EligibleInvoiceOrder>> {
+  const response = await api.get<Response<InvoicePage<EligibleInvoiceOrder>>>(
     '/api/user/invoices/eligible',
-    { params: { p: page, page_size: 10 } }
+    { params: { p: page, page_size: pageSize, ...filters } }
   )
   return requireServerSuccess(response.data).data
 }
 export async function getInvoiceRequests(
   admin: boolean,
   page: number,
-  status: string
+  status: string,
+  pageSize = 10,
+  filters: InvoiceSearch = {}
 ): Promise<InvoicePage<InvoiceRequest>> {
   const response = await api.get<Response<InvoicePage<InvoiceRequest>>>(
     admin ? '/api/user/invoices' : '/api/user/invoices/self',
-    { params: { p: page, page_size: 10, status } }
+    { params: { p: page, page_size: pageSize, status, ...filters } }
   )
   return requireServerSuccess(response.data).data
+}
+
+export async function uploadInvoiceFile(id: number, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  const response = await api.post<Response<InvoiceUploadResult>>(
+    `/api/user/invoices/${id}/file`,
+    form
+  )
+  return requireServerSuccess(response.data).data
+}
+
+export async function downloadInvoiceFile(id: number) {
+  const response = await api.get<Blob>(`/api/user/invoices/${id}/file`, {
+    responseType: 'blob',
+  })
+  const extension = {
+    'application/pdf': 'pdf',
+    'image/png': 'png',
+    'image/jpeg': 'jpg',
+  }[response.data.type]
+  if (!extension) throw new Error('Invoice file is not available')
+  const url = URL.createObjectURL(response.data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `invoice-${id}.${extension}`
+  document.body.append(link)
+  link.click()
+  link.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+export async function sendInvoiceEmail(id: number) {
+  const response = await api.post<Response<null>>(
+    `/api/user/invoices/${id}/email`
+  )
+  requireServerSuccess(response.data)
+}
+
+export async function getInvoiceNotificationSettings() {
+  const response = await api.get<Response<InvoiceNotificationSettings>>(
+    '/api/user/invoices/notifications'
+  )
+  return requireServerSuccess(response.data).data
+}
+
+export async function saveInvoiceNotificationSettings(user_ids: number[]) {
+  const response = await api.put<Response<null>>(
+    '/api/user/invoices/notifications',
+    { user_ids }
+  )
+  requireServerSuccess(response.data)
 }
 export async function createInvoiceRequest(
   input: InvoiceApplication
@@ -61,11 +121,19 @@ export async function createInvoiceRequest(
   )
   return requireServerSuccess(response.data).data
 }
+export async function withdrawInvoiceRequest(
+  id: number
+): Promise<InvoiceRequest> {
+  const response = await api.post<Response<InvoiceRequest>>(
+    `/api/user/invoices/${id}/withdraw`
+  )
+  return requireServerSuccess(response.data).data
+}
 export async function processInvoiceRequest(
   id: number,
   input: InvoiceProcessInput
-): Promise<InvoiceRequest> {
-  const response = await api.put<Response<InvoiceRequest>>(
+): Promise<InvoiceProcessResult> {
+  const response = await api.put<Response<InvoiceProcessResult>>(
     `/api/user/invoices/${id}`,
     input
   )
