@@ -91,6 +91,30 @@ const (
 	MsgSecurityEventWeChatLinked         = "email.security_event.wechat_linked"
 )
 
+// Invoice emails and application notifications
+const (
+	MsgInvoiceEmailSubject   = "invoice.email_subject"
+	MsgInvoiceEmailBody      = "invoice.email_body"
+	MsgInvoiceView           = "invoice.view"
+	MsgInvoiceNotifySubject  = "invoice.notify_subject"
+	MsgInvoiceNotifyBody     = "invoice.notify_body"
+	MsgInvoiceApplicationID  = "invoice.application_id"
+	MsgInvoiceTitle          = "invoice.title"
+	MsgInvoiceAmount         = "invoice.amount"
+	MsgInvoiceRecipient      = "invoice.recipient"
+	MsgInvoiceApplicant      = "invoice.applicant"
+	MsgInvoiceNumber         = "invoice.number"
+	MsgInvoiceIssuedBadge    = "invoice.issued_badge"
+	MsgInvoiceIssuedIntro    = "invoice.issued_intro"
+	MsgInvoicePendingBadge   = "invoice.pending_badge"
+	MsgInvoicePendingIntro   = "invoice.pending_intro"
+	MsgInvoiceManage         = "invoice.manage"
+	MsgInvoiceAttachmentHint = "invoice.attachment_hint"
+	MsgInvoiceLinkHint       = "invoice.link_hint"
+	MsgInvoiceAdminHint      = "invoice.admin_hint"
+	MsgInvoiceFooter         = "invoice.footer"
+)
+
 // Low-quota notices, in the recipient's saved language
 const (
 	MsgNotifyQuotaLowTitle             = "notify.quota_low_title"

@@ -517,7 +517,13 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 	router.GET("/api/user/invoices/self", UserAuth(), ok)
 	router.GET("/api/user/invoices/eligible", UserAuth(), ok)
 	router.POST("/api/user/invoices", UserAuth(), ok)
+	router.POST("/api/user/invoices/:id/withdraw", UserAuth(), ok)
+	router.GET("/api/user/invoices/:id/file", UserAuth(), ok)
+	router.POST("/api/user/invoices/:id/email", UserAuth(), ok)
 	router.GET("/api/user/invoices", AdminAuth(), ok)
+	router.GET("/api/user/invoices/notifications", AdminAuth(), ok)
+	router.PUT("/api/user/invoices/notifications", AdminAuth(), ok)
+	router.POST("/api/user/invoices/:id/file", AdminAuth(), ok)
 	router.PUT("/api/user/invoices/:id", AdminAuth(), ok)
 	router.POST("/api/user/lottery/draw", UserAuth(), ok)
 	router.POST("/api/sso/chatgpt2api/authorize", UserAuth(), ok)
@@ -547,8 +553,19 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 		{name: "profile cannot read eligible orders", path: "/api/user/invoices/eligible", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "apply for invoice", method: http.MethodPost, path: "/api/user/invoices", token: walletWriter, status: http.StatusOK},
 		{name: "read wallet cannot apply for invoice", method: http.MethodPost, path: "/api/user/invoices", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "withdraw own invoice", method: http.MethodPost, path: "/api/user/invoices/4/withdraw", token: walletWriter, status: http.StatusOK},
+		{name: "read wallet cannot withdraw invoice", method: http.MethodPost, path: "/api/user/invoices/4/withdraw", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "download own issued invoice", method: http.MethodGet, path: "/api/user/invoices/4/file", token: wallet, status: http.StatusOK},
+		{name: "profile cannot download invoice", method: http.MethodGet, path: "/api/user/invoices/4/file", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "email own invoice", method: http.MethodPost, path: "/api/user/invoices/4/email", token: walletWriter, status: http.StatusOK},
+		{name: "read wallet cannot email invoice", method: http.MethodPost, path: "/api/user/invoices/4/email", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "admin reads all invoices", path: "/api/user/invoices", token: billingReader, status: http.StatusOK},
 		{name: "wallet cannot read all invoices", path: "/api/user/invoices", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "admin reads invoice notification recipients", path: "/api/user/invoices/notifications", token: billingReader, status: http.StatusOK},
+		{name: "billing read cannot edit invoice recipients", method: http.MethodPut, path: "/api/user/invoices/notifications", token: billingReader, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "admin edits invoice notification recipients", method: http.MethodPut, path: "/api/user/invoices/notifications", token: billingWriter, status: http.StatusOK},
+		{name: "admin uploads issued invoice", method: http.MethodPost, path: "/api/user/invoices/4/file", token: billingWriter, status: http.StatusOK},
+		{name: "billing read cannot upload invoice", method: http.MethodPost, path: "/api/user/invoices/4/file", token: billingReader, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "admin processes invoice", method: http.MethodPut, path: "/api/user/invoices/4", token: billingWriter, status: http.StatusOK},
 		{name: "read billing cannot process invoice", method: http.MethodPut, path: "/api/user/invoices/4", token: billingReader, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "wallet writer cannot process invoice", method: http.MethodPut, path: "/api/user/invoices/4", token: walletWriter, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},

@@ -16,7 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  notifyManager,
+  QueryClient,
+  QueryClientProvider,
+} from '@tanstack/react-query'
 import {
   createRouter,
   createRootRoute,
@@ -105,9 +109,14 @@ beforeEach(() => {
   })
 })
 
-afterEach(() => {
+afterEach(async () => {
   cleanup()
   client.clear()
+  // Unmounting removes subscriptions, but already queued query notifications
+  // still run. Drain that queue before Vitest tears down the jsdom window.
+  await act(async () => {
+    await new Promise<void>((resolve) => notifyManager.schedule(resolve))
+  })
   vi.useRealTimers()
   vi.restoreAllMocks()
   useAuthStore.setState({ auth: originalAuth })

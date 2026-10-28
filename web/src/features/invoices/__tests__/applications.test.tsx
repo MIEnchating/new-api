@@ -678,13 +678,19 @@ it('opens administrator processing directly as a page without the application ta
 
 it('clears orders selected on multiple pages without losing invoice details', async () => {
   const user = userEvent.setup()
-  vi.spyOn(api, 'get').mockImplementation(async (_url, config) => ({
-    data: {
-      success: true,
+  vi.spyOn(api, 'get').mockImplementation(async (_url, config) => {
+    const params = config?.params
+    const secondPage =
+      typeof params === 'object' &&
+      params !== null &&
+      'p' in params &&
+      params.p === 2
+    return {
       data: {
-        total: 11,
-        items:
-          config?.params.p === 2
+        success: true,
+        data: {
+          total: 11,
+          items: secondPage
             ? [{ id: 11, trade_no: 'order-eleven', money: 20 }]
             : [
                 {
@@ -697,9 +703,10 @@ it('clears orders selected on multiple pages without losing invoice details', as
                   complete_time: 1793110060,
                 },
               ],
+        },
       },
-    },
-  }))
+    }
+  })
   renderInvoice(<InvoiceApplicationForm onSubmitted={vi.fn()} />)
   const orders = screen.getByRole('region', { name: 'Select orders' })
   const details = screen.getByRole('region', { name: 'Invoice details' })

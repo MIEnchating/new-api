@@ -22,15 +22,16 @@ import (
 )
 
 const (
-	ginKeyChannelAffinityCacheKey   = "channel_affinity_cache_key"
-	ginKeyChannelAffinityTTLSeconds = "channel_affinity_ttl_seconds"
-	ginKeyChannelAffinityMeta       = "channel_affinity_meta"
-	ginKeyChannelAffinityLogInfo    = "channel_affinity_log_info"
-	ginKeyChannelAffinitySkipRetry  = "channel_affinity_skip_retry_on_failure"
-	ginKeyChannelAffinityFirstPick  = "channel_affinity_first_pick_complete"
-	ginKeyChannelAffinityActiveHit  = "channel_affinity_active_hit"
-	ginKeyChannelAffinityFailover   = "channel_affinity_failover"
-	ginKeyChannelAffinityManaged    = "channel_affinity_managed_selection"
+	ginKeyChannelAffinityCacheKey    = "channel_affinity_cache_key"
+	ginKeyChannelAffinityTTLSeconds  = "channel_affinity_ttl_seconds"
+	ginKeyChannelAffinityMeta        = "channel_affinity_meta"
+	ginKeyChannelAffinityLogInfo     = "channel_affinity_log_info"
+	ginKeyChannelAffinitySkipRetry   = "channel_affinity_skip_retry_on_failure"
+	ginKeyChannelAffinityFirstPick   = "channel_affinity_first_pick_complete"
+	ginKeyChannelAffinityActiveHit   = "channel_affinity_active_hit"
+	ginKeyChannelAffinityFailover    = "channel_affinity_failover"
+	ginKeyChannelAffinityManaged     = "channel_affinity_managed_selection"
+	ginKeyChannelAffinityRetryOffset = "channel_affinity_retry_offset"
 
 	channelAffinityCacheNamespace           = "new-api:channel_affinity:v1"
 	channelAffinityUsageCacheStatsNamespace = "new-api:channel_affinity_usage_cache_stats:v1"
@@ -739,6 +740,8 @@ func MarkChannelAffinityUsed(c *gin.Context, selectedGroup string, channelID int
 		CacheKey:  meta.CacheKey,
 		ChannelID: channelID,
 	})
+	// Affinity consumes an attempt, but does not visit a normal priority tier.
+	c.Set(ginKeyChannelAffinityRetryOffset, 1)
 	info := map[string]any{
 		"reason":         meta.RuleName,
 		"rule_name":      meta.RuleName,
