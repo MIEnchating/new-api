@@ -81,6 +81,16 @@ export function InvoiceProcessDialog(props: {
           )
         )
       }
+      if (result.notification_sent) {
+        toast.success(t('Invoice download notification sent'))
+      }
+      if (result.notification_failed) {
+        toast.error(
+          t(
+            'Invoice issued, but the download notification failed. Please notify the user to download it.'
+          )
+        )
+      }
       props.onProcessed?.()
       props.onClose()
     },
@@ -215,7 +225,7 @@ export function InvoiceProcessDialog(props: {
                       'The invoice will be emailed after confirmation. Upload a file or provide an invoice link.'
                     )
                   : t(
-                      'Email is disabled. The user can download the invoice from their applications.'
+                      'The invoice attachment will not be emailed. The user will receive a notification to download it from their applications.'
                     )}
               </p>
             </div>

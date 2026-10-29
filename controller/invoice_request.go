@@ -112,6 +112,7 @@ func ProcessInvoiceRequest(c *gin.Context) {
 	}
 	recordManageAuditFor(c, request.UserId, "invoice."+request.Status, map[string]any{"request_id": request.Id, "order_count": len(request.Orders)})
 	emailSent, emailFailed := false, false
+	notificationSent, notificationFailed := false, false
 	if sendEmail {
 		if err := service.SendInvoiceEmail(request); err != nil {
 			emailFailed = true
@@ -120,11 +121,20 @@ func ProcessInvoiceRequest(c *gin.Context) {
 			recordManageAuditFor(c, request.UserId, "invoice.email", map[string]any{"request_id": request.Id})
 		}
 	}
+	if request.Status == model.InvoiceRequestIssued && !sendEmail {
+		if err := service.NotifyInvoiceReady(request); err != nil {
+			notificationFailed = true
+		} else {
+			notificationSent = true
+		}
+	}
 	common.ApiSuccess(c, struct {
 		*model.InvoiceRequest
-		EmailSent   bool `json:"email_sent"`
-		EmailFailed bool `json:"email_failed"`
-	}{request, emailSent, emailFailed})
+		EmailSent          bool `json:"email_sent"`
+		EmailFailed        bool `json:"email_failed"`
+		NotificationSent   bool `json:"notification_sent"`
+		NotificationFailed bool `json:"notification_failed"`
+	}{request, emailSent, emailFailed, notificationSent, notificationFailed})
 }
 
 func GetInvoiceSettings(c *gin.Context) {

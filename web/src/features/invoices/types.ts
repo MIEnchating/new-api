@@ -83,6 +83,8 @@ export interface InvoiceUploadResult {
 export interface InvoiceProcessResult extends InvoiceRequest {
   email_sent?: boolean
   email_failed?: boolean
+  notification_sent?: boolean
+  notification_failed?: boolean
 }
 
 export interface InvoiceEmailTemplate {

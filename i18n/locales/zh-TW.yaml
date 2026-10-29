@@ -336,3 +336,8 @@ invoice.attachment_hint: "發票檔案已隨郵件附上，您也可以前往開
 invoice.link_hint: "點擊上方按鈕即可查看或下載發票。"
 invoice.admin_hint: "請核對申請資訊，完成開票後上傳發票檔案。"
 invoice.footer: "本郵件由系統自動寄送，請勿直接回覆。"
+
+invoice.ready_subject: "發票已開立，請下載"
+invoice.ready_body: "您的發票已開立。抬頭：{{.Title}}；發票號碼：{{.Number}}。請前往開票申請頁面，開啟申請詳情並手動下載發票：{{.URL}}"
+invoice.ready_intro: "您的發票已開立，請前往開票申請頁面，開啟申請詳情並點選「下載發票」。"
+invoice.ready_hint: "本通知不附帶發票檔案，請登入您的帳戶手動下載。"

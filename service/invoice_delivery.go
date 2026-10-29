@@ -140,6 +140,64 @@ func SendInvoiceEmail(request *model.InvoiceRequest) error {
 	return nil
 }
 
+// NotifyInvoiceReady sends a download reminder through the user's notification
+// channel. It never includes an attachment or exposes the private storage reference.
+func NotifyInvoiceReady(request *model.InvoiceRequest) error {
+	if request.Status != model.InvoiceRequestIssued || request.InvoiceURL == "" {
+		return common.NewMessage("Invoice download notification could not be sent")
+	}
+	user, err := model.GetUserById(request.UserId, false)
+	if err != nil {
+		return err
+	}
+	setting := user.GetSetting()
+	email := user.Email
+	if email == "" {
+		email = request.Email
+	}
+	subject := i18n.Translate("zh-CN", i18n.MsgInvoiceReadySubject, nil)
+	portalURL := strings.TrimRight(system_setting.ServerAddress, "/") + "/invoices"
+	content := i18n.Translate("zh-CN", i18n.MsgInvoiceReadyBody, map[string]any{
+		"Title": request.Title, "Number": request.InvoiceNumber, "URL": portalURL,
+	})
+	switch setting.NotifyType {
+	case "", dto.NotifyTypeEmail:
+		recipient := setting.NotificationEmail
+		if recipient == "" {
+			recipient = email
+		}
+		address, err := mail.ParseAddress(recipient)
+		if err != nil || address.Address != recipient {
+			return common.NewMessage("Invoice download notification could not be sent")
+		}
+		data := invoiceEmailValues(request, false)
+		data.Intro = i18n.Translate("zh-CN", i18n.MsgInvoiceReadyIntro, nil)
+		data.Hint = i18n.Translate("zh-CN", i18n.MsgInvoiceReadyHint, nil)
+		data.URL = portalURL
+		data.Action = i18n.Translate("zh-CN", i18n.MsgInvoiceView, nil)
+		rendered, err := renderInvoiceEmailTemplate(model.InvoiceEmailTemplate{Subject: subject, HTML: defaultInvoiceEmailHTML}, data)
+		if err != nil {
+			return err
+		}
+		content = rendered.HTML
+	case dto.NotifyTypeWebhook:
+		if setting.WebhookUrl == "" {
+			return common.NewMessage("Invoice download notification could not be sent")
+		}
+	case dto.NotifyTypeBark:
+		if setting.BarkUrl == "" {
+			return common.NewMessage("Invoice download notification could not be sent")
+		}
+	case dto.NotifyTypeGotify:
+		if setting.GotifyUrl == "" || setting.GotifyToken == "" {
+			return common.NewMessage("Invoice download notification could not be sent")
+		}
+	default:
+		return common.NewMessage("Invoice download notification could not be sent")
+	}
+	return NotifyUser(user.Id, email, setting, dto.NewNotify("invoice_ready", subject, content, nil))
+}
+
 func NotifyInvoiceAdministrators(request *model.InvoiceRequest) {
 	settings, err := model.GetInvoiceNotificationSettings()
 	if err != nil {

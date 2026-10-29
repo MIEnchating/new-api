@@ -336,3 +336,8 @@ invoice.attachment_hint: "The invoice is attached. You can also download it from
 invoice.link_hint: "Use the button above to view or download the invoice."
 invoice.admin_hint: "Please review the application and upload the invoice after processing."
 invoice.footer: "This is an automated message. Please do not reply."
+
+invoice.ready_subject: "Your invoice is ready to download"
+invoice.ready_body: "Your invoice has been issued. Title: {{.Title}}; Invoice number: {{.Number}}. Open your invoice application details to download it: {{.URL}}"
+invoice.ready_intro: "Your invoice has been issued. Open your invoice application details and select Download invoice."
+invoice.ready_hint: "This notification has no invoice attachment. Sign in to your account to download it."

@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -205,6 +206,11 @@ func TestInvoiceFileDelivery(t *testing.T) {
 	})
 
 	t.Run("completion respects the mail switch and preserves issuance on delivery failure", func(t *testing.T) {
+		previousAddress := system_setting.ServerAddress
+		system_setting.ServerAddress = "https://console.example.com"
+		t.Cleanup(func() { system_setting.ServerAddress = previousAddress })
+		invoiceFile, err := service.StoreInvoiceFile(bytes.NewReader(pdf))
+		require.NoError(t, err)
 		for _, tc := range []struct {
 			name, extra          string
 			missing, mailFailure bool
@@ -213,7 +219,8 @@ func TestInvoiceFileDelivery(t *testing.T) {
 		}{
 			{name: "default on", sent: 1, success: true},
 			{name: "explicit on", extra: `,"send_email":true`, sent: 1, success: true},
-			{name: "off", extra: `,"send_email":false`, sent: 0, success: true},
+			{name: "off", extra: `,"send_email":false`, sent: 1, success: true},
+			{name: "failed notice", extra: `,"send_email":false`, mailFailure: true, sent: 1, success: true},
 			{name: "off without file", extra: `,"send_email":false`, missing: true, success: true},
 			{name: "on without file", missing: true, success: false},
 			{name: "failed mail", mailFailure: true, sent: 1, success: true},
@@ -224,11 +231,30 @@ func TestInvoiceFileDelivery(t *testing.T) {
 				request, err := model.CreateInvoiceRequest(1, model.InvoiceApplicationInput{OrderIds: []int{order.Id}, TitleType: "company", Title: "Invoice switch", TaxId: "TAX123", Email: "invoice@example.com"})
 				require.NoError(t, err)
 				if !tc.missing {
-					_, _, err = model.AttachInvoiceFile(request.Id, application.InvoiceURL)
+					_, _, err = model.AttachInvoiceFile(request.Id, invoiceFile)
 					require.NoError(t, err)
 				}
 				calls := 0
-				http.DefaultTransport = emailHTTPTransport(func(_ *http.Request) (*http.Response, error) {
+				http.DefaultTransport = emailHTTPTransport(func(httpRequest *http.Request) (*http.Response, error) {
+					var payload struct {
+						To          []string `json:"to"`
+						HTML        string   `json:"html"`
+						Subject     string   `json:"subject"`
+						Attachments []any    `json:"attachments"`
+					}
+					require.NoError(t, common.DecodeJson(httpRequest.Body, &payload))
+					if tc.extra == `,"send_email":false` {
+						assert.Equal(t, []string{"account@example.com"}, payload.To)
+						assert.Empty(t, payload.Attachments)
+						assert.Equal(t, "发票已开好，请下载", payload.Subject)
+						assert.Contains(t, payload.HTML, "https://console.example.com/invoices")
+						assert.Contains(t, payload.HTML, "下载发票")
+						assert.NotContains(t, payload.HTML, "已随邮件附上")
+						assert.NotContains(t, payload.HTML, "invoice-file:")
+					} else {
+						assert.Equal(t, []string{"invoice@example.com"}, payload.To)
+						assert.Len(t, payload.Attachments, 1)
+					}
 					calls++
 					code := 200
 					if tc.mailFailure {
@@ -247,22 +273,89 @@ func TestInvoiceFileDelivery(t *testing.T) {
 				var result struct {
 					Success bool `json:"success"`
 					Data    struct {
-						Status      string `json:"status"`
-						EmailSent   bool   `json:"email_sent"`
-						EmailFailed bool   `json:"email_failed"`
+						Status             string `json:"status"`
+						EmailSent          bool   `json:"email_sent"`
+						EmailFailed        bool   `json:"email_failed"`
+						NotificationSent   bool   `json:"notification_sent"`
+						NotificationFailed bool   `json:"notification_failed"`
 					} `json:"data"`
 				}
 				require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
 				assert.Equal(t, tc.success, result.Success, response.Body.String())
 				assert.Equal(t, tc.sent, calls)
-				assert.Equal(t, tc.sent > 0 && !tc.mailFailure, result.Data.EmailSent)
-				assert.Equal(t, tc.mailFailure, result.Data.EmailFailed)
+				notice := tc.extra == `,"send_email":false`
+				assert.Equal(t, !notice && tc.sent > 0 && !tc.mailFailure, result.Data.EmailSent)
+				assert.Equal(t, !notice && tc.mailFailure, result.Data.EmailFailed)
+				assert.Equal(t, notice && tc.sent > 0 && !tc.mailFailure, result.Data.NotificationSent)
+				assert.Equal(t, notice && (tc.mailFailure || tc.missing), result.Data.NotificationFailed)
 				require.NoError(t, db.First(request, request.Id).Error)
+				if tc.name == "off" {
+					replay := httptest.NewRecorder()
+					context, _ := gin.CreateTestContext(replay)
+					context.Set("id", 7)
+					context.Set("role", common.RoleAdminUser)
+					context.Params = gin.Params{{Key: "id", Value: strconv.Itoa(request.Id)}}
+					context.Request = httptest.NewRequest(http.MethodPut, "/api/user/invoices/1", strings.NewReader(`{"status":"issued","invoice_number":"12345678","send_email":false}`))
+					context.Request.Header.Set("Content-Type", "application/json")
+					ProcessInvoiceRequest(context)
+					assert.Equal(t, 1, calls, "replaying completion must not resend the notification")
+				}
 				if tc.success {
 					assert.Equal(t, model.InvoiceRequestIssued, request.Status)
 				} else {
 					assert.Equal(t, model.InvoiceRequestPending, request.Status)
 				}
+			})
+		}
+	})
+
+	t.Run("download notices respect notification email with application email fallback", func(t *testing.T) {
+		originalAddress := system_setting.ServerAddress
+		system_setting.ServerAddress = "https://console.example.com"
+		t.Cleanup(func() { system_setting.ServerAddress = originalAddress })
+		for _, tc := range []struct {
+			name, email, setting, recipient string
+			fail                            bool
+		}{
+			{"notification email", "account@example.com", `{"notification_email":"notify@example.com"}`, "notify@example.com", false},
+			{"account email", "account@example.com", `{}`, "account@example.com", false},
+			{"application fallback", "", `{}`, "invoice@example.com", false},
+			{"missing webhook", "account@example.com", `{"notify_type":"webhook"}`, "", true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				require.NoError(t, db.Model(&model.User{}).Where("id = ?", 1).Updates(map[string]any{"email": tc.email, "setting": tc.setting}).Error)
+				t.Cleanup(func() {
+					require.NoError(t, db.Model(&model.User{}).Where("id = ?", 1).Updates(map[string]any{"email": "account@example.com", "setting": `{"language":"en"}`}).Error)
+				})
+				calls := 0
+				http.DefaultTransport = emailHTTPTransport(func(r *http.Request) (*http.Response, error) {
+					calls++
+					var payload struct {
+						To          []string `json:"to"`
+						HTML        string   `json:"html"`
+						Attachments []any    `json:"attachments"`
+					}
+					require.NoError(t, common.DecodeJson(r.Body, &payload))
+					assert.Equal(t, []string{tc.recipient}, payload.To)
+					assert.Empty(t, payload.Attachments)
+					assert.Contains(t, payload.HTML, "&lt;script&gt;company&lt;/script&gt;")
+					assert.NotContains(t, payload.HTML, "<script>company</script>")
+					assert.Contains(t, payload.HTML, "https://console.example.com/invoices")
+					assert.NotContains(t, payload.HTML, "https://files.example.com")
+					return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"id":"notice"}`)), Header: make(http.Header)}, nil
+				})
+				request := application
+				request.Status, request.InvoiceURL = model.InvoiceRequestIssued, "https://files.example.com/invoice.pdf"
+				err := service.NotifyInvoiceReady(&request)
+				if tc.fail {
+					require.Error(t, err)
+					assert.Zero(t, calls)
+				} else {
+					require.NoError(t, err)
+					assert.Equal(t, 1, calls)
+				}
+				request.Status = model.InvoiceRequestRejected
+				require.Error(t, service.NotifyInvoiceReady(&request))
 			})
 		}
 	})

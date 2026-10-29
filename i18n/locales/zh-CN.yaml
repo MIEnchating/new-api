@@ -336,3 +336,8 @@ invoice.attachment_hint: "发票文件已随邮件附上，您也可以前往开
 invoice.link_hint: "点击上方按钮即可查看或下载发票。"
 invoice.admin_hint: "请核对申请信息，完成开票后上传发票文件。"
 invoice.footer: "本邮件由系统自动发送，请勿直接回复。"
+
+invoice.ready_subject: "发票已开好，请下载"
+invoice.ready_body: "您的发票已开具。抬头：{{.Title}}；发票号码：{{.Number}}。请前往开票申请页面，打开申请详情并手动下载发票：{{.URL}}"
+invoice.ready_intro: "您的发票已开具，请前往开票申请页面，打开申请详情并点击“下载发票”。"
+invoice.ready_hint: "本通知不附带发票文件，请登录您的账户手动下载。"

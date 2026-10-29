@@ -93,6 +93,10 @@ const (
 
 // Invoice emails and application notifications
 const (
+	MsgInvoiceReadySubject   = "invoice.ready_subject"
+	MsgInvoiceReadyBody      = "invoice.ready_body"
+	MsgInvoiceReadyIntro     = "invoice.ready_intro"
+	MsgInvoiceReadyHint      = "invoice.ready_hint"
 	MsgInvoiceEmailSubject   = "invoice.email_subject"
 	MsgInvoiceEmailBody      = "invoice.email_body"
 	MsgInvoiceView           = "invoice.view"

@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -1364,3 +1365,55 @@ it('displays the 90-day payment deadline and keeps company tax identification ma
     )
   )
 })
+
+it.each([false, true])(
+  'reports download notification result when attachment email is off (failed=%s)',
+  async (failed) => {
+    const success = vi.spyOn(toast, 'success')
+    const error = vi.spyOn(toast, 'error')
+    const put = vi.spyOn(api, 'put').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          ...pending,
+          status: 'issued',
+          notification_sent: !failed,
+          notification_failed: failed,
+        },
+      },
+    })
+    const onClose = vi.fn()
+    const user = userEvent.setup()
+    renderInvoice(
+      <InvoiceProcessDialog
+        request={{
+          ...pending,
+          invoice_number: 'INV-001',
+          invoice_url: 'invoice-file:ready.pdf',
+        }}
+        action='issued'
+        onClose={onClose}
+      />
+    )
+    await user.click(screen.getByRole('switch', { name: 'Send to email' }))
+    expect(
+      screen.getByText(
+        'The invoice attachment will not be emailed. The user will receive a notification to download it from their applications.'
+      )
+    ).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Confirm' }))
+    await waitFor(() => expect(onClose).toHaveBeenCalled())
+    expect(put).toHaveBeenCalledWith(
+      '/api/user/invoices/4',
+      expect.objectContaining({ send_email: false })
+    )
+    if (failed) {
+      expect(error).toHaveBeenCalledWith(
+        'Invoice issued, but the download notification failed. Please notify the user to download it.'
+      )
+    } else {
+      expect(success).toHaveBeenCalledWith('Invoice download notification sent')
+    }
+    expect(success).not.toHaveBeenCalledWith('Invoice email sent')
+  }
+)
