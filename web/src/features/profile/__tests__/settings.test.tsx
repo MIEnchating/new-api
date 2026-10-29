@@ -21,8 +21,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { updateUserSettings } from '../api'
+import { SidebarModulesCard } from '../components/sidebar-modules-card'
 import { NotificationTab } from '../components/tabs/notification-tab'
 import type { UserProfile } from '../types'
 
@@ -342,4 +344,45 @@ describe('notifications a user receives', () => {
     await save(onUpdate)
     expect(sentBody(put)).toMatchObject({ channel_notify_enabled: true })
   })
+})
+
+it('personal sidebar settings save the invoice choice independently of wallet visibility', async () => {
+  const initialAuth = useAuthStore.getState()
+  useAuthStore.getState().auth.setUser({ id: 1, username: 'alice', role: 1 })
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: { sidebar_modules: '{"personal":{"enabled":true,"topup":true}}' },
+    },
+  })
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  try {
+    render(<SidebarModulesCard />)
+    const invoiceSwitch = await screen.findByRole('switch', {
+      name: 'Invoice applications',
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByRole('switch', { name: 'Wallet Management' })
+      ).toBeChecked()
+    )
+    expect(invoiceSwitch).toBeChecked()
+    fireEvent.click(invoiceSwitch)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }))
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    const saved = JSON.parse(
+      (put.mock.calls[0][1] as { sidebar_modules: string }).sidebar_modules
+    )
+    expect(saved.personal).toMatchObject({ topup: true, invoices: false })
+    await waitFor(() =>
+      expect(
+        JSON.parse(useAuthStore.getState().auth.user?.sidebar_modules ?? '{}')
+          .personal.invoices
+      ).toBe(false)
+    )
+  } finally {
+    useAuthStore.setState(initialAuth, true)
+  }
 })

@@ -134,7 +134,7 @@ func SendInvoiceEmail(request *model.InvoiceRequest) error {
 		return common.NewMessage("Invoice file is not available")
 	}
 	// The destination is the validated email on the committed application, never a request override.
-	if err := common.SendEmail(i18n.Translate("zh-CN", "invoice.email_subject", nil), request.Email, content, attachments...); err != nil {
+	if err := common.SendEmail(content.Subject, request.Email, content.HTML, attachments...); err != nil {
 		return common.NewMessage("Invoice email could not be sent. Please try again later")
 	}
 	return nil
@@ -158,13 +158,16 @@ func NotifyInvoiceAdministrators(request *model.InvoiceRequest) {
 		setting := user.GetSetting()
 		values := map[string]any{"ID": request.Id, "UserID": request.UserId, "Title": html.EscapeString(request.Title), "URL": html.EscapeString(strings.TrimRight(system_setting.ServerAddress, "/") + "/invoice-requests")}
 		content := i18n.Translate("zh-CN", "invoice.notify_body", values)
+		subject := i18n.Translate("zh-CN", "invoice.notify_subject", nil)
 		if setting.NotifyType == "" || setting.NotifyType == dto.NotifyTypeEmail {
-			content, err = renderInvoiceEmail(request, true)
+			rendered, err := renderInvoiceEmail(request, true)
 			if err != nil {
+				common.SysError(common.LogText("Failed to render invoice application %d notification", request.Id))
 				continue
 			}
+			content, subject = rendered.HTML, rendered.Subject
 		}
-		data := dto.NewNotify("invoice_application", i18n.Translate("zh-CN", "invoice.notify_subject", nil), content, nil)
+		data := dto.NewNotify("invoice_application", subject, content, nil)
 		if err := NotifyUser(user.Id, user.Email, setting, data); err != nil {
 			common.SysError(common.LogText("Failed to deliver invoice application %d notification to administrator %d", request.Id, user.Id))
 		}

@@ -10,6 +10,43 @@ import (
 
 const InvoiceNotificationOption = "InvoiceNotificationUserIDs"
 
+const InvoiceEmailTemplatesOption = "InvoiceEmailTemplates"
+
+type InvoiceEmailTemplate struct {
+	Subject string `json:"subject"`
+	HTML    string `json:"html"`
+}
+
+type InvoiceEmailTemplates struct {
+	Admin    InvoiceEmailTemplate `json:"admin"`
+	Customer InvoiceEmailTemplate `json:"customer"`
+}
+
+func GetInvoiceEmailTemplates() (InvoiceEmailTemplates, error) {
+	var templates InvoiceEmailTemplates
+	var option Option
+	err := DB.Where(&Option{Key: InvoiceEmailTemplatesOption}).First(&option).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return templates, nil
+	}
+	if err != nil {
+		return templates, err
+	}
+	if option.Value != "" {
+		err = common.UnmarshalJsonStr(option.Value, &templates)
+	}
+	return templates, err
+}
+
+// Callers validate both templates before persisting them together.
+func SaveInvoiceEmailTemplates(templates InvoiceEmailTemplates) error {
+	value, err := common.Marshal(templates)
+	if err != nil {
+		return err
+	}
+	return UpdateOptionsBulk(map[string]string{InvoiceEmailTemplatesOption: string(value)})
+}
+
 type InvoiceAdministrator struct {
 	Id          int    `json:"id"`
 	Username    string `json:"username"`

@@ -84,3 +84,12 @@ export interface InvoiceProcessResult extends InvoiceRequest {
   email_sent?: boolean
   email_failed?: boolean
 }
+
+export interface InvoiceEmailTemplate {
+  subject: string
+  html: string
+}
+export interface InvoiceEmailTemplates {
+  admin: InvoiceEmailTemplate
+  customer: InvoiceEmailTemplate
+}

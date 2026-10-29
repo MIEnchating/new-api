@@ -17,7 +17,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from '@tanstack/react-router'
 import type {
   ColumnFiltersState,
   PaginationState,
@@ -461,11 +460,6 @@ export function TopUpStats() {
         <SectionPageLayout.Title>
           {t('Order Management')}
         </SectionPageLayout.Title>
-        <SectionPageLayout.Actions>
-          <Button variant='outline' render={<Link to='/invoice-requests' />}>
-            {t('Invoice applications')}
-          </Button>
-        </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
           <div className='h-full min-h-0'>
             <DataTablePage

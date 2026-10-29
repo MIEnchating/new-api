@@ -24,6 +24,7 @@ import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 
 import { InvoiceApplicationForm } from './components/application-form'
+import { InvoiceEmailTemplatesDialog } from './components/email-templates'
 import { InvoiceNotificationDialog } from './components/notification-settings'
 import { InvoiceRequestList } from './components/request-list'
 
@@ -36,6 +37,7 @@ export function InvoicesPage(props: { admin?: boolean }) {
         {props.admin ? t('Invoice management') : t('Invoice applications')}
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
+        {props.admin && <InvoiceEmailTemplatesDialog />}
         {props.admin && <InvoiceNotificationDialog />}
         {!props.admin && (
           <InvoiceApplicationForm

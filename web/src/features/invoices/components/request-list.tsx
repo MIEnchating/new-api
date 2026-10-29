@@ -114,7 +114,6 @@ export function InvoiceRequestList(props: { admin: boolean }) {
               {row.original.title}
             </LongText>
             <span className='text-muted-foreground text-xs'>
-              #{row.original.id} ·{' '}
               {row.original.title_type === 'company'
                 ? t('Company')
                 : t('Personal')}

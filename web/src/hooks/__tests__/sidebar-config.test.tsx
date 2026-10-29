@@ -28,7 +28,10 @@ import {
 } from '@/features/system-settings/maintenance/config'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { useSidebarConfig } from '../use-sidebar-config'
+import {
+  useIsSidebarModuleVisible,
+  useSidebarConfig,
+} from '../use-sidebar-config'
 import { useSidebarData } from '../use-sidebar-data'
 
 beforeEach(() => {
@@ -70,7 +73,14 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
     () => useSidebarConfig(useSidebarData().navGroups),
     { wrapper: Wrapper }
   )
-  return result
+  const visibility = renderHook(
+    () => ({
+      invoices: useIsSidebarModuleVisible('/invoices'),
+      management: useIsSidebarModuleVisible('/invoice-requests'),
+    }),
+    { wrapper: Wrapper }
+  )
+  return { ...result, visibility: visibility.result }
 }
 
 describe('security sidebar visibility', () => {
@@ -202,15 +212,67 @@ describe('invoice page navigation', () => {
       ])
     )
   })
-  it('hides invoice entries with the corresponding wallet and order settings', () => {
-    const { result } = sidebarFor({
-      personal: { enabled: true, topup: false },
-      admin: { enabled: true, topup_stats: false },
-    })
+  it('legacy settings keep invoice menus independent from wallet and orders', () => {
+    const { result } = sidebarFor(
+      {
+        personal: { enabled: true, topup: false },
+        admin: { enabled: true, topup_stats: false },
+      },
+      { personal: { topup: false }, admin: { topup_stats: false } }
+    )
+    const urls = result.current
+      .flatMap((group) => group.items)
+      .map((item) => ('url' in item ? item.url : undefined))
+    expect(urls).toContain('/invoices')
+    expect(urls).toContain('/invoice-requests')
+    expect(urls).not.toContain('/wallet')
+    expect(urls).not.toContain('/topup-stats')
+  })
+
+  it.each([
+    [
+      { personal: { invoices: false }, admin: { invoice_requests: false } },
+      undefined,
+    ],
+    [
+      undefined,
+      { personal: { invoices: false }, admin: { invoice_requests: false } },
+    ],
+    [
+      { personal: { invoices: false }, admin: { invoice_requests: false } },
+      { personal: { invoices: true }, admin: { invoice_requests: true } },
+    ],
+    [{ personal: { enabled: false }, admin: { enabled: false } }, undefined],
+    [undefined, { personal: { enabled: false }, admin: { enabled: false } }],
+  ])(
+    'hides invoice menus and shortcuts when either layer disables them (%j, %j)',
+    (admin, user) => {
+      const { result, visibility } = sidebarFor(admin, user)
+      const urls = result.current
+        .flatMap((group) => group.items)
+        .map((item) => ('url' in item ? item.url : undefined))
+      expect(urls).not.toContain('/invoices')
+      expect(urls).not.toContain('/invoice-requests')
+      expect(visibility.current).toEqual({ invoices: false, management: false })
+    }
+  )
+
+  it('admin settings save independent invoice switches without hiding wallet or orders', () => {
+    const config = parseSidebarModulesAdmin(
+      '{"personal":{"topup":true},"admin":{"topup_stats":true}}'
+    )
+    expect(config.personal.invoices).toBe(true)
+    expect(config.admin.invoice_requests).toBe(true)
+    config.personal.invoices = false
+    config.admin.invoice_requests = false
+    const saved = parseSidebarModulesAdmin(serializeSidebarModulesAdmin(config))
+    const { result } = sidebarFor(saved)
     const urls = result.current
       .flatMap((group) => group.items)
       .map((item) => ('url' in item ? item.url : undefined))
     expect(urls).not.toContain('/invoices')
     expect(urls).not.toContain('/invoice-requests')
+    expect(urls).toContain('/wallet')
+    expect(urls).toContain('/topup-stats')
   })
 })

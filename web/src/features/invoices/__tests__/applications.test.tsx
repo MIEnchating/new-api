@@ -25,6 +25,7 @@ import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { InvoiceApplicationForm } from '../components/application-form'
+import { InvoiceEmailTemplatesDialog } from '../components/email-templates'
 import { InvoiceNotificationDialog } from '../components/notification-settings'
 import { InvoiceOrderPicker } from '../components/order-picker'
 import { InvoiceProcessDialog } from '../components/process-dialog'
@@ -1030,3 +1031,90 @@ it.each([false, true])(
     }
   }
 )
+
+it('edits both invoice email templates, previews without sending and restores defaults', async () => {
+  const user = userEvent.setup()
+  const defaults = {
+    admin: { subject: 'New application', html: '<h1>{{.Title}}</h1>' },
+    customer: { subject: 'Your invoice', html: '<p>{{.InvoiceNumber}}</p>' },
+  }
+  const saved = structuredClone(defaults)
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: { templates: saved, defaults } },
+  })
+  const post = vi.spyOn(api, 'post').mockImplementation(async (_url, body) => {
+    const input = body as { subject: string }
+    return {
+      data: {
+        success: true,
+        data: {
+          subject: input.subject,
+          html: '<h1>Preview company</h1><script>alert(1)</script>',
+        },
+      },
+    }
+  })
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true, data: null } })
+  renderInvoice(<InvoiceEmailTemplatesDialog />)
+  await user.click(screen.getByRole('button', { name: 'Email templates' }))
+  const subject = await screen.findByLabelText('Email subject')
+  await user.clear(subject)
+  await user.type(subject, 'Updated notification')
+  await waitFor(() => expect(screen.getByTitle('Email preview')).toBeVisible())
+  const frame = screen.getByTitle('Email preview')
+  expect(frame).toHaveAttribute('sandbox', '')
+  expect(frame.getAttribute('srcdoc')).not.toContain('<script>')
+  expect(frame.getAttribute('srcdoc')).toContain('Content-Security-Policy')
+  await user.click(screen.getByRole('tab', { name: 'Customer invoice email' }))
+  expect(subject).toHaveValue('Your invoice')
+  await user.clear(subject)
+  await user.type(subject, 'Changed invoice')
+  await user.click(
+    screen.getByRole('button', { name: 'Restore default template' })
+  )
+  expect(subject).toHaveValue('Your invoice')
+  await user.click(
+    screen.getByRole('tab', { name: 'Administrator notification' })
+  )
+  expect(subject).toHaveValue('Updated notification')
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+  )
+  await user.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(put).toHaveBeenCalledWith('/api/user/invoices/email-templates', {
+      admin: { ...defaults.admin, subject: 'Updated notification' },
+      customer: defaults.customer,
+    })
+  )
+  expect(
+    post.mock.calls.every(
+      (call) => call[0] === '/api/user/invoices/email-templates/preview'
+    )
+  ).toBe(true)
+})
+
+it('disables template saving when preview validation fails', async () => {
+  const user = userEvent.setup()
+  const templates = {
+    admin: { subject: 'Test', html: '{{.Unknown}}' },
+    customer: { subject: 'Invoice', html: '<p>Invoice</p>' },
+  }
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: { templates, defaults: templates } },
+  })
+  vi.spyOn(api, 'post').mockResolvedValue({
+    data: { success: false, message: 'Invalid invoice email template' },
+  })
+  const put = vi.spyOn(api, 'put')
+  renderInvoice(<InvoiceEmailTemplatesDialog />)
+  await user.click(screen.getByRole('button', { name: 'Email templates' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Invalid invoice email template'
+  )
+  expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(put).not.toHaveBeenCalled()
+})

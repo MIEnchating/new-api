@@ -118,3 +118,45 @@ func SetInvoiceNotificationSettings(c *gin.Context) {
 	recordManageAuditFor(c, c.GetInt("id"), "invoice.notifications", map[string]any{"recipient_count": len(input.UserIDs)})
 	common.ApiSuccess(c, nil)
 }
+
+func GetInvoiceEmailTemplates(c *gin.Context) {
+	templates, err := service.GetInvoiceEmailTemplates()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"templates": templates, "defaults": service.DefaultInvoiceEmailTemplates()})
+}
+
+func SaveInvoiceEmailTemplates(c *gin.Context) {
+	var input model.InvoiceEmailTemplates
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 256<<10)
+	if c.ShouldBindJSON(&input) != nil {
+		common.ApiError(c, common.NewMessage("Invalid invoice email template"))
+		return
+	}
+	if err := service.SaveInvoiceEmailTemplates(input); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAuditFor(c, c.GetInt("id"), "invoice.email_templates", nil)
+	common.ApiSuccess(c, nil)
+}
+
+func PreviewInvoiceEmail(c *gin.Context) {
+	var input struct {
+		model.InvoiceEmailTemplate
+		Kind string `json:"kind"`
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 128<<10)
+	if c.ShouldBindJSON(&input) != nil {
+		common.ApiError(c, common.NewMessage("Invalid invoice email template"))
+		return
+	}
+	preview, err := service.PreviewInvoiceEmail(input.InvoiceEmailTemplate, input.Kind)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, preview)
+}

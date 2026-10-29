@@ -132,6 +132,12 @@ export function SidebarModulesSection({
         title: t('Wallet'),
         description: t('Top up balance and view billing history.'),
       },
+      invoices: {
+        title: t('Invoice applications'),
+        description: t(
+          'Select paid orders, submit invoice details, and track progress.'
+        ),
+      },
       personal: {
         title: t('Profile'),
         description: t('Personal settings and profile management.'),
@@ -170,6 +176,12 @@ export function SidebarModulesSection({
         title: t('Order Management'),
         description: t(
           'Review recharge orders, statistics, and invoice status.'
+        ),
+      },
+      invoice_requests: {
+        title: t('Invoice management'),
+        description: t(
+          'Review invoice applications and record processing results.'
         ),
       },
       setting: {

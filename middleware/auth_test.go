@@ -524,6 +524,9 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 	router.GET("/api/user/invoices/notifications", AdminAuth(), ok)
 	router.PUT("/api/user/invoices/notifications", AdminAuth(), ok)
 	router.POST("/api/user/invoices/:id/file", AdminAuth(), ok)
+	router.GET("/api/user/invoices/email-templates", AdminAuth(), ok)
+	router.PUT("/api/user/invoices/email-templates", AdminAuth(), ok)
+	router.POST("/api/user/invoices/email-templates/preview", AdminAuth(), ok)
 	router.PUT("/api/user/invoices/:id", AdminAuth(), ok)
 	router.POST("/api/user/lottery/draw", UserAuth(), ok)
 	router.POST("/api/sso/chatgpt2api/authorize", UserAuth(), ok)
@@ -559,6 +562,12 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 		{name: "profile cannot download invoice", method: http.MethodGet, path: "/api/user/invoices/4/file", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "email own invoice", method: http.MethodPost, path: "/api/user/invoices/4/email", token: walletWriter, status: http.StatusOK},
 		{name: "read wallet cannot email invoice", method: http.MethodPost, path: "/api/user/invoices/4/email", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+
+		{name: "admin reads invoice templates", path: "/api/user/invoices/email-templates", token: billingReader, status: http.StatusOK},
+		{name: "admin previews invoice templates", method: http.MethodPost, path: "/api/user/invoices/email-templates/preview", token: billingReader, status: http.StatusOK},
+		{name: "admin saves invoice templates", method: http.MethodPut, path: "/api/user/invoices/email-templates", token: billingWriter, status: http.StatusOK},
+		{name: "read billing cannot save templates", method: http.MethodPut, path: "/api/user/invoices/email-templates", token: billingReader, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "wallet cannot read templates", path: "/api/user/invoices/email-templates", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "admin reads all invoices", path: "/api/user/invoices", token: billingReader, status: http.StatusOK},
 		{name: "wallet cannot read all invoices", path: "/api/user/invoices", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "admin reads invoice notification recipients", path: "/api/user/invoices/notifications", token: billingReader, status: http.StatusOK},

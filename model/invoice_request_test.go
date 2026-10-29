@@ -150,6 +150,23 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 						require.Error(t, SetInvoiceNotificationUsers(ids))
 					}
 					require.NoError(t, SetInvoiceNotificationUsers(nil))
+					// Templates survive persistence and replacement on every supported dialect.
+					templates, err := GetInvoiceEmailTemplates()
+					require.NoError(t, err)
+					assert.Empty(t, templates.Admin.HTML)
+					templates = InvoiceEmailTemplates{
+						Admin:    InvoiceEmailTemplate{Subject: "新的申请 {{.Title}}", HTML: "<p>{{.Title}}</p>" + strings.Repeat("<!-- 发票 -->", 1500)},
+						Customer: InvoiceEmailTemplate{Subject: "您的发票", HTML: "<p>{{.InvoiceNumber}}</p>"},
+					}
+					require.NoError(t, SaveInvoiceEmailTemplates(templates))
+					storedTemplates, err := GetInvoiceEmailTemplates()
+					require.NoError(t, err)
+					assert.Equal(t, templates, storedTemplates)
+					templates.Admin.Subject = "更新后的申请通知"
+					require.NoError(t, SaveInvoiceEmailTemplates(templates))
+					storedTemplates, err = GetInvoiceEmailTemplates()
+					require.NoError(t, err)
+					assert.Equal(t, templates, storedTemplates)
 					orders := []TopUp{
 						{UserId: 1, CreateTime: 1000, TradeNo: "paid-1", Money: 10.25, Amount: 15, Status: common.TopUpStatusSuccess},
 						{UserId: 1, CreateTime: 2000, TradeNo: "paid-2", Money: 20.75, Amount: 25, Status: common.TopUpStatusSuccess},

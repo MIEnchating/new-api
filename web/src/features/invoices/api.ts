@@ -29,11 +29,44 @@ import type {
   InvoiceRequest,
   InvoiceSearch,
   InvoiceNotificationSettings,
+  InvoiceEmailTemplate,
+  InvoiceEmailTemplates,
 } from './types'
 
 interface Response<T> {
   success: boolean
   data: T
+}
+
+export async function getInvoiceEmailTemplates() {
+  const response = await api.get<
+    Response<{
+      templates: InvoiceEmailTemplates
+      defaults: InvoiceEmailTemplates
+    }>
+  >('/api/user/invoices/email-templates')
+  return requireServerSuccess(response.data).data
+}
+
+export async function saveInvoiceEmailTemplates(input: InvoiceEmailTemplates) {
+  const response = await api.put<Response<null>>(
+    '/api/user/invoices/email-templates',
+    input
+  )
+  requireServerSuccess(response.data)
+}
+
+export async function previewInvoiceEmail(
+  kind: keyof InvoiceEmailTemplates,
+  input: InvoiceEmailTemplate,
+  signal?: AbortSignal
+) {
+  const response = await api.post<Response<InvoiceEmailTemplate>>(
+    '/api/user/invoices/email-templates/preview',
+    { kind, ...input },
+    { signal }
+  )
+  return requireServerSuccess(response.data).data
 }
 
 export async function getInvoiceOrders(

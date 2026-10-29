@@ -324,6 +324,84 @@ func TestInvoiceFileDelivery(t *testing.T) {
 		require.Error(t, model.SetInvoiceNotificationUsers([]int{1}))
 		require.Error(t, model.SetInvoiceNotificationUsers([]int{8}))
 	})
+	t.Run("email templates preview without sending and saved templates drive delivery", func(t *testing.T) {
+		defaults := service.DefaultInvoiceEmailTemplates()
+		preview, err := service.PreviewInvoiceEmail(defaults.Admin, "admin")
+		require.NoError(t, err)
+		assert.Contains(t, preview.HTML, "125.50")
+		assert.Contains(t, preview.HTML, "示例科技有限公司")
+		for _, kind := range []string{"admin", "customer"} {
+			source := defaults.Admin
+			source.Subject = "开票申请 {{.Title}} <测试>"
+			preview, err := service.PreviewInvoiceEmail(source, kind)
+			require.NoError(t, err)
+			assert.Equal(t, "开票申请 示例科技有限公司 <测试>", preview.Subject)
+			assert.Contains(t, preview.HTML, ">开票申请 示例科技有限公司 &lt;测试&gt;</h1>")
+		}
+		calls := 0
+		http.DefaultTransport = emailHTTPTransport(func(request *http.Request) (*http.Response, error) {
+			calls++
+			var payload struct {
+				Subject string `json:"subject"`
+				HTML    string `json:"html"`
+			}
+			require.NoError(t, common.DecodeJson(request.Body, &payload))
+			assert.Equal(t, "自定义发票 INV-1", payload.Subject)
+			assert.Contains(t, payload.HTML, "<h1>自定义发票 INV-1</h1>")
+			assert.Contains(t, payload.HTML, "&lt;script&gt;company&lt;/script&gt;")
+			assert.Contains(t, payload.HTML, "125.50")
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"id":"template-test"}`)), Header: make(http.Header)}, nil
+		})
+		custom := defaults
+		custom.Customer = model.InvoiceEmailTemplate{Subject: "自定义发票 {{.InvoiceNumber}}", HTML: "<h1>{{.Heading}}</h1><p>{{.Title}}</p><p>{{.Amount}}</p>"}
+		body, err := common.Marshal(custom)
+		require.NoError(t, err)
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Set("id", 7)
+		c.Request = httptest.NewRequest(http.MethodPut, "/api/user/invoices/email-templates", bytes.NewReader(body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		SaveInvoiceEmailTemplates(c)
+		var result struct {
+			Success bool `json:"success"`
+		}
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+		require.True(t, result.Success, response.Body.String())
+		stored, err := service.GetInvoiceEmailTemplates()
+		require.NoError(t, err)
+		assert.Equal(t, custom, stored)
+		_, err = service.PreviewInvoiceEmail(custom.Customer, "customer")
+		require.NoError(t, err)
+		assert.Zero(t, calls)
+		for _, invalid := range []model.InvoiceEmailTemplate{
+			{Subject: "", HTML: "<p>body</p>"},
+			{Subject: "bad\r\nsubject", HTML: "<p>body</p>"},
+			{Subject: "ok", HTML: "{{.UnknownField}}"},
+			{Subject: "ok", HTML: "{{template \"body\" .}}"},
+			{Subject: "ok", HTML: "{{printf \"%s\" .Title}}"},
+			{Subject: "ok", HTML: strings.Repeat("a", 32769)},
+			{Subject: "ok", HTML: "{{if .URL}}"},
+		} {
+			broken := custom
+			broken.Customer = invalid
+			require.Error(t, service.SaveInvoiceEmailTemplates(broken))
+			current, err := service.GetInvoiceEmailTemplates()
+			require.NoError(t, err)
+			assert.Equal(t, custom, current)
+		}
+		_, err = service.PreviewInvoiceEmail(custom.Admin, "unknown")
+		require.Error(t, err)
+		delivery := application
+		delivery.Status = model.InvoiceRequestIssued
+		delivery.InvoiceURL = "https://example.com/invoice.pdf"
+		require.NoError(t, service.SendInvoiceEmail(&delivery))
+		assert.Equal(t, 1, calls)
+		require.NoError(t, service.SaveInvoiceEmailTemplates(defaults))
+		restored, err := service.GetInvoiceEmailTemplates()
+		require.NoError(t, err)
+		assert.Equal(t, defaults, restored)
+	})
+
 }
 
 // A real text PDF can also be rendered for the image OCR regression.

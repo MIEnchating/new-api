@@ -202,3 +202,17 @@ test('selecting an external custom page opens it separately and closes search', 
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
   )
 })
+
+test('invoice switches hide invoice search entries without hiding wallet and orders', async () => {
+  const entries = await searchEntriesFor(
+    ROLE.ADMIN,
+    JSON.stringify({
+      personal: { invoices: false },
+      admin: { invoice_requests: false },
+    })
+  )
+  expect(entries).not.toContain('Invoice applications')
+  expect(entries).not.toContain('Invoice management')
+  expect(entries).toContain('Wallet')
+  expect(entries).toContain('Order Management')
+})
