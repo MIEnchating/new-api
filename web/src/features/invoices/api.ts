@@ -31,6 +31,7 @@ import type {
   InvoiceNotificationSettings,
   InvoiceEmailTemplate,
   InvoiceEmailTemplates,
+  InvoiceSettings,
 } from './types'
 
 interface Response<T> {
@@ -171,4 +172,30 @@ export async function processInvoiceRequest(
     input
   )
   return requireServerSuccess(response.data).data
+}
+
+export async function getInvoiceSettings(): Promise<InvoiceSettings> {
+  const response = await api.get<Response<InvoiceSettings>>(
+    '/api/user/invoices/settings'
+  )
+  const settings = requireServerSuccess(response.data).data
+  if (
+    !settings ||
+    !Number.isFinite(settings.minimum_amount) ||
+    settings.minimum_amount < 0 ||
+    !Number.isInteger(settings.application_days) ||
+    settings.application_days < 0 ||
+    settings.application_days > 3650
+  ) {
+    throw new Error('Invalid minimum invoice amount')
+  }
+  return settings
+}
+
+export async function saveInvoiceSettings(input: InvoiceSettings) {
+  const response = await api.put<Response<null>>(
+    '/api/user/invoices/settings',
+    input
+  )
+  requireServerSuccess(response.data)
 }

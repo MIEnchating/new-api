@@ -122,12 +122,12 @@ export function InvoiceOrderPicker(props: {
         ),
       },
       {
-        accessorKey: 'create_time',
+        accessorKey: 'complete_time',
         size: 160,
-        header: t('Created At'),
+        header: t('Payment time'),
         cell: ({ row }) => (
           <TimestampCell
-            timestamp={row.original.create_time}
+            timestamp={row.original.complete_time}
             format='absolute'
             justNowLabel={t('Just now')}
             className='w-32 text-xs whitespace-nowrap'

@@ -93,3 +93,8 @@ export interface InvoiceEmailTemplates {
   admin: InvoiceEmailTemplate
   customer: InvoiceEmailTemplate
 }
+
+export interface InvoiceSettings {
+  application_days: number
+  minimum_amount: number
+}

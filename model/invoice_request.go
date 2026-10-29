@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -89,7 +90,10 @@ func CreateInvoiceRequest(userId int, input InvoiceApplicationInput) (*InvoiceRe
 	if err != nil || address.Address != input.Email || len(input.Email) > 254 || input.Title == "" || utf8.RuneCountInString(input.Title) > 200 || len(input.TaxId) > 32 || utf8.RuneCountInString(input.InvoiceAddress) > 300 || utf8.RuneCountInString(input.InvoicePhone) > 50 || utf8.RuneCountInString(input.BankName) > 100 || utf8.RuneCountInString(input.BankAccount) > 64 || utf8.RuneCountInString(input.Remark) > 1000 {
 		return nil, ErrInvoiceRequestInput
 	}
-	if input.TitleType != "personal" && input.TitleType != "company" || input.TitleType == "company" && input.TaxId == "" {
+	if input.TitleType == "" {
+		input.TitleType = "company"
+	}
+	if input.TitleType != "company" || input.TaxId == "" {
 		return nil, ErrInvoiceRequestInput
 	}
 	if userId <= 0 || len(input.OrderIds) == 0 || len(input.OrderIds) > 100 {
@@ -101,6 +105,10 @@ func CreateInvoiceRequest(userId int, input InvoiceApplicationInput) (*InvoiceRe
 		return nil, ErrInvoiceRequestOrders
 	}
 	request := &InvoiceRequest{UserId: userId, TitleType: input.TitleType, Title: input.Title, TaxId: input.TaxId, Email: input.Email, InvoiceAddress: input.InvoiceAddress, InvoicePhone: input.InvoicePhone, BankName: input.BankName, BankAccount: input.BankAccount, Remark: input.Remark, Status: InvoiceRequestPending, CreatedAt: common.GetTimestamp()}
+	settings, err := GetInvoiceSettings()
+	if err != nil {
+		return nil, err
+	}
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		var orders []TopUp
 		if err := lockForUpdate(tx).Where("id IN ? AND user_id = ?", ids, userId).Order("id ASC").Find(&orders).Error; err != nil {
@@ -109,10 +117,18 @@ func CreateInvoiceRequest(userId int, input InvoiceApplicationInput) (*InvoiceRe
 		if len(orders) != len(ids) {
 			return ErrInvoiceRequestOrders
 		}
+		total := decimal.Zero
 		for _, order := range orders {
 			if order.Status != common.TopUpStatusSuccess || order.InvoiceStatus == TopUpInvoiceStatusIssued || order.Money <= 0 || math.IsNaN(order.Money) || math.IsInf(order.Money, 0) {
 				return ErrInvoiceRequestOrders
 			}
+			if settings.ApplicationDays > 0 && (order.CompleteTime <= 0 || order.CompleteTime < request.CreatedAt-int64(settings.ApplicationDays)*86400 || order.CompleteTime > request.CreatedAt) {
+				return common.NewMessage("Orders must be paid within the last {{days}} days", map[string]any{"days": settings.ApplicationDays})
+			}
+			total = total.Add(decimal.NewFromFloat(order.Money))
+		}
+		if total.LessThan(decimal.NewFromFloat(settings.MinimumAmount)) {
+			return common.NewMessage("Invoice amount must be at least {{amount}}", map[string]any{"amount": strconv.FormatFloat(settings.MinimumAmount, 'f', -1, 64)})
 		}
 		var pending int64
 		if err := tx.Model(&InvoiceRequestOrder{}).Where("active_top_up_id IN ?", ids).Count(&pending).Error; err != nil {
@@ -265,12 +281,21 @@ func GetInvoiceEligibleOrders(userId int, page *common.PageInfo, filter InvoiceS
 	}
 	pending := DB.Model(&InvoiceRequestOrder{}).Select("active_top_up_id").Where("active_top_up_id IS NOT NULL")
 	query := DB.Model(&TopUp{}).Where("user_id = ? AND status = ? AND money > 0", userId, common.TopUpStatusSuccess).
-		Where("(invoice_status IS NULL OR invoice_status <> ?)", TopUpInvoiceStatusIssued).Where("id NOT IN (?)", pending)
+		Where("(invoice_status IS NULL OR invoice_status <> ?)", TopUpInvoiceStatusIssued).
+		Where("id NOT IN (?)", pending)
+	settings, err := GetInvoiceSettings()
+	if err != nil {
+		return err
+	}
+	if settings.ApplicationDays > 0 {
+		now := common.GetTimestamp()
+		query = query.Where("complete_time > 0 AND complete_time >= ? AND complete_time <= ?", now-int64(settings.ApplicationDays)*86400, now)
+	}
 	if filter.Start > 0 {
-		query = query.Where("create_time >= ?", filter.Start)
+		query = query.Where("complete_time >= ?", filter.Start)
 	}
 	if filter.End > 0 {
-		query = query.Where("create_time <= ?", filter.End)
+		query = query.Where("complete_time <= ?", filter.End)
 	}
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
 		query = query.Where("trade_no LIKE ?", "%"+keyword+"%")

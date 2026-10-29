@@ -18,23 +18,18 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
-export const invoiceApplicationSchema = z
-  .object({
-    order_ids: z.array(z.number().int().positive()).min(1).max(100),
-    title_type: z.enum(['personal', 'company']),
-    title: z.string().trim().min(1).max(200),
-    tax_id: z.string().trim().max(32),
-    email: z.email().max(254),
-    invoice_address: z.string().trim().max(300),
-    invoice_phone: z.string().trim().max(50),
-    bank_name: z.string().trim().max(100),
-    bank_account: z.string().trim().max(64),
-    remark: z.string().trim().max(1000),
-  })
-  .refine(
-    (value) => value.title_type !== 'company' || value.tax_id.length > 0,
-    { path: ['tax_id'] }
-  )
+export const invoiceApplicationSchema = z.object({
+  order_ids: z.array(z.number().int().positive()).min(1).max(100),
+  title_type: z.literal('company'),
+  title: z.string().trim().min(1).max(200),
+  tax_id: z.string().trim().min(1).max(32),
+  email: z.email().max(254),
+  invoice_address: z.string().trim().max(300),
+  invoice_phone: z.string().trim().max(50),
+  bank_name: z.string().trim().max(100),
+  bank_account: z.string().trim().max(64),
+  remark: z.string().trim().max(1000),
+})
 
 export type InvoiceApplication = z.infer<typeof invoiceApplicationSchema>
 
@@ -63,3 +58,8 @@ export const invoiceProcessSchema = z
       ? value.invoice_number.length > 0
       : value.note.length > 0
   )
+
+export const invoiceSettingsSchema = z.object({
+  application_days: z.number().int().min(0).max(3650),
+  minimum_amount: z.number().min(0).max(1_000_000_000_000).multipleOf(0.01),
+})

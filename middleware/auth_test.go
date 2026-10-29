@@ -514,6 +514,8 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 	router.PUT("/api/token/:id/route", UserAuth(), ok)
 	router.PUT("/api/status-monitor/cache/baseline", AdminAuth(), ok)
 	router.GET("/api/user/billing/self", UserAuth(), ok)
+	router.GET("/api/user/invoices/settings", UserAuth(), ok)
+	router.PUT("/api/user/invoices/settings", AdminAuth(), ok)
 	router.GET("/api/user/invoices/self", UserAuth(), ok)
 	router.GET("/api/user/invoices/eligible", UserAuth(), ok)
 	router.POST("/api/user/invoices", UserAuth(), ok)
@@ -563,6 +565,10 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 		{name: "email own invoice", method: http.MethodPost, path: "/api/user/invoices/4/email", token: walletWriter, status: http.StatusOK},
 		{name: "read wallet cannot email invoice", method: http.MethodPost, path: "/api/user/invoices/4/email", token: wallet, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 
+		{name: "wallet reads invoice minimum", path: "/api/user/invoices/settings", token: wallet, status: http.StatusOK},
+		{name: "admin changes invoice minimum", method: http.MethodPut, path: "/api/user/invoices/settings", token: billingWriter, status: http.StatusOK},
+		{name: "wallet cannot change invoice minimum", method: http.MethodPut, path: "/api/user/invoices/settings", token: walletWriter, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "billing read cannot change invoice minimum", method: http.MethodPut, path: "/api/user/invoices/settings", token: billingReader, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "admin reads invoice templates", path: "/api/user/invoices/email-templates", token: billingReader, status: http.StatusOK},
 		{name: "admin previews invoice templates", method: http.MethodPost, path: "/api/user/invoices/email-templates/preview", token: billingReader, status: http.StatusOK},
 		{name: "admin saves invoice templates", method: http.MethodPut, path: "/api/user/invoices/email-templates", token: billingWriter, status: http.StatusOK},

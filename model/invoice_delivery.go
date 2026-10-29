@@ -2,9 +2,12 @@ package model
 
 import (
 	"errors"
+	"math"
 	"slices"
+	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 )
 
@@ -140,4 +143,60 @@ func AttachInvoiceFile(id int, reference string) (*InvoiceRequest, string, error
 		return tx.Model(request).Update("invoice_url", reference).Error
 	})
 	return request, previous, err
+}
+
+const InvoiceMinimumAmountOption = "InvoiceMinimumAmount"
+const InvoiceApplicationDaysOption = "InvoiceApplicationDays"
+
+type InvoiceSettings struct {
+	MinimumAmount   float64 `json:"minimum_amount"`
+	ApplicationDays int     `json:"application_days"`
+}
+
+func parseInvoiceMinimumAmount(value string) (float64, error) {
+	amount, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(amount) || math.IsInf(amount, 0) || amount < 0 || amount > 1e12 {
+		return 0, common.NewMessage("Invalid minimum invoice amount")
+	}
+	precise := decimal.NewFromFloat(amount)
+	if !precise.Equal(precise.Round(2)) {
+		return 0, common.NewMessage("Invalid minimum invoice amount")
+	}
+	return amount, nil
+}
+
+func parseInvoiceApplicationDays(value string) (int, error) {
+	days, err := strconv.Atoi(value)
+	if err != nil || days < 0 || days > 3650 {
+		return 0, common.NewMessage("Invalid invoice application window")
+	}
+	return days, nil
+}
+
+func GetInvoiceSettings() (*InvoiceSettings, error) {
+	settings := &InvoiceSettings{MinimumAmount: 1000, ApplicationDays: 90}
+	var options []Option
+	if err := DB.Where(map[string]any{"key": []string{InvoiceMinimumAmountOption, InvoiceApplicationDaysOption}}).Find(&options).Error; err != nil {
+		return nil, err
+	}
+	for _, option := range options {
+		var err error
+		switch option.Key {
+		case InvoiceMinimumAmountOption:
+			settings.MinimumAmount, err = parseInvoiceMinimumAmount(option.Value)
+		case InvoiceApplicationDaysOption:
+			settings.ApplicationDays, err = parseInvoiceApplicationDays(option.Value)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return settings, nil
+}
+
+func SaveInvoiceSettings(settings InvoiceSettings) error {
+	return UpdateOptionsBulk(map[string]string{
+		InvoiceMinimumAmountOption:   strconv.FormatFloat(settings.MinimumAmount, 'f', -1, 64),
+		InvoiceApplicationDaysOption: strconv.Itoa(settings.ApplicationDays),
+	})
 }

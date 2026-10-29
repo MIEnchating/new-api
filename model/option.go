@@ -245,6 +245,14 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == InvoiceApplicationDaysOption {
+		_, err := parseInvoiceApplicationDays(value)
+		return err
+	}
+	if key == InvoiceMinimumAmountOption {
+		_, err := parseInvoiceMinimumAmount(value)
+		return err
+	}
 	if key == legacyAccessTokenRetireAtKey {
 		return errLegacyRetireAtReadOnly
 	}

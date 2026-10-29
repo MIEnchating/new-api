@@ -17,14 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, Send } from 'lucide-react'
 import { useEffect, useId, useState, type ReactElement } from 'react'
-import { useForm, useWatch } from 'react-hook-form'
+import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
+import { ErrorState } from '@/components/error-state'
+import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -33,19 +35,12 @@ import {
 } from '@/components/ui/collapsible'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { createInvoiceRequest } from '../api'
+import { createInvoiceRequest, getInvoiceSettings } from '../api'
 import {
   invoiceApplicationSchema,
   type InvoiceApplication,
@@ -68,6 +63,18 @@ export function InvoiceApplicationForm(props: {
     (sum, order) => sum + order.money,
     0
   )
+  const settings = useQuery({
+    queryKey: ['invoices', 'settings'],
+    queryFn: getInvoiceSettings,
+    enabled: props.open ?? true,
+  })
+  const minimumAmount = settings.data?.minimum_amount
+  // Ignore only floating-point addition noise; the server compares decimal amounts.
+  const meetsMinimum =
+    minimumAmount !== undefined &&
+    invoiceAmount +
+      Number.EPSILON * Math.max(1, invoiceAmount) * selectedOrders.length >=
+      minimumAmount
   const client = useQueryClient()
   const initialValues: InvoiceApplication = {
     order_ids: [],
@@ -91,7 +98,6 @@ export function InvoiceApplicationForm(props: {
       resetField('email', { defaultValue: userEmail ?? '' })
     }
   }, [userEmail, props.open, getFieldState, resetField])
-  const titleType = useWatch({ control: form.control, name: 'title_type' })
   const mutation = useMutation({
     mutationFn: createInvoiceRequest,
     onSuccess: () => {
@@ -102,6 +108,11 @@ export function InvoiceApplicationForm(props: {
       props.onSubmitted()
     },
   })
+  const canSubmit =
+    !mutation.isPending &&
+    selectedOrders.length > 0 &&
+    meetsMinimum &&
+    !settings.isError
   const fields = [
     { name: 'title', label: t('Invoice title'), maxLength: 200, type: 'text' },
     {
@@ -150,16 +161,31 @@ export function InvoiceApplicationForm(props: {
       footerClassName='flex-col sm:items-center sm:justify-between'
       footer={
         <>
-          <div className='flex items-baseline gap-3' aria-live='polite'>
-            <span className='text-muted-foreground text-sm'>
-              {t('Invoice amount')}
-            </span>
-            <output
-              aria-label={t('Invoice amount')}
-              className='text-2xl font-semibold tabular-nums'
-            >
-              {formatNumber(invoiceAmount, locale)}
-            </output>
+          <div className='space-y-1' aria-live='polite'>
+            <div className='flex items-baseline gap-3'>
+              <span className='text-muted-foreground text-sm'>
+                {t('Invoice amount')}
+              </span>
+              <output
+                aria-label={t('Invoice amount')}
+                className='text-2xl font-semibold tabular-nums'
+              >
+                {formatNumber(invoiceAmount, locale)}
+              </output>
+            </div>
+            {minimumAmount !== undefined && (
+              <p
+                className={
+                  meetsMinimum
+                    ? 'text-muted-foreground text-xs'
+                    : 'text-destructive text-xs'
+                }
+              >
+                {t('Minimum invoice amount: {{amount}}', {
+                  amount: formatNumber(minimumAmount, locale),
+                })}
+              </p>
+            )}
           </div>
           <div className='flex items-center justify-end gap-2'>
             <Button
@@ -173,11 +199,7 @@ export function InvoiceApplicationForm(props: {
             >
               {t('Cancel')}
             </Button>
-            <Button
-              type='submit'
-              form={formId}
-              disabled={mutation.isPending || selectedOrders.length === 0}
-            >
+            <Button type='submit' form={formId} disabled={!canSubmit}>
               <Send className='size-4' aria-hidden='true' />
               {t('Submit invoice application')}
             </Button>
@@ -188,10 +210,31 @@ export function InvoiceApplicationForm(props: {
       <form
         id={formId}
         className='grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_300px]'
-        onSubmit={form.handleSubmit((input) => mutation.mutate(input))}
+        onSubmit={form.handleSubmit((input) => {
+          if (canSubmit) mutation.mutate(input)
+        })}
       >
         <section aria-label={t('Select orders')} className='min-w-0 space-y-3'>
           <h3 className='text-sm font-semibold'>{t('Select orders')}</h3>
+          {settings.data && (
+            <p className='text-muted-foreground text-xs'>
+              {settings.data.application_days > 0
+                ? t(
+                    'Apply within {{days}} days after payment. Orders currently invoiced or awaiting processing cannot be selected again.',
+                    { days: settings.data.application_days }
+                  )
+                : t(
+                    'Orders currently invoiced or awaiting processing cannot be selected again.'
+                  )}
+            </p>
+          )}
+          {settings.isPending && <LoadingState />}
+          {settings.isError && (
+            <ErrorState
+              className='min-h-0'
+              onRetry={() => void settings.refetch()}
+            />
+          )}
           <InvoiceOrderPicker
             selected={selectedOrders}
             enabled={props.open ?? true}
@@ -211,44 +254,9 @@ export function InvoiceApplicationForm(props: {
           className='min-w-0 space-y-4 border-t pt-5 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6'
         >
           <h3 className='text-sm font-semibold'>{t('Invoice details')}</h3>
-          <div className='space-y-2'>
-            <Label htmlFor='invoice-title-type'>
-              {t('Invoice title type')}
-            </Label>
-            <Select
-              value={titleType}
-              onValueChange={(value) => {
-                if (value === 'company' || value === 'personal') {
-                  form.setValue('title_type', value, { shouldValidate: true })
-                }
-              }}
-              items={[
-                { value: 'company', label: t('Company') },
-                { value: 'personal', label: t('Personal') },
-              ]}
-              disabled={mutation.isPending}
-            >
-              <SelectTrigger id='invoice-title-type'>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent
-                alignItemWithTrigger={false}
-                side='bottom'
-                align='start'
-              >
-                <SelectItem value='company'>{t('Company')}</SelectItem>
-                <SelectItem value='personal'>{t('Personal')}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
           {fields.map((field) => (
             <div key={field.name} className='space-y-2'>
-              <Label htmlFor={`invoice-${field.name}`}>
-                {field.label}
-                {field.name === 'tax_id' && titleType === 'personal'
-                  ? ` (${t('Optional')})`
-                  : ''}
-              </Label>
+              <Label htmlFor={`invoice-${field.name}`}>{field.label}</Label>
               <Input
                 id={`invoice-${field.name}`}
                 type={field.type}

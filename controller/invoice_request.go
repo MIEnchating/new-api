@@ -126,3 +126,33 @@ func ProcessInvoiceRequest(c *gin.Context) {
 		EmailFailed bool `json:"email_failed"`
 	}{request, emailSent, emailFailed})
 }
+
+func GetInvoiceSettings(c *gin.Context) {
+	settings, err := model.GetInvoiceSettings()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, settings)
+}
+
+func SaveInvoiceSettings(c *gin.Context) {
+	var input struct {
+		MinimumAmount   *float64 `json:"minimum_amount"`
+		ApplicationDays *int     `json:"application_days"`
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1024)
+	if c.ShouldBindJSON(&input) != nil || input.MinimumAmount == nil {
+		common.ApiError(c, common.NewMessage("Invalid minimum invoice amount"))
+		return
+	}
+	if input.ApplicationDays == nil {
+		common.ApiError(c, common.NewMessage("Invalid invoice application window"))
+		return
+	}
+	if err := model.SaveInvoiceSettings(model.InvoiceSettings{MinimumAmount: *input.MinimumAmount, ApplicationDays: *input.ApplicationDays}); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, nil)
+}

@@ -27,6 +27,7 @@ import { InvoiceApplicationForm } from './components/application-form'
 import { InvoiceEmailTemplatesDialog } from './components/email-templates'
 import { InvoiceNotificationDialog } from './components/notification-settings'
 import { InvoiceRequestList } from './components/request-list'
+import { InvoiceSettingsDialog } from './components/settings'
 
 export function InvoicesPage(props: { admin?: boolean }) {
   const { t } = useTranslation()
@@ -37,6 +38,7 @@ export function InvoicesPage(props: { admin?: boolean }) {
         {props.admin ? t('Invoice management') : t('Invoice applications')}
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
+        {props.admin && <InvoiceSettingsDialog />}
         {props.admin && <InvoiceEmailTemplatesDialog />}
         {props.admin && <InvoiceNotificationDialog />}
         {!props.admin && (

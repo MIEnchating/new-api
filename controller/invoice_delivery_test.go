@@ -52,6 +52,7 @@ func TestInvoiceFileDelivery(t *testing.T) {
 		{Id: 8, Username: "disabled", AffCode: "disabled", Email: "disabled@example.com", Status: common.UserStatusDisabled, Role: common.RoleAdminUser},
 	}
 	require.NoError(t, db.Create(&users).Error)
+	require.NoError(t, db.Create(&model.Option{Key: model.InvoiceMinimumAmountOption, Value: "0"}).Error)
 	application := model.InvoiceRequest{UserId: 1, Title: "<script>company</script>", Email: "invoice@example.com", Status: model.InvoiceRequestPending, InvoiceNumber: "INV-1"}
 	require.NoError(t, db.Create(&application).Error)
 	require.NoError(t, db.Create(&model.InvoiceRequestOrder{RequestId: application.Id, TopUpId: 99, TradeNo: "email-total", Money: 125.50}).Error)
@@ -218,9 +219,9 @@ func TestInvoiceFileDelivery(t *testing.T) {
 			{name: "failed mail", mailFailure: true, sent: 1, success: true},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				order := model.TopUp{UserId: 1, TradeNo: "invoice-switch-" + tc.name, Money: 12.5, Status: common.TopUpStatusSuccess}
+				order := model.TopUp{UserId: 1, TradeNo: "invoice-switch-" + tc.name, CompleteTime: common.GetTimestamp(), Money: 12.5, Status: common.TopUpStatusSuccess}
 				require.NoError(t, db.Create(&order).Error)
-				request, err := model.CreateInvoiceRequest(1, model.InvoiceApplicationInput{OrderIds: []int{order.Id}, TitleType: "personal", Title: "Invoice switch", Email: "invoice@example.com"})
+				request, err := model.CreateInvoiceRequest(1, model.InvoiceApplicationInput{OrderIds: []int{order.Id}, TitleType: "company", Title: "Invoice switch", TaxId: "TAX123", Email: "invoice@example.com"})
 				require.NoError(t, err)
 				if !tc.missing {
 					_, _, err = model.AttachInvoiceFile(request.Id, application.InvoiceURL)
@@ -433,4 +434,58 @@ func invoiceRecognitionPDF(lines ...string) []byte {
 	}
 	fmt.Fprintf(&output, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF", len(offsets), xref)
 	return output.Bytes()
+}
+
+func TestInvoiceSettingsAPI(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "invoice-settings.db")), &gorm.Config{})
+	require.NoError(t, err)
+	originalDB := model.DB
+	model.DB = db
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { model.DB = originalDB; assert.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&model.Option{}))
+	common.OptionMapRWMutex.Lock()
+	previous := common.OptionMap
+	common.OptionMap = map[string]string{}
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = previous
+		common.OptionMapRWMutex.Unlock()
+	})
+	for _, tc := range []struct {
+		body    string
+		success bool
+	}{
+		{`{}`, false}, {`{"minimum_amount":null}`, false},
+		{`{"minimum_amount":-1}`, false}, {`{"minimum_amount":1.001}`, false},
+		{`{"minimum_amount":1500.50}`, false},
+		{`{"minimum_amount":1500.50,"application_days":null}`, false},
+		{`{"minimum_amount":1500.50,"application_days":1.5}`, false},
+		{`{"minimum_amount":1500.50,"application_days":-1}`, false},
+		{`{"minimum_amount":1500.50,"application_days":180}`, true},
+	} {
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Request = httptest.NewRequest(http.MethodPut, "/api/user/invoices/settings", strings.NewReader(tc.body))
+		c.Request.Header.Set("Content-Type", "application/json")
+		SaveInvoiceSettings(c)
+		var result struct {
+			Success bool `json:"success"`
+		}
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+		assert.Equal(t, tc.success, result.Success)
+	}
+	response := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(response)
+	GetInvoiceSettings(c)
+	var result struct {
+		Success bool                  `json:"success"`
+		Data    model.InvoiceSettings `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+	assert.True(t, result.Success)
+	assert.Equal(t, 1500.50, result.Data.MinimumAmount)
+	assert.Equal(t, 180, result.Data.ApplicationDays)
 }

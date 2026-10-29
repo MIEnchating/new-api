@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -100,7 +101,7 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 					// TopUp's schema is unchanged from the latest release v2026.10.26.
 					// Upgrade starts with that schema and representative historical data.
 					historical := TopUp{UserId: 1, TradeNo: "historical", Money: 12.5, Amount: 20, Status: common.TopUpStatusSuccess, InvoiceStatus: TopUpInvoiceStatusIssued, InvoicedBy: 7}
-					legacyRequest := legacyInvoiceRequest{UserId: 99, TitleType: "company", Title: "Historical Ltd", TaxId: "OLD-TAX", Email: "old@example.com", Status: InvoiceRequestIssued, CreatedAt: 100, InvoiceNumber: "OLD-INV"}
+					legacyRequest := legacyInvoiceRequest{UserId: 99, TitleType: "personal", Title: "Historical Ltd", TaxId: "OLD-TAX", Email: "old@example.com", Status: InvoiceRequestIssued, CreatedAt: 100, InvoiceNumber: "OLD-INV"}
 					if upgrade {
 						// A separate ORM instance represents the prior version's schema cache.
 						legacyDB, err := gorm.Open(driver, &gorm.Config{})
@@ -119,6 +120,7 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 						var preservedRequest InvoiceRequest
 						require.NoError(t, db.Preload("Orders").First(&preservedRequest, legacyRequest.Id).Error)
 						assert.Equal(t, legacyRequest.Title, preservedRequest.Title)
+						assert.Equal(t, "personal", preservedRequest.TitleType)
 						assert.Equal(t, legacyRequest.InvoiceNumber, preservedRequest.InvoiceNumber)
 						assert.Equal(t, legacyRequest.Orders, preservedRequest.Orders)
 						assert.Empty(t, preservedRequest.InvoiceAddress)
@@ -140,6 +142,13 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 						users[i].AffCode = fmt.Sprintf("invoice-%d", users[i].Id)
 					}
 					require.NoError(t, db.Create(&users).Error)
+					invoiceSettings, err := GetInvoiceSettings()
+					require.NoError(t, err)
+					assert.Equal(t, 1000.0, invoiceSettings.MinimumAmount)
+					assert.Equal(t, 90, invoiceSettings.ApplicationDays)
+					// The existing lifecycle cases use a small configurable minimum.
+					require.NoError(t, SaveInvoiceSettings(InvoiceSettings{MinimumAmount: 1}))
+
 					require.NoError(t, SetInvoiceNotificationUsers([]int{7, 7}))
 					settings, err := GetInvoiceNotificationSettings()
 					require.NoError(t, err)
@@ -168,8 +177,8 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 					require.NoError(t, err)
 					assert.Equal(t, templates, storedTemplates)
 					orders := []TopUp{
-						{UserId: 1, CreateTime: 1000, TradeNo: "paid-1", Money: 10.25, Amount: 15, Status: common.TopUpStatusSuccess},
-						{UserId: 1, CreateTime: 2000, TradeNo: "paid-2", Money: 20.75, Amount: 25, Status: common.TopUpStatusSuccess},
+						{UserId: 1, CreateTime: 900, CompleteTime: 1000, TradeNo: "paid-1", Money: 10.25, Amount: 15, Status: common.TopUpStatusSuccess},
+						{UserId: 1, CreateTime: 1900, CompleteTime: 2000, TradeNo: "paid-2", Money: 20.75, Amount: 25, Status: common.TopUpStatusSuccess},
 						{UserId: 2, TradeNo: "other-user", Money: 50, Status: common.TopUpStatusSuccess},
 						{UserId: 1, TradeNo: "unpaid", Money: 30, Status: common.TopUpStatusPending},
 						{UserId: 1, TradeNo: "invoiced", Money: 40, Status: common.TopUpStatusSuccess, InvoiceStatus: TopUpInvoiceStatusIssued},
@@ -183,9 +192,11 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 						_, err := CreateInvoiceRequest(1, invalid)
 						require.ErrorIs(t, err, ErrInvoiceRequestOrders)
 					}
-					for _, field := range []string{"tax", "email", "title", "type", "address", "phone", "bank", "account"} {
+					for _, field := range []string{"personal", "tax", "email", "title", "type", "address", "phone", "bank", "account"} {
 						invalid := input
 						switch field {
+						case "personal":
+							invalid.TitleType = "personal"
 						case "tax":
 							invalid.TaxId = ""
 						case "email":
@@ -246,7 +257,7 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 						assert.Equal(t, "invoice-owner", items[0].Username)
 						assert.Equal(t, "Invoice Applicant", items[0].DisplayName)
 					}
-					for _, filter := range []InvoiceSearch{{Start: request.CreatedAt + 1}, {User: "2"}, {Keyword: "' OR 1=1 --"}, {TitleType: "personal"}} {
+					for _, filter := range []InvoiceSearch{{Start: request.CreatedAt + 1}, {User: "2"}, {Keyword: "' OR 1=1 --"}} {
 						require.NoError(t, ListInvoiceRequests(0, "", page, filter))
 						assert.Zero(t, page.Total)
 					}
@@ -313,9 +324,15 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 					require.NoError(t, db.AutoMigrate(&User{}, &Option{}, &TopUp{}, &InvoiceRequest{}, &InvoiceRequestOrder{}))
 					require.NoError(t, ListInvoiceRequests(1, "", page, InvoiceSearch{}))
 					assert.Equal(t, 2, page.Total)
-					// A return permits a new application while retaining the original history.
+					// Returning the marker permits reapplication, retaining the original history.
 					_, err = UpdateTopUpInvoiceStatuses(input.OrderIds, TopUpInvoiceActionReturn, 7)
 					require.NoError(t, err)
+					require.NoError(t, GetInvoiceEligibleOrders(1, page, InvoiceSearch{}))
+					assert.Equal(t, 2, page.Total)
+					// Clearing an issued marker also restores eligibility.
+					require.NoError(t, db.Model(&TopUp{}).Where("id = ?", orders[0].Id).Update("invoice_status", TopUpInvoiceStatusNone).Error)
+					orders[1].InvoiceStatus = TopUpInvoiceStatusReturned
+
 					var wg sync.WaitGroup
 					var successes atomic.Int32
 					start := make(chan struct{})
@@ -396,9 +413,133 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 							assert.Equal(t, TopUpInvoiceStatusIssued, actual.InvoiceStatus)
 						} else {
 							assert.Equal(t, InvoiceRequestWithdrawn, reapplied.Status)
-							assert.Equal(t, TopUpInvoiceStatusReturned, actual.InvoiceStatus)
+							assert.Equal(t, original.InvoiceStatus, actual.InvoiceStatus)
 						}
 					}
+
+					t.Run("payment window filters orders and rejects direct submissions", func(t *testing.T) {
+						require.NoError(t, SaveInvoiceSettings(InvoiceSettings{MinimumAmount: 0, ApplicationDays: 90}))
+						settings, err := GetInvoiceSettings()
+						require.NoError(t, err)
+						assert.Equal(t, 90, settings.ApplicationDays)
+						now := common.GetTimestamp()
+						orders := []TopUp{
+							{UserId: 2, TradeNo: "window-inside", Money: 1000, Status: common.TopUpStatusSuccess, CreateTime: now - 200*86400, CompleteTime: now - 90*86400 + 60},
+							{UserId: 2, TradeNo: "window-expired", Money: 1000, Status: common.TopUpStatusSuccess, CreateTime: now, CompleteTime: now - 90*86400 - 60},
+							{UserId: 2, TradeNo: "window-missing", Money: 1000, Status: common.TopUpStatusSuccess},
+							{UserId: 2, TradeNo: "window-future", Money: 1000, Status: common.TopUpStatusSuccess, CompleteTime: now + 86400},
+							{UserId: 2, TradeNo: "window-issued", Money: 1000, Status: common.TopUpStatusSuccess, CompleteTime: now, InvoiceStatus: TopUpInvoiceStatusIssued},
+						}
+						require.NoError(t, db.Create(&orders).Error)
+						page := &common.PageInfo{Page: 1, PageSize: 10}
+						require.NoError(t, GetInvoiceEligibleOrders(2, page, InvoiceSearch{Keyword: "window-"}))
+						visible := page.Items.([]TopUp)
+						require.Len(t, visible, 1)
+						assert.Equal(t, orders[0].Id, visible[0].Id)
+						input := InvoiceApplicationInput{Title: "Window test", TaxId: "TAX123", Email: "test@example.com"}
+						for _, order := range orders[1:] {
+							input.OrderIds = []int{order.Id}
+							_, err := CreateInvoiceRequest(2, input)
+							require.Error(t, err)
+						}
+						input.OrderIds = []int{orders[0].Id, orders[1].Id}
+						_, err = CreateInvoiceRequest(2, input)
+						require.Error(t, err, "one expired order rejects the entire application")
+						input.OrderIds = []int{orders[0].Id}
+						pending, err := CreateInvoiceRequest(2, input)
+						require.NoError(t, err)
+						require.NoError(t, SaveInvoiceSettings(InvoiceSettings{MinimumAmount: 0, ApplicationDays: 1}))
+						// Tightening the application window does not invalidate already submitted applications.
+						_, err = ProcessInvoiceRequest(pending.Id, 7, InvoiceProcessInput{Status: InvoiceRequestIssued, InvoiceNumber: "WINDOW"})
+						require.NoError(t, err)
+						require.NoError(t, SaveInvoiceSettings(InvoiceSettings{MinimumAmount: 0, ApplicationDays: 180}))
+						stored, err := GetInvoiceSettings()
+						require.NoError(t, err)
+						assert.Equal(t, 180, stored.ApplicationDays)
+						input.OrderIds = []int{orders[1].Id}
+						_, err = CreateInvoiceRequest(2, input)
+						require.NoError(t, err)
+						for _, value := range []string{"-1", "1.5", "3651", "not-days"} {
+							require.Error(t, UpdateOptionsBulk(map[string]string{InvoiceApplicationDaysOption: value}))
+						}
+						require.Error(t, SaveInvoiceSettings(InvoiceSettings{MinimumAmount: 500, ApplicationDays: -1}))
+						stored, err = GetInvoiceSettings()
+						require.NoError(t, err)
+						assert.Equal(t, 180, stored.ApplicationDays)
+						assert.Zero(t, stored.MinimumAmount, "invalid day settings must not partially update the minimum")
+						require.NoError(t, SaveInvoiceSettings(InvoiceSettings{MinimumAmount: 0, ApplicationDays: 0}))
+						require.NoError(t, GetInvoiceEligibleOrders(2, page, InvoiceSearch{Keyword: "window-missing"}))
+						assert.Equal(t, 1, page.Total)
+					})
+					t.Run("minimum amount is inclusive and uses server order totals", func(t *testing.T) {
+						require.NoError(t, db.Where(&Option{Key: InvoiceMinimumAmountOption}).Delete(&Option{}).Error)
+						defaults, err := GetInvoiceSettings()
+						require.NoError(t, err)
+						assert.Equal(t, 1000.0, defaults.MinimumAmount)
+						for _, tc := range []struct {
+							name    string
+							amounts []float64
+							minimum float64
+							allowed bool
+						}{
+							{"below default", []float64{999.99}, 1000, false},
+							{"equal default", []float64{1000}, 1000, true},
+							{"above default", []float64{1000.01}, 1000, true},
+							{"combined equals", []float64{600, 400}, 1000, true},
+							{"decimal combined equals", []float64{0.1, 0.7}, 0.8, true},
+							{"new minimum blocks", []float64{1000}, 1500, false},
+							{"new minimum permits", []float64{1500}, 1500, true},
+							{"zero minimum", []float64{0.01}, 0, true},
+						} {
+							t.Run(tc.name, func(t *testing.T) {
+								require.NoError(t, SaveInvoiceSettings(InvoiceSettings{MinimumAmount: tc.minimum}))
+								saved, err := GetInvoiceSettings()
+								require.NoError(t, err)
+								assert.Equal(t, tc.minimum, saved.MinimumAmount)
+								for _, titleType := range []string{"company", ""} {
+									orders := make([]TopUp, len(tc.amounts))
+									for i, amount := range tc.amounts {
+										orders[i] = TopUp{UserId: 2, TradeNo: fmt.Sprintf("minimum-%s-%s-%d", tc.name, titleType, i), Money: amount, Status: common.TopUpStatusSuccess}
+									}
+									require.NoError(t, db.Create(&orders).Error)
+									input := InvoiceApplicationInput{TitleType: titleType, Title: "Minimum test", TaxId: "TAX123", Email: "test@example.com"}
+									for _, order := range orders {
+										input.OrderIds = append(input.OrderIds, order.Id)
+									}
+									var before int64
+									require.NoError(t, db.Model(&InvoiceRequest{}).Count(&before).Error)
+									request, err := CreateInvoiceRequest(2, input)
+									if tc.allowed {
+										require.NoError(t, err)
+										assert.Len(t, request.Orders, len(tc.amounts))
+										assert.Equal(t, "company", request.TitleType)
+									} else {
+										require.Error(t, err)
+										var message *common.Message
+										require.ErrorAs(t, err, &message)
+										assert.Equal(t, "Invoice amount must be at least {{amount}}", message.Key)
+										var count int64
+										require.NoError(t, db.Model(&InvoiceRequestOrder{}).Where("active_top_up_id IN ?", input.OrderIds).Count(&count).Error)
+										assert.Zero(t, count, "rejected application must not reserve orders")
+										require.NoError(t, db.Model(&InvoiceRequest{}).Count(&count).Error)
+										assert.Equal(t, before, count)
+										assert.Nil(t, request)
+									}
+								}
+							})
+						}
+						for _, amount := range []float64{-1, 1.001, math.NaN(), math.Inf(1), 1e13} {
+							require.Error(t, SaveInvoiceSettings(InvoiceSettings{MinimumAmount: amount}))
+						}
+						saved, err := GetInvoiceSettings()
+						require.NoError(t, err)
+						assert.Zero(t, saved.MinimumAmount, "invalid settings must not replace the previous value")
+						require.Error(t, UpdateOptionsBulk(map[string]string{InvoiceMinimumAmountOption: "invalid"}))
+						require.NoError(t, db.Model(&Option{}).Where(&Option{Key: InvoiceMinimumAmountOption}).Update("value", "invalid").Error)
+						_, err = GetInvoiceSettings()
+						require.Error(t, err, "corrupt settings must fail closed")
+					})
+
 				})
 			}
 		})

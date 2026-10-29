@@ -83,6 +83,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/user/aff":                            accessTokenScopeRule("wallet:read"),
 	"GET /api/user/topup/info":                     accessTokenScopeRule("wallet:read"),
 	"GET /api/user/topup/self":                     accessTokenScopeRule("wallet:read"),
+	"GET /api/user/invoices/settings":              accessTokenScopeRule("wallet:read"),
+	"PUT /api/user/invoices/settings":              accessTokenScopeRule("billing:write"),
 	"GET /api/user/invoices/self":                  accessTokenScopeRule("wallet:read"),
 	"GET /api/user/invoices/eligible":              accessTokenScopeRule("wallet:read"),
 	"POST /api/user/invoices":                      accessTokenScopeRule("wallet:write"),

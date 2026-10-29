@@ -30,6 +30,7 @@ import { InvoiceNotificationDialog } from '../components/notification-settings'
 import { InvoiceOrderPicker } from '../components/order-picker'
 import { InvoiceProcessDialog } from '../components/process-dialog'
 import { InvoiceRequestList } from '../components/request-list'
+import { InvoiceSettingsDialog } from '../components/settings'
 import { InvoicesPage } from '../index'
 import type { InvoiceRequest } from '../types'
 
@@ -40,10 +41,17 @@ afterEach(() => {
   useAuthStore.getState().auth.setUser(null)
 })
 
-function renderInvoice(ui?: React.ReactNode) {
+function renderInvoice(ui?: React.ReactNode, minimumAmount: number | null = 0) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
+  if (minimumAmount !== null) {
+    client.setQueryDefaults(['invoices', 'settings'], { staleTime: Infinity })
+    client.setQueryData(['invoices', 'settings'], {
+      minimum_amount: minimumAmount,
+      application_days: 90,
+    })
+  }
   clients.push(client)
   return render(
     <QueryClientProvider client={client}>
@@ -345,7 +353,9 @@ it('keeps selections across pages and submits all selected orders with validated
   expect(
     screen.queryByRole('columnheader', { name: 'Order status' })
   ).not.toBeInTheDocument()
-  expect(screen.getByRole('columnheader', { name: 'Created At' })).toBeVisible()
+  expect(
+    screen.getByRole('columnheader', { name: 'Payment time' })
+  ).toBeVisible()
   expect(
     screen.queryByRole('columnheader', { name: 'Completion time' })
   ).not.toBeInTheDocument()
@@ -416,7 +426,7 @@ it('keeps selections across pages and submits all selected orders with validated
   )
 })
 
-it('retains personal invoice input and selection when submission fails', async () => {
+it('retains company invoice input and selection when submission fails', async () => {
   const user = userEvent.setup()
   vi.spyOn(api, 'get').mockResolvedValue({
     data: {
@@ -448,9 +458,11 @@ it('retains personal invoice input and selection when submission fails', async (
   await user.click(
     await screen.findByRole('checkbox', { name: 'Select order order-one' })
   )
-  await user.click(screen.getByRole('combobox', { name: 'Invoice title type' }))
-  await user.click(screen.getByRole('option', { name: 'Personal' }))
+  expect(
+    screen.queryByRole('combobox', { name: 'Invoice title type' })
+  ).not.toBeInTheDocument()
   await user.type(screen.getByLabelText('Invoice title'), 'Alice')
+  await user.type(screen.getByLabelText('Tax identification number'), 'TAX123')
   await user.type(screen.getByLabelText('Invoice email'), 'alice@example.com')
   await user.click(
     screen.getByRole('button', { name: 'Submit invoice application' })
@@ -1117,4 +1129,238 @@ it('disables template saving when preview validation fails', async () => {
   expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
   await user.click(screen.getByRole('button', { name: 'Cancel' }))
   expect(put).not.toHaveBeenCalled()
+})
+
+it.each([
+  { amounts: [999.99], allowed: false },
+  { amounts: [1000], allowed: true },
+  { amounts: [1000.01], allowed: true },
+  { amounts: [600, 400], allowed: true },
+])(
+  'requires a combined invoice amount of at least 1000 for $amounts',
+  async ({ amounts, allowed }) => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          total: amounts.length,
+          items: amounts.map((money, index) => ({
+            id: index + 1,
+            trade_no: `minimum-${index}`,
+            money,
+          })),
+        },
+      },
+    })
+    const user = userEvent.setup()
+    renderInvoice(<InvoiceApplicationForm onSubmitted={vi.fn()} />, 1000)
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'Select all' })
+    )
+    const submit = screen.getByRole('button', {
+      name: 'Submit invoice application',
+    })
+    if (allowed) expect(submit).toBeEnabled()
+    else expect(submit).toBeDisabled()
+    expect(screen.getByText('Minimum invoice amount: 1,000')).toBeVisible()
+  }
+)
+
+it('blocks application submission when settings fail to load and allows retry', async () => {
+  let unavailable = true
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/user/invoices/settings') {
+      if (unavailable) throw new Error('offline')
+      return {
+        data: {
+          success: true,
+          data: { minimum_amount: 1500, application_days: 90 },
+        },
+      }
+    }
+    return {
+      data: {
+        success: true,
+        data: {
+          total: 1,
+          items: [{ id: 1, trade_no: 'minimum-order', money: 1500 }],
+        },
+      },
+    }
+  })
+  const user = userEvent.setup()
+  renderInvoice(<InvoiceApplicationForm onSubmitted={vi.fn()} />, null)
+  await user.click(await screen.findByRole('checkbox', { name: 'Select all' }))
+  const submit = screen.getByRole('button', {
+    name: 'Submit invoice application',
+  })
+  expect(submit).toBeDisabled()
+  unavailable = false
+  await user.click(await screen.findByRole('button', { name: 'Retry' }))
+  await waitFor(() => expect(submit).toBeEnabled())
+  expect(screen.getByText('Minimum invoice amount: 1,500')).toBeVisible()
+})
+
+it('invoice management saves the minimum, keeps input after failure, and displays the saved value on reopen', async () => {
+  let minimum = 1000
+  let days = 90
+  vi.spyOn(api, 'get').mockImplementation(async () => ({
+    data: {
+      success: true,
+      data: { minimum_amount: minimum, application_days: days },
+    },
+  }))
+  const put = vi
+    .spyOn(api, 'put')
+    .mockRejectedValueOnce(new Error('offline'))
+    .mockImplementation(async (_url, input) => {
+      minimum = (input as { minimum_amount: number }).minimum_amount
+      days = (input as { application_days: number }).application_days
+      return { data: { success: true } }
+    })
+  const user = userEvent.setup()
+  renderInvoice(<InvoiceSettingsDialog />, null)
+  await user.click(screen.getByRole('button', { name: 'Invoice settings' }))
+  const amount = await screen.findByRole('spinbutton', {
+    name: 'Minimum invoice amount',
+  })
+  expect(amount).toHaveValue(1000)
+  await user.clear(amount)
+  await user.type(amount, '1500.50')
+  const windowDays = screen.getByRole('spinbutton', {
+    name: 'Invoice application window (days)',
+  })
+  expect(windowDays).toHaveValue(90)
+  await user.clear(windowDays)
+  await user.type(windowDays, '180')
+  await user.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(put).toHaveBeenCalledTimes(1))
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+  )
+  expect(amount).toHaveValue(1500.5)
+  await user.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
+  expect(put).toHaveBeenLastCalledWith('/api/user/invoices/settings', {
+    minimum_amount: 1500.5,
+    application_days: 180,
+  })
+  await user.click(screen.getByRole('button', { name: 'Invoice settings' }))
+  expect(
+    await screen.findByRole('spinbutton', { name: 'Minimum invoice amount' })
+  ).toHaveValue(1500.5)
+  expect(
+    screen.getByRole('spinbutton', {
+      name: 'Invoice application window (days)',
+    })
+  ).toHaveValue(180)
+})
+
+it('invoice settings reject empty, negative and overprecise amounts without saving', async () => {
+  const put = vi.spyOn(api, 'put')
+  const user = userEvent.setup()
+  renderInvoice(<InvoiceSettingsDialog />, 1000)
+  await user.click(screen.getByRole('button', { name: 'Invoice settings' }))
+  const amount = screen.getByRole('spinbutton', {
+    name: 'Minimum invoice amount',
+  })
+  for (const value of ['', '-1', '10.001']) {
+    await user.clear(amount)
+    if (value) await user.type(amount, value)
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(put).not.toHaveBeenCalled()
+    expect(screen.getByRole('dialog')).toBeVisible()
+  }
+})
+
+it('an updated minimum immediately disables an application whose total is now too small', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        total: 1,
+        items: [{ id: 1, trade_no: 'minimum-order', money: 1000 }],
+      },
+    },
+  })
+  const user = userEvent.setup()
+  renderInvoice(<InvoiceApplicationForm onSubmitted={vi.fn()} />, 1000)
+  await user.click(await screen.findByRole('checkbox', { name: 'Select all' }))
+  const submit = screen.getByRole('button', {
+    name: 'Submit invoice application',
+  })
+  expect(submit).toBeEnabled()
+  act(() =>
+    clients[0].setQueryData(['invoices', 'settings'], {
+      minimum_amount: 1500,
+      application_days: 90,
+    })
+  )
+  await waitFor(() => expect(submit).toBeDisabled())
+})
+
+it('shows the payment window and rejects fractional or negative day settings', async () => {
+  const user = userEvent.setup()
+  const put = vi.spyOn(api, 'put')
+  renderInvoice(<InvoiceSettingsDialog />, 1000)
+  await user.click(screen.getByRole('button', { name: 'Invoice settings' }))
+  const days = screen.getByRole('spinbutton', {
+    name: 'Invoice application window (days)',
+  })
+  for (const value of ['-1', '1.5', '3651']) {
+    await user.clear(days)
+    await user.type(days, value)
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    expect(put).not.toHaveBeenCalled()
+  }
+})
+
+it('displays the 90-day payment deadline and keeps company tax identification mandatory', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        total: 1,
+        items: [{ id: 1, trade_no: 'company-order', money: 1000 }],
+      },
+    },
+  })
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValue({ data: { success: true, data: pending } })
+  const user = userEvent.setup()
+  renderInvoice(<InvoiceApplicationForm onSubmitted={vi.fn()} />, 1000)
+  expect(
+    screen.getByText(
+      'Apply within 90 days after payment. Orders currently invoiced or awaiting processing cannot be selected again.'
+    )
+  ).toBeVisible()
+  expect(
+    screen.queryByRole('combobox', { name: 'Invoice title type' })
+  ).not.toBeInTheDocument()
+  await user.click(await screen.findByRole('checkbox', { name: 'Select all' }))
+  await user.type(screen.getByLabelText('Invoice title'), 'Company Ltd')
+  await user.type(screen.getByLabelText('Invoice email'), 'billing@example.com')
+  await user.click(
+    screen.getByRole('button', { name: 'Submit invoice application' })
+  )
+  await waitFor(() =>
+    expect(screen.getByLabelText('Tax identification number')).toHaveAttribute(
+      'aria-invalid',
+      'true'
+    )
+  )
+  expect(post).not.toHaveBeenCalled()
+  await user.type(screen.getByLabelText('Tax identification number'), 'TAX123')
+  await user.click(
+    screen.getByRole('button', { name: 'Submit invoice application' })
+  )
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/user/invoices',
+      expect.objectContaining({ title_type: 'company', tax_id: 'TAX123' })
+    )
+  )
 })
