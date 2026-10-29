@@ -194,6 +194,15 @@ func CriticalRateLimit() func(c *gin.Context) {
 	return defNext
 }
 
+// LotteryDrawRateLimit allows repeated draws without consuming the much smaller
+// critical-operation budget. Must run after UserAuth; limits are per user.
+func LotteryDrawRateLimit() func(c *gin.Context) {
+	if !common.LotteryDrawRateLimitEnable {
+		return defNext
+	}
+	return userRateLimitFactory(common.LotteryDrawRateLimitNum, common.LotteryDrawRateLimitDuration, "LD")
+}
+
 func UserCriticalRateLimit(scope string) func(c *gin.Context) {
 	if !common.CriticalRateLimitEnable {
 		return defNext

@@ -39,10 +39,10 @@ export async function getLotteryStatus(): Promise<
   return response.data
 }
 
-export async function drawLottery(): Promise<
-  LotteryApiResponse<LotteryDrawResult>
-> {
-  const response = await api.post('/api/user/lottery/draw', {}, {
+export async function drawLottery(
+  count = 1
+): Promise<LotteryApiResponse<LotteryDrawResult>> {
+  const response = await api.post('/api/user/lottery/draw', { count }, {
     skipBusinessError: true,
   } as Record<string, unknown>)
   return response.data

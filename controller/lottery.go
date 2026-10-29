@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -40,13 +41,29 @@ func GetLotteryStatus(c *gin.Context) {
 }
 
 func DrawLottery(c *gin.Context) {
-	result, err := model.DrawLottery(c.GetInt("id"))
+	request := struct {
+		Count *int `json:"count"`
+	}{}
+	if err := c.ShouldBindJSON(&request); err != nil && !errors.Is(err, io.EOF) {
+		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid parameters"))
+		return
+	}
+	count := 1
+	if request.Count != nil {
+		count = *request.Count
+	}
+	if count < 1 || count > model.MaxLotteryDrawCount {
+		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Lottery draw count must be between 1 and 100"))
+		return
+	}
+	result, err := model.DrawLotteryBatch(c.GetInt("id"), count)
 	if err != nil {
 		if errors.Is(err, model.ErrNoLotteryChances) {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "No lottery chances available",
-			})
+			message := "No lottery chances available"
+			if count > 1 {
+				message = "Not enough lottery chances"
+			}
+			common.ApiErrorT(c, message)
 			return
 		}
 		common.ApiError(c, err)

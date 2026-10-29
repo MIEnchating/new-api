@@ -43,6 +43,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { Dialog } from '@/components/dialog'
 import { EmptyState } from '@/components/empty-state'
 import { Main } from '@/components/layout'
 import {
@@ -246,7 +247,10 @@ export function Lottery() {
   const [drawing, setDrawing] = useState(false)
   const [selectedBox, setSelectedBox] = useState<number | null>(null)
   const [latestDraw, setLatestDraw] = useState<LotteryDraw | null>(null)
-  const [pendingDraw, setPendingDraw] = useState<LotteryDraw | null>(null)
+  const [pendingDraws, setPendingDraws] = useState<LotteryDraw[] | null>(null)
+  const [batchDraws, setBatchDraws] = useState<LotteryDraw[]>([])
+  const [batchResultsOpen, setBatchResultsOpen] = useState(false)
+  const drawInFlight = useRef(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [manualGrantOpen, setManualGrantOpen] = useState(false)
   const [recordView, setRecordView] = useState<'draws' | 'grants'>('draws')
@@ -461,34 +465,43 @@ export function Lottery() {
     })
   }, [status?.recent_activity])
 
-  const handleDraw = async () => {
-    if (!status || status.available_chances <= 0 || drawing) return
+  const handleDraw = async (count = 1) => {
+    if (!status || status.available_chances < count || drawInFlight.current) {
+      return
+    }
+    drawInFlight.current = true
     drawStartedAt.current = Date.now()
     setDrawing(true)
     setSelectedBox(LOTTERY_GRID_ROUTE[0])
     setLatestDraw(null)
-    setPendingDraw(null)
+    setPendingDraws(null)
+    setBatchDraws([])
     try {
-      const response = await drawLottery()
+      const response = await drawLottery(count)
       if (!response.success || !response.data) {
         handleServerError(response, t('Lottery draw failed'))
         setDrawing(false)
         setSelectedBox(null)
+        drawInFlight.current = false
         return
       }
       const result = response.data
-      setPendingDraw(result.draw)
+      const draws = result.draws ?? [result.draw]
+      setPendingDraws(draws)
       setStatus(result.status)
       if (userDrawPage === 1) {
         setUserDraws((current) =>
-          [result.draw, ...current].slice(0, USER_PAGE_SIZE)
+          [...[...draws].reverse(), ...current].slice(0, USER_PAGE_SIZE)
         )
-        setUserDrawTotal((current) => current + 1)
+        setUserDrawTotal((current) => current + draws.length)
+      } else {
+        setUserDrawPage(1)
       }
     } catch (error) {
       handleServerError(error, t('Lottery draw failed'))
       setDrawing(false)
       setSelectedBox(null)
+      drawInFlight.current = false
     }
   }
 
@@ -506,7 +519,8 @@ export function Lottery() {
   }, [drawing])
 
   useEffect(() => {
-    if (!pendingDraw) return
+    const pendingDraw = pendingDraws?.at(-1)
+    if (!pendingDraw || !pendingDraws) return
     const remainingDelay = Math.max(
       0,
       DRAW_REVEAL_DELAY_MS - (Date.now() - drawStartedAt.current)
@@ -516,8 +530,14 @@ export function Lottery() {
         LOTTERY_GRID_ROUTE[Math.abs(pendingDraw.id) % LOTTERY_GRID_ROUTE.length]
       )
       setLatestDraw(pendingDraw)
-      setPendingDraw(null)
+      setPendingDraws(null)
       setDrawing(false)
+      drawInFlight.current = false
+      if (pendingDraws.length > 1) {
+        setBatchDraws(pendingDraws)
+        setBatchResultsOpen(true)
+        return
+      }
       if (pendingDraw.quota <= 0) {
         toast.info(t('No prize this time'))
         return
@@ -529,7 +549,7 @@ export function Lottery() {
       )
     }, remainingDelay)
     return () => window.clearTimeout(timer)
-  }, [pendingDraw, t])
+  }, [pendingDraws, t])
 
   const handleRevokeReward = async () => {
     if (!revokeDraw) return
@@ -787,13 +807,32 @@ export function Lottery() {
                       }
                     )}
                   </div>
+                  <div className='mt-4 flex w-full max-w-xs flex-wrap gap-2'>
+                    {[10, 100].map((count) => (
+                      <Button
+                        key={count}
+                        type='button'
+                        variant='outline'
+                        className='h-auto min-h-9 min-w-0 flex-1 whitespace-normal'
+                        data-testid={`lottery-draw-${count}`}
+                        disabled={
+                          loading ||
+                          drawing ||
+                          (status?.available_chances || 0) < count
+                        }
+                        onClick={() => void handleDraw(count)}
+                      >
+                        {t('Draw {{count}} times', { count })}
+                      </Button>
+                    ))}
+                  </div>
                   <div
                     role='status'
                     aria-live='polite'
                     aria-atomic='true'
                     className='mt-5 flex min-h-6 items-center justify-center text-center text-sm font-medium'
                   >
-                    {drawing ? (
+                    {drawing && (
                       <span
                         className='text-primary inline-flex items-center gap-2'
                         data-testid='lottery-draw-progress'
@@ -816,13 +855,32 @@ export function Lottery() {
                           <i className='bg-primary/25 flex-1 rounded-full [animation-delay:240ms] motion-safe:animate-pulse' />
                         </span>
                       </span>
-                    ) : latestDraw ? (
+                    )}
+                    {!drawing && batchDraws.length > 0 && (
+                      <span>
+                        {t(
+                          'Completed {{count}} draws · Total reward: {{amount}}',
+                          {
+                            count: batchDraws.length,
+                            amount: formatQuota(
+                              batchDraws.reduce(
+                                (total, draw) => total + draw.quota,
+                                0
+                              )
+                            ),
+                          }
+                        )}
+                      </span>
+                    )}
+                    {!drawing && batchDraws.length === 0 && latestDraw && (
                       <span className='motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-300'>
                         {drawResultLabel(latestDraw, t)}
                       </span>
-                    ) : (
-                      drawHint
                     )}
+                    {!drawing &&
+                      batchDraws.length === 0 &&
+                      !latestDraw &&
+                      drawHint}
                   </div>
                 </CardContent>
               </Card>
@@ -1651,6 +1709,39 @@ export function Lottery() {
           </CardStaggerItem>
         </CardStaggerContainer>
       </div>
+      <Dialog
+        open={batchResultsOpen}
+        onOpenChange={setBatchResultsOpen}
+        title={t('Batch draw results')}
+        description={t('Completed {{count}} draws · Total reward: {{amount}}', {
+          count: batchDraws.length,
+          amount: formatQuota(
+            batchDraws.reduce((total, draw) => total + draw.quota, 0)
+          ),
+        })}
+        footer={
+          <Button onClick={() => setBatchResultsOpen(false)}>
+            {t('Close')}
+          </Button>
+        }
+      >
+        <ol className='grid gap-2 sm:grid-cols-2'>
+          {batchDraws.map((draw, index) => (
+            <li
+              key={draw.id}
+              data-testid='lottery-batch-result'
+              className='flex min-w-0 items-center justify-between gap-3 rounded-lg border p-3 text-sm'
+            >
+              <span className='text-muted-foreground'>
+                {t('Draw {{number}}', { number: index + 1 })}
+              </span>
+              <strong className='text-end break-words'>
+                {drawResultLabel(draw, t)}
+              </strong>
+            </li>
+          ))}
+        </ol>
+      </Dialog>
       <LotterySettingsDialog
         open={settingsOpen}
         onOpenChange={setSettingsOpen}

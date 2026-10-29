@@ -159,7 +159,10 @@ type LotteryStatus struct {
 	ActiveGrantRules    []LotteryChanceGrantRule `json:"active_grant_rules"`
 }
 
+const MaxLotteryDrawCount = 100
+
 type LotteryDrawResult struct {
+	Draws  []LotteryDraw `json:"draws"`
 	Draw   LotteryDraw   `json:"draw"`
 	Status LotteryStatus `json:"status"`
 }
@@ -1121,74 +1124,86 @@ func GetLotteryStatus(userId int) (LotteryStatus, error) {
 	return getLotteryStatusAt(userId, time.Now())
 }
 
-func drawLotteryAt(
-	userId int,
-	now time.Time,
-	roll int,
-) (LotteryDrawResult, error) {
-	if userId <= 0 || roll < 0 || roll >= 100 {
+func drawLotteryAt(userId int, now time.Time, roll int) (LotteryDrawResult, error) {
+	return drawLotteriesAt(userId, now, []int{roll})
+}
+
+func drawLotteriesAt(userId int, now time.Time, rolls []int) (LotteryDrawResult, error) {
+	if userId <= 0 || len(rolls) < 1 || len(rolls) > MaxLotteryDrawCount {
 		return LotteryDrawResult{}, errors.New("invalid lottery draw")
+	}
+	for _, roll := range rolls {
+		if roll < 0 || roll >= 100 {
+			return LotteryDrawResult{}, errors.New("invalid lottery draw")
+		}
 	}
 	statusBefore, err := getLotteryStatusAt(userId, now)
 	if err != nil {
 		return LotteryDrawResult{}, err
 	}
-	prize := lotteryPrizeForRoll(roll, statusBefore.Prizes)
-	prizeQuota, err := lotteryAmountQuota(prize.Amount)
-	if err != nil {
-		return LotteryDrawResult{}, err
+	if statusBefore.AvailableChances < len(rolls) {
+		return LotteryDrawResult{}, ErrNoLotteryChances
 	}
-	eventKey := "lottery-draw:" + common.GetUUID()
-	draw := LotteryDraw{
-		EventKey: eventKey, UserId: userId, Prize: prize.Type,
-		Quota: prizeQuota, Status: LotteryDrawStatusAwarded,
-		CreatedAt: now.Unix(),
-	}
-	if prizeQuota <= 0 {
-		draw.Status = LotteryDrawStatusNoPrize
+	draws := make([]LotteryDraw, len(rolls))
+	for i, roll := range rolls {
+		prize := lotteryPrizeForRoll(roll, statusBefore.Prizes)
+		prizeQuota, err := lotteryAmountQuota(prize.Amount)
+		if err != nil {
+			return LotteryDrawResult{}, err
+		}
+		draws[i] = LotteryDraw{
+			EventKey: "lottery-draw:" + common.GetUUID(), UserId: userId, Prize: prize.Type,
+			Quota: prizeQuota, Status: LotteryDrawStatusAwarded, CreatedAt: now.Unix(),
+		}
+		if prizeQuota <= 0 {
+			draws[i].Status = LotteryDrawStatusNoPrize
+		}
 	}
 	credited := false
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		var grant LotteryChanceGrant
-		if err := lockForUpdate(tx).
-			Where("user_id = ? AND consumed < chances AND (expires_at = 0 OR expires_at > ?)", userId, now.Unix()).
-			Order("created_at ASC, id ASC").
-			First(&grant).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrNoLotteryChances
+		for i := range draws {
+			draw := &draws[i]
+			var grant LotteryChanceGrant
+			if err := lockForUpdate(tx).
+				Where("user_id = ? AND consumed < chances AND (expires_at = 0 OR expires_at > ?)", userId, now.Unix()).
+				Order("created_at ASC, id ASC").
+				First(&grant).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return ErrNoLotteryChances
+				}
+				return err
 			}
-			return err
+			result := tx.Model(&LotteryChanceGrant{}).
+				Where(
+					"id = ? AND consumed = ? AND consumed < chances AND (expires_at = 0 OR expires_at > ?)",
+					grant.Id, grant.Consumed, now.Unix(),
+				).
+				Update("consumed", gorm.Expr("consumed + 1"))
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errors.New("lottery chance was already consumed")
+			}
+			if err := tx.Create(draw).Error; err != nil {
+				return err
+			}
+			if draw.Quota <= 0 {
+				continue
+			}
+			if err := creditTopUpQuota(tx, userId, draw.Quota, nil); err != nil {
+				return err
+			}
+			if err := CreateBillingTransaction(tx, &BillingTransaction{
+				EventKey: draw.EventKey, UserId: userId, Type: BillingTypeLottery,
+				Quota: draw.Quota, Reference: draw.EventKey,
+				PaymentMethod: "lottery", Status: "success",
+				CreatedAt: now.Unix(), Detail: draw.Prize,
+			}); err != nil {
+				return err
+			}
+			credited = true
 		}
-		result := tx.Model(&LotteryChanceGrant{}).
-			Where(
-				"id = ? AND consumed = ? AND consumed < chances AND (expires_at = 0 OR expires_at > ?)",
-				grant.Id, grant.Consumed, now.Unix(),
-			).
-			Update("consumed", gorm.Expr("consumed + 1"))
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return errors.New("lottery chance was already consumed")
-		}
-		if err := tx.Create(&draw).Error; err != nil {
-			return err
-		}
-		if prizeQuota <= 0 {
-			return nil
-		}
-		if err := creditTopUpQuota(tx, userId, prizeQuota, nil); err != nil {
-			return err
-		}
-		if err := CreateBillingTransaction(tx, &BillingTransaction{
-			EventKey: eventKey, UserId: userId, Type: BillingTypeLottery,
-			Quota: prizeQuota, Reference: eventKey,
-			PaymentMethod: "lottery", Status: "success",
-			CreatedAt: now.Unix(), Detail: prize.Type,
-		}); err != nil {
-			return err
-		}
-		credited = true
 		return nil
 	})
 	if err != nil {
@@ -1196,48 +1211,47 @@ func drawLotteryAt(
 	}
 	if credited {
 		if err := invalidateUserCache(userId); err != nil {
-			common.SysLog(
-				"failed to invalidate user cache after lottery reward: " +
-					err.Error(),
-			)
+			common.SysLog("failed to invalidate user cache after lottery reward: " + err.Error())
 		}
-		RecordLog(
-			userId,
-			LogTypeSystem,
-			common.NewMessage("Lottery reward {{quota}}", map[string]any{"quota": logger.FormatQuota(prizeQuota)}),
-		)
-	} else {
-		RecordLog(userId, LogTypeSystem, common.NewMessage("Lottery draw, no prize won"))
+	}
+	for _, draw := range draws {
+		if draw.Quota > 0 {
+			RecordLog(userId, LogTypeSystem,
+				common.NewMessage("Lottery reward {{quota}}", map[string]any{"quota": logger.FormatQuota(draw.Quota)}))
+		} else {
+			RecordLog(userId, LogTypeSystem, common.NewMessage("Lottery draw, no prize won"))
+		}
 	}
 	status, err := getLotteryStatusAt(userId, now)
 	if err != nil {
-		common.SysLog(
-			"failed to refresh lottery status after committed draw: " +
-				err.Error(),
-		)
-		if statusBefore.AvailableChances > 0 {
-			statusBefore.AvailableChances--
+		common.SysLog("failed to refresh lottery status after committed draw: " + err.Error())
+		status = statusBefore
+		status.AvailableChances = max(0, status.AvailableChances-len(draws))
+		for _, draw := range draws {
+			status.RecentDraws = append([]LotteryDraw{draw}, status.RecentDraws...)
 		}
-		statusBefore.RecentDraws = append(
-			[]LotteryDraw{draw},
-			statusBefore.RecentDraws...,
-		)
-		if len(statusBefore.RecentDraws) > 10 {
-			statusBefore.RecentDraws = statusBefore.RecentDraws[:10]
-		}
-		return LotteryDrawResult{
-			Draw: draw, Status: statusBefore,
-		}, nil
+		status.RecentDraws = status.RecentDraws[:min(10, len(status.RecentDraws))]
 	}
-	return LotteryDrawResult{Draw: draw, Status: status}, nil
+	return LotteryDrawResult{Draw: draws[len(draws)-1], Draws: draws, Status: status}, nil
 }
 
 func DrawLottery(userId int) (LotteryDrawResult, error) {
-	roll, err := rand.Int(rand.Reader, big.NewInt(100))
-	if err != nil {
-		return LotteryDrawResult{}, err
+	return DrawLotteryBatch(userId, 1)
+}
+
+func DrawLotteryBatch(userId int, count int) (LotteryDrawResult, error) {
+	if count < 1 || count > MaxLotteryDrawCount {
+		return LotteryDrawResult{}, errors.New("invalid lottery draw count")
 	}
-	return drawLotteryAt(userId, time.Now(), int(roll.Int64()))
+	rolls := make([]int, count)
+	for i := range rolls {
+		roll, err := rand.Int(rand.Reader, big.NewInt(100))
+		if err != nil {
+			return LotteryDrawResult{}, err
+		}
+		rolls[i] = int(roll.Int64())
+	}
+	return drawLotteriesAt(userId, time.Now(), rolls)
 }
 
 func GetUserLotteryDraws(userId int, page int, pageSize int) (LotteryUserDrawPage, error) {

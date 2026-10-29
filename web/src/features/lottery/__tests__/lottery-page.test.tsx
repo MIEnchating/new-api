@@ -19,7 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 
 import { Window } from 'happy-dom'
-import { afterAll, afterEach, beforeEach, describe, expect, test } from 'vitest'
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  test,
+  vi,
+} from 'vitest'
 
 const domWindow = new Window()
 for (const key of [
@@ -460,6 +468,169 @@ describe('lottery center', () => {
 
     await act(async () => root.unmount())
   })
+
+  test.each([10, 100])(
+    'draws %i times with one request and shows every result',
+    async (count) => {
+      const draws = Array.from({ length: count }, (_, index) => ({
+        id: index + 1,
+        prize: 'quota_1',
+        quota: 500_000,
+        status: 'awarded',
+        revoked_at: 0,
+        created_at: 1_786_363_200,
+      }))
+      const requests: unknown[] = []
+      api.defaults.adapter = async (config) => {
+        let data: unknown = { ...baseStatus, available_chances: count }
+        if (config.url?.includes('/draws/self')) {
+          data = { items: [], total: 0, page: 1, page_size: 10 }
+        } else if (config.url?.endsWith('/draw')) {
+          requests.push(JSON.parse(config.data))
+          data = {
+            draw: draws.at(-1),
+            draws,
+            status: { ...baseStatus, recent_draws: draws.slice(-10).reverse() },
+          }
+        }
+        return {
+          data: { success: true, data },
+          status: 200,
+          statusText: 'OK',
+          headers: {},
+          config,
+        }
+      }
+      let reveal: (() => void) | undefined
+      const originalTimeout = window.setTimeout.bind(window)
+      const timerSpy = vi
+        .spyOn(window, 'setTimeout')
+        .mockImplementation((callback, delay, ...args) => {
+          if (delay !== undefined && delay > 2000 && delay <= 2400) {
+            reveal = callback as () => void
+            return 0 as unknown as ReturnType<typeof window.setTimeout>
+          }
+          return originalTimeout(
+            callback,
+            delay,
+            ...args
+          ) as unknown as ReturnType<typeof window.setTimeout>
+        })
+      const container = document.createElement('div')
+      document.body.append(container)
+      const root = createRoot(container)
+      try {
+        await act(async () => {
+          root.render(
+            <I18nextProvider i18n={i18n}>
+              <Lottery />
+            </I18nextProvider>
+          )
+          await flushRequests()
+        })
+        const button = container.querySelector<HTMLButtonElement>(
+          `[data-testid="lottery-draw-${count}"]`
+        )
+        assert.ok(button)
+        assert.equal(button.disabled, false)
+        if (count === 10) {
+          expect(
+            container.querySelector<HTMLButtonElement>(
+              '[data-testid="lottery-draw-100"]'
+            )?.disabled
+          ).toBe(true)
+        }
+        await act(async () => {
+          button.click()
+          button.click()
+          await flushRequests()
+        })
+        expect(requests).toEqual([{ count }])
+        expect(button.disabled).toBe(true)
+        assert.ok(reveal)
+        await act(async () => reveal?.())
+        const dialog = document.querySelector('[role="dialog"]')
+        assert.ok(dialog)
+        expect(dialog.textContent).toContain('Batch draw results')
+        expect(dialog.textContent).toContain(`Completed ${count} draws`)
+        expect(dialog.textContent).toContain(`$${count}`)
+        expect(
+          dialog.querySelectorAll('[data-testid="lottery-batch-result"]').length
+        ).toBe(count)
+        expect(button.disabled).toBe(true)
+      } finally {
+        await act(async () => root.unmount())
+        timerSpy.mockRestore()
+        container.remove()
+      }
+    }
+  )
+
+  test.each(['business', 'network'])(
+    'allows another batch attempt after a %s failure without showing rewards',
+    async (failure) => {
+      let drawRequests = 0
+      api.defaults.adapter = async (config) => {
+        if (config.url?.endsWith('/draw')) {
+          drawRequests++
+          if (failure === 'network') throw new Error('Network error')
+          return {
+            data: { success: false, message: 'Not enough lottery chances' },
+            status: 200,
+            statusText: 'OK',
+            headers: {},
+            config,
+          }
+        }
+        const data = config.url?.includes('/draws/self')
+          ? { items: [], total: 0, page: 1, page_size: 10 }
+          : { ...baseStatus, available_chances: 10 }
+        return {
+          data: { success: true, data },
+          status: 200,
+          statusText: 'OK',
+          headers: {},
+          config,
+        }
+      }
+      const container = document.createElement('div')
+      document.body.append(container)
+      const root = createRoot(container)
+      try {
+        await act(async () => {
+          root.render(
+            <I18nextProvider i18n={i18n}>
+              <Lottery />
+            </I18nextProvider>
+          )
+          await flushRequests()
+        })
+        const button = container.querySelector<HTMLButtonElement>(
+          '[data-testid="lottery-draw-10"]'
+        )
+        assert.ok(button)
+        await act(async () => {
+          button.click()
+          await flushRequests()
+        })
+        expect(drawRequests).toBe(1)
+        expect(button.disabled).toBe(false)
+        expect(
+          container.querySelector('[data-testid="lottery-draw-progress"]')
+        ).toBeNull()
+        expect(document.querySelector('[role="dialog"]')).toBeNull()
+        expect(container.textContent).not.toContain('Completed 10 draws')
+        await act(async () => {
+          button.click()
+          await flushRequests()
+        })
+        expect(drawRequests).toBe(2)
+      } finally {
+        await act(async () => root.unmount())
+        container.remove()
+      }
+    }
+  )
 
   test('lets administrators manage draws and inspect chance grants', async () => {
     useAuthStore.getState().auth.setUser({

@@ -96,6 +96,86 @@ func TestRedisUserRateLimiterUsesSharedFixedWindow(t *testing.T) {
 	assert.Equal(t, 23*time.Second, redisServer.TTL(key))
 }
 
+var lotteryRateLimitTestUsers atomic.Int64
+
+func TestLotteryDrawRateLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousEnable, previousNum, previousDuration := common.LotteryDrawRateLimitEnable, common.LotteryDrawRateLimitNum, common.LotteryDrawRateLimitDuration
+	previousCriticalEnable, previousCriticalNum, previousCriticalDuration := common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration
+	previousRedisEnabled := common.RedisEnabled
+	t.Cleanup(func() {
+		common.LotteryDrawRateLimitEnable, common.LotteryDrawRateLimitNum, common.LotteryDrawRateLimitDuration = previousEnable, previousNum, previousDuration
+		common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration = previousCriticalEnable, previousCriticalNum, previousCriticalDuration
+		common.RedisEnabled = previousRedisEnabled
+	})
+
+	for _, backend := range []string{"memory", "redis"} {
+		t.Run(backend, func(t *testing.T) {
+			common.LotteryDrawRateLimitEnable, common.LotteryDrawRateLimitNum, common.LotteryDrawRateLimitDuration = true, 60, 60
+			common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration = true, 1, 1200
+			common.RedisEnabled = false
+			var redisServer *miniredis.Miniredis
+			if backend == "redis" {
+				redisServer, _ = useRateLimitMiniRedis(t)
+			}
+
+			userID := 8300000 + int(lotteryRateLimitTestUsers.Add(2))
+			router := gin.New()
+			require.NoError(t, router.SetTrustedProxies(nil))
+			router.Use(func(c *gin.Context) { c.Set("id", userID) })
+			completedDraws := 0
+			router.POST("/draw", LotteryDrawRateLimit(), func(c *gin.Context) {
+				completedDraws++
+				c.Status(http.StatusNoContent)
+			})
+			router.GET("/critical", UserCriticalRateLimit("lottery-draw"), func(c *gin.Context) {
+				c.Status(http.StatusNoContent)
+			})
+			draw := func(remoteAddr string) *httptest.ResponseRecorder {
+				recorder := httptest.NewRecorder()
+				request := httptest.NewRequest(http.MethodPost, "/draw", nil)
+				request.RemoteAddr = remoteAddr
+				router.ServeHTTP(recorder, request)
+				return recorder
+			}
+
+			const remoteAddr = "192.0.2.80:12345"
+			assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/critical", remoteAddr).Code)
+			assert.Equal(t, http.StatusTooManyRequests, performRateLimitRequest(router, "/critical", remoteAddr).Code)
+			// Exhausting the previous critical-operation bucket must not block draws.
+			for i := range 60 {
+				require.Equal(t, http.StatusNoContent, draw(remoteAddr).Code, "draw %d", i+1)
+			}
+			limited := draw("198.51.100.80:12345")
+			assert.Equal(t, http.StatusTooManyRequests, limited.Code, "changing IP must not bypass the per-user limit")
+			assert.Equal(t, "60", limited.Header().Get("Retry-After"))
+			assert.Equal(t, 60, completedDraws, "rejected requests must not reach the draw handler")
+
+			userID++
+			assert.Equal(t, http.StatusNoContent, draw(remoteAddr).Code, "users sharing an IP have independent budgets")
+			userID--
+
+			if redisServer != nil {
+				redisServer.FastForward(time.Minute)
+				// The UI reveals each result after 2.4 seconds. All 100 chances
+				// should remain usable without the old 20-draw/20-minute cap.
+				for i := range 100 {
+					require.Equal(t, http.StatusNoContent, draw(remoteAddr).Code, "sequential draw %d", i+1)
+					redisServer.FastForward(2400 * time.Millisecond)
+				}
+			}
+
+			common.LotteryDrawRateLimitEnable = false
+			router.POST("/unlimited", LotteryDrawRateLimit(), func(c *gin.Context) {
+				c.Status(http.StatusNoContent)
+			})
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/unlimited", nil))
+			assert.Equal(t, http.StatusNoContent, response.Code)
+		})
+	}
+}
+
 func TestRedisEmailVerificationRateLimiterPreservesResponseAndTTL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	redisServer, _ := useRateLimitMiniRedis(t)

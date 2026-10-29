@@ -141,6 +141,10 @@ func InitEnv() {
 	SearchRateLimitEnable = GetEnvOrDefaultBool("SEARCH_RATE_LIMIT_ENABLE", true)
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
+
+	LotteryDrawRateLimitEnable = GetEnvOrDefaultBool("LOTTERY_DRAW_RATE_LIMIT_ENABLE", true)
+	LotteryDrawRateLimitNum = GetEnvOrDefault("LOTTERY_DRAW_RATE_LIMIT", 60)
+	LotteryDrawRateLimitDuration = int64(GetEnvOrDefault("LOTTERY_DRAW_RATE_LIMIT_DURATION", 60))
 	initConstantEnv()
 }
 

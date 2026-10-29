@@ -189,6 +189,90 @@ func TestLotteryAccountingRegressionsAcrossDatabases(t *testing.T) {
 			require.NoError(t, DB.Raw(versionSQL).Scan(&version).Error)
 			t.Logf("%s %s", dialect, version)
 
+			t.Run("batch consumes grants and accounts for every prize", func(t *testing.T) {
+				userID, now := setupLotteryTest(t)
+				for i, count := range []int{30, 70} {
+					require.NoError(t, DB.Create(&LotteryChanceGrant{
+						EventKey: fmt.Sprintf("batch-grant-%d", i), UserId: userID,
+						Type: LotteryGrantTypeManual, Chances: count, CreatedAt: now.Unix(),
+					}).Error)
+				}
+				rolls := make([]int, 100)
+				for i := range rolls {
+					if i%2 == 1 {
+						rolls[i] = 99
+					}
+				}
+				result, err := drawLotteriesAt(userID, now, rolls)
+				require.NoError(t, err)
+				require.Len(t, result.Draws, 100)
+				assert.Equal(t, result.Draws[99], result.Draw)
+				assert.Zero(t, result.Status.AvailableChances)
+				require.Len(t, result.Status.RecentDraws, 10)
+				assert.Equal(t, result.Draw.Id, result.Status.RecentDraws[0].Id)
+				var user User
+				require.NoError(t, DB.First(&user, userID).Error)
+				assert.Equal(t, 6000, user.Quota)
+				var grants []LotteryChanceGrant
+				require.NoError(t, DB.Where("user_id = ?", userID).Find(&grants).Error)
+				for _, grant := range grants {
+					assert.Equal(t, grant.Chances, grant.Consumed)
+				}
+				var entries []BillingTransaction
+				require.NoError(t, DB.Where("user_id = ?", userID).Find(&entries).Error)
+				require.Len(t, entries, 50)
+				for i, draw := range result.Draws {
+					if i%2 == 1 {
+						assert.Zero(t, draw.Quota)
+						assert.Equal(t, LotteryDrawStatusNoPrize, draw.Status)
+						continue
+					}
+					assert.Equal(t, 100, draw.Quota)
+					assert.Equal(t, draw.EventKey, entries[i/2].EventKey)
+					assert.Equal(t, draw.Quota, entries[i/2].Quota)
+				}
+				_, err = drawLotteriesAt(userID, now, []int{0})
+				assert.ErrorIs(t, err, ErrNoLotteryChances)
+			})
+
+			t.Run("batch rolls back earlier prizes when a later credit fails", func(t *testing.T) {
+				userID, now := setupLotteryTest(t)
+				grant := LotteryChanceGrant{EventKey: "batch-rollback", UserId: userID,
+					Type: LotteryGrantTypeManual, Chances: 10, CreatedAt: now.Unix()}
+				require.NoError(t, DB.Create(&grant).Error)
+				require.NoError(t, DB.Model(&User{}).Where("id = ?", userID).
+					Update("quota", common.MaxWalletQuota-150).Error)
+				_, err := drawLotteriesAt(userID, now, []int{0, 0})
+				require.ErrorIs(t, err, ErrTopUpQuotaLimitExceeded)
+				var user User
+				require.NoError(t, DB.First(&user, userID).Error)
+				assert.Equal(t, common.MaxWalletQuota-150, user.Quota)
+				require.NoError(t, DB.First(&grant, grant.Id).Error)
+				assert.Zero(t, grant.Consumed)
+				for _, record := range []any{&LotteryDraw{}, &BillingTransaction{}} {
+					var count int64
+					require.NoError(t, DB.Model(record).Where("user_id = ?", userID).Count(&count).Error)
+					assert.Zero(t, count)
+				}
+			})
+
+			t.Run("batch with insufficient chances leaves the wallet and chances unchanged", func(t *testing.T) {
+				userID, now := setupLotteryTest(t)
+				grant := LotteryChanceGrant{EventKey: "batch-insufficient", UserId: userID,
+					Type: LotteryGrantTypeManual, Chances: 9, CreatedAt: now.Unix()}
+				require.NoError(t, DB.Create(&grant).Error)
+				_, err := drawLotteriesAt(userID, now, make([]int, 10))
+				require.ErrorIs(t, err, ErrNoLotteryChances)
+				require.NoError(t, DB.First(&grant, grant.Id).Error)
+				assert.Zero(t, grant.Consumed)
+				var user User
+				require.NoError(t, DB.First(&user, userID).Error)
+				assert.Equal(t, 1000, user.Quota)
+				var count int64
+				require.NoError(t, DB.Model(&LotteryDraw{}).Where("user_id = ?", userID).Count(&count).Error)
+				assert.Zero(t, count)
+			})
+
 			t.Run("missed weeks are awarded once with independent caps", func(t *testing.T) {
 				userID, sunday := setupLotteryTest(t)
 				config := defaultLotteryConfig()
@@ -857,6 +941,19 @@ func TestLotteryDrawConsumesChanceAndCreditsPrize(t *testing.T) {
 
 	_, err = drawLotteryAt(userId, now, 0)
 	assert.ErrorIs(t, err, ErrNoLotteryChances)
+}
+
+func TestLotteryBatchRejectsInvalidCounts(t *testing.T) {
+	for _, count := range []int{-1, 0, 101, 1 << 30} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			_, err := DrawLotteryBatch(61, count)
+			require.Error(t, err)
+		})
+	}
+	for _, rolls := range [][]int{nil, make([]int, 101), {-1}, {100}} {
+		_, err := drawLotteriesAt(61, time.Now(), rolls)
+		require.Error(t, err)
+	}
 }
 
 func TestLotteryDrawRejectsWalletOverflowWithoutConsumingChance(t *testing.T) {

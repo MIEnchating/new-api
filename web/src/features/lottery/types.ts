@@ -164,6 +164,7 @@ export interface LotteryStatus {
 
 export interface LotteryDrawResult {
   draw: LotteryDraw
+  draws?: LotteryDraw[]
   status: LotteryStatus
 }
 

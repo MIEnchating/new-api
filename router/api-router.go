@@ -142,7 +142,7 @@ func SetApiRouter(router *gin.Engine) {
 				{
 					lotteryRoute.GET("", controller.GetLotteryStatus)
 					lotteryRoute.GET("/draws/self", controller.GetUserLotteryDraws)
-					lotteryRoute.POST("/draw", middleware.UserCriticalRateLimit("lottery-draw"), controller.DrawLottery)
+					lotteryRoute.POST("/draw", middleware.LotteryDrawRateLimit(), controller.DrawLottery)
 				}
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)

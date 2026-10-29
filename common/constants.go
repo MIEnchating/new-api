@@ -246,6 +246,10 @@ var (
 	SearchRateLimitEnable         = true
 	SearchRateLimitNum            = 10
 	SearchRateLimitDuration int64 = 60
+
+	LotteryDrawRateLimitEnable         = true
+	LotteryDrawRateLimitNum            = 60
+	LotteryDrawRateLimitDuration int64 = 60
 )
 
 var RateLimitKeyExpirationDuration = 20 * time.Minute
