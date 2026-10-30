@@ -76,6 +76,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useIsAdmin } from '@/hooks/use-admin'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
+import { createServerError } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
@@ -103,6 +104,8 @@ import type {
 
 const ADMIN_PAGE_SIZE = 20
 const USER_PAGE_SIZE = 10
+// Keep each request within the server's MaxLotteryDrawCount limit.
+const MAX_DRAW_BATCH_SIZE = 100
 const LOTTERY_GRID_SIZE = 9
 const LOTTERY_GRID_CENTER = 4
 const LOTTERY_GRID_ROUTE = [0, 1, 2, 5, 8, 7, 6, 3] as const
@@ -251,6 +254,8 @@ export function Lottery() {
   const [batchDraws, setBatchDraws] = useState<LotteryDraw[]>([])
   const [batchResultsOpen, setBatchResultsOpen] = useState(false)
   const drawInFlight = useRef(false)
+  const drawPageActive = useRef(true)
+  const availableChances = status?.available_chances ?? 0
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [manualGrantOpen, setManualGrantOpen] = useState(false)
   const [recordView, setRecordView] = useState<'draws' | 'grants'>('draws')
@@ -313,6 +318,13 @@ export function Lottery() {
   useEffect(() => {
     void loadStatus()
   }, [loadStatus])
+
+  useEffect(() => {
+    drawPageActive.current = true
+    return () => {
+      drawPageActive.current = false
+    }
+  }, [])
 
   const loadUserDraws = useCallback(async () => {
     const requestId = ++userDrawRequestId.current
@@ -466,7 +478,12 @@ export function Lottery() {
   }, [status?.recent_activity])
 
   const handleDraw = async (count = 1) => {
-    if (!status || status.available_chances < count || drawInFlight.current) {
+    if (
+      !status ||
+      count <= 0 ||
+      status.available_chances < count ||
+      drawInFlight.current
+    ) {
       return
     }
     drawInFlight.current = true
@@ -476,32 +493,51 @@ export function Lottery() {
     setLatestDraw(null)
     setPendingDraws(null)
     setBatchDraws([])
+    const completedDraws: LotteryDraw[] = []
     try {
-      const response = await drawLottery(count)
-      if (!response.success || !response.data) {
-        handleServerError(response, t('Lottery draw failed'))
-        setDrawing(false)
-        setSelectedBox(null)
-        drawInFlight.current = false
-        return
-      }
-      const result = response.data
-      const draws = result.draws ?? [result.draw]
-      setPendingDraws(draws)
-      setStatus(result.status)
-      if (userDrawPage === 1) {
-        setUserDraws((current) =>
-          [...[...draws].reverse(), ...current].slice(0, USER_PAGE_SIZE)
+      // Snapshot the requested count. Newly granted chances during a run are
+      // left for the next click; each batch must finish before starting another.
+      while (completedDraws.length < count && drawPageActive.current) {
+        const batchSize = Math.min(
+          MAX_DRAW_BATCH_SIZE,
+          count - completedDraws.length
         )
-        setUserDrawTotal((current) => current + draws.length)
-      } else {
-        setUserDrawPage(1)
+        const response = await drawLottery(batchSize)
+        if (!response.success || !response.data) {
+          throw createServerError(response, t('Lottery draw failed'))
+        }
+        if (!drawPageActive.current) break
+        const result = response.data
+        const draws = result.draws ?? [result.draw]
+        completedDraws.push(...draws)
+        setStatus(result.status)
+        if (userDrawPage === 1) {
+          setUserDraws((current) =>
+            [...[...draws].reverse(), ...current].slice(0, USER_PAGE_SIZE)
+          )
+          setUserDrawTotal((current) => current + draws.length)
+        }
+        // Stop if an older server returns only one draw for a batch request.
+        if (draws.length !== batchSize) break
       }
     } catch (error) {
-      handleServerError(error, t('Lottery draw failed'))
-      setDrawing(false)
-      setSelectedBox(null)
-      drawInFlight.current = false
+      if (drawPageActive.current) {
+        handleServerError(error, t('Lottery draw failed'))
+        // A lost response may follow a committed draw. Refresh the balance and
+        // history before another manual attempt; never replay a failed batch.
+        await Promise.all([loadStatus(), loadUserDraws()])
+      }
+    } finally {
+      if (drawPageActive.current) {
+        if (completedDraws.length > 0) {
+          setPendingDraws(completedDraws)
+          if (userDrawPage !== 1) setUserDrawPage(1)
+        } else {
+          setDrawing(false)
+          setSelectedBox(null)
+          drawInFlight.current = false
+        }
+      }
     }
   }
 
@@ -808,17 +844,21 @@ export function Lottery() {
                     )}
                   </div>
                   <div className='mt-4 flex w-full max-w-xs flex-wrap gap-2'>
-                    {[10, 100].map((count) => (
+                    {[
+                      { id: '10', count: 10 },
+                      { id: 'all', count: availableChances },
+                    ].map(({ id, count }) => (
                       <Button
-                        key={count}
+                        key={id}
                         type='button'
                         variant='outline'
                         className='h-auto min-h-9 min-w-0 flex-1 whitespace-normal'
-                        data-testid={`lottery-draw-${count}`}
+                        data-testid={`lottery-draw-${id}`}
                         disabled={
                           loading ||
                           drawing ||
-                          (status?.available_chances || 0) < count
+                          count <= 0 ||
+                          availableChances < count
                         }
                         onClick={() => void handleDraw(count)}
                       >

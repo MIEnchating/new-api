@@ -45,6 +45,7 @@ import { formatNumber } from '@/lib/format'
 import { downloadInvoiceFile, sendInvoiceEmail } from '../api'
 import { invoiceStatusIcons, invoiceStatusVariants } from '../constants'
 import type { InvoiceRequest } from '../types'
+import { InvoiceCopyButton } from './copy-invoice-button'
 import { InvoiceFileUpload } from './file-upload'
 
 export function InvoiceRequestDetails(props: {
@@ -72,6 +73,7 @@ export function InvoiceRequestDetails(props: {
     rejected: t('Rejected'),
     withdrawn: t('Withdrawn'),
   }
+
   return (
     <Sheet
       open
@@ -92,13 +94,16 @@ export function InvoiceRequestDetails(props: {
           </SheetDescription>
         </SheetHeader>
         <div className={sideDrawerFormClassName('[overflow-wrap:anywhere]')}>
-          <StatusBadge
-            copyable={false}
-            variant={invoiceStatusVariants[request.status]}
-            icon={invoiceStatusIcons[request.status]}
-          >
-            {labels[request.status]}
-          </StatusBadge>
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <StatusBadge
+              copyable={false}
+              variant={invoiceStatusVariants[request.status]}
+              icon={invoiceStatusIcons[request.status]}
+            >
+              {labels[request.status]}
+            </StatusBadge>
+            <InvoiceCopyButton request={request} />
+          </div>
           <dl className='grid gap-2 text-sm sm:grid-cols-2'>
             {props.admin && (
               <div>

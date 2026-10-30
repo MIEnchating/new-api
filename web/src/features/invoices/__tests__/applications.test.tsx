@@ -1045,6 +1045,65 @@ it.each([false, true])(
   }
 )
 
+it.each([false, true])(
+  'copies invoice details directly from the list and from the details drawer (admin=%s)',
+  async (admin) => {
+    const user = userEvent.setup()
+    const writeText = vi
+      .spyOn(navigator.clipboard, 'writeText')
+      .mockResolvedValue()
+    const request = {
+      ...pending,
+      bank_name: 'Example Bank',
+      bank_account: '0012345',
+      invoice_address: '12 Main Street',
+      invoice_phone: '123456',
+      remark: 'Send to accounting\nThank you',
+      orders: [
+        { id: 1, trade_no: 'order-one', money: 600 },
+        { id: 2, trade_no: 'order-two', money: 450.5 },
+      ],
+    }
+    const items = admin ? [request] : [pending]
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: { total: 1, items } },
+    })
+    renderInvoice(<InvoiceRequestList admin={admin} />)
+    await user.click(
+      await screen.findByRole('button', { name: 'Copy invoice details' })
+    )
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    const expected = [
+      'Invoice title: Example Company',
+      'Invoice title type: Company',
+      'Tax identification number: TAX123',
+      'Invoice email: billing@example.com',
+    ]
+    if (admin) {
+      expected.push(
+        'Invoice address: 12 Main Street',
+        'Invoice phone number: 123456',
+        'Bank name: Example Bank',
+        'Bank account number: 0012345',
+        'Invoice amount: 1,050.5',
+        'Remarks: Send to accounting\nThank you'
+      )
+    } else {
+      expected.push('Invoice amount: 10')
+    }
+    expect(writeText).toHaveBeenCalledWith(expected.join('\n'))
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeVisible()
+    writeText.mockClear()
+    await user.click(screen.getByRole('button', { name: 'View details' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(
+      within(dialog).getByRole('button', { name: 'Copy invoice details' })
+    )
+    expect(writeText).toHaveBeenCalledWith(expected.join('\n'))
+    expect(within(dialog).getByRole('button', { name: 'Copied' })).toBeVisible()
+  }
+)
+
 it('edits both invoice email templates, previews without sending and restores defaults', async () => {
   const user = userEvent.setup()
   const defaults = {

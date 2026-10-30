@@ -216,6 +216,11 @@ describe('lottery center', () => {
     assert.equal(streak?.textContent?.replaceAll(/\s/g, ''), '1day')
     assert.doesNotMatch(container.textContent || '', /1 days/)
     expect(container.textContent).toContain('No lottery chances available')
+    const emptyBatch = container.querySelector<HTMLButtonElement>(
+      '[data-testid="lottery-draw-all"]'
+    )
+    expect(emptyBatch?.disabled).toBe(true)
+    expect(emptyBatch?.textContent).toContain('Draw 0 times')
     const drawLabel = container.querySelector(
       '[data-testid="lottery-draw-button"] span.whitespace-normal'
     )
@@ -469,9 +474,42 @@ describe('lottery center', () => {
     await act(async () => root.unmount())
   })
 
-  test.each([10, 100])(
-    'draws %i times with one request and shows every result',
-    async (count) => {
+  test.each([
+    { available: 65, count: 10, buttonId: 'lottery-draw-10', requests: [10] },
+    { available: 1, count: 1, buttonId: 'lottery-draw-all', requests: [1] },
+    { available: 7, count: 7, buttonId: 'lottery-draw-all', requests: [7] },
+    { available: 10, count: 10, buttonId: 'lottery-draw-all', requests: [10] },
+    { available: 65, count: 65, buttonId: 'lottery-draw-all', requests: [65] },
+    {
+      available: 100,
+      count: 100,
+      buttonId: 'lottery-draw-all',
+      requests: [100],
+    },
+    {
+      available: 165,
+      count: 165,
+      buttonId: 'lottery-draw-all',
+      requests: [100, 65],
+    },
+    {
+      available: 250,
+      count: 100,
+      buttonId: 'lottery-draw-all',
+      requests: [100, 100],
+      failure: 'business',
+    },
+    {
+      available: 250,
+      count: 100,
+      buttonId: 'lottery-draw-all',
+      requests: [100, 100],
+      failure: 'network',
+    },
+  ])(
+    '$buttonId draws $count of $available chances and updates the remaining-count button',
+    async (scenario) => {
+      const count = scenario.count
       const draws = Array.from({ length: count }, (_, index) => ({
         id: index + 1,
         prize: 'quota_1',
@@ -481,16 +519,42 @@ describe('lottery center', () => {
         created_at: 1_786_363_200,
       }))
       const requests: unknown[] = []
+      let completed = 0
       api.defaults.adapter = async (config) => {
-        let data: unknown = { ...baseStatus, available_chances: count }
+        let data: unknown = {
+          ...baseStatus,
+          available_chances: scenario.available - completed,
+        }
         if (config.url?.includes('/draws/self')) {
-          data = { items: [], total: 0, page: 1, page_size: 10 }
-        } else if (config.url?.endsWith('/draw')) {
-          requests.push(JSON.parse(config.data))
           data = {
-            draw: draws.at(-1),
-            draws,
-            status: { ...baseStatus, recent_draws: draws.slice(-10).reverse() },
+            items: draws.slice(0, completed).slice(-10).reverse(),
+            total: completed,
+            page: 1,
+            page_size: 10,
+          }
+        } else if (config.url?.endsWith('/draw')) {
+          const request = JSON.parse(config.data)
+          requests.push(request)
+          if ('failure' in scenario && requests.length === 2) {
+            if (scenario.failure === 'network') throw new Error('Network error')
+            return {
+              data: { success: false, message: 'Not enough lottery chances' },
+              status: 200,
+              statusText: 'OK',
+              headers: {},
+              config,
+            }
+          }
+          const batch = draws.slice(completed, completed + request.count)
+          completed += request.count
+          data = {
+            draw: batch.at(-1),
+            draws: batch,
+            status: {
+              ...baseStatus,
+              available_chances: scenario.available - completed,
+              recent_draws: draws.slice(0, completed).slice(-10).reverse(),
+            },
           }
         }
         return {
@@ -529,35 +593,50 @@ describe('lottery center', () => {
           await flushRequests()
         })
         const button = container.querySelector<HTMLButtonElement>(
-          `[data-testid="lottery-draw-${count}"]`
+          `[data-testid="${scenario.buttonId}"]`
         )
         assert.ok(button)
         assert.equal(button.disabled, false)
-        if (count === 10) {
-          expect(
-            container.querySelector<HTMLButtonElement>(
-              '[data-testid="lottery-draw-100"]'
-            )?.disabled
-          ).toBe(true)
-        }
+        const allButton = container.querySelector<HTMLButtonElement>(
+          '[data-testid="lottery-draw-all"]'
+        )
+        assert.ok(allButton)
+        expect(allButton.textContent).toContain(
+          `Draw ${scenario.available} times`
+        )
+        expect(allButton.disabled).toBe(false)
+        expect(
+          container.querySelector<HTMLButtonElement>(
+            '[data-testid="lottery-draw-10"]'
+          )?.disabled
+        ).toBe(scenario.available < 10)
         await act(async () => {
           button.click()
           button.click()
           await flushRequests()
         })
-        expect(requests).toEqual([{ count }])
+        expect(requests).toEqual(scenario.requests.map((count) => ({ count })))
         expect(button.disabled).toBe(true)
         assert.ok(reveal)
         await act(async () => reveal?.())
         const dialog = document.querySelector('[role="dialog"]')
-        assert.ok(dialog)
-        expect(dialog.textContent).toContain('Batch draw results')
-        expect(dialog.textContent).toContain(`Completed ${count} draws`)
-        expect(dialog.textContent).toContain(`$${count}`)
-        expect(
-          dialog.querySelectorAll('[data-testid="lottery-batch-result"]').length
-        ).toBe(count)
-        expect(button.disabled).toBe(true)
+        if (count > 1) {
+          assert.ok(dialog)
+          expect(dialog.textContent).toContain('Batch draw results')
+          expect(dialog.textContent).toContain(`Completed ${count} draws`)
+          expect(dialog.textContent).toContain(`$${count}`)
+          expect(
+            dialog.querySelectorAll('[data-testid="lottery-batch-result"]')
+              .length
+          ).toBe(count)
+        } else {
+          expect(dialog).toBeNull()
+          expect(container.textContent).toContain('Won $1')
+        }
+        expect(allButton.textContent).toContain(
+          `Draw ${scenario.available - count} times`
+        )
+        expect(allButton.disabled).toBe(scenario.available === count)
       } finally {
         await act(async () => root.unmount())
         timerSpy.mockRestore()
@@ -565,6 +644,76 @@ describe('lottery center', () => {
       }
     }
   )
+
+  test('leaving the page during a draw prevents the next batch from starting', async () => {
+    let resolveDraw: (() => void) | undefined
+    const requests: unknown[] = []
+    const draws = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1,
+      prize: 'none',
+      quota: 0,
+      status: 'no_prize',
+      revoked_at: 0,
+      created_at: 1_786_363_200,
+    }))
+    api.defaults.adapter = async (config) => {
+      let data: unknown = { ...baseStatus, available_chances: 165 }
+      if (config.url?.endsWith('/draw')) {
+        requests.push(JSON.parse(config.data))
+        await new Promise<void>((resolve) => {
+          resolveDraw = resolve
+        })
+        data = {
+          draws,
+          draw: draws.at(-1),
+          status: { ...baseStatus, available_chances: 65 },
+        }
+      } else if (config.url?.includes('/draws/self')) {
+        data = { items: [], total: 0, page: 1, page_size: 10 }
+      }
+      return {
+        data: { success: true, data },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    try {
+      await act(async () => {
+        root.render(
+          <I18nextProvider i18n={i18n}>
+            <Lottery />
+          </I18nextProvider>
+        )
+        await flushRequests()
+      })
+      const button = container.querySelector<HTMLButtonElement>(
+        '[data-testid="lottery-draw-all"]'
+      )
+      assert.ok(button)
+      await act(async () => {
+        button.click()
+        await flushRequests()
+      })
+      expect(button.disabled).toBe(true)
+      expect(requests).toEqual([{ count: 100 }])
+      assert.ok(resolveDraw)
+      await act(async () => root.unmount())
+      await act(async () => {
+        resolveDraw?.()
+        await flushRequests()
+      })
+      expect(requests).toEqual([{ count: 100 }])
+    } finally {
+      resolveDraw?.()
+      await act(async () => root.unmount())
+      container.remove()
+    }
+  })
 
   test.each(['business', 'network'])(
     'allows another batch attempt after a %s failure without showing rewards',

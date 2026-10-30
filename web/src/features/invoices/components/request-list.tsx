@@ -36,6 +36,7 @@ import { formatNumber } from '@/lib/format'
 import { getInvoiceRequests, withdrawInvoiceRequest } from '../api'
 import { invoiceStatusIcons, invoiceStatusVariants } from '../constants'
 import type { InvoiceRequest, InvoiceSearch } from '../types'
+import { InvoiceCopyButton } from './copy-invoice-button'
 import { InvoiceProcessDialog } from './process-dialog'
 import { InvoiceRequestDetails } from './request-details'
 import { InvoiceSearchFields } from './search-fields'
@@ -184,6 +185,7 @@ export function InvoiceRequestList(props: { admin: boolean }) {
             >
               {t('View details')}
             </Button>
+            <InvoiceCopyButton request={row.original} />
             {!props.admin && row.original.status === 'pending' && (
               <Button
                 size='sm'
