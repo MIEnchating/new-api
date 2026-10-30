@@ -21,14 +21,17 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 import { uploadInvoiceFile } from '../api'
 import type { InvoiceUploadResult } from '../types'
+import { InvoiceFilePreview } from './file-preview'
 
 export function InvoiceFileUpload(props: {
   requestId: number
+  title: string
   uploaded: boolean
   disabled?: boolean
   onUploaded?: (result: InvoiceUploadResult) => void
@@ -37,11 +40,16 @@ export function InvoiceFileUpload(props: {
   const { t } = useTranslation()
   const client = useQueryClient()
   const [filename, setFilename] = useState('')
+  const [replacing, setReplacing] = useState(false)
   const mutation = useMutation({
     mutationFn: (file: File) => uploadInvoiceFile(props.requestId, file),
     onMutate: () => props.onUploadingChange?.(true),
     onSuccess: (result, file) => {
       setFilename(file.name)
+      setReplacing(false)
+      void client.invalidateQueries({
+        queryKey: ['invoices', 'file', props.requestId],
+      })
       void client.invalidateQueries({ queryKey: ['invoices', 'requests'] })
       props.onUploaded?.(result)
       toast.success(t('Invoice uploaded'))
@@ -49,6 +57,22 @@ export function InvoiceFileUpload(props: {
     onSettled: () => props.onUploadingChange?.(false),
   })
   const id = `invoice-file-${props.requestId}`
+  if ((props.uploaded || filename) && !replacing) {
+    return (
+      <div className='space-y-2'>
+        <InvoiceFilePreview requestId={props.requestId} title={props.title} />
+        <Button
+          type='button'
+          variant='ghost'
+          size='sm'
+          disabled={props.disabled || mutation.isPending}
+          onClick={() => setReplacing(true)}
+        >
+          {t('Replace invoice file')}
+        </Button>
+      </div>
+    )
+  }
   return (
     <div className='bg-muted/20 space-y-3 rounded-lg border border-dashed p-4'>
       <Label htmlFor={id}>{t('Invoice file')}</Label>

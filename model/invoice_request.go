@@ -50,6 +50,7 @@ type InvoiceRequest struct {
 	Orders         []InvoiceRequestOrder `json:"orders" gorm:"foreignKey:RequestId"`
 	Username       string                `json:"username,omitempty" gorm:"-"`
 	DisplayName    string                `json:"display_name,omitempty" gorm:"-"`
+	EmailSentAt    int64                 `json:"email_sent_at" gorm:"-"`
 }
 
 // ActiveTopUpId is populated only while pending. Its nullable unique index
@@ -375,6 +376,9 @@ func ListInvoiceRequests(userId int, status string, page *common.PageInfo, filte
 			user := byID[requests[i].UserId]
 			requests[i].Username, requests[i].DisplayName = user.Username, user.DisplayName
 		}
+	}
+	if err := LoadInvoiceEmailHistory(requests); err != nil {
+		return err
 	}
 	page.SetTotal(int(count))
 	page.SetItems(requests)

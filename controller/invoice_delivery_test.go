@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -133,6 +134,9 @@ func TestInvoiceFileDelivery(t *testing.T) {
 			if tc.code == 200 {
 				assert.Equal(t, pdf, response.Body.Bytes())
 				assert.Contains(t, response.Header().Get("Content-Disposition"), "attachment;")
+				_, params, err := mime.ParseMediaType(response.Header().Get("Content-Disposition"))
+				require.NoError(t, err)
+				assert.Equal(t, "_script_company__script_.pdf", params["filename"])
 				assert.Equal(t, "nosniff", response.Header().Get("X-Content-Type-Options"))
 			}
 		}
@@ -157,6 +161,7 @@ func TestInvoiceFileDelivery(t *testing.T) {
 			require.Len(t, payload.Attachments, 1)
 			assert.Equal(t, pdf, payload.Attachments[0].Content)
 			assert.Equal(t, "application/pdf", payload.Attachments[0].ContentType)
+			assert.Equal(t, "_script_company__script_.pdf", payload.Attachments[0].Filename)
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"id":"invoice-delivered"}`)), Header: make(http.Header)}, nil
 		})
 		application.Status = model.InvoiceRequestPending
@@ -203,6 +208,43 @@ func TestInvoiceFileDelivery(t *testing.T) {
 			assert.Equal(t, tc.success, result.Success)
 		}
 		assert.Equal(t, 1, calls)
+	})
+
+	t.Run("issued files cannot be replaced and title filenames preserve Chinese", func(t *testing.T) {
+		for _, tc := range []struct{ title, want string }{
+			{"示例科技（海南）有限公司", "示例科技（海南）有限公司.pdf"},
+			{"A/B\\C\r\nCompany", "A_B_C__Company.pdf"},
+			{" . ", "invoice.pdf"},
+		} {
+			assert.Equal(t, tc.want, service.InvoiceAttachmentFilename(tc.title, ".pdf"))
+		}
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, err := writer.CreateFormFile("file", "replacement.pdf")
+		require.NoError(t, err)
+		_, err = part.Write(pdf)
+		require.NoError(t, err)
+		require.NoError(t, writer.Close())
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Set("id", 7)
+		c.Set("role", common.RoleAdminUser)
+		c.Params = gin.Params{{Key: "id", Value: strconv.Itoa(application.Id)}}
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/user/invoices/1/file", &body)
+		c.Request.Header.Set("Content-Type", writer.FormDataContentType())
+		UploadInvoiceFile(c)
+		var result struct {
+			Success bool `json:"success"`
+		}
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+		assert.False(t, result.Success)
+		var stored model.InvoiceRequest
+		require.NoError(t, db.First(&stored, application.Id).Error)
+		assert.Equal(t, application.InvoiceURL, stored.InvoiceURL)
+		assert.Equal(t, model.InvoiceRequestIssued, stored.Status)
+		requests := []model.InvoiceRequest{stored}
+		require.NoError(t, model.LoadInvoiceEmailHistory(requests))
+		assert.Positive(t, requests[0].EmailSentAt)
 	})
 
 	t.Run("completion respects the mail switch and preserves issuance on delivery failure", func(t *testing.T) {

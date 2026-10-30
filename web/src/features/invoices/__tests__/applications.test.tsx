@@ -25,6 +25,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 
+import { downloadInvoiceFile } from '../api'
 import { InvoiceApplicationForm } from '../components/application-form'
 import { InvoiceEmailTemplatesDialog } from '../components/email-templates'
 import { InvoiceNotificationDialog } from '../components/notification-settings'
@@ -215,6 +216,11 @@ it('disables completion during upload and retains the uploaded file when issuing
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'Confirm' })).toBeEnabled()
   )
+  expect(screen.queryByLabelText('Invoice file')).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Preview invoice' })).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'Replace invoice file' })
+  ).toBeEnabled()
   expect(
     screen.queryByLabelText('Invoice link (HTTPS, optional)')
   ).not.toBeInTheDocument()
@@ -265,6 +271,102 @@ it('offers issued invoice download and sends mail without accepting a destinatio
   post.mockResolvedValue({ data: { success: true, data: null } })
   await user.click(screen.getByRole('button', { name: 'Send to email' }))
   await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
+  expect(
+    await screen.findByRole('button', { name: 'Resend to email' })
+  ).toBeEnabled()
+})
+
+it.each(['application/pdf', 'image/png'])(
+  'previews an issued %s without an editable file picker and revokes the preview URL',
+  async (type) => {
+    const user = userEvent.setup()
+    const file = new Blob(['invoice'], { type })
+    const createURL = vi
+      .spyOn(URL, 'createObjectURL')
+      .mockReturnValue('blob:invoice-preview')
+    const revokeURL = vi
+      .spyOn(URL, 'revokeObjectURL')
+      .mockImplementation(() => {})
+    vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      if (String(url).endsWith('/file')) {
+        return {
+          data: file,
+          headers: {
+            'content-disposition':
+              "attachment; filename*=utf-8''%E7%A4%BA%E4%BE%8B%E5%85%AC%E5%8F%B8.pdf",
+          },
+        }
+      }
+      return {
+        data: {
+          success: true,
+          data: {
+            total: 1,
+            items: [
+              {
+                ...pending,
+                status: 'issued',
+                email_sent_at: 3,
+                processed_at: 2,
+                invoice_url: 'invoice-file:stored.pdf',
+              },
+            ],
+          },
+        },
+      }
+    })
+    const view = renderInvoice(<InvoiceRequestList admin />)
+    await user.click(
+      await screen.findByRole('button', { name: 'View details' })
+    )
+    expect(screen.queryByLabelText('Invoice file')).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Replace invoice file' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Resend to email' })
+    ).toBeEnabled()
+    expect(screen.getByText(/Review time:/)).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Preview invoice' }))
+    const preview =
+      type === 'application/pdf'
+        ? await screen.findByTitle('Preview invoice')
+        : await screen.findByRole('img', { name: 'Preview invoice' })
+    expect(preview).toHaveAttribute(
+      type === 'application/pdf' ? 'data' : 'src',
+      'blob:invoice-preview'
+    )
+    expect(createURL).toHaveBeenCalledWith(file)
+    view.unmount()
+    expect(revokeURL).toHaveBeenCalledWith('blob:invoice-preview')
+  }
+)
+
+it('downloads the invoice using the title filename returned by the server', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: new Blob(['invoice'], { type: 'application/pdf' }),
+    headers: {
+      'content-disposition':
+        "attachment; filename*=utf-8''%E7%A4%BA%E4%BE%8B%E5%85%AC%E5%8F%B8.pdf",
+    },
+  })
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:download')
+  const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
+  let filename = ''
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
+    function (this: HTMLAnchorElement) {
+      filename = this.download
+    }
+  )
+  vi.useFakeTimers()
+  try {
+    await downloadInvoiceFile(4)
+    expect(filename).toBe('示例公司.pdf')
+    vi.runAllTimers()
+    expect(revoke).toHaveBeenCalledWith('blob:download')
+  } finally {
+    vi.useRealTimers()
+  }
 })
 
 it('loads administrator notification recipients and saves the selected administrators', async () => {
@@ -1044,6 +1146,53 @@ it.each([false, true])(
     }
   }
 )
+
+it('keeps issued invoice orders at their natural height inside the scrolling drawer', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        total: 1,
+        items: [
+          {
+            ...pending,
+            status: 'issued',
+            invoice_number: '26442000012479318431',
+            invoice_url: 'invoice-file:ready.pdf',
+            processed_at: 2,
+            orders: [
+              { id: 1, trade_no: 'order-one', money: 600 },
+              { id: 2, trade_no: 'order-two', money: 400 },
+            ],
+          },
+        ],
+      },
+    },
+  })
+  renderInvoice(<InvoiceRequestList admin />)
+  await user.click(await screen.findByRole('button', { name: 'View details' }))
+  const dialog = await screen.findByRole('dialog')
+  const content = within(dialog).getByRole('region', {
+    name: 'Invoice details',
+  })
+  expect(content).toHaveClass('block', 'overflow-y-auto', 'min-h-0')
+  expect(content).not.toHaveClass('flex')
+  const orders = within(content).getByRole('table')
+  expect(within(orders).getAllByRole('row')).toHaveLength(3)
+  expect(within(orders).getByText('order-two')).toBeVisible()
+  const actions = within(content).getByRole('group', { name: 'Actions' })
+  expect(actions).toHaveClass('flex', 'flex-wrap')
+  expect(
+    within(actions).getByRole('button', { name: 'Download invoice' })
+  ).toBeVisible()
+  expect(
+    within(actions).getByRole('button', { name: 'Send to email' })
+  ).toBeVisible()
+  expect(dialog.querySelector('[data-slot="sheet-footer"]')).toHaveClass(
+    'shrink-0'
+  )
+})
 
 it.each([false, true])(
   'copies invoice details directly from the list and from the details drawer (admin=%s)',

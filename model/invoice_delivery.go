@@ -135,7 +135,7 @@ func AttachInvoiceFile(id int, reference string) (*InvoiceRequest, string, error
 	request := &InvoiceRequest{}
 	var previous string
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := lockForUpdate(tx).Where("id = ? AND status IN ?", id, []string{InvoiceRequestPending, InvoiceRequestIssued}).First(request).Error; err != nil {
+		if err := lockForUpdate(tx).Where("id = ? AND status = ?", id, InvoiceRequestPending).First(request).Error; err != nil {
 			return err
 		}
 		previous = request.InvoiceURL
@@ -143,6 +143,57 @@ func AttachInvoiceFile(id int, reference string) (*InvoiceRequest, string, error
 		return tx.Model(request).Update("invoice_url", reference).Error
 	})
 	return request, previous, err
+}
+
+// LoadInvoiceEmailHistory projects successful delivery audits without exposing
+// administrator metadata. Existing invoices retain their delivery history.
+func LoadInvoiceEmailHistory(requests []InvoiceRequest) error {
+	remaining := make(map[int]int)
+	var since int64
+	for i, request := range requests {
+		if request.Status != InvoiceRequestIssued {
+			continue
+		}
+		if len(remaining) == 0 || request.CreatedAt < since {
+			since = request.CreatedAt
+		}
+		remaining[request.Id] = i
+	}
+	if len(remaining) == 0 {
+		return nil
+	}
+	if LOG_DB == nil {
+		return gorm.ErrInvalidDB
+	}
+	rows, err := LOG_DB.Model(&AuditLog{}).Select("created_at", "other").
+		Where("action = ? AND success = ? AND created_at >= ?", "invoice.email", true, since).
+		Order("created_at DESC").Rows()
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var entry AuditLog
+		if err := LOG_DB.ScanRows(rows, &entry); err != nil {
+			return err
+		}
+		if entry.Other.Op == nil {
+			continue
+		}
+		encoded, err := common.Marshal(entry.Other.Op.Params["request_id"])
+		var id int
+		if err != nil || common.Unmarshal(encoded, &id) != nil {
+			continue
+		}
+		if index, ok := remaining[id]; ok {
+			requests[index].EmailSentAt = entry.CreatedAt
+			delete(remaining, id)
+			if len(remaining) == 0 {
+				break
+			}
+		}
+	}
+	return rows.Err()
 }
 
 const InvoiceMinimumAmountOption = "InvoiceMinimumAmount"

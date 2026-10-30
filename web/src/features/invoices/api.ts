@@ -105,9 +105,11 @@ export async function uploadInvoiceFile(id: number, file: File) {
   return requireServerSuccess(response.data).data
 }
 
-export async function downloadInvoiceFile(id: number) {
+export async function getInvoiceFile(id: number, signal?: AbortSignal) {
   const response = await api.get<Blob>(`/api/user/invoices/${id}/file`, {
     responseType: 'blob',
+    signal,
+    disableDuplicate: true,
   })
   const extension = {
     'application/pdf': 'pdf',
@@ -115,10 +117,21 @@ export async function downloadInvoiceFile(id: number) {
     'image/jpeg': 'jpg',
   }[response.data.type]
   if (!extension) throw new Error('Invoice file is not available')
-  const url = URL.createObjectURL(response.data)
+  const disposition = String(response.headers?.['content-disposition'] ?? '')
+  const encoded = disposition.match(/filename\*=utf-8''([^;]+)/i)?.[1]
+  const plain = disposition.match(/filename="([^"]+)"|filename=([^;]+)/i)
+  const filename = encoded
+    ? decodeURIComponent(encoded)
+    : (plain?.[1] ?? plain?.[2] ?? `invoice-${id}.${extension}`)
+  return { blob: response.data, filename }
+}
+
+export async function downloadInvoiceFile(id: number) {
+  const file = await getInvoiceFile(id)
+  const url = URL.createObjectURL(file.blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `invoice-${id}.${extension}`
+  link.download = file.filename
   document.body.append(link)
   link.click()
   link.remove()

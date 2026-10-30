@@ -109,6 +109,26 @@ func RemoveInvoiceFile(reference string) {
 	}
 }
 
+// InvoiceAttachmentFilename preserves the title while removing characters that
+// are unsafe in attachment headers or filenames on common desktop platforms.
+func InvoiceAttachmentFilename(title, extension string) string {
+	title = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 || strings.ContainsRune(`/\:*?"<>|`, r) {
+			return '_'
+		}
+		return r
+	}, title)
+	name := []rune(strings.TrimSpace(title))
+	if len(name) > 70 {
+		name = name[:70]
+	}
+	title = strings.Trim(string(name), ". ")
+	if title == "" {
+		title = "invoice"
+	}
+	return title + extension
+}
+
 func SendInvoiceEmail(request *model.InvoiceRequest) error {
 	if request.Status != model.InvoiceRequestIssued || request.InvoiceURL == "" {
 		return common.NewMessage("Only issued invoices with a file or link can be emailed")
@@ -127,6 +147,7 @@ func SendInvoiceEmail(request *model.InvoiceRequest) error {
 		if err != nil {
 			return err
 		}
+		file.Filename = InvoiceAttachmentFilename(request.Title, filepath.Ext(file.Filename))
 		attachments = append(attachments, *file)
 	} else if strings.HasPrefix(request.InvoiceURL, "https://") {
 		// The template includes the validated HTTPS link.

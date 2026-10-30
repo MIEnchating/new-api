@@ -37,6 +37,7 @@ export interface InvoiceRequest {
   title: string
   tax_id: string
   email: string
+  email_sent_at?: number
   invoice_address?: string
   invoice_phone?: string
   bank_name?: string

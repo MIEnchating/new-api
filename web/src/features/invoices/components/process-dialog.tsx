@@ -136,6 +136,7 @@ export function InvoiceProcessDialog(props: {
           <>
             <InvoiceFileUpload
               requestId={props.request.id}
+              title={props.request.title}
               uploaded={uploaded}
               disabled={mutation.isPending}
               onUploadingChange={setUploading}

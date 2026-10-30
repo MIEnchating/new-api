@@ -75,10 +75,30 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 			sqlDB, err := db.DB()
 			require.NoError(t, err)
 			t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+			logDriver := driver
+			switch dialect {
+			case "sqlite":
+				logDriver = sqlite.Open(filepath.Join(t.TempDir(), "invoice-audits.db"))
+			case "mysql":
+				if dsn := os.Getenv("TEST_MYSQL_LOG_DSN"); dsn != "" {
+					logDriver = mysql.Open(dsn)
+				}
+			case "postgres":
+				if dsn := os.Getenv("TEST_POSTGRES_LOG_DSN"); dsn != "" {
+					logDriver = postgres.Open(dsn)
+				}
+			}
+			logDB, err := gorm.Open(logDriver, &gorm.Config{})
+			require.NoError(t, err)
+			logSQL, err := logDB.DB()
+			require.NoError(t, err)
+			t.Cleanup(func() { assert.NoError(t, logDB.Migrator().DropTable(&AuditLog{})); assert.NoError(t, logSQL.Close()) })
+			oldLogDB := LOG_DB
 			oldDB, oldMain, oldLog := DB, common.MainDatabaseType(), common.LogDatabaseType()
 			DB = db
-			common.SetDatabaseTypes(common.DatabaseType(dialect), oldLog)
-			t.Cleanup(func() { DB = oldDB; common.SetDatabaseTypes(oldMain, oldLog) })
+			LOG_DB = logDB
+			common.SetDatabaseTypes(common.DatabaseType(dialect), common.DatabaseType(dialect))
+			t.Cleanup(func() { DB = oldDB; LOG_DB = oldLogDB; common.SetDatabaseTypes(oldMain, oldLog) })
 			var version string
 			versionQuery := "SELECT version()"
 			if dialect == "sqlite" {
@@ -93,11 +113,14 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 					db, err := gorm.Open(driver, &gorm.Config{})
 					require.NoError(t, err)
 					DB = db
+					LOG_DB = logDB
 					scenarioSQL, err := db.DB()
 					require.NoError(t, err)
 					t.Cleanup(func() { assert.NoError(t, scenarioSQL.Close()) })
 					require.NoError(t, db.Migrator().DropTable(models...))
 					t.Cleanup(func() { assert.NoError(t, db.Migrator().DropTable(models...)) })
+					require.NoError(t, logDB.Migrator().DropTable(&AuditLog{}))
+					require.NoError(t, logDB.AutoMigrate(&AuditLog{}))
 					// TopUp's schema is unchanged from the latest release v2026.10.26.
 					// Upgrade starts with that schema and representative historical data.
 					historical := TopUp{UserId: 1, TradeNo: "historical", Money: 12.5, Amount: 20, Status: common.TopUpStatusSuccess, InvoiceStatus: TopUpInvoiceStatusIssued, InvoicedBy: 7}
@@ -303,10 +326,33 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 					require.NoError(t, err)
 					_, err = GetInvoiceForDelivery(request.Id, 2, false)
 					require.ErrorIs(t, err, gorm.ErrRecordNotFound)
-					attached, previous, err := AttachInvoiceFile(request.Id, "invoice-file:0123456789abcdef0123456789abcdef.pdf")
-					require.NoError(t, err)
-					assert.Equal(t, "invoice-file:0123456789abcdef0123456789abcdef.pdf", previous)
-					assert.Equal(t, InvoiceRequestIssued, attached.Status)
+					_, _, err = AttachInvoiceFile(request.Id, "invoice-file:replacement.pdf")
+					require.ErrorIs(t, err, gorm.ErrRecordNotFound)
+					var unchangedInvoice InvoiceRequest
+					require.NoError(t, db.First(&unchangedInvoice, request.Id).Error)
+					assert.Equal(t, issued.InvoiceURL, unchangedInvoice.InvoiceURL)
+
+					// Successful historical delivery audits distinguish sending from resending.
+					for i, event := range []struct {
+						action  string
+						success bool
+						id      int
+						at      int64
+					}{
+						{"invoice.email", true, issued.Id, issued.CreatedAt + 1},
+						{"invoice.email", true, issued.Id, issued.CreatedAt + 2},
+						{"invoice.email", false, issued.Id, issued.CreatedAt + 3},
+						{"invoice.upload", true, issued.Id, issued.CreatedAt + 4},
+						{"invoice.email", true, issued.Id + 1000, issued.CreatedAt + 5},
+					} {
+						require.NoError(t, logDB.Create(&AuditLog{EventId: fmt.Sprintf("invoice-email-%d", i), Action: event.action, Success: event.success, CreatedAt: event.at, Other: AuditOther{Op: &AuditOperation{Action: event.action, Params: AuditFields{"request_id": event.id}}}}).Error)
+					}
+					for _, viewer := range []int{0, 1} {
+						require.NoError(t, ListInvoiceRequests(viewer, InvoiceRequestIssued, page, InvoiceSearch{Keyword: "INV-001"}))
+						items := page.Items.([]InvoiceRequest)
+						require.Len(t, items, 1)
+						assert.Equal(t, issued.CreatedAt+2, items[0].EmailSentAt)
+					}
 
 					for _, original := range orders[:2] {
 						var actual TopUp

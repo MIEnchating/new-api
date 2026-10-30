@@ -3,6 +3,7 @@ package controller
 import (
 	"mime"
 	"net/http"
+	"path/filepath"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
@@ -18,7 +19,7 @@ func UploadInvoiceFile(c *gin.Context) {
 		return
 	}
 	request, err := model.GetInvoiceForDelivery(id, c.GetInt("id"), true)
-	if err != nil || request.Status == model.InvoiceRequestRejected {
+	if err != nil || request.Status != model.InvoiceRequestPending {
 		common.ApiError(c, model.ErrInvoiceRequestProcessed)
 		return
 	}
@@ -69,7 +70,8 @@ func DownloadInvoiceFile(c *gin.Context) {
 		return
 	}
 	c.Header("X-Content-Type-Options", "nosniff")
-	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": file.Filename}))
+	filename := service.InvoiceAttachmentFilename(request.Title, filepath.Ext(file.Filename))
+	c.Header("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
 	c.Data(http.StatusOK, file.ContentType, file.Content)
 }
 
