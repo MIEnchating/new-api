@@ -353,11 +353,11 @@ it('downloads the invoice using the title filename returned by the server', asyn
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:download')
   const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
   let filename = ''
-  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(
-    function (this: HTMLAnchorElement) {
-      filename = this.download
-    }
-  )
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (
+    this: HTMLAnchorElement
+  ) {
+    filename = this.download
+  })
   vi.useFakeTimers()
   try {
     await downloadInvoiceFile(4)

@@ -31,6 +31,7 @@ func pluginMap(t *testing.T, value any) map[string]any {
 func TestMigratedTaskPluginsPreservePerSecondBilling(t *testing.T) {
 	tests := []struct {
 		key         string
+		name        string
 		model       string
 		requestBody map[string]any
 		seconds     float64
@@ -41,10 +42,17 @@ func TestMigratedTaskPluginsPreservePerSecondBilling(t *testing.T) {
 		{key: "jimeng", model: "jimeng_vgfm_t2v_l20", requestBody: map[string]any{"duration": 10}, seconds: 5},
 		{key: "kling", model: "kling-v1-6", requestBody: map[string]any{"duration": 10}, seconds: 10},
 		{key: "vidu", model: "vidu2.0", requestBody: map[string]any{"duration": 8, "resolution": "720p"}, seconds: 8, resolution: "720p"},
+		{key: "kling", name: "native duration", model: "kling-v3", requestBody: map[string]any{"vendorBody": map[string]any{"duration": "10", "mode": "pro"}}, seconds: 10},
+		{key: "kling", name: "protocol metadata duration", model: "kling-v3", requestBody: map[string]any{"duration": 5, "metadata": map[string]any{"duration": "10"}}, seconds: 10},
+		{key: "kling", name: "4.0 protocol settings duration", model: "kling-4.0", requestBody: map[string]any{"metadata": map[string]any{"settings": map[string]any{"duration": 12}}}, seconds: 12},
+		{key: "kling", name: "4.0 native automatic duration", model: "kling-4.0", requestBody: map[string]any{"endpoint": "text-to-video", "vendorBody": map[string]any{"prompt": "waves"}}, seconds: 30},
+		{key: "vidu", name: "native duration", model: "viduq3-pro", requestBody: map[string]any{"action": "text_to_video", "vendorBody": map[string]any{"duration": 8, "resolution": "720p"}}, seconds: 8, resolution: "720p"},
+		{key: "doubao", name: "native duration", model: "doubao-seedance-1-0-pro-250528", requestBody: map[string]any{"vendorBody": map[string]any{"duration": 10}}, seconds: 10, resolution: "1080p"},
+		{key: "doubao", name: "native unreadable duration reserves maximum", model: "doubao-seedance-2-0-260128", requestBody: map[string]any{"vendorBody": map[string]any{"duration": true}}, seconds: 15},
 	}
 
 	for _, test := range tests {
-		t.Run(test.key, func(t *testing.T) {
+		t.Run(test.key+" "+test.name, func(t *testing.T) {
 			plugin := loadBuiltinTaskPlugin(t, test.key)
 			baseContext := map[string]any{
 				"requestBody":   test.requestBody,
@@ -71,6 +79,50 @@ func TestMigratedTaskPluginsPreservePerSecondBilling(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestJimengLegacyActionPreservesSubmitAndQuery(t *testing.T) {
+	plugin := loadBuiltinTaskPlugin(t, "jimeng")
+	value, err := plugin.Engine.CallPath(t.Context(), "native", []string{"legacyAction"}, map[string]any{
+		"query": map[string]any{"Action": []any{"CVSync2AsyncSubmitTask"}},
+		"body": map[string]any{"kind": "json", "value": map[string]any{
+			"req_key": "jimeng_ti2v_v30_pro", "prompt": "waves", "images": []any{"https://example.com/frame.png"}, "frames": 241,
+		}},
+	})
+	require.NoError(t, err)
+	decoded := pluginMap(t, value)
+	assert.Equal(t, "submit", decoded["kind"])
+	assert.Equal(t, "image_to_video", decoded["action"])
+	assert.Equal(t, "jimeng_ti2v_v30_pro", decoded["model"])
+	ctx := map[string]any{"requestBody": decoded["requestBody"], "upstreamModel": decoded["model"], "baseUrl": "https://example.com", "apiKey": "sk-test"}
+	value, err = plugin.Engine.Call(t.Context(), "buildSubmitRequest", ctx)
+	require.NoError(t, err)
+	descriptor := pluginMap(t, value)
+	var body map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(descriptor["body"].(string), &body))
+	assert.Equal(t, []any{"https://example.com/frame.png"}, body["image_urls"])
+	assert.Equal(t, float64(241), body["frames"])
+	value, err = plugin.Engine.Call(t.Context(), "extractUsage", ctx)
+	require.NoError(t, err)
+	assert.Equal(t, float64(10), pluginMap(t, value)["seconds"])
+
+	value, err = plugin.Engine.CallPath(t.Context(), "native", []string{"legacyAction"}, map[string]any{
+		"query": map[string]any{"Action": []any{"CVSync2AsyncGetResult"}},
+		"body":  map[string]any{"kind": "json", "value": map[string]any{"task_id": "task_public"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"kind": "query", "taskIds": []any{"task_public"}}, pluginMap(t, value))
+	value, err = plugin.Engine.CallPath(t.Context(), "native", []string{"legacyTask"}, map[string]any{}, []any{map[string]any{
+		"task_id": "task_public", "data": map[string]any{"code": 10000, "data": map[string]any{"task_id": "private", "status": "done"}},
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"code": float64(10000), "data": map[string]any{"task_id": "task_public", "status": "done"}}, pluginMap(t, value))
+
+	_, err = plugin.Engine.CallPath(t.Context(), "native", []string{"legacyAction"}, map[string]any{
+		"query": map[string]any{"Action": []any{"DeleteTask"}},
+		"body":  map[string]any{"kind": "json", "value": map[string]any{}},
+	})
+	require.ErrorContains(t, err, "unsupported Jimeng Action")
 }
 
 func TestVeoPluginsPreserveVeo31FrameAndReferenceInputs(t *testing.T) {

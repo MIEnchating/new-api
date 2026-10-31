@@ -16,11 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 import { ROLE } from '@/lib/roles'
+import { STATUS_QUERY_KEY } from '@/lib/status-query'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { updateUserSettings } from '../api'
@@ -347,6 +349,12 @@ describe('notifications a user receives', () => {
 })
 
 it('personal sidebar settings save the invoice choice independently of wallet visibility', async () => {
+  const client = new QueryClient()
+  client.setQueryData(STATUS_QUERY_KEY, {
+    SidebarModulesAdmin: JSON.stringify({
+      personal: { enabled: true, topup: true, invoices: true },
+    }),
+  })
   const initialAuth = useAuthStore.getState()
   useAuthStore.getState().auth.setUser({ id: 1, username: 'alice', role: 1 })
   vi.spyOn(api, 'get').mockResolvedValue({
@@ -359,7 +367,11 @@ it('personal sidebar settings save the invoice choice independently of wallet vi
     .spyOn(api, 'put')
     .mockResolvedValue({ data: { success: true } })
   try {
-    render(<SidebarModulesCard />)
+    render(
+      <QueryClientProvider client={client}>
+        <SidebarModulesCard />
+      </QueryClientProvider>
+    )
     const invoiceSwitch = await screen.findByRole('switch', {
       name: 'Invoice applications',
     })
@@ -383,6 +395,7 @@ it('personal sidebar settings save the invoice choice independently of wallet vi
       ).toBe(false)
     )
   } finally {
+    client.clear()
     useAuthStore.setState(initialAuth, true)
   }
 })
