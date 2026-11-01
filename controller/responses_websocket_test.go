@@ -59,12 +59,17 @@ func setupResponsesWSRequestTest(t *testing.T) (*model.User, *model.Token) {
 	t.Setenv("SQL_DSN", os.Getenv("TEST_RESPONSES_SQL_DSN"))
 	t.Setenv("LOG_SQL_DSN", os.Getenv("TEST_RESPONSES_LOG_SQL_DSN"))
 	common.IsMasterNode, common.MemoryCacheEnabled, common.RedisEnabled = false, false, false
-	common.SQLitePath = filepath.Join(t.TempDir(), "responses.db")
+	// These request tests need isolated SQL state, not filesystem durability.
+	common.SQLitePath = "file:" + filepath.Join(t.TempDir(), "responses.db") + "?mode=memory&cache=shared"
 	require.NoError(t, model.InitDB())
 	db := model.DB
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		// Keep the in-memory database alive until the fixture closes its pool.
+		sqlDB.SetConnMaxLifetime(0)
+	}
 	require.NoError(t, model.InitLogDB())
 	if model.LOG_DB != db {
 		logSQL, err := model.LOG_DB.DB()

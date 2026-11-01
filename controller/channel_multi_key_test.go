@@ -33,11 +33,15 @@ func setupMultiKeyManagementTest(t *testing.T) (*gorm.DB, *model.User) {
 	t.Setenv("SQL_DSN", os.Getenv("TEST_CHANNEL_SQL_DSN"))
 	t.Setenv("LOG_SQL_DSN", "")
 	common.IsMasterNode, common.MemoryCacheEnabled, common.RedisEnabled = false, false, false
-	common.SQLitePath = filepath.Join(t.TempDir(), "channel.db")
+	// These management tests need isolated SQL state, not filesystem durability.
+	common.SQLitePath = "file:" + filepath.Join(t.TempDir(), "channel.db") + "?mode=memory&cache=shared"
 	require.NoError(t, model.InitDB())
 	database := model.DB
 	sqlDB, err := database.DB()
 	require.NoError(t, err)
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		sqlDB.SetConnMaxLifetime(0)
+	}
 	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	model.LOG_DB = database
 	common.SetLogDatabaseType(common.MainDatabaseType())

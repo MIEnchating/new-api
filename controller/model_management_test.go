@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,7 +33,14 @@ import (
 
 func modelManagementDB(t *testing.T, kind, dsn string) *gorm.DB {
 	t.Helper()
-	database, isolatedDSN := newAuditTestDatabase(t, kind, dsn)
+	var isolatedDSN string
+	if kind == "sqlite" {
+		// Management behavior does not require the audit migration fixture's
+		// durable file or its extra database connection.
+		isolatedDSN = "file:" + filepath.Join(t.TempDir(), "models.db") + "?mode=memory&cache=shared"
+	} else {
+		_, isolatedDSN = newAuditTestDatabase(t, kind, dsn)
+	}
 	previousDB, previousLogDB := model.DB, model.LOG_DB
 	previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
 	previousMaster, previousSQLite := common.IsMasterNode, common.SQLitePath
@@ -62,7 +70,12 @@ func modelManagementDB(t *testing.T, kind, dsn string) *gorm.DB {
 	t.Setenv("SQL_DSN", isolatedDSN)
 	t.Setenv("LOG_SQL_DSN", "")
 	require.NoError(t, model.InitDB())
-	database = model.DB
+	database := model.DB
+	if kind == "sqlite" {
+		connection, err := database.DB()
+		require.NoError(t, err)
+		connection.SetConnMaxLifetime(0)
+	}
 	model.LOG_DB = database
 	require.NoError(t, database.AutoMigrate(&model.Model{}, &model.Vendor{}, &model.Channel{}, &model.Ability{}, &model.Option{}, &model.User{}, &model.AuditLog{}))
 	for _, value := range restoreRatios {
