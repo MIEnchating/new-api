@@ -148,11 +148,30 @@ func GetInvoiceSettings(c *gin.Context) {
 
 func SaveInvoiceSettings(c *gin.Context) {
 	var input struct {
-		MinimumAmount   *float64 `json:"minimum_amount"`
-		ApplicationDays *int     `json:"application_days"`
+		MinimumAmount   *float64  `json:"minimum_amount"`
+		ApplicationDays *int      `json:"application_days"`
+		CopyFields      *[]string `json:"copy_fields"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1024)
-	if c.ShouldBindJSON(&input) != nil || input.MinimumAmount == nil {
+	if c.ShouldBindJSON(&input) != nil {
+		common.ApiError(c, common.NewMessage("Invalid minimum invoice amount"))
+		return
+	}
+	// Copy preferences are saved independently so neither settings dialog can
+	// overwrite changes made by the other.
+	if input.CopyFields != nil {
+		if input.MinimumAmount != nil || input.ApplicationDays != nil {
+			common.ApiError(c, model.ErrInvoiceRequestInput)
+			return
+		}
+		if err := model.SaveInvoiceCopyFields(*input.CopyFields); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		common.ApiSuccess(c, nil)
+		return
+	}
+	if input.MinimumAmount == nil {
 		common.ApiError(c, common.NewMessage("Invalid minimum invoice amount"))
 		return
 	}

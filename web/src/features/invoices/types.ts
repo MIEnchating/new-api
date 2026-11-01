@@ -97,7 +97,11 @@ export interface InvoiceEmailTemplates {
   customer: InvoiceEmailTemplate
 }
 
+export type InvoiceCopyField =
+  (typeof import('./constants').invoiceCopyFields)[number]
+
 export interface InvoiceSettings {
+  copy_fields?: InvoiceCopyField[]
   application_days: number
   minimum_amount: number
 }

@@ -41,14 +41,18 @@ import { InvoiceProcessDialog } from './process-dialog'
 import { InvoiceRequestDetails } from './request-details'
 import { InvoiceSearchFields } from './search-fields'
 
-export function InvoiceRequestList(props: { admin: boolean }) {
+export function InvoiceRequestList(props: {
+  admin: boolean
+  defaultStatus?: 'pending' | ''
+}) {
   const { t, i18n } = useTranslation()
   const queryClient = useQueryClient()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const [draft, setDraft] = useState<InvoiceSearch>({})
   const [search, setSearch] = useState<InvoiceSearch>({})
+  const defaultStatus = props.defaultStatus ?? (props.admin ? 'pending' : '')
   const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>(
-    props.admin ? [{ id: 'status', value: ['pending'] }] : []
+    defaultStatus ? [{ id: 'status', value: [defaultStatus] }] : []
   )
   const status =
     (

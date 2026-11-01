@@ -16,45 +16,45 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
 
-import type { InvoiceRequest } from '../types'
+import { getInvoiceSettings } from '../api'
+import { invoiceCopyFields } from '../constants'
+import { invoiceCopyFieldLabels } from '../lib/copy-fields'
+import type { InvoiceCopyField, InvoiceRequest } from '../types'
 
 export function InvoiceCopyButton(props: { request: InvoiceRequest }) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const request = props.request
-  const invoiceDetails = [
-    [t('Invoice title'), request.title],
-    [
-      t('Invoice title type'),
-      request.title_type === 'company' ? t('Company') : t('Personal'),
-    ],
-    [t('Tax identification number'), request.tax_id],
-    [t('Invoice email'), request.email],
-    [t('Invoice address'), request.invoice_address],
-    [t('Invoice phone number'), request.invoice_phone],
-    [t('Bank name'), request.bank_name],
-    [t('Bank account number'), request.bank_account],
-    [
-      t('Invoice amount'),
-      formatNumber(
-        request.orders.reduce((total, order) => total + order.money, 0),
-        locale
-      ),
-    ],
-    [t('Remarks'), request.remark],
-  ]
-    .filter(([, value]) => value?.trim())
-    .map(([label, value]) => `${label}: ${value}`)
+  const settings = useQuery({
+    queryKey: ['invoices', 'settings'],
+    queryFn: getInvoiceSettings,
+    staleTime: 60_000,
+  })
+  const labels = invoiceCopyFieldLabels(t)
+  const values: Partial<Record<InvoiceCopyField, string>> = {
+    ...request,
+    title_type: request.title_type === 'company' ? t('Company') : t('Personal'),
+    amount: formatNumber(
+      request.orders.reduce((total, order) => total + order.money, 0),
+      locale
+    ),
+  }
+  const selected = settings.data?.copy_fields ?? invoiceCopyFields
+  const invoiceDetails = invoiceCopyFields
+    .filter((field) => selected.includes(field) && values[field]?.trim())
+    .map((field) => `${labels[field]}: ${values[field]}`)
     .join('\n')
   return (
     <CopyButton
       value={invoiceDetails}
+      disabled={!settings.data || settings.isError || !invoiceDetails}
       variant='outline'
       size='sm'
       aria-label={t('Copy invoice details')}

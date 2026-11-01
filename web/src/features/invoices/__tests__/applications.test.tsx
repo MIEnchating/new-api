@@ -27,6 +27,8 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { downloadInvoiceFile } from '../api'
 import { InvoiceApplicationForm } from '../components/application-form'
+import { InvoiceCopyButton } from '../components/copy-invoice-button'
+import { InvoiceCopySettingsDialog } from '../components/copy-settings'
 import { InvoiceEmailTemplatesDialog } from '../components/email-templates'
 import { InvoiceNotificationDialog } from '../components/notification-settings'
 import { InvoiceOrderPicker } from '../components/order-picker'
@@ -52,6 +54,18 @@ function renderInvoice(ui?: React.ReactNode, minimumAmount: number | null = 0) {
     client.setQueryData(['invoices', 'settings'], {
       minimum_amount: minimumAmount,
       application_days: 90,
+      copy_fields: [
+        'title',
+        'title_type',
+        'tax_id',
+        'email',
+        'invoice_address',
+        'invoice_phone',
+        'bank_name',
+        'bank_account',
+        'amount',
+        'remark',
+      ],
     })
   }
   clients.push(client)
@@ -1625,3 +1639,187 @@ it.each([false, true])(
     expect(success).not.toHaveBeenCalledWith('Invoice email sent')
   }
 )
+
+it('shows all users and statuses on the application page for an administrator', async () => {
+  useAuthStore.getState().auth.setUser({ id: 7, username: 'admin', role: 10 })
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        total: 1,
+        items: [
+          {
+            ...pending,
+            username: 'other-user',
+            display_name: 'Other Applicant',
+          },
+        ],
+      },
+    },
+  })
+  renderInvoice(<InvoicesPage />)
+  expect(await screen.findByText('Other Applicant')).toBeVisible()
+  expect(get).toHaveBeenCalledWith('/api/user/invoices', {
+    params: expect.objectContaining({ status: '' }),
+  })
+  expect(screen.getByRole('button', { name: 'Request invoice' })).toBeVisible()
+  expect(
+    screen.queryByRole('button', { name: 'Notification settings' })
+  ).not.toBeInTheDocument()
+})
+
+it('keeps ordinary users on their own application list', async () => {
+  useAuthStore.getState().auth.setUser({ id: 8, username: 'user', role: 1 })
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: { total: 1, items: [pending] } },
+  })
+  renderInvoice(<InvoicesPage />)
+  await screen.findByText('Example Company')
+  expect(get).toHaveBeenCalledWith('/api/user/invoices/self', expect.anything())
+  expect(get).not.toHaveBeenCalledWith('/api/user/invoices', expect.anything())
+})
+
+it('saves selected copy fields and applies them to list and drawer copy buttons', async () => {
+  const user = userEvent.setup()
+  const writeText = vi
+    .spyOn(navigator.clipboard, 'writeText')
+    .mockResolvedValue()
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+    data: {
+      success: true,
+      data:
+        url === '/api/user/invoices/settings'
+          ? {
+              minimum_amount: 1000,
+              application_days: 90,
+              copy_fields: ['title', 'tax_id'],
+            }
+          : { total: 1, items: [pending] },
+    },
+  }))
+  renderInvoice(<InvoicesPage admin />)
+  await user.click(screen.getByRole('button', { name: 'Copy settings' }))
+  const dialog = await screen.findByRole('dialog')
+  await user.click(within(dialog).getByRole('button', { name: 'Deselect all' }))
+  expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled()
+  await user.click(
+    within(dialog).getByRole('checkbox', { name: 'Invoice title' })
+  )
+  await user.click(
+    within(dialog).getByRole('checkbox', { name: 'Tax identification number' })
+  )
+  await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(put).toHaveBeenCalledWith('/api/user/invoices/settings', {
+      copy_fields: ['title', 'tax_id'],
+    })
+  )
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
+  await user.click(
+    await screen.findByRole('button', { name: 'Copy invoice details' })
+  )
+  expect(writeText).toHaveBeenLastCalledWith(
+    'Invoice title: Example Company\nTax identification number: TAX123'
+  )
+  await user.click(screen.getByRole('button', { name: 'View details' }))
+  await user.click(
+    within(await screen.findByRole('dialog')).getByRole('button', {
+      name: 'Copy invoice details',
+    })
+  )
+  expect(writeText).toHaveBeenLastCalledWith(
+    'Invoice title: Example Company\nTax identification number: TAX123'
+  )
+})
+
+it('keeps copy settings open when saving fails and discards cancelled edits', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(toast, 'error').mockReturnValue(1)
+  vi.spyOn(api, 'put').mockResolvedValue({
+    data: { success: false, message: 'Save failed' },
+  })
+  renderInvoice(<InvoiceCopySettingsDialog />)
+  await user.click(screen.getByRole('button', { name: 'Copy settings' }))
+  let dialog = await screen.findByRole('dialog')
+  await user.click(
+    within(dialog).getByRole('checkbox', { name: 'Invoice email' })
+  )
+  await user.click(within(dialog).getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(toast.error).toHaveBeenCalled())
+  expect(dialog).toBeVisible()
+  await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+  await user.click(screen.getByRole('button', { name: 'Copy settings' }))
+  dialog = await screen.findByRole('dialog')
+  expect(
+    within(dialog).getByRole('checkbox', { name: 'Invoice email' })
+  ).toBeChecked()
+})
+
+it('restores saved field selections when the copy settings dialog is opened', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        minimum_amount: 1000,
+        application_days: 90,
+        copy_fields: ['title', 'tax_id'],
+      },
+    },
+  })
+  renderInvoice(<InvoiceCopySettingsDialog />, null)
+  await user.click(screen.getByRole('button', { name: 'Copy settings' }))
+  expect(
+    await screen.findByRole('checkbox', { name: 'Tax identification number' })
+  ).toBeChecked()
+  expect(
+    screen.getByRole('checkbox', { name: 'Invoice email' })
+  ).not.toBeChecked()
+})
+
+it('disables copying when settings fail to load instead of copying unselected fields', async () => {
+  const user = userEvent.setup()
+  const writeText = vi
+    .spyOn(navigator.clipboard, 'writeText')
+    .mockResolvedValue()
+  const get = vi
+    .spyOn(api, 'get')
+    .mockRejectedValue(new Error('Settings unavailable'))
+  renderInvoice(<InvoiceCopyButton request={pending} />, null)
+  const button = screen.getByRole('button', { name: 'Copy invoice details' })
+  expect(button).toBeDisabled()
+  await waitFor(() => expect(get).toHaveBeenCalled())
+  await user.click(button)
+  expect(writeText).not.toHaveBeenCalled()
+  expect(button).toBeDisabled()
+})
+
+it('does not overwrite the clipboard when all selected invoice fields are empty', async () => {
+  const user = userEvent.setup()
+  const writeText = vi
+    .spyOn(navigator.clipboard, 'writeText')
+    .mockResolvedValue()
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        minimum_amount: 1000,
+        application_days: 90,
+        copy_fields: ['bank_name'],
+      },
+    },
+  })
+  renderInvoice(<InvoiceCopyButton request={pending} />, null)
+  await waitFor(() =>
+    expect(clients[0].getQueryData(['invoices', 'settings'])).toBeDefined()
+  )
+  const button = screen.getByRole('button', { name: 'Copy invoice details' })
+  expect(button).toBeDisabled()
+  await user.click(button)
+  expect(writeText).not.toHaveBeenCalled()
+})

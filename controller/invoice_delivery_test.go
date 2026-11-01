@@ -600,6 +600,13 @@ func TestInvoiceSettingsAPI(t *testing.T) {
 		{`{"minimum_amount":1500.50,"application_days":1.5}`, false},
 		{`{"minimum_amount":1500.50,"application_days":-1}`, false},
 		{`{"minimum_amount":1500.50,"application_days":180}`, true},
+		{`{"copy_fields":[]}`, false},
+		{`{"copy_fields":["unknown"]}`, false},
+		{`{"copy_fields":["title","title"]}`, false},
+		{`{"copy_fields":["title",123]}`, false},
+		{`{"copy_fields":null}`, false},
+		{`{"copy_fields":["title"],"minimum_amount":500,"application_days":30}`, false},
+		{`{"copy_fields":["title","tax_id"]}`, true},
 	} {
 		response := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(response)
@@ -623,4 +630,5 @@ func TestInvoiceSettingsAPI(t *testing.T) {
 	assert.True(t, result.Success)
 	assert.Equal(t, 1500.50, result.Data.MinimumAmount)
 	assert.Equal(t, 180, result.Data.ApplicationDays)
+	assert.Equal(t, []string{"title", "tax_id"}, result.Data.CopyFields)
 }

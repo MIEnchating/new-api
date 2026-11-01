@@ -22,8 +22,11 @@ import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { InvoiceApplicationForm } from './components/application-form'
+import { InvoiceCopySettingsDialog } from './components/copy-settings'
 import { InvoiceEmailTemplatesDialog } from './components/email-templates'
 import { InvoiceNotificationDialog } from './components/notification-settings'
 import { InvoiceRequestList } from './components/request-list'
@@ -31,6 +34,8 @@ import { InvoiceSettingsDialog } from './components/settings'
 
 export function InvoicesPage(props: { admin?: boolean }) {
   const { t } = useTranslation()
+  const user = useAuthStore((state) => state.auth.user)
+  const viewAll = Boolean(props.admin) || (user?.role ?? 0) >= ROLE.ADMIN
   const [applying, setApplying] = useState(false)
   return (
     <SectionPageLayout fixedContent>
@@ -41,6 +46,7 @@ export function InvoicesPage(props: { admin?: boolean }) {
         {props.admin && <InvoiceSettingsDialog />}
         {props.admin && <InvoiceEmailTemplatesDialog />}
         {props.admin && <InvoiceNotificationDialog />}
+        {props.admin && <InvoiceCopySettingsDialog />}
         {!props.admin && (
           <InvoiceApplicationForm
             open={applying}
@@ -56,7 +62,11 @@ export function InvoicesPage(props: { admin?: boolean }) {
         )}
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        <InvoiceRequestList admin={Boolean(props.admin)} />
+        <InvoiceRequestList
+          key={viewAll ? 'all' : 'self'}
+          admin={viewAll}
+          defaultStatus={props.admin ? 'pending' : ''}
+        />
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

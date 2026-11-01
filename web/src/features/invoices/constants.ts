@@ -35,3 +35,16 @@ export const invoiceStatusIcons = {
   rejected: CircleX,
   withdrawn: Undo2,
 } as const
+
+export const invoiceCopyFields = [
+  'title',
+  'title_type',
+  'tax_id',
+  'email',
+  'invoice_address',
+  'invoice_phone',
+  'bank_name',
+  'bank_account',
+  'amount',
+  'remark',
+] as const

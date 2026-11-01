@@ -169,6 +169,28 @@ func TestInvoiceRequestDatabase(t *testing.T) {
 					require.NoError(t, err)
 					assert.Equal(t, 1000.0, invoiceSettings.MinimumAmount)
 					assert.Equal(t, 90, invoiceSettings.ApplicationDays)
+					t.Run("copy fields persist independently and reject invalid selections", func(t *testing.T) {
+						assert.Contains(t, invoiceSettings.CopyFields, "title")
+						require.NoError(t, SaveInvoiceCopyFields([]string{"title", "tax_id", "amount"}))
+						for _, fields := range [][]string{nil, {}, {"unknown"}, {"title", "title"}} {
+							require.Error(t, SaveInvoiceCopyFields(fields))
+						}
+						require.Error(t, UpdateOptionsBulk(map[string]string{InvoiceCopyFieldsOption: `[]`}))
+						settings, err := GetInvoiceSettings()
+						require.NoError(t, err)
+						assert.Equal(t, []string{"title", "tax_id", "amount"}, settings.CopyFields)
+						assert.Equal(t, 1000.0, settings.MinimumAmount)
+						assert.Equal(t, 90, settings.ApplicationDays)
+						require.NoError(t, SaveInvoiceSettings(InvoiceSettings{MinimumAmount: 2000, ApplicationDays: 30}))
+						settings, err = GetInvoiceSettings()
+						require.NoError(t, err)
+						assert.Equal(t, []string{"title", "tax_id", "amount"}, settings.CopyFields)
+						require.NoError(t, SaveInvoiceCopyFields([]string{"email"}))
+						settings, err = GetInvoiceSettings()
+						require.NoError(t, err)
+						assert.Equal(t, []string{"email"}, settings.CopyFields)
+						assert.Equal(t, 2000.0, settings.MinimumAmount)
+					})
 					// The existing lifecycle cases use a small configurable minimum.
 					require.NoError(t, SaveInvoiceSettings(InvoiceSettings{MinimumAmount: 1}))
 

@@ -198,10 +198,37 @@ func LoadInvoiceEmailHistory(requests []InvoiceRequest) error {
 
 const InvoiceMinimumAmountOption = "InvoiceMinimumAmount"
 const InvoiceApplicationDaysOption = "InvoiceApplicationDays"
+const InvoiceCopyFieldsOption = "InvoiceCopyFields"
+
+var defaultInvoiceCopyFields = []string{"title", "title_type", "tax_id", "email", "invoice_address", "invoice_phone", "bank_name", "bank_account", "amount", "remark"}
+
+func parseInvoiceCopyFields(value string) ([]string, error) {
+	var fields []string
+	if common.UnmarshalJsonStr(value, &fields) != nil || len(fields) == 0 || len(fields) > len(defaultInvoiceCopyFields) {
+		return nil, common.NewMessage("Select at least one valid invoice copy field")
+	}
+	seen := make(map[string]bool, len(fields))
+	for _, field := range fields {
+		if !slices.Contains(defaultInvoiceCopyFields, field) || seen[field] {
+			return nil, common.NewMessage("Select at least one valid invoice copy field")
+		}
+		seen[field] = true
+	}
+	return fields, nil
+}
+
+func SaveInvoiceCopyFields(fields []string) error {
+	value, err := common.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	return UpdateOptionsBulk(map[string]string{InvoiceCopyFieldsOption: string(value)})
+}
 
 type InvoiceSettings struct {
-	MinimumAmount   float64 `json:"minimum_amount"`
-	ApplicationDays int     `json:"application_days"`
+	MinimumAmount   float64  `json:"minimum_amount"`
+	ApplicationDays int      `json:"application_days"`
+	CopyFields      []string `json:"copy_fields"`
 }
 
 func parseInvoiceMinimumAmount(value string) (float64, error) {
@@ -225,9 +252,9 @@ func parseInvoiceApplicationDays(value string) (int, error) {
 }
 
 func GetInvoiceSettings() (*InvoiceSettings, error) {
-	settings := &InvoiceSettings{MinimumAmount: 1000, ApplicationDays: 90}
+	settings := &InvoiceSettings{MinimumAmount: 1000, ApplicationDays: 90, CopyFields: slices.Clone(defaultInvoiceCopyFields)}
 	var options []Option
-	if err := DB.Where(map[string]any{"key": []string{InvoiceMinimumAmountOption, InvoiceApplicationDaysOption}}).Find(&options).Error; err != nil {
+	if err := DB.Where(map[string]any{"key": []string{InvoiceMinimumAmountOption, InvoiceApplicationDaysOption, InvoiceCopyFieldsOption}}).Find(&options).Error; err != nil {
 		return nil, err
 	}
 	for _, option := range options {
@@ -237,6 +264,8 @@ func GetInvoiceSettings() (*InvoiceSettings, error) {
 			settings.MinimumAmount, err = parseInvoiceMinimumAmount(option.Value)
 		case InvoiceApplicationDaysOption:
 			settings.ApplicationDays, err = parseInvoiceApplicationDays(option.Value)
+		case InvoiceCopyFieldsOption:
+			settings.CopyFields, err = parseInvoiceCopyFields(option.Value)
 		}
 		if err != nil {
 			return nil, err

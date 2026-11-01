@@ -245,6 +245,10 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == InvoiceCopyFieldsOption {
+		_, err := parseInvoiceCopyFields(value)
+		return err
+	}
 	if key == InvoiceApplicationDaysOption {
 		_, err := parseInvoiceApplicationDays(value)
 		return err

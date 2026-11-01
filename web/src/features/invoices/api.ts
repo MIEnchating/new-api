@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { api } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
+import { invoiceCopyFields } from './constants'
 import type { InvoiceApplication } from './lib/schema'
 import type {
   EligibleInvoiceOrder,
@@ -32,6 +33,7 @@ import type {
   InvoiceEmailTemplate,
   InvoiceEmailTemplates,
   InvoiceSettings,
+  InvoiceCopyField,
 } from './types'
 
 interface Response<T> {
@@ -202,13 +204,32 @@ export async function getInvoiceSettings(): Promise<InvoiceSettings> {
   ) {
     throw new Error('Invalid minimum invoice amount')
   }
+  if (
+    settings.copy_fields !== undefined &&
+    (!Array.isArray(settings.copy_fields) ||
+      settings.copy_fields.length === 0 ||
+      settings.copy_fields.some((field) => !invoiceCopyFields.includes(field)))
+  ) {
+    throw new Error('Select at least one valid invoice copy field')
+  }
   return settings
 }
 
 export async function saveInvoiceSettings(input: InvoiceSettings) {
   const response = await api.put<Response<null>>(
     '/api/user/invoices/settings',
-    input
+    {
+      minimum_amount: input.minimum_amount,
+      application_days: input.application_days,
+    }
+  )
+  requireServerSuccess(response.data)
+}
+
+export async function saveInvoiceCopyFields(copy_fields: InvoiceCopyField[]) {
+  const response = await api.put<Response<null>>(
+    '/api/user/invoices/settings',
+    { copy_fields }
   )
   requireServerSuccess(response.data)
 }
