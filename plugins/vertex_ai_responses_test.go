@@ -2,9 +2,12 @@ package plugins_test
 
 import (
 	"encoding/base64"
+	"maps"
+	"slices"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	builtinplugins "github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/relay"
@@ -51,7 +54,7 @@ func TestVertexAIResponsesProtocol(t *testing.T) {
 			require.True(t, exists, key)
 			assert.NotEmpty(t, schema.Description, key)
 		}
-		assert.Equal(t, []string{"360p", "720p", "1080p", "4k"}, plugin.Meta.UsageSchema["resolution"].Enum)
+		assert.Equal(t, []string{"720p", "1080p", "4k"}, plugin.Meta.UsageSchema["resolution"].Enum)
 		assert.Equal(t, "boolean", plugin.Meta.UsageSchema["generate_audio"].Type)
 	})
 
@@ -459,7 +462,72 @@ func TestVertexAIOmniUsageAndVideoDecoder(t *testing.T) {
 	const omni = "gemini-omni-1.1-flash-preview"
 	usage, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{"upstreamModel": omni, "requestBody": map[string]any{"prompt": "x", "size": "1920x1080"}})
 	require.NoError(t, err)
-	assert.Equal(t, map[string]any{"seconds": float64(8), "resolution": "1080p", "generate_audio": true}, decodePluginValue(t, usage))
+	facts := decodePluginValue(t, usage)
+	assert.Equal(t, map[string]any{"seconds": float64(8), "resolution": "1080p", "generate_audio": true, "input_tokens": float64(0), "output_tokens": float64(0), "video_tokens": float64(8 * 8688)}, facts)
+	ratios, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{"upstreamModel": omni, "usagePurpose": "billing_ratios", "requestBody": map[string]any{"size": "1920x1080"}})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"seconds": float64(8), "resolution": "1080p", "generate_audio": true}, decodePluginValue(t, ratios), "token quantities must not multiply existing legacy prices")
+	schema, _ := plugin.Meta.UsageForModel(omni)
+	assert.ElementsMatch(t, []string{"input_tokens", "output_tokens", "video_tokens"}, slices.Collect(maps.Keys(schema)))
+
+	// Thinking is billed as text output.
+	completed, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": omni}, map[string]any{}, map[string]any{
+		"usage": map[string]any{
+			"total_input_tokens": 12, "total_thought_tokens": 40,
+			"output_tokens_by_modality": []any{map[string]any{"modality": "VIDEO", "tokens": 5793}, map[string]any{"modality": "text", "tokens": 7}},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"input_tokens": float64(12), "output_tokens": float64(47), "video_tokens": float64(5793)}, decodePluginValue(t, completed))
+	settled := maps.Clone(facts)
+	maps.Copy(settled, decodePluginValue(t, completed))
+	for _, tc := range []struct {
+		name, expression  string
+		reserved, settled float64
+	}{
+		{"legacy duration and resolution", `u("resolution") == "1080p" && u("generate_audio") ? tier("audio", u("seconds") * 0.5) : tier("other", u("seconds") * 0.25)`, 4, 4},
+		{"reported tokens", `tier("tokens", (u("input_tokens") * 2 + u("output_tokens") * 3 + u("video_tokens") * 4) / 1000000)`, 0.278016, 0.023337},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reserved, _, err := billingexpr.RunExprWithRequest(tc.expression, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
+			require.NoError(t, err)
+			assert.InDelta(t, tc.reserved, reserved, 1e-9)
+			actual, _, err := billingexpr.RunExprWithRequest(tc.expression, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: settled})
+			require.NoError(t, err)
+			assert.InDelta(t, tc.settled, actual, 1e-9)
+		})
+	}
+	for _, tc := range []struct {
+		name    string
+		usage   map[string]any
+		want    map[string]any
+		invalid bool
+	}{
+		{name: "null totals are unreported", usage: map[string]any{"total_input_tokens": nil, "total_thought_tokens": nil}, want: map[string]any{}},
+		{name: "explicit zero remains measured", usage: map[string]any{"total_input_tokens": 0, "total_thought_tokens": 0, "output_tokens_by_modality": []any{map[string]any{"modality": "video", "tokens": 0}}}, want: map[string]any{"input_tokens": float64(0), "output_tokens": float64(0), "video_tokens": float64(0)}},
+		{name: "audio and video share the video rate", usage: map[string]any{"output_tokens_by_modality": []any{map[string]any{"modality": "video", "tokens": 10}, map[string]any{"modality": "audio", "tokens": 4}}}, want: map[string]any{"video_tokens": float64(14)}},
+		{name: "null video count cannot refund reservation", usage: map[string]any{"output_tokens_by_modality": []any{map[string]any{"modality": "video", "tokens": nil}}}, invalid: true},
+		{name: "missing video count cannot refund reservation", usage: map[string]any{"output_tokens_by_modality": []any{map[string]any{"modality": "video"}}}, invalid: true},
+		{name: "negative counts cannot cancel valid counts", usage: map[string]any{"output_tokens_by_modality": []any{map[string]any{"modality": "video", "tokens": 10}, map[string]any{"modality": "audio", "tokens": -10}}}, invalid: true},
+		{name: "malformed total", usage: map[string]any{"total_input_tokens": "invalid"}, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": omni}, map[string]any{}, map[string]any{"usage": tc.usage})
+			if tc.invalid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, decodePluginValue(t, value))
+		})
+	}
+	// Unreported facts are omitted so the host keeps the submit estimate.
+	partial, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": omni}, map[string]any{}, map[string]any{"usage": map[string]any{"total_input_tokens": 12}})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"input_tokens": float64(12)}, decodePluginValue(t, partial))
+	veo, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": "veo-3.0-generate-001"}, map[string]any{}, map[string]any{"done": true})
+	require.NoError(t, err)
+	assert.Nil(t, veo)
 
 	decoded, err := plugin.Engine.CallPath(t.Context(), "protocols", []string{"openai_video", "decodeRequest"}, map[string]any{
 		"model": "omni-alias", "upstreamModel": omni,
