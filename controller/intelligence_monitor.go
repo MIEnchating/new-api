@@ -319,7 +319,14 @@ func GetIntelligenceResults(c *gin.Context) {
 		common.ApiErrorT(c, "Intelligence test request failed")
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"history": history}})
+	config := getIntelligenceConfig()
+	groupOrder := make([]string, 0, len(config.Groups))
+	for _, group := range config.Groups {
+		if group.Group != "" {
+			groupOrder = append(groupOrder, group.Group)
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"history": history, "group_order": groupOrder}})
 }
 
 func UpdateIntelligenceMonitor(c *gin.Context) {

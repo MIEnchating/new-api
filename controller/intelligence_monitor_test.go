@@ -160,6 +160,16 @@ func TestIntelligenceCatalogGroupOrder(t *testing.T) {
 			assert.Equal(t, tc.want, response.Data.GroupOrder)
 		})
 	}
+	common.OptionMap[intelligenceOptionKey] = `{"groups":[{"group":"other"},{"group":"vip"},{"group":"default"}],"questions":[{"name":"private","prompt":"private prompt"}]}`
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/status-monitor/intelligence/results", nil)
+	GetIntelligenceResults(c)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.True(t, gjson.GetBytes(recorder.Body.Bytes(), "success").Bool())
+	assert.JSONEq(t, `["other","vip","default"]`, gjson.GetBytes(recorder.Body.Bytes(), "data.group_order").Raw)
+	assert.NotContains(t, recorder.Body.String(), "private prompt")
+
 }
 
 // Uses real engines and isolated databases; no production tables are touched.

@@ -169,9 +169,9 @@ export const intelligenceResultsQueryKey = [
 ]
 
 export async function getIntelligenceResults() {
-  const response = await api.get<Response<{ history: IntelligenceTask[] }>>(
-    `${endpoint}/results`
-  )
+  const response = await api.get<
+    Response<{ history: IntelligenceTask[]; group_order?: string[] }>
+  >(`${endpoint}/results`)
   return requireServerSuccess(response.data).data
 }
 

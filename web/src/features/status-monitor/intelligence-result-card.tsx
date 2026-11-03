@@ -20,7 +20,9 @@ import { Clock3, Cpu } from 'lucide-react'
 import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { ErrorState } from '@/components/error-state'
 import { GroupBadge } from '@/components/group-badge'
+import { LoadingState } from '@/components/loading-state'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
@@ -69,7 +71,7 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
       data-card-hover='false'
       className='min-w-0 gap-0 overflow-hidden border py-0 ring-0'
     >
-      <CardHeader className='gap-2 px-4 py-3'>
+      <CardHeader className='h-28 shrink-0 content-start gap-2 px-4 py-3'>
         <div className='flex min-w-0 items-start justify-between gap-3'>
           <CardTitle className='min-w-0 flex-1'>
             <Badge
@@ -82,7 +84,7 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
                 aria-hidden='true'
                 className='text-muted-foreground shrink-0'
               />
-              <span className='break-all whitespace-normal'>{props.model}</span>
+              <span className='truncate'>{props.model}</span>
             </Badge>
           </CardTitle>
           <Badge
@@ -92,36 +94,34 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
             {statusLabel}
           </Badge>
         </div>
-        {(props.showGroup || questionName) && (
-          <div className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
-            {props.showGroup && (
-              <Button
-                variant='ghost'
-                size='sm'
-                aria-label={t('Filter by group {{group}}', {
-                  group: groupLabel,
-                })}
-                className='h-auto min-h-6 max-w-full min-w-0 justify-start rounded-md p-0'
-                onClick={() => props.onGroupSelect(props.group)}
-              >
-                <GroupBadge
-                  group={props.group}
-                  label={groupLabel}
-                  aria-label={`${t('Group')}: ${groupLabel}`}
-                />
-              </Button>
-            )}
-            {questionName && (
-              <span
-                className='text-muted-foreground min-w-0 flex-1 basis-28 truncate text-xs'
-                title={questionName}
-              >
-                {questionName}
-              </span>
-            )}
-          </div>
-        )}
-        <div className='text-muted-foreground flex min-w-0 flex-wrap items-center justify-between gap-2 text-xs tabular-nums'>
+        <div className='flex h-6 min-w-0 items-center gap-2'>
+          {props.showGroup && (
+            <Button
+              variant='ghost'
+              size='sm'
+              aria-label={t('Filter by group {{group}}', {
+                group: groupLabel,
+              })}
+              className='h-auto min-h-6 max-w-full min-w-0 justify-start rounded-md p-0'
+              onClick={() => props.onGroupSelect(props.group)}
+            >
+              <GroupBadge
+                group={props.group}
+                label={groupLabel}
+                aria-label={`${t('Group')}: ${groupLabel}`}
+              />
+            </Button>
+          )}
+          {questionName && (
+            <span
+              className='text-muted-foreground min-w-0 flex-1 truncate text-xs'
+              title={questionName}
+            >
+              {questionName}
+            </span>
+          )}
+        </div>
+        <div className='text-muted-foreground flex min-w-0 items-center justify-between gap-2 text-xs tabular-nums'>
           <time dateTime={date.toISOString()} title={dateLabel}>
             {date.toLocaleString(locale, {
               month: '2-digit',
@@ -153,7 +153,46 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
             </span>
           )}
         </div>
-        {!props.channel && (active || percent !== null) && (
+      </CardHeader>
+      <div
+        data-slot='intelligence-card-content'
+        aria-busy={active}
+        className='bg-muted/30 relative aspect-[6/5] shrink-0 overflow-hidden border-t'
+      >
+        {props.channel && !error ? (
+          <div className='absolute inset-0 overflow-hidden'>
+            <IntelligencePreview
+              taskId={props.task.task_id}
+              channelId={props.channel.channel_id}
+              group={props.channel.group}
+              model={props.channel.model}
+              questionIndex={props.channel.question_index}
+              label={`${groupLabel} · ${props.model} · ${questionName}`}
+            />
+          </div>
+        ) : (
+          <div
+            className='absolute inset-0 flex flex-col overflow-auto p-4 pb-10'
+            role={error ? 'alert' : undefined}
+          >
+            {active && !error ? (
+              <LoadingState message={statusLabel} className='min-h-0 flex-1' />
+            ) : (
+              <div className='my-auto'>
+                <ErrorState
+                  title={
+                    error
+                      ? t('Failed')
+                      : t('Intelligence test returned no output')
+                  }
+                  description={error ? t(error) : undefined}
+                  className='min-h-0 gap-2 p-0 [overflow-wrap:anywhere] [&_[data-slot=empty-description]]:text-xs'
+                />
+              </div>
+            )}
+          </div>
+        )}
+        {!props.channel && !error && (active || percent !== null) && (
           <Progress
             value={
               props.status === 'running' && (percent === null || percent === 0)
@@ -161,28 +200,10 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
                 : (percent ?? 0)
             }
             aria-label={`${t('Progress')}: ${props.group} · ${props.model}`}
-            className='[&_[data-slot=progress-indicator][data-indeterminate]]:w-1/3 [&_[data-slot=progress-indicator][data-indeterminate]]:motion-safe:animate-[intelligence-progress_1.4s_ease-in-out_infinite_alternate] [&_[data-slot=progress-track]]:h-1.5'
+            className='absolute inset-x-4 bottom-4 [&_[data-slot=progress-indicator][data-indeterminate]]:w-1/3 [&_[data-slot=progress-indicator][data-indeterminate]]:motion-safe:animate-[intelligence-progress_1.4s_ease-in-out_infinite_alternate] [&_[data-slot=progress-track]]:h-1.5'
           />
         )}
-      </CardHeader>
-      {error ? (
-        <p
-          role='alert'
-          className='text-destructive bg-destructive/5 border-t px-4 py-3 text-xs break-words'
-        >
-          {t(error)}
-        </p>
-      ) : null}
-      {props.channel && !error && (
-        <IntelligencePreview
-          taskId={props.task.task_id}
-          channelId={props.channel.channel_id}
-          group={props.channel.group}
-          model={props.channel.model}
-          questionIndex={props.channel.question_index}
-          label={`${groupLabel} · ${props.model} · ${questionName}`}
-        />
-      )}
+      </div>
     </Card>
   )
 })

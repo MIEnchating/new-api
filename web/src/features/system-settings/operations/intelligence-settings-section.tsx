@@ -25,6 +25,7 @@ import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { GroupOrderControls } from '@/components/auto-group-order-item'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
@@ -275,6 +276,23 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                       title={
                         selectedGroups[index].group ||
                         t('Test group {{number}}', { number: index + 1 })
+                      }
+                      action={
+                        <GroupOrderControls
+                          group={
+                            selectedGroups[index].group ||
+                            t('Test group {{number}}', { number: index + 1 })
+                          }
+                          index={index}
+                          count={groups.fields.length}
+                          disabled={pending}
+                          onMove={(direction) =>
+                            groups.move(
+                              index,
+                              index + (direction === 'up' ? -1 : 1)
+                            )
+                          }
+                        />
                       }
                       className='min-w-0 border shadow-none ring-0'
                       headerClassName='bg-muted/30 px-4 py-3! sm:px-5'

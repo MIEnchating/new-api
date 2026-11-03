@@ -1353,12 +1353,16 @@ it('separates running models and displays their own progress independently', asy
       .getByLabelText('Model: slow-model')
       .closest('[data-slot=card]') as HTMLElement
     expect(fast).not.toBe(slow)
-    expect(within(fast).getByText('Completed')).toBeVisible()
+    expect(
+      within(fast).getByText('Completed', { selector: '[data-slot=badge]' })
+    ).toBeVisible()
     expect(within(fast).getByRole('progressbar')).toHaveAttribute(
       'aria-valuenow',
       '100'
     )
-    expect(within(slow).getByText('Running')).toBeVisible()
+    expect(
+      within(slow).getByText('Running', { selector: '[data-slot=badge]' })
+    ).toBeVisible()
     expect(within(slow).getByRole('progressbar')).not.toHaveAttribute(
       'aria-valuenow'
     )
@@ -1460,7 +1464,9 @@ it('shows finished model previews while another model runs and fetches its resul
     const slow = screen
       .getByLabelText('Model: slow-model')
       .closest('[data-slot=card]') as HTMLElement
-    expect(within(slow).getByText('Running')).toBeVisible()
+    expect(
+      within(slow).getByText('Running', { selector: '[data-slot=badge]' })
+    ).toBeVisible()
     expect(within(slow).getByRole('progressbar')).not.toHaveAttribute(
       'aria-valuenow'
     )
@@ -1734,7 +1740,9 @@ it.each([
       expect(within(badge).getByText(label)).toHaveClass('truncate')
       const card = badge.closest('[data-slot=card]') as HTMLElement
       expect(within(card).getByLabelText('Model: test-model')).toBeVisible()
-      expect(within(card).getByText('Pending')).toBeVisible()
+      expect(
+        within(card).getByText('Pending', { selector: '[data-slot=badge]' })
+      ).toBeVisible()
     } finally {
       view.unmount()
       client.clear()
@@ -1997,5 +2005,78 @@ it('stops downloading completed previews while a batch runs and fetches newly co
     view.unmount()
     client.clear()
     vi.useRealTimers()
+  }
+})
+
+it('moves test groups with named controls and saves their order without losing settings', async () => {
+  const data: IntelligenceMonitorData = {
+    config: {
+      groups: [
+        {
+          group: 'default',
+          models: ['first'],
+          endpoint: 'openai',
+          enabled: false,
+          times: ['09:00'],
+          question_indexes: [0],
+        },
+        {
+          group: 'vip',
+          models: ['second'],
+          endpoint: 'openai-response',
+          enabled: true,
+          times: ['12:00'],
+          question_indexes: [0],
+        },
+      ],
+      questions: [{ name: 'Pelican', prompt: 'Draw a pelican' }],
+    },
+    catalog: { default: ['first'], vip: ['second'] },
+    history: [],
+  }
+  const put = vi.spyOn(api, 'put').mockImplementation(async (_url, config) => ({
+    data: { success: true, data: config },
+  }))
+  const client = new QueryClient()
+  const actions = document.createElement('div')
+  document.body.append(actions)
+  const view = render(
+    <QueryClientProvider client={client}>
+      <SettingsPageProvider actionsContainer={actions}>
+        <IntelligenceSettings data={data} />
+      </SettingsPageProvider>
+    </QueryClientProvider>
+  )
+  const user = userEvent.setup()
+  try {
+    expect(
+      screen.getByRole('button', { name: 'Move default up' })
+    ).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Move vip down' })).toBeDisabled()
+    screen.getByRole('button', { name: 'Move vip up' }).focus()
+    await user.keyboard('{Enter}')
+    expect(
+      screen
+        .getAllByRole('combobox', { name: 'Model Group' })
+        .map((el) => el.textContent)
+    ).toEqual(['vip', 'default'])
+    expect(screen.getByRole('button', { name: 'Move vip up' })).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: 'Run all groups' })
+    ).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    expect(put.mock.calls[0][1]).toMatchObject({
+      groups: [data.config.groups[1], data.config.groups[0]],
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Run all groups' })
+      ).toBeEnabled()
+    )
+  } finally {
+    view.unmount()
+    actions.remove()
+    client.clear()
   }
 })

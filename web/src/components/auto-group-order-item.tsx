@@ -89,34 +89,12 @@ export function AutoGroupOrderItem(props: AutoGroupOrderItemProps) {
         {props.children}
       </div>
       <div className='flex shrink-0 gap-1'>
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon-sm'
-          disabled={props.index === 0}
-          aria-label={t('Move {{group}} up', { group: props.group })}
-          onClick={() => props.onMove(props.index, 'up')}
-        >
-          <HugeiconsIcon
-            icon={ArrowUp01Icon}
-            strokeWidth={2}
-            aria-hidden='true'
-          />
-        </Button>
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon-sm'
-          disabled={props.index === props.count - 1}
-          aria-label={t('Move {{group}} down', { group: props.group })}
-          onClick={() => props.onMove(props.index, 'down')}
-        >
-          <HugeiconsIcon
-            icon={ArrowDown01Icon}
-            strokeWidth={2}
-            aria-hidden='true'
-          />
-        </Button>
+        <GroupOrderControls
+          group={props.group}
+          index={props.index}
+          count={props.count}
+          onMove={(direction) => props.onMove(props.index, direction)}
+        />
         <Button
           type='button'
           variant='ghost'
@@ -132,5 +110,48 @@ export function AutoGroupOrderItem(props: AutoGroupOrderItemProps) {
         </Button>
       </div>
     </Reorder.Item>
+  )
+}
+
+// Shared by compact order rows and full group settings cards.
+export function GroupOrderControls(props: {
+  group: string
+  index: number
+  count: number
+  disabled?: boolean
+  onMove: (direction: 'up' | 'down') => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className='flex shrink-0 gap-1'>
+      <Button
+        type='button'
+        variant='ghost'
+        size='icon-sm'
+        disabled={props.disabled || props.index === 0}
+        aria-label={t('Move {{group}} up', { group: props.group })}
+        onClick={() => props.onMove('up')}
+      >
+        <HugeiconsIcon
+          icon={ArrowUp01Icon}
+          strokeWidth={2}
+          aria-hidden='true'
+        />
+      </Button>
+      <Button
+        type='button'
+        variant='ghost'
+        size='icon-sm'
+        disabled={props.disabled || props.index === props.count - 1}
+        aria-label={t('Move {{group}} down', { group: props.group })}
+        onClick={() => props.onMove('down')}
+      >
+        <HugeiconsIcon
+          icon={ArrowDown01Icon}
+          strokeWidth={2}
+          aria-hidden='true'
+        />
+      </Button>
+    </div>
   )
 }

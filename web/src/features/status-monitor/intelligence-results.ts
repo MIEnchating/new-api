@@ -28,13 +28,18 @@ export type IntelligenceCardData = {
   counts?: Pick<NonNullable<IntelligenceTask['state']>, 'processed' | 'total'>
 }
 
-export function buildIntelligenceCards(history: IntelligenceTask[]): {
+export function buildIntelligenceCards(
+  history: IntelligenceTask[],
+  groupOrder: string[] = []
+): {
   cards: IntelligenceCardData[]
   groupCounts: Map<string, number>
 } {
   const cards: IntelligenceCardData[] = []
   const groupCounts = new Map<string, number>()
+  const groupRanks = new Map(groupOrder.map((group, index) => [group, index]))
   for (const task of history) {
+    const taskCards: IntelligenceCardData[] = []
     const groups = task.groups?.length
       ? task.groups
       : [{ group: task.group, model: task.model }]
@@ -46,7 +51,7 @@ export function buildIntelligenceCards(history: IntelligenceTask[]): {
       const group = channel.group || task.group
       const model = channel.model || task.model
       completedModels.add(JSON.stringify([group, model]))
-      cards.push({
+      taskCards.push({
         id: JSON.stringify([
           task.task_id,
           group,
@@ -82,7 +87,7 @@ export function buildIntelligenceCards(history: IntelligenceTask[]): {
       ) {
         status = progress.failed === progress.total ? 'failed' : 'succeeded'
       }
-      cards.push({
+      taskCards.push({
         id: JSON.stringify([
           task.task_id,
           group.group,
@@ -97,6 +102,31 @@ export function buildIntelligenceCards(history: IntelligenceTask[]): {
         counts: progress ?? (groups.length === 1 ? task.state : undefined),
       })
     }
+    const modelRanks = new Map(
+      groups.map((group, index) => [
+        JSON.stringify([group.group, group.model]),
+        index,
+      ])
+    )
+    taskCards.sort((a, b) => {
+      if (a.group !== b.group) {
+        const rank =
+          (groupRanks.get(a.group) ?? groupOrder.length) -
+          (groupRanks.get(b.group) ?? groupOrder.length)
+        return rank || a.group.localeCompare(b.group)
+      }
+      const rank =
+        (modelRanks.get(JSON.stringify([a.group, a.model])) ?? groups.length) -
+        (modelRanks.get(JSON.stringify([b.group, b.model])) ?? groups.length)
+      return (
+        rank ||
+        a.model.localeCompare(b.model) ||
+        (a.channel?.channel_id ?? Number.MAX_SAFE_INTEGER) -
+          (b.channel?.channel_id ?? Number.MAX_SAFE_INTEGER) ||
+        (a.channel?.question_index ?? 0) - (b.channel?.question_index ?? 0)
+      )
+    })
+    cards.push(...taskCards)
   }
   // History is newest first. A run may expand into several model/question
   // results, so the API's 20-run limit is not a per-group card limit.
@@ -106,5 +136,10 @@ export function buildIntelligenceCards(history: IntelligenceTask[]): {
     groupCounts.set(card.group, count + 1)
     return true
   })
-  return { cards: latestCards, groupCounts }
+  const orderedGroups = [...groupCounts].sort(
+    ([a], [b]) =>
+      (groupRanks.get(a) ?? groupOrder.length) -
+        (groupRanks.get(b) ?? groupOrder.length) || a.localeCompare(b)
+  )
+  return { cards: latestCards, groupCounts: new Map(orderedGroups) }
 }

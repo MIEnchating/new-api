@@ -69,8 +69,12 @@ export function IntelligenceMonitor() {
     meta: { errorToast: false },
   })
   const { cards, groupCounts } = useMemo(
-    () => buildIntelligenceCards(query.data?.history ?? []),
-    [query.data?.history]
+    () =>
+      buildIntelligenceCards(
+        query.data?.history ?? [],
+        query.data?.group_order
+      ),
+    [query.data?.history, query.data?.group_order]
   )
   const groupOptions = useMemo(
     () =>
@@ -89,7 +93,7 @@ export function IntelligenceMonitor() {
   const filteredCards = useMemo(
     () =>
       selectedGroupKey === 'all'
-        ? cards
+        ? cards.slice(0, 20)
         : cards.filter(
             (card) => JSON.stringify(card.group) === selectedGroupKey
           ),
@@ -136,7 +140,11 @@ export function IntelligenceMonitor() {
                 className='w-full max-w-full min-w-0 shrink-0 [scrollbar-width:none] flex-nowrap justify-start gap-1.5 overflow-x-auto bg-transparent p-1 group-data-horizontal/tabs:h-auto lg:w-auto lg:flex-1 [&::-webkit-scrollbar]:hidden'
               >
                 {[
-                  { key: 'all', label: t('All'), count: cards.length },
+                  {
+                    key: 'all',
+                    label: t('All'),
+                    count: Math.min(cards.length, 20),
+                  },
                   ...groupOptions,
                 ].map((group) => (
                   <TabsTrigger
@@ -194,7 +202,7 @@ export function IntelligenceMonitor() {
                 bordered
               />
             )}
-            <div className='grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] items-start gap-3 sm:gap-4'>
+            <div className='grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] items-stretch gap-3 sm:gap-4'>
               {filteredCards.map((card) => (
                 <IntelligenceResultCard
                   key={card.id}

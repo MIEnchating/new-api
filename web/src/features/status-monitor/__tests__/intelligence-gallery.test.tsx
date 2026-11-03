@@ -298,8 +298,8 @@ it('caps groups independently after expanding multi-model runs, retaining newest
   const result = buildIntelligenceCards(history)
   expect(result.cards).toHaveLength(40)
   expect([...result.groupCounts]).toEqual([
-    ['standard', 20],
     ['premium', 20],
+    ['standard', 20],
   ])
   expect(result.cards.some((card) => card.task.task_id === 'gallery-9')).toBe(
     true
@@ -384,3 +384,143 @@ it('defers new preview requests during scrolling and preserves an already visibl
     vi.unstubAllGlobals()
   }
 })
+
+it('limits All to 20 cards while keeping each group accessible in configured order', async () => {
+  const history = Array.from({ length: 27 }, (_, index) =>
+    historyTask(index, index % 2 ? 'premium' : 'standard')
+  )
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        history,
+        group_order: ['premium', 'standard'],
+      },
+    },
+  })
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligenceMonitor />
+    </QueryClientProvider>
+  )
+  try {
+    await screen.findByLabelText('Model: model-0')
+    expect(screen.getAllByLabelText(/^Model: /)).toHaveLength(20)
+    expect(screen.getByRole('tab', { name: 'All' })).toHaveTextContent('20')
+    expect(
+      screen.getAllByRole('tab').map((tab) => tab.getAttribute('aria-label'))
+    ).toEqual(['All', 'premium', 'standard'])
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'standard' }))
+    expect(screen.getAllByLabelText(/^Model: /)).toHaveLength(14)
+    expect(screen.getByLabelText('Model: model-26')).toBeVisible()
+  } finally {
+    view.unmount()
+    client.clear()
+  }
+})
+
+it('keeps batch models in their configured order when results arrive out of order', () => {
+  const task = historyTask(0)
+  task.groups = ['a', 'b'].map((model) => ({
+    group: 'standard',
+    model,
+    endpoint: 'openai-response',
+  }))
+  task.status = 'running'
+  if (!task.result) throw new Error('Expected a result fixture')
+  task.result = {
+    channels: [{ ...task.result.channels[0], group: 'standard', model: 'b' }],
+  }
+  task.state = {
+    total: 2,
+    processed: 1,
+    progress: 50,
+    models: [
+      { group: 'standard', model: 'a', total: 1, processed: 0, failed: 0 },
+      { group: 'standard', model: 'b', total: 1, processed: 1, failed: 0 },
+    ],
+  }
+  expect(
+    buildIntelligenceCards([task]).cards.map((card) => card.model)
+  ).toEqual(['a', 'b'])
+})
+
+it.each(['pending', 'running', 'failed', 'succeeded'] as const)(
+  'keeps the same header and preview dimensions for %s cards, including long content',
+  (status) => {
+    const task = historyTask(0)
+    const error =
+      status === 'failed'
+        ? 'Upstream request failed with a detailed diagnostic. '.repeat(30)
+        : ''
+    const model = 'a-very-long-model-name-that-must-not-change-the-card-height'
+    const client = new QueryClient({
+      defaultOptions: { queries: { enabled: false } },
+    })
+    const channel =
+      status === 'succeeded'
+        ? {
+            channel_id: 0,
+            question_index: 0,
+            question_name: 'Pelican',
+            latency_ms: 100,
+            error: '',
+          }
+        : undefined
+    const view = render(
+      <QueryClientProvider client={client}>
+        <IntelligenceResultCard
+          id='layout'
+          task={{ ...task, error }}
+          group='standard'
+          model={model}
+          status={status}
+          channel={channel}
+          showGroup={false}
+          onGroupSelect={() => {}}
+        />
+      </QueryClientProvider>
+    )
+    try {
+      const card = screen
+        .getByLabelText(`Model: ${model}`)
+        .closest('[data-slot=card]')
+      expect(card?.querySelector('[data-slot=card-header]')).toHaveClass(
+        'h-28',
+        'shrink-0'
+      )
+      expect(screen.getByText(model)).toHaveClass('truncate')
+      const content = card?.querySelector(
+        '[data-slot=intelligence-card-content]'
+      )
+      expect(content).toHaveClass(
+        'relative',
+        'aspect-[6/5]',
+        'shrink-0',
+        'overflow-hidden'
+      )
+      expect(content?.firstElementChild).toHaveClass('absolute', 'inset-0')
+      if (status === 'failed') {
+        expect(
+          within(screen.getByRole('alert')).getByText('Failed')
+        ).toBeVisible()
+        expect(screen.getByRole('alert')).toHaveClass('overflow-auto')
+        expect(
+          within(content as HTMLElement).queryByRole('progressbar')
+        ).not.toBeInTheDocument()
+      }
+      if (status === 'running' || status === 'pending') {
+        expect(content).toHaveAttribute('aria-busy', 'true')
+        expect(
+          within(content as HTMLElement).getByRole('progressbar')
+        ).toBeVisible()
+      }
+    } finally {
+      view.unmount()
+      client.clear()
+    }
+  }
+)
