@@ -112,3 +112,35 @@ describe('Vertex AI API Key project ID', () => {
     )
   })
 })
+
+describe('Vertex AI endpoint version', () => {
+  test('defaults existing channels to v1 and persists an explicit beta choice', () => {
+    expect(savedSettings(vertexAPIKeyForm()).vertex_api_version).toBe('v1')
+    expect(
+      savedSettings(vertexAPIKeyForm({ vertex_api_version: 'v1beta1' }))
+        .vertex_api_version
+    ).toBe('v1beta1')
+  })
+
+  test('removes the Vertex version when changing channel type', () => {
+    const settings = savedSettings(
+      vertexAPIKeyForm({
+        type: 14,
+        allow_speed: true,
+        vertex_api_version: 'v1beta1',
+        settings: '{"vertex_api_version":"v1beta1","allow_speed":true}',
+      })
+    )
+    expect(settings).not.toHaveProperty('vertex_api_version')
+    expect(settings.allow_speed).toBe(true)
+  })
+
+  test('rejects an unsupported endpoint version', () => {
+    expect(
+      channelFormSchema.safeParse({
+        ...vertexAPIKeyForm(),
+        vertex_api_version: 'v2',
+      }).success
+    ).toBe(false)
+  })
+})

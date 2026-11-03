@@ -3108,3 +3108,74 @@ test('AWS interface selection is disabled without sensitive channel write permis
     await screen.findByRole('combobox', { name: 'AWS API' })
   ).toBeDisabled()
 })
+
+test.each([
+  { saved: undefined, checked: false, next: 'v1beta1' },
+  { saved: 'v1beta1', checked: true, next: 'v1' },
+])(
+  'Vertex endpoint switch restores $saved and saves $next',
+  async ({ saved, checked, next }) => {
+    editingChannel = {
+      ...editingChannel,
+      type: 41,
+      models: 'gemini-4-argon',
+      other: '{"default":"global"}',
+      settings: JSON.stringify({
+        vertex_key_type: 'api_key',
+        vertex_project_id: 'my-project',
+        vertex_api_version: saved,
+      }),
+    }
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true } })
+    const user = userEvent.setup()
+    render(<ConfigurationHarness currentRow={editingChannel} />)
+    const toggle = await screen.findByRole('switch', {
+      name: 'Use Vertex AI v1beta1 endpoint',
+    })
+    await waitFor(() =>
+      expect(toggle).toHaveAttribute('aria-checked', String(checked))
+    )
+    await user.click(toggle)
+    expect(toggle).toHaveAttribute('aria-checked', String(!checked))
+    await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+    await waitFor(() => expect(put).toHaveBeenCalled())
+    const payload = put.mock.calls[0]?.[1] as { settings: string }
+    expect(JSON.parse(payload.settings)).toMatchObject({
+      vertex_api_version: next,
+      vertex_project_id: 'my-project',
+    })
+  }
+)
+
+test('Vertex endpoint switch is disabled without sensitive channel write permission', async () => {
+  editingChannel = {
+    ...editingChannel,
+    type: 41,
+    other: '{"default":"global"}',
+    settings: '{"vertex_api_version":"v1beta1"}',
+  }
+  useAuthStore.setState({
+    auth: {
+      ...originalAuth,
+      user: {
+        id: 10,
+        username: 'operator',
+        role: ROLE.ADMIN,
+        permissions: {
+          admin_permissions: { channel: { read: true, write: true } },
+        },
+      },
+    },
+  })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  const toggle = await screen.findByRole('switch', {
+    name: 'Use Vertex AI v1beta1 endpoint',
+  })
+  expect(toggle).toHaveAttribute('aria-disabled', 'true')
+  await waitFor(() => expect(toggle).toBeChecked())
+  await user.click(toggle)
+  expect(toggle).toBeChecked()
+})

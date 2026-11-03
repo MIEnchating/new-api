@@ -26,6 +26,24 @@ func TestRenderGeminiMapsAndClampsInsteadOfRejecting(t *testing.T) {
 		wantCodes  []string
 	}{
 		{
+			name: "argon defaults to medium", model: "gemini-4-argon",
+			intent: Intent{Mode: ModeEnabled}, wantEffort: EffortMedium,
+		},
+		{
+			name: "argon cyber permissive defaults to high", model: "gemini-4-argon-cyber-permissive",
+			intent: Intent{Mode: ModeEnabled}, wantEffort: EffortHigh,
+		},
+		{
+			name: "argon budget becomes a level", model: "gemini-4-argon",
+			intent: Intent{BudgetTokens: &budget8192}, wantLevel: "medium", wantEffort: EffortMedium,
+			wantCodes: []string{"gemini_budget_to_level"},
+		},
+		{
+			name: "argon cannot disable thinking", model: "gemini-4-argon",
+			intent: Intent{Mode: ModeDisabled, Effort: EffortNone, Source: SourceSuffix}, wantLevel: "low", wantEffort: EffortLow,
+			wantCodes: []string{"gemini_thinking_disable_unsupported"},
+		},
+		{
 			name:       "budget on gemini 3.1 pro becomes level",
 			model:      "gemini-3.1-pro-preview",
 			intent:     Intent{BudgetTokens: &budget8192},

@@ -87,3 +87,24 @@ func TestGeminiChatGenerationConfigPreservesExplicitZeroValuesSnakeCase(t *testi
 	assert.Equal(t, float64(0), generationConfig["seed"])
 	assert.Equal(t, false, generationConfig["responseLogprobs"])
 }
+
+func TestGeminiArgonFieldsRoundTrip(t *testing.T) {
+	for _, raw := range []string{
+		`{"continuationToken":{"id":"next"},"contents":[{"parts":[{"mediaProcessing":{"enabled":false}}]}],"generationConfig":{"mediaProcessing":{"fps":0}}}`,
+		`{"continuation_token":{"id":"next"},"contents":[{"parts":[{"media_processing":{"enabled":false}}]}],"generationConfig":{"media_processing":{"fps":0}}}`,
+	} {
+		var request GeminiChatRequest
+		require.NoError(t, kitutil.Unmarshal([]byte(raw), &request))
+		encoded, err := kitutil.Marshal(request)
+		require.NoError(t, err)
+		var roundTrip GeminiChatRequest
+		require.NoError(t, kitutil.Unmarshal(encoded, &roundTrip))
+		assert.JSONEq(t, `{"id":"next"}`, string(roundTrip.ContinuationToken))
+		require.Len(t, roundTrip.Contents, 1)
+		require.Len(t, roundTrip.Contents[0].Parts, 1)
+		assert.JSONEq(t, `{"enabled":false}`, string(roundTrip.Contents[0].Parts[0].MediaProcessing))
+		assert.JSONEq(t, `{"fps":0}`, string(roundTrip.GenerationConfig.MediaProcessing))
+		assert.NotContains(t, string(encoded), "continuation_token")
+		assert.NotContains(t, string(encoded), "media_processing")
+	}
+}
