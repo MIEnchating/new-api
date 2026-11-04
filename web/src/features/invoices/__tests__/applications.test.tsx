@@ -351,6 +351,22 @@ it.each(['application/pdf', 'image/png'])(
       'blob:invoice-preview'
     )
     expect(createURL).toHaveBeenCalledWith(file)
+    await user.click(screen.getByRole('button', { name: 'Enlarge preview' }))
+    const enlarged = await screen.findByRole('dialog', {
+      name: 'Preview invoice',
+    })
+    await user.click(within(enlarged).getByRole('button', { name: 'Close' }))
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('dialog', { name: 'Preview invoice' })
+      ).not.toBeInTheDocument()
+    )
+    expect(
+      screen.getByRole('button', { name: 'Resend to email' })
+    ).toBeVisible()
+    expect(
+      screen.getByRole('button', { name: 'Enlarge preview' })
+    ).toHaveFocus()
     view.unmount()
     expect(revokeURL).toHaveBeenCalledWith('blob:invoice-preview')
   }

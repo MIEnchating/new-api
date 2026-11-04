@@ -25,6 +25,7 @@ import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
 
 import { getInvoiceFile } from '../api'
+import { InvoiceFilePreviewDialog } from './file-preview-dialog'
 
 export function InvoiceFilePreview(props: {
   requestId: number
@@ -61,15 +62,25 @@ export function InvoiceFilePreview(props: {
             {t('Invoice uploaded')}
           </p>
         </div>
-        <Button
-          type='button'
-          variant='outline'
-          size='sm'
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-        >
-          {t('Preview invoice')}
-        </Button>
+        <div className='flex flex-wrap items-center gap-2'>
+          {open && url && !query.isError && query.data && (
+            <InvoiceFilePreviewDialog
+              key={url}
+              url={url}
+              filename={query.data.filename}
+              type={query.data.blob.type}
+            />
+          )}
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
+            {t('Preview invoice')}
+          </Button>
+        </div>
       </div>
       {open && query.isError && (
         <ErrorState
