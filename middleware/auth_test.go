@@ -34,24 +34,33 @@ func setupDashboardAuthMiddlewareTest(t *testing.T) {
 	previousDB := model.DB
 	previousLogDB := model.LOG_DB
 	previousType := common.MainDatabaseType()
+	previousLogType := common.LogDatabaseType()
+	previousMaster := common.IsMasterNode
 	previousRedis := common.RedisEnabled
 	previousSecret := common.SessionSecret
-	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
-	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.Token{}, &model.AuditLog{}, &model.UserAccessToken{}, &model.Option{}))
-	model.DB = db
-	model.LOG_DB = db
-	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
-	common.RedisEnabled = false
-	common.SessionSecret = "middleware-auth-test-secret"
-	require.NoError(t, model.EnsureLegacyAccessTokenRetireAt(time.Now().Unix()))
 	t.Cleanup(func() {
 		model.DB = previousDB
 		model.LOG_DB = previousLogDB
-		common.SetMainDatabaseType(previousType)
+		common.SetDatabaseTypes(previousType, previousLogType)
+		common.IsMasterNode = previousMaster
 		common.RedisEnabled = previousRedis
 		common.SessionSecret = previousSecret
 	})
+	t.Setenv("LOG_SQL_DSN", "")
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.Token{}, &model.AuditLog{}, &model.UserAccessToken{}, &model.Option{}))
+	model.DB = db
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	common.IsMasterNode = false
+	common.RedisEnabled = false
+	common.SessionSecret = "middleware-auth-test-secret"
+	// Sharing the primary DB for logs also initializes dialect-specific column names.
+	require.NoError(t, model.InitLogDB())
+	require.NoError(t, model.EnsureLegacyAccessTokenRetireAt(time.Now().Unix()))
 }
 
 func TestTokenAuthReadOnlyWritesUserQuotaContext(t *testing.T) {
@@ -76,11 +85,8 @@ func TestTokenAuthReadOnlyWritesUserQuotaContext(t *testing.T) {
 		Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true,
 	}
 	require.NoError(t, model.DB.Create(token).Error)
-	cachedToken := *token
-	cachedToken.Key = ""
-	cachedToken.CacheSchema = 3
-	tokenCacheKey := fmt.Sprintf("token:%s", common.GenerateHMAC(token.Key))
-	require.NoError(t, common.RedisHSetObj(tokenCacheKey, &cachedToken, time.Minute))
+	_, err := model.GetTokenByKey(token.Key, true)
+	require.NoError(t, err)
 
 	router := gin.New()
 	router.GET("/api/usage/token/", TokenAuthReadOnly(), func(c *gin.Context) {
@@ -152,16 +158,17 @@ func TestTokenAuthRestoresConfiguredGroupRoutesWhenOwnGroupIsHidden(t *testing.T
 	}
 	require.NoError(t, model.DB.Create(routeToken).Error)
 	require.NoError(t, model.DB.Create(fixedToken).Error)
-	cacheToken := func(token *model.Token) {
-		t.Helper()
-		cached := *token
-		cached.Key = ""
-		cached.CacheSchema = 3
-		key := fmt.Sprintf("token:%s", common.GenerateHMAC(token.Key))
-		require.NoError(t, common.RedisHSetObj(key, &cached, time.Minute))
+	for _, token := range []*model.Token{routeToken, fixedToken} {
+		_, err := model.GetTokenByKey(token.Key, true)
+		require.NoError(t, err)
 	}
-	cacheToken(routeToken)
-	cacheToken(fixedToken)
+	const callbackName = "test:group-route-token-cache-hit"
+	require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "tokens" {
+			tx.AddError(errors.New("token database reads must not be needed for a valid cache hit"))
+		}
+	}))
+	t.Cleanup(func() { model.DB.Callback().Query().Remove(callbackName) })
 
 	assertTokenGroup := func(key string, expectRoutes, websocket bool) {
 		t.Helper()
@@ -324,6 +331,87 @@ func TestUserAuthNeverFallsBackForRecognizedInvalidInternalJWT(t *testing.T) {
 
 	assert.Equal(t, http.StatusUnauthorized, response.Code)
 	assert.Contains(t, response.Body.String(), "AUTH_UNAUTHORIZED")
+}
+
+func TestDashboardAuthRejectsRedisRoleTampering(t *testing.T) {
+	for _, role := range []int{common.RoleCommonUser, common.RoleAdminUser, common.RoleRootUser} {
+		t.Run(fmt.Sprintf("role_%d", role), func(t *testing.T) {
+			setupDashboardAuthMiddlewareTest(t)
+			gin.SetMode(gin.TestMode)
+			_, redisClient := useRateLimitMiniRedis(t)
+			legacy := "cache-integrity-legacy"
+			user := createMiddlewarePATUser(t, "cache-integrity", legacy)
+			require.NoError(t, model.DB.Model(user).Update("role", role).Error)
+			bundle, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "cache-integrity-test")
+			require.NoError(t, err)
+			pat, _ := createMiddlewareScopedToken(t, user.Id, 0, "profile:read", "user:read")
+
+			router := gin.New()
+			router.GET("/api/perf-metrics", RootAuth(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+			router.GET("/api/user/", AdminAuth(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+			showIdentity := func(c *gin.Context) {
+				c.JSON(http.StatusOK, gin.H{"id": c.GetInt("id"), "role": c.GetInt("role")})
+			}
+			router.GET("/api/user/self", UserAuth(), showIdentity)
+			router.GET("/api/pricing", TryUserAuth(), showIdentity)
+			rootStatus, adminStatus := http.StatusForbidden, http.StatusForbidden
+			if role == common.RoleRootUser {
+				rootStatus = http.StatusNoContent
+			}
+			if role >= common.RoleAdminUser {
+				adminStatus = http.StatusNoContent
+			}
+			for _, credential := range []struct{ name, raw string }{
+				{name: "login JWT", raw: bundle.AccessToken},
+				{name: "scoped PAT", raw: pat},
+				{name: "legacy token", raw: legacy},
+			} {
+				t.Run(credential.name, func(t *testing.T) {
+					cacheKey := fmt.Sprintf("user:%d", user.Id)
+					require.NoError(t, redisClient.HSet(t.Context(), cacheKey, "Role", role).Err())
+					response := middlewareBearerRequest(router, "/api/perf-metrics", credential.raw)
+					require.Equal(t, rootStatus, response.Code, response.Body.String())
+					response = middlewareBearerRequest(router, "/api/user/", credential.raw)
+					require.Equal(t, adminStatus, response.Code, response.Body.String())
+
+					require.NoError(t, redisClient.HSet(t.Context(), cacheKey, "Role", common.RoleRootUser).Err())
+					response = middlewareBearerRequest(router, "/api/perf-metrics", credential.raw)
+					assert.Equal(t, rootStatus, response.Code, response.Body.String())
+					response = middlewareBearerRequest(router, "/api/user/", credential.raw)
+					assert.Equal(t, adminStatus, response.Code, response.Body.String())
+					for _, path := range []string{"/api/user/self", "/api/pricing"} {
+						response = middlewareBearerRequest(router, path, credential.raw)
+						require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+						var body struct {
+							ID   int `json:"id"`
+							Role int `json:"role"`
+						}
+						require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+						assert.Equal(t, user.Id, body.ID, path)
+						assert.Equal(t, role, body.Role, path)
+					}
+				})
+			}
+			stored, err := model.GetUserById(user.Id, false)
+			require.NoError(t, err)
+			assert.Equal(t, role, stored.Role)
+			if role == common.RoleCommonUser {
+				const callbackName = "test:dashboard-auth-user-read-failure"
+				require.NoError(t, model.DB.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+					if tx.Statement.Table == "users" {
+						tx.AddError(errors.New("forced user database read failure"))
+					}
+				}))
+				t.Cleanup(func() { model.DB.Callback().Query().Remove(callbackName) })
+				response := middlewareBearerRequest(router, "/api/user/self", bundle.AccessToken)
+				assert.Equal(t, http.StatusOK, response.Code, "a valid cache hit must not query the user table")
+				require.NoError(t, redisClient.HSet(t.Context(), fmt.Sprintf("user:%d", user.Id), "CacheMAC", "tampered", "Role", common.RoleRootUser).Err())
+				response = middlewareBearerRequest(router, "/api/perf-metrics", bundle.AccessToken)
+				assert.Equal(t, http.StatusInternalServerError, response.Code, response.Body.String())
+				assert.Contains(t, response.Body.String(), "AUTH_INTERNAL_ERROR")
+			}
+		})
+	}
 }
 
 func TestTryUserAuthCredentialClassification(t *testing.T) {

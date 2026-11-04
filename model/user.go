@@ -194,7 +194,7 @@ func UpdateUserSetting(userId int, setting dto.UserSetting) error {
 	if err = DB.Model(&User{}).Where("id = ?", userId).Update("setting", settingValue).Error; err != nil {
 		return err
 	}
-	return updateUserSettingCache(userId, settingValue)
+	return PublishUserAuthCache(userId)
 }
 
 func UpdateUserAffCode(userId int, affCode string) error {
@@ -1405,7 +1405,7 @@ func GetUserSetting(id int, fromDB bool) (settingMap dto.UserSetting, err error)
 		// Update Redis cache asynchronously on successful DB read
 		if shouldUpdateRedis(fromDB, err) {
 			gopool.Go(func() {
-				if err := updateUserSettingCache(id, setting); err != nil {
+				if err := PublishUserAuthCache(id); err != nil {
 					common.SysLog(common.LogText("failed to update user setting cache: %s", err.Error()))
 				}
 			})
@@ -1576,7 +1576,7 @@ func GetUsernameById(id int, fromDB bool) (username string, err error) {
 		// Update Redis cache asynchronously on successful DB read
 		if shouldUpdateRedis(fromDB, err) {
 			gopool.Go(func() {
-				if err := updateUserNameCache(id, username); err != nil {
+				if err := PublishUserAuthCache(id); err != nil {
 					common.SysLog(common.LogText("failed to update user name cache: %s", err.Error()))
 				}
 			})

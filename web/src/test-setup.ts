@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import '@testing-library/jest-dom/vitest'
-import { cleanup, configure } from '@testing-library/react'
+import { act, cleanup, configure } from '@testing-library/react'
 import i18next from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import { afterEach, beforeAll } from 'vitest'
@@ -40,8 +40,12 @@ beforeAll(async () => {
   })
 })
 
-afterEach(() => {
-  cleanup()
+afterEach(async () => {
+  // Let React finish queued work before Vitest tears down jsdom's window.
+  // Synchronous unmounting alone can leave scheduler callbacks pending.
+  await act(async () => {
+    cleanup()
+  })
 })
 
 // Prefer reduced motion in tests: entrance animations write inline
