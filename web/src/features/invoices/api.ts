@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { AxiosProgressEvent } from 'axios'
+
 import { api } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
@@ -97,12 +99,17 @@ export async function getInvoiceRequests(
   return requireServerSuccess(response.data).data
 }
 
-export async function uploadInvoiceFile(id: number, file: File) {
+export async function uploadInvoiceFile(
+  id: number,
+  file: File,
+  onUploadProgress?: (event: AxiosProgressEvent) => void
+) {
   const form = new FormData()
   form.append('file', file)
   const response = await api.post<Response<InvoiceUploadResult>>(
     `/api/user/invoices/${id}/file`,
-    form
+    form,
+    { onUploadProgress }
   )
   return requireServerSuccess(response.data).data
 }

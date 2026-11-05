@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { AxiosProgressEvent } from 'axios'
 import { toast } from 'sonner'
 import { afterEach, expect, it, vi } from 'vitest'
 
@@ -30,6 +31,7 @@ import { InvoiceApplicationForm } from '../components/application-form'
 import { InvoiceCopyButton } from '../components/copy-invoice-button'
 import { InvoiceCopySettingsDialog } from '../components/copy-settings'
 import { InvoiceEmailTemplatesDialog } from '../components/email-templates'
+import { InvoiceFileUpload } from '../components/file-upload'
 import { InvoiceNotificationDialog } from '../components/notification-settings'
 import { InvoiceOrderPicker } from '../components/order-picker'
 import { InvoiceProcessDialog } from '../components/process-dialog'
@@ -215,9 +217,29 @@ it('disables completion during upload and retains the uploaded file when issuing
   )
   expect(post).toHaveBeenCalledWith(
     '/api/user/invoices/4/file',
-    expect.any(FormData)
+    expect.any(FormData),
+    expect.objectContaining({ onUploadProgress: expect.any(Function) })
   )
   expect((post.mock.calls[0][1] as FormData).get('file')).toBe(file)
+  const progress = screen.getByRole('progressbar', { name: 'Upload progress' })
+  expect(progress).not.toHaveAttribute('aria-valuenow')
+  expect(screen.getByText('invoice.pdf')).toBeVisible()
+  const onProgress = post.mock.calls[0][2]?.onUploadProgress
+  act(() => onProgress?.({ loaded: 50, total: 200 } as AxiosProgressEvent))
+  expect(progress).toHaveAttribute('aria-valuenow', '25')
+  expect(screen.getByText('25%')).toBeVisible()
+  act(() => onProgress?.({ loaded: 199, total: 200 } as AxiosProgressEvent))
+  expect(progress).toHaveAttribute('aria-valuenow', '99')
+  expect(
+    screen.queryByText('Upload complete. Recognizing invoice...')
+  ).not.toBeInTheDocument()
+  act(() => onProgress?.({ loaded: 200, total: 200 } as AxiosProgressEvent))
+  expect(progress).toHaveAttribute('aria-valuenow', '100')
+  expect(
+    screen.getByText('Upload complete. Recognizing invoice...')
+  ).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Confirm' })).toBeDisabled()
+  expect(screen.getByLabelText('Invoice file')).toBeDisabled()
   completeUpload({
     data: {
       success: true,
@@ -1838,4 +1860,56 @@ it('does not overwrite the clipboard when all selected invoice fields are empty'
   expect(button).toBeDisabled()
   await user.click(button)
   expect(writeText).not.toHaveBeenCalled()
+})
+
+it('clears upload progress after failure and starts a fresh progress state when retrying the same file', async () => {
+  const user = userEvent.setup()
+  let rejectUpload: (error: Error) => void = () => {}
+  const post = vi.spyOn(api, 'post').mockImplementation(
+    () =>
+      new Promise((_, reject) => {
+        rejectUpload = reject
+      })
+  )
+  vi.spyOn(toast, 'error').mockReturnValue(1)
+  const uploading = vi.fn()
+  const uploaded = vi.fn()
+  renderInvoice(
+    <InvoiceFileUpload
+      requestId={4}
+      title='Example Company'
+      uploaded={false}
+      onUploadingChange={uploading}
+      onUploaded={uploaded}
+    />
+  )
+  const file = new File(['invoice'], 'retry.pdf', { type: 'application/pdf' })
+  await user.upload(screen.getByLabelText('Invoice file'), file)
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+  act(() =>
+    post.mock.calls[0][2]?.onUploadProgress?.({
+      loaded: 50,
+      total: 100,
+    } as AxiosProgressEvent)
+  )
+  expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50')
+  await act(async () => rejectUpload(new Error('Upload failed')))
+  await waitFor(() =>
+    expect(screen.getByLabelText('Invoice file')).toBeEnabled()
+  )
+  expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
+  expect(uploaded).not.toHaveBeenCalled()
+  expect(uploading).toHaveBeenLastCalledWith(false)
+  await user.upload(screen.getByLabelText('Invoice file'), file)
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
+  expect(uploading).toHaveBeenLastCalledWith(true)
+  expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow')
+  act(() =>
+    post.mock.calls[1][2]?.onUploadProgress?.({
+      loaded: 50,
+    } as AxiosProgressEvent)
+  )
+  expect(screen.getByRole('progressbar')).not.toHaveAttribute('aria-valuenow')
+  expect(screen.getByText('Uploading...')).toBeVisible()
+  await act(async () => rejectUpload(new Error('Upload failed')))
 })

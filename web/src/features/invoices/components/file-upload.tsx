@@ -24,6 +24,10 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Progress } from '@/components/ui/progress'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatNumber } from '@/lib/format'
+import { handleServerError } from '@/lib/handle-server-error'
 
 import { uploadInvoiceFile } from '../api'
 import type { InvoiceUploadResult } from '../types'
@@ -37,13 +41,35 @@ export function InvoiceFileUpload(props: {
   onUploaded?: (result: InvoiceUploadResult) => void
   onUploadingChange?: (uploading: boolean) => void
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const client = useQueryClient()
   const [filename, setFilename] = useState('')
   const [replacing, setReplacing] = useState(false)
+  const [progress, setProgress] = useState<number | null>(null)
   const mutation = useMutation({
-    mutationFn: (file: File) => uploadInvoiceFile(props.requestId, file),
-    onMutate: () => props.onUploadingChange?.(true),
+    mutationFn: (file: File) =>
+      uploadInvoiceFile(props.requestId, file, (event) => {
+        if (
+          !event.total ||
+          !Number.isFinite(event.total) ||
+          event.total <= 0 ||
+          !Number.isFinite(event.loaded)
+        ) {
+          setProgress(null)
+          return
+        }
+        setProgress(
+          Math.max(
+            0,
+            Math.min(100, Math.floor((event.loaded / event.total) * 100))
+          )
+        )
+      }),
+    onMutate: () => {
+      setProgress(null)
+      props.onUploadingChange?.(true)
+    },
     onSuccess: (result, file) => {
       setFilename(file.name)
       setReplacing(false)
@@ -54,6 +80,7 @@ export function InvoiceFileUpload(props: {
       props.onUploaded?.(result)
       toast.success(t('Invoice uploaded'))
     },
+    onError: (error) => handleServerError(error),
     onSettled: () => props.onUploadingChange?.(false),
   })
   const id = `invoice-file-${props.requestId}`
@@ -100,12 +127,35 @@ export function InvoiceFileUpload(props: {
           mutation.mutate(file)
         }}
       />
+      {mutation.isPending && (
+        <div className='space-y-2' aria-busy='true'>
+          <div className='flex items-start justify-between gap-3 text-xs'>
+            <span className='min-w-0 break-all'>
+              {mutation.variables?.name}
+            </span>
+            {progress !== null && (
+              <span className='shrink-0 tabular-nums'>
+                {formatNumber(progress, locale)}%
+              </span>
+            )}
+          </div>
+          <Progress
+            value={progress}
+            aria-label={t('Upload progress')}
+            aria-describedby={`${id}-help`}
+            className='[&_[data-slot=progress-indicator][data-indeterminate]]:w-1/3 [&_[data-slot=progress-indicator][data-indeterminate]]:motion-safe:animate-pulse [&_[data-slot=progress-track]]:h-1.5'
+          />
+        </div>
+      )}
       <p
         id={`${id}-help`}
         className='text-muted-foreground text-xs break-all'
         aria-live='polite'
       >
-        {mutation.isPending && t('Uploading and recognizing invoice...')}
+        {mutation.isPending &&
+          (progress === 100
+            ? t('Upload complete. Recognizing invoice...')
+            : t('Uploading...'))}
         {!mutation.isPending &&
           (filename ||
             (props.uploaded
