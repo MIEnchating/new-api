@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/go-redis/redis/v8"
 
 	"gorm.io/gorm"
 )
@@ -24,12 +25,14 @@ var ErrUserAuthCachePending = errors.New("user authentication state update is pe
 
 var ErrUserAuthVersionConflict = errors.New("user authentication version update conflicted")
 
+// Fence and version keys use the user cache key as their hash tag so the
+// cache fill script and the floor MGET stay in one slot on sharded Redis.
 func getUserAuthFenceKey(userId int) string {
-	return fmt.Sprintf("auth:user:fence:%d", userId)
+	return fmt.Sprintf("auth:user:fence:{%s}", getUserCacheKey(userId))
 }
 
 func getUserAuthVersionKey(userId int) string {
-	return fmt.Sprintf("auth:user:version:%d", userId)
+	return fmt.Sprintf("auth:user:version:{%s}", getUserCacheKey(userId))
 }
 
 // A pending fence only covers the interval between publishing the next
@@ -50,6 +53,15 @@ func writeUserCache(user *UserBase, includeQuota bool) error {
 	user.CacheSchema = userCacheSchemaVersion
 	if user.AuthVersion <= 0 {
 		return fmt.Errorf("invalid user auth version")
+	}
+	// A pre-upgrade fence or committed floor must still reject a delayed
+	// snapshot. The Lua script below enforces concurrent writes to the new keys.
+	floor, err := getUserAuthVersionFloor(user.Id)
+	if err != nil {
+		return err
+	}
+	if user.AuthVersion < floor {
+		return ErrUserAuthCachePending
 	}
 	includeQuotaArg := "0"
 	if includeQuota {
@@ -110,6 +122,23 @@ func getUserAuthVersionFloor(userId int) (int64, error) {
 	values, err := common.RDB.MGet(context.Background(), getUserAuthFenceKey(userId), getUserAuthVersionKey(userId)).Result()
 	if err != nil {
 		return 0, err
+	}
+	// Older versions used untagged keys. Keep their revocation floor during
+	// upgrades, including when the metadata refresh after a commit failed.
+	// Separate GET commands are valid across slots; never include these keys
+	// in the new MGET or Lua scripts. Pending fences retain their original TTL.
+	for _, key := range []string{
+		fmt.Sprintf("auth:user:fence:%d", userId),
+		fmt.Sprintf("auth:user:version:%d", userId),
+	} {
+		value, err := common.RDB.Get(context.Background(), key).Result()
+		if errors.Is(err, redis.Nil) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		values = append(values, value)
 	}
 	var floor int64
 	for _, value := range values {

@@ -2,6 +2,7 @@ package model
 
 import (
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,6 +14,28 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+// Sharded Redis hashes only the text inside the first brace pair, so fence
+// and version keys tagged with the untagged cache key share its slot.
+// Miniredis does not enforce slots, so check the tags explicitly.
+func TestAuthCacheKeysShareClusterHashTag(t *testing.T) {
+	for _, tc := range []struct {
+		cacheKey string
+		related  []string
+	}{
+		{getUserCacheKey(5), []string{getUserAuthFenceKey(5), getUserAuthVersionKey(5)}},
+		{getTokenCacheKey("test-token"), []string{getTokenCacheFenceKey("test-token")}},
+	} {
+		assert.NotContains(t, tc.cacheKey, "{")
+		for _, key := range tc.related {
+			_, suffix, ok := strings.Cut(key, "{")
+			require.True(t, ok)
+			tag, _, ok := strings.Cut(suffix, "}")
+			require.True(t, ok)
+			assert.Equal(t, tc.cacheKey, tag)
+		}
+	}
+}
 
 func useUserCacheMiniRedis(t *testing.T) *miniredis.Miniredis {
 	t.Helper()
@@ -220,4 +243,32 @@ func TestUserAuthVersionFenceAndCommittedFloorAreMonotonic(t *testing.T) {
 	committed, err = common.RDB.Get(t.Context(), getUserAuthVersionKey(userID)).Result()
 	require.NoError(t, err)
 	assert.Equal(t, "5", committed)
+}
+
+func TestUserAuthCacheUpgradePreservesLegacyRevocationFloor(t *testing.T) {
+	for _, key := range []string{"auth:user:fence:4203", "auth:user:version:4203"} {
+		t.Run(key, func(t *testing.T) {
+			server := useUserCacheMiniRedis(t)
+			stale := UserBase{Id: 4203, Group: "default", Username: "cached", AuthVersion: 1}
+			require.NoError(t, writeUserCache(&stale, true))
+			// The old process committed a restrictive update but could not
+			// refresh the signed hash. Its floor must survive the key rename.
+			require.NoError(t, server.Set(key, "2"))
+			_, err := cacheGetUserBase(stale.Id)
+			assert.ErrorIs(t, err, ErrUserAuthCachePending)
+			assert.ErrorIs(t, writeUserCache(&stale, true), ErrUserAuthCachePending)
+
+			current := stale
+			current.AuthVersion = 2
+			require.NoError(t, writeUserCache(&current, true))
+			cached, err := cacheGetUserBase(current.Id)
+			require.NoError(t, err)
+			assert.EqualValues(t, 2, cached.AuthVersion)
+
+			// Malformed legacy security state must fail closed as well.
+			require.NoError(t, server.Set(key, "invalid"))
+			_, err = cacheGetUserBase(current.Id)
+			assert.Error(t, err)
+		})
+	}
 }
