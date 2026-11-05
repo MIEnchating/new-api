@@ -25,7 +25,6 @@ import { Controller, useFieldArray, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
-import { GroupOrderControls } from '@/components/auto-group-order-item'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
@@ -77,6 +76,7 @@ import {
   SettingsPageFormActions,
 } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
+import { IntelligenceGroupCard } from './intelligence-group-card'
 import { IntelligenceHistory } from './intelligence-history'
 
 export function IntelligenceSettingsSection() {
@@ -105,6 +105,9 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
     type: 'group' | 'question'
     id: string
   } | null>(null)
+  const [collapsedGroups, setCollapsedGroups] = useState<
+    Record<string, boolean>
+  >({})
   const queryClient = useQueryClient()
   const endpoints = getIntelligenceEndpointOptions(t)
   const groupOptions = (
@@ -155,6 +158,7 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
   const onSubmit = form.handleSubmit(
     (config) => save.mutate(config),
     (errors) => {
+      setCollapsedGroups({})
       setActiveTab(errors.questions ? 'questions' : 'settings')
     }
   )
@@ -264,7 +268,7 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                   {t('Add test group')}
                 </Button>
               </div>
-              <div className='grid min-w-0 items-start gap-5 @min-[70rem]:grid-cols-2'>
+              <div className='grid min-w-0 items-start gap-4 @min-[70rem]:grid-cols-2'>
                 {groups.fields.map((entry, index) => (
                   <div
                     key={entry.id}
@@ -272,33 +276,41 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                     aria-label={selectedGroups[index].group || t('Model Group')}
                     className='@container min-w-0'
                   >
-                    <TitledCard
+                    <IntelligenceGroupCard
                       title={
                         selectedGroups[index].group ||
                         t('Test group {{number}}', { number: index + 1 })
                       }
-                      action={
-                        <GroupOrderControls
-                          group={
-                            selectedGroups[index].group ||
-                            t('Test group {{number}}', { number: index + 1 })
-                          }
-                          index={index}
-                          count={groups.fields.length}
-                          disabled={pending}
-                          onMove={(direction) =>
-                            groups.move(
-                              index,
-                              index + (direction === 'up' ? -1 : 1)
-                            )
-                          }
-                        />
+                      index={index}
+                      count={groups.fields.length}
+                      open={!collapsedGroups[entry.id]}
+                      onOpenChange={(open) =>
+                        setCollapsedGroups((current) => ({
+                          ...current,
+                          [entry.id]: !open,
+                        }))
                       }
-                      className='min-w-0 border shadow-none ring-0'
-                      headerClassName='bg-muted/30 px-4 py-3! sm:px-5'
-                      titleClassName='break-all text-base sm:text-base'
-                      contentClassName='flex min-w-0 flex-col gap-5 p-4 sm:p-5'
-                      disableHoverEffect
+                      pending={pending}
+                      runDisabled={
+                        pending ||
+                        form.formState.isDirty ||
+                        !selectedGroups[index].group ||
+                        selectedGroups[index].question_indexes?.length === 0 ||
+                        !(
+                          selectedGroups[index].models?.length ||
+                          selectedGroups[index].model
+                        )
+                      }
+                      onRun={() => run.mutate(selectedGroups[index].group)}
+                      onRemove={() =>
+                        setRemoveTarget({ type: 'group', id: entry.id })
+                      }
+                      onMove={(direction) =>
+                        groups.move(
+                          index,
+                          index + (direction === 'up' ? -1 : 1)
+                        )
+                      }
                     >
                       <div className='grid min-w-0 grid-cols-1 gap-3 @min-[28rem]:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]'>
                         <Field className='min-w-0'>
@@ -616,42 +628,7 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                           />
                         )}
                       </SettingsControlGroup>
-                      <div className='flex flex-wrap items-center justify-between gap-4 border-t pt-4'>
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='sm'
-                          disabled={
-                            pending ||
-                            form.formState.isDirty ||
-                            !selectedGroups[index].group ||
-                            selectedGroups[index].question_indexes?.length ===
-                              0 ||
-                            !(
-                              selectedGroups[index].models?.length ||
-                              selectedGroups[index].model
-                            )
-                          }
-                          onClick={() =>
-                            run.mutate(selectedGroups[index].group)
-                          }
-                        >
-                          {t('Run this group')}
-                        </Button>
-                        <Button
-                          type='button'
-                          variant='ghost'
-                          size='sm'
-                          className='text-muted-foreground hover:text-destructive'
-                          disabled={pending || groups.fields.length === 1}
-                          onClick={() =>
-                            setRemoveTarget({ type: 'group', id: entry.id })
-                          }
-                        >
-                          {t('Remove group')}
-                        </Button>
-                      </div>
-                    </TitledCard>
+                    </IntelligenceGroupCard>
                   </div>
                 ))}
 

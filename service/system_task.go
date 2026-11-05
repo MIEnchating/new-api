@@ -564,3 +564,12 @@ func logSystemTaskLockError(ctx context.Context, task *model.SystemTask, err err
 	}
 	logger.LogWarn(ctx, common.LogText("system task %s update failed: %v", task.TaskID, err))
 }
+
+// RequeueIntelligenceTest retains the history row and wakes the shared runner.
+func RequeueIntelligenceTest(task *model.SystemTask, payload, state, result any) (bool, error) {
+	changed, err := model.RequeueIntelligenceTest(task, payload, state, result)
+	if changed && err == nil {
+		notifySystemTaskRunner()
+	}
+	return changed, err
+}

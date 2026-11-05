@@ -233,6 +233,9 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	var streamRequests, jsonRequests atomic.Int32
 	var failRequests atomic.Int32
 	var arrivals atomic.Int32
+	var blockSecondQuestion atomic.Bool
+	releaseQuestion := make(chan struct{})
+	unblockQuestion := sync.OnceFunc(func() { close(releaseQuestion) })
 	var checkParallel atomic.Bool
 	checkParallel.Store(true)
 	releaseRequests := make(chan struct{})
@@ -293,6 +296,13 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 		case "first selection prompt":
 			responseOutput = "<html>first selection</html>"
 		case "second selection prompt":
+			if blockSecondQuestion.Load() {
+				select {
+				case <-releaseQuestion:
+				case <-r.Context().Done():
+					return
+				}
+			}
 			responseOutput = "<html>second selection</html>"
 		default:
 			assert.Equal(t, defaultIntelligencePrompt, prompt)
@@ -316,6 +326,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	}))
 	t.Cleanup(upstream.Close)
 	t.Cleanup(unblockSecondModel)
+	t.Cleanup(unblockQuestion)
 	url := upstream.URL
 	channels := []model.Channel{
 		{Id: 1, Type: constant.ChannelTypeOpenAI, Key: "test-secret", Name: "selected", Status: common.ChannelStatusEnabled, Group: "default,vip", Models: "gpt-4o-mini", BaseURL: &url},
@@ -334,6 +345,17 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 		c.Set("role", common.RoleRootUser)
 		handler(c)
 		return w
+	}
+	retryCall := func(taskID string, target any) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		encoded, err := common.Marshal(target)
+		require.NoError(t, err)
+		c.Request = httptest.NewRequest(http.MethodPost, "/api/status-monitor/intelligence/results/"+taskID+"/retry", bytes.NewReader(encoded))
+		c.Params = gin.Params{{Key: "task_id", Value: taskID}}
+		c.Set("id", 1)
+		RetryIntelligenceModel(c)
+		return recorder
 	}
 	saved := call(UpdateIntelligenceMonitor, http.MethodPut, config)
 	require.True(t, gjson.GetBytes(saved.Body.Bytes(), "success").Bool(), saved.Body.String())
@@ -443,6 +465,25 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	previewJSON, err := common.Marshal(activePreview)
 	require.NoError(t, err)
 	assert.Equal(t, output, gjson.GetBytes(previewJSON, "result.channels.0.html").String())
+
+	// Completed subrequests can be retried and previewed while a sibling is blocked.
+	oldRequestID := gjson.Get(active.Result, "channels.0.request_id").String()
+	rowTarget := map[string]any{"group": "vip", "model": "gpt-4o-mini", "channel_id": 1, "question_index": 0}
+	assert.Equal(t, http.StatusConflict, retryCall(multiTask.TaskID, map[string]any{"group": "vip", "model": "second-model", "channel_id": 1, "question_index": 0}).Code)
+	queuedPartial := retryCall(multiTask.TaskID, rowTarget)
+	require.True(t, gjson.GetBytes(queuedPartial.Body.Bytes(), "success").Bool(), queuedPartial.Body.String())
+	assert.Equal(t, http.StatusConflict, retryCall(multiTask.TaskID, rowTarget).Code)
+	ended, err := model.FinishIntelligenceTest(active, "multi-runner", model.SystemTaskStatusSucceeded, intelligenceResult{}, "")
+	require.NoError(t, err)
+	assert.False(t, ended, "a stale completion must not discard an accepted retry")
+	require.Eventually(t, func() bool {
+		current, err := model.GetSystemTaskByTaskID(multiTask.TaskID)
+		return err == nil && current.Status == model.SystemTaskStatusRunning && gjson.Get(current.Result, "channels.0.request_id").String() != oldRequestID
+	}, 5*time.Second, 10*time.Millisecond)
+	partial, err := model.GetSystemTaskByTaskID(multiTask.TaskID)
+	require.NoError(t, err)
+	assert.Equal(t, output, gjson.Get(partial.Result, "channels.0.html").String())
+	assert.EqualValues(t, 0, gjson.Get(partial.State, "models.1.processed").Int())
 	unblockSecondModel()
 	<-multiFinished
 	multiTask, err = model.GetSystemTaskByTaskID(multiTask.TaskID)
@@ -455,6 +496,153 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	publicMulti, err := publishedIntelligenceTask(multiTask, false, false)
 	require.NoError(t, err)
 	assert.Equal(t, []gin.H{{"group": "vip", "model": "gpt-4o-mini", "endpoint": "openai"}, {"group": "vip", "model": "second-model", "endpoint": "openai"}}, publicMulti["groups"])
+
+	t.Run("a completed question can retry while another question of the same model runs", func(t *testing.T) {
+		blockSecondQuestion.Store(true)
+		defer blockSecondQuestion.Store(false)
+		cfg := intelligenceConfig{Groups: []intelligenceGroup{{Group: "vip", Models: []string{"gpt-4o-mini"}, Endpoint: "openai", Stream: lo.ToPtr(false)}}, Questions: []intelligenceQuestion{{Name: "First", Prompt: "first selection prompt"}, {Name: "Second", Prompt: "second selection prompt"}}}
+		queued, err := model.CreateSystemTask(intelligenceTaskType, cfg, nil)
+		require.NoError(t, err)
+		claimed, acquired, err := model.ClaimSystemTask(queued.ID, queued.Type, "question-runner", time.Now().Add(time.Minute).Unix())
+		require.NoError(t, err)
+		require.True(t, acquired)
+		done := make(chan struct{})
+		go func() { handler.Run(context.Background(), claimed, "question-runner"); close(done) }()
+		defer func() { unblockQuestion(); <-done }()
+		require.Eventually(t, func() bool {
+			task, err := model.GetSystemTaskByTaskID(queued.TaskID)
+			return err == nil && gjson.Get(task.Result, "channels.#").Int() == 1
+		}, 5*time.Second, 10*time.Millisecond)
+		original, err := model.GetSystemTaskByTaskID(queued.TaskID)
+		require.NoError(t, err)
+		requestID := gjson.Get(original.Result, "channels.0.request_id").String()
+		target := map[string]any{"group": "vip", "model": "gpt-4o-mini", "channel_id": 1, "question_index": 0}
+		assert.Equal(t, http.StatusConflict, retryCall(queued.TaskID, map[string]string{"group": "vip", "model": "gpt-4o-mini"}).Code)
+		response := retryCall(queued.TaskID, target)
+		require.True(t, gjson.GetBytes(response.Body.Bytes(), "success").Bool(), response.Body.String())
+		require.Eventually(t, func() bool {
+			task, err := model.GetSystemTaskByTaskID(queued.TaskID)
+			return err == nil && gjson.Get(task.Result, "channels.0.request_id").String() != requestID
+		}, 5*time.Second, 10*time.Millisecond)
+		active, err := model.GetSystemTaskByTaskID(queued.TaskID)
+		require.NoError(t, err)
+		assert.Equal(t, model.SystemTaskStatusRunning, active.Status)
+		assert.Equal(t, "<html>first selection</html>", gjson.Get(active.Result, "channels.0.html").String())
+		assert.EqualValues(t, 1, gjson.Get(active.State, "models.0.processed").Int())
+		assert.EqualValues(t, 2, gjson.Get(active.State, "models.0.total").Int())
+		unblockQuestion()
+		<-done
+		finished, err := model.GetSystemTaskByTaskID(queued.TaskID)
+		require.NoError(t, err)
+		assert.Equal(t, model.SystemTaskStatusSucceeded, finished.Status)
+		assert.Equal(t, "<html>second selection</html>", gjson.Get(finished.Result, "channels.1.html").String())
+		secondID := gjson.Get(finished.Result, "channels.1.request_id").String()
+		// The same row-specific contract also applies to an already finished run.
+		require.True(t, gjson.GetBytes(retryCall(queued.TaskID, target).Body.Bytes(), "success").Bool())
+		claimed, acquired, err = model.ClaimSystemTask(queued.ID, queued.Type, "finished-question-runner", time.Now().Add(time.Minute).Unix())
+		require.NoError(t, err)
+		require.True(t, acquired)
+		handler.Run(context.Background(), claimed, "finished-question-runner")
+		finished, err = model.GetSystemTaskByTaskID(queued.TaskID)
+		require.NoError(t, err)
+		assert.Equal(t, model.SystemTaskStatusSucceeded, finished.Status)
+		assert.EqualValues(t, 2, gjson.Get(finished.Result, "channels.#").Int())
+		assert.Equal(t, secondID, gjson.Get(finished.Result, "channels.0.request_id").String())
+		assert.EqualValues(t, 2, gjson.Get(finished.State, "models.0.processed").Int())
+		// Completed siblings are independently retryable even before the runner claims the batch.
+		require.True(t, gjson.GetBytes(retryCall(queued.TaskID, target).Body.Bytes(), "success").Bool())
+		secondTarget := map[string]any{"group": "vip", "model": "gpt-4o-mini", "channel_id": 1, "question_index": 1}
+		require.True(t, gjson.GetBytes(retryCall(queued.TaskID, secondTarget).Body.Bytes(), "success").Bool())
+		assert.Equal(t, http.StatusConflict, retryCall(queued.TaskID, secondTarget).Code)
+		claimed, acquired, err = model.ClaimSystemTask(queued.ID, queued.Type, "pending-question-runner", time.Now().Add(time.Minute).Unix())
+		require.NoError(t, err)
+		require.True(t, acquired)
+		handler.Run(context.Background(), claimed, "pending-question-runner")
+		finished, err = model.GetSystemTaskByTaskID(queued.TaskID)
+		require.NoError(t, err)
+		assert.Equal(t, model.SystemTaskStatusSucceeded, finished.Status)
+		assert.NotEqual(t, secondID, gjson.Get(finished.Result, "channels.0.request_id").String())
+		assert.EqualValues(t, 2, gjson.Get(finished.State, "models.0.processed").Int())
+	})
+
+	t.Run("retry replaces only the recorded model and rejects duplicate or invalid retries", func(t *testing.T) {
+		var original intelligenceResult
+		require.NoError(t, common.UnmarshalJsonStr(multiTask.Result, &original))
+		require.Len(t, original.Channels, 2)
+		originalID, originalCreatedAt := multiTask.TaskID, multiTask.CreatedAt
+		// A failed model can be retried using its recorded prompt even after settings change.
+		original.Channels[0].Error, original.Channels[0].HTML = "Intelligence test request failed", ""
+		encoded, err := common.Marshal(original)
+		require.NoError(t, err)
+		require.NoError(t, db.Model(&model.SystemTask{}).Where("task_id = ?", multiTask.TaskID).Update("result", string(encoded)).Error)
+		common.OptionMap[intelligenceOptionKey] = `{"groups":[],"questions":[]}`
+
+		for _, target := range []any{map[string]string{"group": "vip", "model": "missing"}, map[string]string{"group": "default", "model": "gpt-4o-mini"}, map[string]string{}} {
+			response := retryCall(originalID, target)
+			assert.False(t, gjson.GetBytes(response.Body.Bytes(), "success").Bool(), response.Body.String())
+		}
+		target := map[string]string{"group": "vip", "model": "gpt-4o-mini"}
+		queued := retryCall(originalID, target)
+		require.True(t, gjson.GetBytes(queued.Body.Bytes(), "success").Bool(), queued.Body.String())
+		assert.Equal(t, originalID, gjson.GetBytes(queued.Body.Bytes(), "data.task_id").String())
+		assert.Equal(t, "pending", gjson.GetBytes(queued.Body.Bytes(), "data.status").String())
+		assert.NotContains(t, queued.Body.String(), defaultIntelligencePrompt)
+		require.NotEmpty(t, gjson.GetBytes(queued.Body.Bytes(), "data.retry.revision").String())
+		duplicate := retryCall(originalID, target)
+		assert.Equal(t, http.StatusConflict, duplicate.Code)
+		pending, err := model.GetSystemTaskByTaskID(originalID)
+		require.NoError(t, err)
+		var pendingResult intelligenceResult
+		require.NoError(t, common.UnmarshalJsonStr(pending.Result, &pendingResult))
+		assert.Equal(t, original.Channels[1:], pendingResult.Channels)
+		claimed, acquired, err := model.ClaimSystemTask(pending.ID, intelligenceTaskType, "model-retry", time.Now().Add(time.Minute).Unix())
+		require.NoError(t, err)
+		require.True(t, acquired)
+		assert.Equal(t, http.StatusConflict, retryCall(originalID, target).Code)
+		beforeRequests := jsonRequests.Load()
+		handler.Run(context.Background(), claimed, "model-retry")
+		finished, err := model.GetSystemTaskByTaskID(originalID)
+		require.NoError(t, err)
+		require.Equal(t, model.SystemTaskStatusSucceeded, finished.Status, finished.Error)
+		assert.EqualValues(t, 1, jsonRequests.Load()-beforeRequests)
+		assert.Equal(t, originalCreatedAt, finished.CreatedAt)
+		var replaced intelligenceResult
+		require.NoError(t, common.UnmarshalJsonStr(finished.Result, &replaced))
+		require.Len(t, replaced.Channels, 2)
+		assert.Equal(t, original.Channels[1], replaced.Channels[0])
+		assert.Equal(t, "gpt-4o-mini", replaced.Channels[1].Model)
+		assert.Equal(t, output, replaced.Channels[1].HTML)
+		assert.Empty(t, replaced.Channels[1].Error)
+		assert.NotEqual(t, original.Channels[0].RequestID, replaced.Channels[1].RequestID)
+		// A stale snapshot cannot overwrite the completed retry or erase a deletion.
+		changed, err := model.RequeueIntelligenceTest(multiTask, multi, nil, nil)
+		require.NoError(t, err)
+		assert.False(t, changed)
+		// Failure before any new output still preserves the other model's result.
+		require.True(t, gjson.GetBytes(retryCall(originalID, target).Body.Bytes(), "success").Bool())
+		pending, err = model.GetSystemTaskByTaskID(originalID)
+		require.NoError(t, err)
+		claimed, acquired, err = model.ClaimSystemTask(pending.ID, intelligenceTaskType, "retry-unavailable", time.Now().Add(time.Minute).Unix())
+		require.NoError(t, err)
+		require.True(t, acquired)
+		require.NoError(t, db.Model(&channels[0]).Update("status", common.ChannelStatusManuallyDisabled).Error)
+		handler.Run(context.Background(), claimed, "retry-unavailable")
+		require.NoError(t, db.Model(&channels[0]).Update("status", common.ChannelStatusEnabled).Error)
+		failed, err := model.GetSystemTaskByTaskID(originalID)
+		require.NoError(t, err)
+		assert.Equal(t, model.SystemTaskStatusFailed, failed.Status)
+		require.NoError(t, common.UnmarshalJsonStr(failed.Result, &replaced))
+		assert.Equal(t, original.Channels[1:], replaced.Channels)
+		deleted, err := model.DeleteIntelligenceTestResult(originalID)
+		require.NoError(t, err)
+		require.True(t, deleted)
+		assert.Equal(t, http.StatusNotFound, retryCall(originalID, target).Code)
+		changed, err = model.RequeueIntelligenceTest(failed, multi, nil, nil)
+		require.NoError(t, err)
+		assert.False(t, changed)
+		assert.Equal(t, http.StatusNotFound, retryCall("missing", target).Code)
+	})
+
 	restored := call(UpdateIntelligenceMonitor, http.MethodPut, config)
 	require.True(t, gjson.GetBytes(restored.Body.Bytes(), "success").Bool(), restored.Body.String())
 	failRequests.Store(5)
@@ -559,7 +747,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	for _, terminal := range []string{"response.completed", "response.failed", "missing"} {
 		responseTerminal.Store(terminal)
 		streamConfig := intelligenceConfig{Groups: []intelligenceGroup{{Group: "vip", Model: "gpt-4o-mini", Endpoint: "openai-response"}}, Questions: config.Questions}
-		streamTask, err := model.CreateSystemTask("intelligence_stream_regression", streamConfig, nil)
+		streamTask, err := model.CreateSystemTask(intelligenceTaskType, streamConfig, nil)
 		require.NoError(t, err)
 		streamTask, ok, err = model.ClaimSystemTask(streamTask.ID, streamTask.Type, "stream-runner", time.Now().Add(time.Minute).Unix())
 		require.NoError(t, err)
@@ -641,7 +829,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	rejected := call(RunIntelligenceMonitor, http.MethodPost, nil)
 	assert.False(t, gjson.GetBytes(rejected.Body.Bytes(), "success").Bool())
 	assert.Equal(t, "Intelligence testing supports at most 50 channel-question pairs per run", gjson.GetBytes(rejected.Body.Bytes(), "message").String())
-	limitTask, err := model.CreateSystemTask("intelligence_selection_limit", limitConfig, nil)
+	limitTask, err := model.CreateSystemTask(intelligenceTaskType, limitConfig, nil)
 	require.NoError(t, err)
 	limitTask, ok, err = model.ClaimSystemTask(limitTask.ID, limitTask.Type, "limit-runner", time.Now().Add(time.Minute).Unix())
 	require.NoError(t, err)
@@ -664,6 +852,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	engine.GET("/api/status-monitor/intelligence", middleware.AdminAuth(), middleware.RequirePermission(authz.ChannelOperate), GetIntelligenceMonitor)
 	engine.PUT("/api/status-monitor/intelligence", middleware.AdminAuth(), middleware.RequirePermission(authz.ChannelOperate), UpdateIntelligenceMonitor)
 	engine.POST("/api/status-monitor/intelligence/run", middleware.AdminAuth(), middleware.RequirePermission(authz.ChannelOperate), RunIntelligenceMonitor)
+	engine.POST("/api/status-monitor/intelligence/results/:task_id/retry", middleware.AdminAuth(), middleware.RequirePermission(authz.ChannelOperate), RetryIntelligenceModel)
 	engine.DELETE("/api/status-monitor/intelligence/results/:task_id", middleware.AdminAuth(), middleware.RequirePermission(authz.ChannelOperate), DeleteIntelligenceRecord)
 	for _, authenticated := range []bool{false, true} {
 		for _, route := range []struct {
@@ -675,6 +864,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 			{http.MethodGet, "/api/status-monitor/intelligence", false},
 			{http.MethodPut, "/api/status-monitor/intelligence", false},
 			{http.MethodPost, "/api/status-monitor/intelligence/run", false},
+			{http.MethodPost, "/api/status-monitor/intelligence/results/" + task.TaskID + "/retry", false},
 			{http.MethodDelete, "/api/status-monitor/intelligence/results/" + task.TaskID, false},
 		} {
 			request := httptest.NewRequest(route.method, route.path, nil)

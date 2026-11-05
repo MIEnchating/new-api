@@ -61,6 +61,7 @@ export function IntelligencePreviewScrollProvider(props: {
 }
 
 type IntelligencePreviewProps = {
+  version?: string
   taskId: string
   channelId: number
   group?: string
@@ -152,7 +153,9 @@ function IntelligencePreviewContent(
     () => false
   )
   const query = useQuery({
-    queryKey: ['status-monitor', 'intelligence-result', props.taskId],
+    queryKey: props.version
+      ? ['status-monitor', 'intelligence-result', props.taskId, props.version]
+      : ['status-monitor', 'intelligence-result', props.taskId],
     queryFn: () => getIntelligenceResult(props.taskId),
     enabled: pageVisible && (props.expanded || (props.visible && !scrolling)),
     staleTime: (query) =>

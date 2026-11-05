@@ -35,17 +35,42 @@ type intelligenceQuestion struct {
 	Prompt string `json:"prompt"`
 }
 
+type intelligenceRetryTarget struct {
+	ChannelID     *int   `json:"channel_id,omitempty"`
+	QuestionIndex *int   `json:"question_index,omitempty"`
+	Revision      string `json:"revision,omitempty"`
+	Group         string `json:"group"`
+	Model         string `json:"model"`
+}
+
+func (target intelligenceRetryTarget) Matches(row intelligenceChannelResult, config intelligenceConfig) bool {
+	group, modelName := row.Group, row.Model
+	if group == "" {
+		group = config.Group
+	}
+	if modelName == "" {
+		modelName = config.Model
+	}
+	return group == target.Group && modelName == target.Model && (target.ChannelID == nil || (row.ChannelID == *target.ChannelID && row.QuestionIndex == *target.QuestionIndex))
+}
+
+func (target intelligenceRetryTarget) Overlaps(other intelligenceRetryTarget) bool {
+	return target.Group == other.Group && target.Model == other.Model && (target.ChannelID == nil || other.ChannelID == nil || (*target.ChannelID == *other.ChannelID && *target.QuestionIndex == *other.QuestionIndex))
+}
+
 type intelligenceConfig struct {
-	Groups          []intelligenceGroup    `json:"groups,omitempty"`
-	ScheduledAt     int64                  `json:"scheduled_at,omitempty"`
-	Questions       []intelligenceQuestion `json:"questions"`
-	QuestionIndexes []int                  `json:"question_indexes"`
-	Group           string                 `json:"group"`
-	Model           string                 `json:"model"`
-	Endpoint        string                 `json:"endpoint"`
-	Stream          *bool                  `json:"stream,omitempty"`
-	Enabled         bool                   `json:"enabled"`
-	IntervalMinutes int                    `json:"interval_minutes"`
+	QueuedRetries   []intelligenceRetryTarget `json:"queued_retries,omitempty"`
+	Retry           *intelligenceRetryTarget  `json:"retry,omitempty"`
+	Groups          []intelligenceGroup       `json:"groups,omitempty"`
+	ScheduledAt     int64                     `json:"scheduled_at,omitempty"`
+	Questions       []intelligenceQuestion    `json:"questions"`
+	QuestionIndexes []int                     `json:"question_indexes"`
+	Group           string                    `json:"group"`
+	Model           string                    `json:"model"`
+	Endpoint        string                    `json:"endpoint"`
+	Stream          *bool                     `json:"stream,omitempty"`
+	Enabled         bool                      `json:"enabled"`
+	IntervalMinutes int                       `json:"interval_minutes"`
 }
 
 type intelligenceGroup struct {
@@ -262,6 +287,7 @@ func publishedIntelligenceTask(task *model.SystemTask, includeHTML bool, admin b
 		row := gin.H{"channel_id": channel.ChannelID, "question_index": channel.QuestionIndex,
 			"question_name": channel.QuestionName, "latency_ms": channel.LatencyMs, "error": "", "group": channel.Group, "model": channel.Model, "endpoint": channel.Endpoint}
 		row["retry_count"] = max(0, len(channel.Attempts)-1)
+		row["revision"] = channel.Revision
 		if admin {
 			row["request_id"] = channel.RequestID
 			row["upstream_request_id"] = channel.UpstreamRequestID
@@ -291,9 +317,23 @@ func publishedIntelligenceTask(task *model.SystemTask, includeHTML bool, admin b
 	if task.Error != "" {
 		errorMessage = "Intelligence test request failed"
 	}
+	var retry *intelligenceRetryTarget
+	if task.Status == model.SystemTaskStatusPending || task.Status == model.SystemTaskStatusRunning {
+		if config.Retry != nil && !slices.Contains(progress.CompletedRetries, config.Retry.Revision) {
+			retry = config.Retry
+		}
+	}
+	queuedRetries := make([]intelligenceRetryTarget, 0)
+	if task.Status == model.SystemTaskStatusRunning || task.Status == model.SystemTaskStatusPending {
+		for _, queued := range config.QueuedRetries {
+			if !slices.Contains(progress.CompletedRetries, queued.Revision) {
+				queuedRetries = append(queuedRetries, queued)
+			}
+		}
+	}
 	return gin.H{"task_id": task.TaskID, "status": task.Status, "created_at": task.CreatedAt,
 		"updated_at": task.UpdatedAt, "group": config.Group, "model": config.Model,
-		"endpoint": config.Endpoint, "groups": publicGroups, "state": progress, "error": errorMessage,
+		"endpoint": config.Endpoint, "groups": publicGroups, "state": progress, "error": errorMessage, "retry": retry, "retries": queuedRetries,
 		"result": gin.H{"channels": channels}}, nil
 }
 
@@ -335,6 +375,8 @@ func UpdateIntelligenceMonitor(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid intelligence test configuration")
 		return
 	}
+	config.Retry = nil
+	config.QueuedRetries = nil
 	config.Group, config.Model = strings.TrimSpace(config.Group), strings.TrimSpace(config.Model)
 	for i := range config.Groups {
 		config.Groups[i].Group = strings.TrimSpace(config.Groups[i].Group)
@@ -426,6 +468,123 @@ func RunIntelligenceMonitor(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": task.ToResponse()})
 }
 
+// Retry reuses the recorded payload and task identity, preserving the schedule key.
+func RetryIntelligenceModel(c *gin.Context) {
+	var request intelligenceRetryTarget
+	if err := common.DecodeJson(http.MaxBytesReader(c.Writer, c.Request.Body, 1024), &request); err != nil {
+		common.ApiErrorT(c, "Invalid intelligence test configuration")
+		return
+	}
+	task, err := model.GetSystemTaskByTaskID(c.Param("task_id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if task == nil || task.Type != intelligenceTaskType || task.IntelligenceResultDeleted() {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "Intelligence test not found"})
+		return
+	}
+	if task.Status != model.SystemTaskStatusSucceeded && task.Status != model.SystemTaskStatusFailed && task.Status != model.SystemTaskStatusRunning && task.Status != model.SystemTaskStatusPending {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "This intelligence test cannot be retried"})
+		return
+	}
+	var config intelligenceConfig
+	if err := task.DecodePayload(&config); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if len(config.Groups) == 0 {
+		config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, Stream: config.Stream, QuestionIndexes: config.QuestionIndexes}}
+	}
+	selected := slices.IndexFunc(config.Groups, func(group intelligenceGroup) bool {
+		return group.Group == request.Group && slices.Contains(group.SelectedModels(), request.Model)
+	})
+	if selected < 0 {
+		common.ApiErrorT(c, "Select a group and model for intelligence testing")
+		return
+	}
+	single := config.ForGroup(config.Groups[selected], request.Model)
+	if err := single.Validate(); err != nil {
+		common.ApiErrorT(c, err.Error())
+		return
+	}
+	targets, err := intelligenceTargets(single)
+	if err != nil {
+		common.ApiErrorT(c, err.Error())
+		return
+	}
+	var result intelligenceResult
+	if task.Result != "" {
+		if err := common.UnmarshalJsonStr(task.Result, &result); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
+	if (request.ChannelID == nil) != (request.QuestionIndex == nil) || (request.ChannelID != nil && (*request.ChannelID <= 0 || *request.QuestionIndex < 0)) {
+		common.ApiErrorT(c, "Invalid intelligence test configuration")
+		return
+	}
+	if request.ChannelID != nil && !slices.ContainsFunc(result.Channels, func(row intelligenceChannelResult) bool { return request.Matches(row, config) }) {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "This intelligence test cannot be retried"})
+		return
+	}
+	if request.ChannelID != nil && (!slices.Contains(single.SelectedQuestionIndexes(), *request.QuestionIndex) || !slices.ContainsFunc(targets, func(channel *model.Channel) bool { return channel.Id == *request.ChannelID })) {
+		common.ApiErrorT(c, "Invalid intelligence test configuration")
+		return
+	}
+	request.Revision = common.NewRequestId()
+	var changed bool
+	if task.Status == model.SystemTaskStatusRunning || task.Status == model.SystemTaskStatusPending {
+		var progress intelligenceProgress
+		if err := task.DecodeState(&progress); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		// Legacy model-wide retries require all of that model's work to finish.
+		// A row-specific retry only requires its own completed result above.
+		if request.ChannelID == nil && !slices.ContainsFunc(progress.Models, func(row intelligenceModelProgress) bool {
+			return row.Group == request.Group && row.Model == request.Model && row.Total > 0 && row.Processed == row.Total
+		}) {
+			c.JSON(http.StatusConflict, gin.H{"success": false, "message": "This intelligence test cannot be retried"})
+			return
+		}
+		for _, queued := range config.QueuedRetries {
+			if !slices.Contains(progress.CompletedRetries, queued.Revision) && queued.Overlaps(request) {
+				c.JSON(http.StatusConflict, gin.H{"success": false, "message": "This intelligence test cannot be retried"})
+				return
+			}
+		}
+		config.QueuedRetries = append(config.QueuedRetries, request)
+		changed, err = model.QueueIntelligenceRetry(task, config)
+	} else {
+		result.Channels = slices.DeleteFunc(result.Channels, func(row intelligenceChannelResult) bool { return request.Matches(row, config) })
+		config.Retry = &request
+		config.QueuedRetries = nil
+		total := len(targets) * len(single.SelectedQuestionIndexes())
+		if request.ChannelID != nil {
+			total = 1
+		}
+		state := intelligenceProgress{Models: []intelligenceModelProgress{{Group: request.Group, Model: request.Model, Total: total}}}
+		state.Total = total
+		changed, err = service.RequeueIntelligenceTest(task, config, state, result)
+	}
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if !changed {
+		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "This intelligence test cannot be retried"})
+		return
+	}
+	recordManageAudit(c, "intelligence_monitor.retry", map[string]any{"task_id": task.TaskID, "group": request.Group, "model": request.Model})
+	response, err := publishedIntelligenceTask(task, false, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": response})
+}
+
 type intelligenceTestHandler struct{}
 
 func (intelligenceTestHandler) Type() string { return intelligenceTaskType }
@@ -477,6 +636,7 @@ type intelligenceAttempt struct {
 }
 
 type intelligenceChannelResult struct {
+	Revision   string `json:"revision,omitempty"`
 	noRetry    bool
 	Attempts   []intelligenceAttempt `json:"attempts,omitempty"`
 	HTTPStatus int                   `json:"http_status,omitempty"`
@@ -507,6 +667,7 @@ type intelligenceModelProgress struct {
 }
 
 type intelligenceProgress struct {
+	CompletedRetries []string `json:"completed_retries,omitempty"`
 	service.SystemTaskProgress
 	Models []intelligenceModelProgress `json:"models,omitempty"`
 }
@@ -535,8 +696,15 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
 		return
 	}
+	var retained intelligenceResult
+	if config.Retry != nil && task.Result != "" {
+		if err := common.UnmarshalJsonStr(task.Result, &retained); err != nil {
+			finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, retained, err)
+			return
+		}
+	}
 	if err := config.Validate(); err != nil {
-		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, retained, err)
 		return
 	}
 	if len(config.Groups) == 0 {
@@ -550,98 +718,231 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 	}
 	targets := []target{}
 	state := intelligenceProgress{}
+	for _, row := range retained.Channels {
+		group, modelName := row.Group, row.Model
+		if group == "" {
+			group = config.Group
+		}
+		if modelName == "" {
+			modelName = config.Model
+		}
+		index := slices.IndexFunc(state.Models, func(progress intelligenceModelProgress) bool {
+			return progress.Group == group && progress.Model == modelName
+		})
+		if index < 0 {
+			state.Models = append(state.Models, intelligenceModelProgress{Group: group, Model: modelName})
+			index = len(state.Models) - 1
+		}
+		state.Models[index].Total++
+		state.Models[index].Processed++
+		if row.Error != "" {
+			state.Models[index].Failed++
+		}
+	}
+
 	for _, group := range config.Groups {
 		for _, modelName := range group.SelectedModels() {
+			if config.Retry != nil && (group.Group != config.Retry.Group || modelName != config.Retry.Model) {
+				continue
+			}
 			single := config.ForGroup(group, modelName)
 			channels, err := intelligenceTargets(single)
 			if err != nil {
-				finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+				finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, retained, err)
 				return
 			}
-			progressIndex := len(state.Models)
-			questionIndexes := single.SelectedQuestionIndexes()
-			state.Models = append(state.Models, intelligenceModelProgress{Group: group.Group, Model: modelName, Total: len(channels) * len(questionIndexes)})
+			progressIndex := slices.IndexFunc(state.Models, func(progress intelligenceModelProgress) bool {
+				return progress.Group == group.Group && progress.Model == modelName
+			})
+			if progressIndex < 0 {
+				progressIndex = len(state.Models)
+				state.Models = append(state.Models, intelligenceModelProgress{Group: group.Group, Model: modelName})
+			}
 			for _, channel := range channels {
-				for _, questionIndex := range questionIndexes {
+				for _, questionIndex := range single.SelectedQuestionIndexes() {
+					if config.Retry != nil && config.Retry.ChannelID != nil && (channel.Id != *config.Retry.ChannelID || questionIndex != *config.Retry.QuestionIndex) {
+						continue
+					}
+					state.Models[progressIndex].Total++
 					targets = append(targets, target{channel, single, progressIndex, questionIndex})
 				}
 			}
 		}
 	}
 	if len(targets) > 50 {
-		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, errors.New("Intelligence testing supports at most 50 channel-question pairs per run"))
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, retained, errors.New("Intelligence testing supports at most 50 channel-question pairs per run"))
+		return
+	}
+	if len(targets) == 0 {
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, retained, errors.New("Intelligence test request failed"))
 		return
 	}
 	userID, err := resolveChannelTestUserID(nil)
 	if err != nil {
-		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
+		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, retained, err)
 		return
 	}
 	total := len(targets)
-	result := intelligenceResult{Channels: make([]intelligenceChannelResult, total)}
-	state.Total = total
-	_ = model.UpdateSystemTaskState(task.TaskID, runnerID, state)
-	jobs := make(chan int, total)
-	for index := range total {
-		jobs <- index
+	offset := len(retained.Channels)
+	result := intelligenceResult{Channels: append(slices.Clone(retained.Channels), make([]intelligenceChannelResult, total)...)}
+	state.Total = total + offset
+	state.Processed = offset
+	if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
+		return
 	}
-	close(jobs)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type requestJob struct {
+		target        target
+		index         int
+		revision      string
+		queueRevision string
+		channelID     int
+	}
 	type completedRequest struct {
-		index int
-		row   intelligenceChannelResult
+		job requestJob
+		row intelligenceChannelResult
 	}
-	completed := make(chan completedRequest, total)
+	jobs := make(chan requestJob, 50)
+	completed := make(chan completedRequest, 50)
 	var workers sync.WaitGroup
-	for range min(4, total) {
+	for range 4 {
 		workers.Go(func() {
-			for index := range jobs {
+			for job := range jobs {
 				if ctx.Err() != nil {
 					return
 				}
-				target := targets[index]
-				channel := *target.channel
-				row := retryIntelligenceRequest(ctx, time.Second, func() intelligenceChannelResult {
-					return runIntelligenceRequest(ctx, &channel, userID, target.config, target.questionIndex)
-				})
-				completed <- completedRequest{index, row}
+				selected := job.target
+				var row intelligenceChannelResult
+				if selected.channel == nil {
+					row = intelligenceChannelResult{RequestID: common.NewRequestId(), Group: selected.config.Group, Model: selected.config.Model, Endpoint: selected.config.Endpoint, ChannelID: job.channelID, QuestionIndex: selected.questionIndex, QuestionName: selected.config.Questions[selected.questionIndex].Name, Error: "Intelligence test request failed"}
+				} else {
+					channel := *selected.channel
+					row = retryIntelligenceRequest(ctx, time.Second, func() intelligenceChannelResult {
+						return runIntelligenceRequest(ctx, &channel, userID, selected.config, selected.questionIndex)
+					})
+				}
+				row.Revision = job.revision
+				select {
+				case completed <- completedRequest{job, row}:
+				case <-ctx.Done():
+					return
+				}
 			}
 		})
 	}
-	go func() { workers.Wait(); close(completed) }()
-	valid, processed := 0, 0
-	for done := range completed {
-		result.Channels[done.index] = done.row
-		if done.row.Error == "" {
-			valid++
+	defer func() { cancel(); close(jobs); workers.Wait() }()
+	for index, selected := range targets {
+		revision := ""
+		if config.Retry != nil {
+			revision = config.Retry.Revision
 		}
-		processed++
-		modelProgress := &state.Models[targets[done.index].progressIndex]
-		modelProgress.Processed++
-		if done.row.Error != "" {
-			modelProgress.Failed++
+		jobs <- requestJob{target: selected, index: offset + index, revision: revision, queueRevision: revision}
+	}
+	outstanding := total
+	dirty := true
+	queuedCount := 0
+	retryRemaining := map[string]int{}
+	if config.Retry != nil {
+		retryRemaining[config.Retry.Revision] = total
+	}
+	ticker := time.NewTicker(200 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		// Only this runner writes results. HTTP requests append to the payload;
+		// polling lets a retry start even while all other responses are blocked.
+		current, err := model.GetIntelligenceTaskExecution(task.TaskID)
+		if err != nil || current == nil || current.Status != model.SystemTaskStatusRunning || current.LockedBy != runnerID {
+			return
 		}
-		state.Processed, state.Progress = processed, processed*100/total
-		// At most 50 requests per run. Persist each completion so a fast model
-		// can finish independently while another model is still responding.
-		partial := intelligenceResult{Channels: make([]intelligenceChannelResult, 0, processed)}
-		for _, row := range result.Channels {
-			if row.RequestID != "" {
+		var latest intelligenceConfig
+		if err := current.DecodePayload(&latest); err != nil {
+			return
+		}
+		for _, retry := range latest.QueuedRetries[queuedCount:] {
+			groupIndex := slices.IndexFunc(config.Groups, func(group intelligenceGroup) bool { return group.Group == retry.Group })
+			single := config.ForGroup(config.Groups[groupIndex], retry.Model)
+			channels, _ := intelligenceTargets(single)
+			progressIndex := slices.IndexFunc(state.Models, func(progress intelligenceModelProgress) bool {
+				return progress.Group == retry.Group && progress.Model == retry.Model
+			})
+			for index, row := range result.Channels {
+				if !retry.Matches(row, config) {
+					continue
+				}
+				var channel *model.Channel
+				for _, candidate := range channels {
+					if candidate.Id == row.ChannelID {
+						channel = candidate
+						break
+					}
+				}
+				// Keep the previous result viewable until its replacement arrives.
+				state.Processed--
+				state.Models[progressIndex].Processed--
+				if row.Error != "" {
+					state.Models[progressIndex].Failed--
+				}
+				jobs <- requestJob{target: target{channel, single, progressIndex, row.QuestionIndex}, index: index, revision: retry.Revision, queueRevision: retry.Revision, channelID: row.ChannelID}
+				outstanding++
+				retryRemaining[retry.Revision]++
+			}
+			queuedCount++
+			dirty = true
+		}
+		partial := intelligenceResult{Channels: make([]intelligenceChannelResult, 0, len(result.Channels))}
+		valid := 0
+		for i, row := range result.Channels {
+			if i < offset || row.RequestID != "" {
 				partial.Channels = append(partial.Channels, row)
+				if row.Error == "" {
+					valid++
+				}
 			}
 		}
-		_ = model.UpdateSystemTaskStateAndResult(task.TaskID, runnerID, state, partial)
+		if state.Total > 0 {
+			state.Progress = state.Processed * 100 / state.Total
+		}
+		if dirty {
+			if err := model.UpdateSystemTaskStateAndResult(task.TaskID, runnerID, state, partial); err != nil {
+				return
+			}
+			dirty = false
+		}
+		if outstanding == 0 {
+			status, message := model.SystemTaskStatusSucceeded, ""
+			if valid == 0 {
+				status, message = model.SystemTaskStatusFailed, "No intelligence test completed successfully"
+			}
+			finished, err := model.FinishIntelligenceTest(current, runnerID, status, partial, message)
+			if err != nil || finished {
+				return
+			}
+			continue // A concurrent retry won the finalization race.
+		}
+		select {
+		case <-ctx.Done():
+			finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, partial, ctx.Err())
+			return
+		case <-ticker.C:
+		case done := <-completed:
+			dirty = true
+			result.Channels[done.job.index] = done.row
+			outstanding--
+			state.Processed++
+			progress := &state.Models[done.job.target.progressIndex]
+			progress.Processed++
+			if done.row.Error != "" {
+				progress.Failed++
+			}
+			if done.job.queueRevision != "" {
+				retryRemaining[done.job.queueRevision]--
+				if retryRemaining[done.job.queueRevision] == 0 {
+					state.CompletedRetries = append(state.CompletedRetries, done.job.queueRevision)
+				}
+			}
+		}
 	}
-	// Unstarted requests are not published as empty successful results on cancellation.
-	result.Channels = slices.DeleteFunc(result.Channels, func(row intelligenceChannelResult) bool { return row.RequestID == "" })
-	if err := ctx.Err(); err != nil {
-		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, err)
-		return
-	}
-	if valid == 0 {
-		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, result, errors.New("No intelligence test completed successfully"))
-		return
-	}
-	finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusSucceeded, result, nil)
 }
 
 // Retry failed requests up to five times (six attempts total). Backoff remains

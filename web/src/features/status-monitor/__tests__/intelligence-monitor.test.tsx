@@ -747,9 +747,7 @@ it('saves independent question selections and preserves their identity when an e
   try {
     const first = screen.getByRole('group', { name: 'default' })
     const second = screen.getByRole('group', { name: 'vip' })
-    expect(
-      within(first).getByText('default', { selector: '[data-slot=card-title]' })
-    ).toBeVisible()
+    expect(within(first).getByTitle('default')).toBeVisible()
     expect(within(first).getByRole('checkbox', { name: 'First' })).toBeChecked()
     expect(
       within(second).getByRole('checkbox', { name: 'First' })
@@ -2077,6 +2075,118 @@ it('moves test groups with named controls and saves their order without losing s
   } finally {
     view.unmount()
     actions.remove()
+    client.clear()
+  }
+})
+
+it('collapses group settings with quick actions and preserves values across keyboard expansion', async () => {
+  const data: IntelligenceMonitorData = {
+    config: {
+      groups: ['default', 'vip'].map((group) => ({
+        group,
+        models: ['model-a'],
+        endpoint: 'openai' as const,
+        enabled: false,
+        times: ['09:00'],
+        question_indexes: [0],
+      })),
+      questions: [{ name: 'Pelican', prompt: 'Draw a pelican' }],
+    },
+    catalog: { default: ['model-a'], vip: ['model-a'] },
+    history: [],
+  }
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: { success: true, data: { task_id: 'queued' } },
+  })
+  const client = new QueryClient({
+    defaultOptions: { mutations: { retry: false } },
+  })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligenceSettings data={data} />
+    </QueryClientProvider>
+  )
+  const user = userEvent.setup()
+  try {
+    const group = screen.getByRole('group', { name: 'vip' })
+    const toggle = within(group).getByRole('button', { name: 'Collapse' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    toggle.focus()
+    await user.keyboard('{Enter}')
+    expect(
+      within(group).queryByRole('combobox', { name: 'API Endpoint' })
+    ).not.toBeInTheDocument()
+    expect(
+      within(group).getByRole('button', { name: 'Expand' })
+    ).toHaveAttribute('aria-expanded', 'false')
+    await user.click(
+      within(group).getByRole('button', { name: 'Run this group' })
+    )
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        '/api/status-monitor/intelligence/run',
+        { group: 'vip' }
+      )
+    )
+    await user.click(
+      within(group).getByRole('button', { name: 'Remove group' })
+    )
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: 'Cancel',
+      })
+    )
+    expect(group).toBeVisible()
+    const expand = within(group).getByRole('button', { name: 'Expand' })
+    expand.focus()
+    await user.keyboard(' ')
+    expect(expand).toHaveAttribute('aria-expanded', 'true')
+    expect(
+      within(group).getByRole('combobox', { name: 'API Endpoint' })
+    ).toBeVisible()
+    expect(
+      within(group).getAllByRole('button', { name: 'Run this group' })
+    ).toHaveLength(1)
+    await user.click(
+      within(group).getByRole('switch', { name: 'Streaming output' })
+    )
+    await user.click(within(group).getByRole('button', { name: 'Collapse' }))
+    expect(
+      within(group).getByRole('button', { name: 'Run this group' })
+    ).toBeDisabled()
+    await user.click(within(group).getByRole('button', { name: 'Move vip up' }))
+    expect(
+      within(group).getByRole('button', { name: 'Expand' })
+    ).toHaveAttribute('aria-expanded', 'false')
+    expect(
+      within(screen.getByRole('group', { name: 'default' })).getByRole(
+        'button',
+        { name: 'Collapse' }
+      )
+    ).toHaveAttribute('aria-expanded', 'true')
+    await user.click(within(group).getByRole('button', { name: 'Expand' }))
+    expect(
+      within(group).getByRole('switch', { name: 'Streaming output' })
+    ).not.toBeChecked()
+    await user.click(within(group).getByRole('button', { name: 'Collapse' }))
+    await user.click(
+      within(group).getByRole('button', { name: 'Remove group' })
+    )
+    await user.click(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: 'Remove',
+      })
+    )
+    expect(screen.queryByRole('group', { name: 'vip' })).not.toBeInTheDocument()
+    const remaining = screen.getByRole('group', { name: 'default' })
+    await user.click(
+      within(remaining).getByRole('button', { name: 'Collapse' })
+    )
+    expect(
+      within(remaining).getByRole('button', { name: 'Remove group' })
+    ).toBeDisabled()
+  } finally {
+    view.unmount()
     client.clear()
   }
 })

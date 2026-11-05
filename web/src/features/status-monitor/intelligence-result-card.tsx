@@ -162,6 +162,7 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
         {props.channel && !error ? (
           <div className='absolute inset-0 overflow-hidden'>
             <IntelligencePreview
+              version={props.channel.revision || props.task.retry?.revision}
               taskId={props.task.task_id}
               channelId={props.channel.channel_id}
               group={props.channel.group}

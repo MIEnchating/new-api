@@ -107,7 +107,15 @@ export type IntelligenceAttempt = {
   http_status?: number
   error: string
 }
+export type IntelligenceRetryTarget = {
+  group: string
+  model: string
+  channel_id?: number
+  question_index?: number
+}
 export type IntelligenceTask = {
+  retries?: (IntelligenceRetryTarget & { revision: string })[]
+  retry?: (IntelligenceRetryTarget & { revision?: string }) | null
   task_id: string
   status: 'pending' | 'running' | 'succeeded' | 'failed'
   created_at: number
@@ -135,6 +143,7 @@ export type IntelligenceTask = {
       model?: string
       endpoint?: string
       attempts?: IntelligenceAttempt[]
+      revision?: string
       retry_count?: number
       http_status?: number
       request_id?: string
@@ -203,4 +212,15 @@ export async function deleteIntelligenceRecord(taskId: string) {
     `${endpoint}/results/${encodeURIComponent(taskId)}`
   )
   return requireServerSuccess(response.data)
+}
+
+export async function retryIntelligenceModel(input: {
+  taskId: string
+  target: IntelligenceRetryTarget
+}) {
+  const response = await api.post<Response<IntelligenceTask>>(
+    `${endpoint}/results/${encodeURIComponent(input.taskId)}/retry`,
+    input.target
+  )
+  return requireServerSuccess(response.data).data
 }

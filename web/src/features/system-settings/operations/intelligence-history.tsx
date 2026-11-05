@@ -26,6 +26,10 @@ import { EmptyState } from '@/components/empty-state'
 import { Badge } from '@/components/ui/badge'
 import {
   deleteIntelligenceRecord,
+  retryIntelligenceModel,
+  intelligenceQueryKey,
+  type IntelligenceMonitorData,
+  type IntelligenceRetryTarget,
   type IntelligenceTask,
 } from '@/features/status-monitor/intelligence-api'
 import { toIntlLocale } from '@/i18n/languages'
@@ -38,6 +42,40 @@ export function IntelligenceHistory(props: { history: IntelligenceTask[] }) {
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const client = useQueryClient()
   const [selected, setSelected] = useState<IntelligenceTask | null>(null)
+  const [retryTarget, setRetryTarget] = useState<{
+    task: IntelligenceTask
+    target: IntelligenceRetryTarget
+  } | null>(null)
+  const [queued, setQueued] = useState<{
+    before: IntelligenceTask
+    after: IntelligenceTask
+  } | null>(null)
+  const retry = useMutation({
+    mutationFn: retryIntelligenceModel,
+    onSuccess: async (updated) => {
+      if (retryTarget) setQueued({ before: retryTarget.task, after: updated })
+      setRetryTarget(null)
+      client.setQueriesData<IntelligenceMonitorData>(
+        { queryKey: intelligenceQueryKey },
+        (data) =>
+          data
+            ? {
+                ...data,
+                history: data.history.map((task) =>
+                  task.task_id === updated.task_id ? updated : task
+                ),
+              }
+            : data
+      )
+      client.removeQueries({
+        queryKey: ['status-monitor', 'intelligence-result', updated.task_id],
+      })
+      toast.success(t('Intelligence test queued'))
+      await client.invalidateQueries({
+        queryKey: ['status-monitor', 'intelligence'],
+      })
+    },
+  })
   const remove = useMutation({
     mutationFn: deleteIntelligenceRecord,
     onSuccess: async (_, taskId) => {
@@ -77,13 +115,42 @@ export function IntelligenceHistory(props: { history: IntelligenceTask[] }) {
           {props.history.map((task) => (
             <IntelligenceHistoryRun
               key={task.task_id}
-              task={task}
-              deleting={remove.isPending}
+              task={queued?.before === task ? queued.after : task}
+              deleting={remove.isPending || retry.isPending}
+              onRetry={(target) => setRetryTarget({ task, target })}
               onDelete={() => setSelected(task)}
             />
           ))}
         </div>
       )}
+      <ConfirmDialog
+        open={retryTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !retry.isPending) setRetryTarget(null)
+        }}
+        title={t('Retry {{model}} and replace its results?', {
+          model: retryTarget?.target.model,
+        })}
+        desc={
+          retryTarget?.target.channel_id !== undefined
+            ? t(
+                'This reruns only this channel and question for the selected model and replaces this result. Other results continue independently. Upstream API usage may incur charges.'
+              )
+            : t(
+                'This reruns only this model in the selected group using the recorded questions and replaces its results in this run. Other models are unchanged. Upstream API usage may incur charges.'
+              )
+        }
+        confirmText={t('Retry model')}
+        isLoading={retry.isPending}
+        handleConfirm={() => {
+          if (retryTarget) {
+            retry.mutate({
+              taskId: retryTarget.task.task_id,
+              target: retryTarget.target,
+            })
+          }
+        }}
+      />
       <ConfirmDialog
         open={selected !== null}
         onOpenChange={(open) => {

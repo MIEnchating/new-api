@@ -39,7 +39,8 @@ afterEach(() => {
 })
 
 function renderHistory(
-  channels: NonNullable<IntelligenceTask['result']>['channels']
+  channels: NonNullable<IntelligenceTask['result']>['channels'],
+  overrides: Partial<IntelligenceTask> = {}
 ) {
   const task: IntelligenceTask = {
     task_id: 'history-results',
@@ -51,6 +52,7 @@ function renderHistory(
     endpoint: 'openai',
     error: '',
     result: { channels },
+    ...overrides,
   }
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -183,4 +185,196 @@ it('previews legacy records without group or model fields and omits failed reque
   expect(dialog).toHaveAccessibleDescription('default · legacy-model · Pelican')
   const frame = await within(dialog).findByTitle('Generated animation preview')
   expect(frame.getAttribute('srcdoc')).toContain('Legacy result')
+})
+
+it('retries only the chosen model after confirmation and refreshes its cached preview', async () => {
+  const task = renderHistory([
+    { ...channel, group: 'default', model: 'first-model' },
+    {
+      ...channel,
+      group: 'vip',
+      model: 'second-model',
+      error: 'Intelligence test request failed',
+    },
+  ])
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        ...task,
+        status: 'pending',
+        retry: { group: 'vip', model: 'second-model' },
+      },
+    },
+  })
+  const user = userEvent.setup()
+  await user.click(
+    screen.getByRole('button', { name: 'Retry model second-model' })
+  )
+  expect(post).not.toHaveBeenCalled()
+  const dialog = screen.getByRole('alertdialog')
+  expect(dialog).toHaveTextContent('second-model')
+  await user.click(within(dialog).getByRole('button', { name: 'Retry model' }))
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledExactlyOnceWith(
+      '/api/status-monitor/intelligence/results/history-results/retry',
+      {
+        group: 'vip',
+        model: 'second-model',
+        channel_id: 108,
+        question_index: 0,
+      }
+    )
+  )
+  await waitFor(() =>
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  )
+  expect(
+    screen.getByRole('button', { name: 'Retry model second-model' })
+  ).toBeDisabled()
+  expect(screen.getByText('first-model')).toBeVisible()
+})
+
+it('keeps the retry confirmation open on failure and leaves other results available', async () => {
+  renderHistory([{ ...channel, group: 'default', model: 'first-model' }])
+  vi.spyOn(api, 'post').mockResolvedValue({
+    data: { success: false, message: 'Intelligence test request failed' },
+  })
+  const user = userEvent.setup()
+  await user.click(
+    screen.getByRole('button', { name: 'Retry model first-model' })
+  )
+  await user.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Retry model',
+    })
+  )
+  await waitFor(() =>
+    expect(
+      within(screen.getByRole('alertdialog')).getByRole('button', {
+        name: 'Retry model',
+      })
+    ).toBeEnabled()
+  )
+  await user.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Cancel',
+    })
+  )
+  await waitFor(() =>
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  )
+  expect(
+    screen.getByRole('button', { name: 'Retry model first-model' })
+  ).toBeEnabled()
+})
+
+it('allows a completed request to be previewed and retried while another question for the same model is running', async () => {
+  const task = renderHistory(
+    [
+      { ...channel, group: 'default', model: 'first-model' },
+      {
+        ...channel,
+        group: 'default',
+        model: 'first-model',
+        question_index: 1,
+        error: 'Intelligence test request failed',
+      },
+    ],
+    {
+      status: 'running',
+      groups: [{ group: 'default', model: 'first-model', endpoint: 'openai' }],
+      state: {
+        processed: 2,
+        total: 3,
+        progress: 67,
+        models: [
+          {
+            group: 'default',
+            model: 'first-model',
+            processed: 2,
+            total: 3,
+            failed: 1,
+          },
+        ],
+      },
+    }
+  )
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        ...task,
+        result: {
+          channels: [
+            {
+              ...channel,
+              group: 'default',
+              model: 'first-model',
+              html: '<html><body>Early result</body></html>',
+            },
+          ],
+        },
+      },
+    },
+  })
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        ...task,
+        retries: [
+          {
+            group: 'default',
+            model: 'first-model',
+            channel_id: 108,
+            question_index: 0,
+            revision: 'retry-1',
+          },
+        ],
+      },
+    },
+  })
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: 'View result' }))
+  const dialog = await screen.findByRole('dialog')
+  expect(
+    (
+      await within(dialog).findByTitle('Generated animation preview')
+    ).getAttribute('srcdoc')
+  ).toContain('Early result')
+  expect(get).toHaveBeenCalledTimes(1)
+  await user.keyboard('{Escape}')
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
+  await user.click(
+    screen.getAllByRole('button', { name: 'Retry model first-model' })[0]
+  )
+  await user.click(
+    within(screen.getByRole('alertdialog')).getByRole('button', {
+      name: 'Retry model',
+    })
+  )
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/status-monitor/intelligence/results/history-results/retry',
+      {
+        group: 'default',
+        model: 'first-model',
+        channel_id: 108,
+        question_index: 0,
+      }
+    )
+  )
+  await waitFor(() =>
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  )
+  expect(
+    screen.getAllByRole('button', { name: 'Retry model first-model' })[0]
+  ).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'View result' })).toBeEnabled()
+  expect(
+    screen.getAllByRole('button', { name: 'Retry model first-model' })[1]
+  ).toBeEnabled()
 })

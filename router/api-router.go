@@ -35,6 +35,7 @@ func SetApiRouter(router *gin.Engine) {
 		handlePermissionRoute(apiRouter.Group("", middleware.AdminAuth()), http.MethodGet, "/status-monitor/intelligence", authz.ChannelOperate, controller.GetIntelligenceMonitor)
 		handlePermissionRoute(apiRouter.Group("", middleware.AdminAuth()), http.MethodPut, "/status-monitor/intelligence", authz.ChannelOperate, controller.UpdateIntelligenceMonitor)
 		handlePermissionRoute(apiRouter.Group("", middleware.AdminAuth()), http.MethodDelete, "/status-monitor/intelligence/results/:task_id", authz.ChannelOperate, controller.DeleteIntelligenceRecord)
+		handlePermissionRoute(apiRouter.Group("", middleware.AdminAuth()), http.MethodPost, "/status-monitor/intelligence/results/:task_id/retry", authz.ChannelOperate, controller.RetryIntelligenceModel)
 		apiRouter.GET("/status-monitor/intelligence/results", middleware.SiteStatusTabAuth("intelligence"), controller.GetIntelligenceResults)
 		apiRouter.GET("/status-monitor/intelligence/results/:task_id", middleware.SiteStatusTabAuth("intelligence"), controller.GetIntelligenceTestResult)
 		handlePermissionRoute(apiRouter.Group("", middleware.AdminAuth()), http.MethodPost, "/status-monitor/intelligence/run", authz.ChannelOperate, controller.RunIntelligenceMonitor)
