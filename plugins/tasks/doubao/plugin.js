@@ -225,6 +225,7 @@ function seedanceUsageSchema(profile) {
   const resolutionLabels = {};
   for (const resolution of profile.resolutions) resolutionLabels[resolution] = { en: resolution, zh: resolution };
   const schema = {
+    seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
     // Upstream billing tokens (estimated at submit, actual on completion).
     tokens: {
       type: "number",
@@ -266,10 +267,10 @@ function seedanceUsageExamples(profile) {
     resolution: resolution,
     seconds: 5,
   }));
-  if (profile.videoInput) specs.push({ label: "720p · 5s (+4s 输入视频)", resolution: "720p", seconds: 9, video_input: "video" });
+  if (profile.videoInput) specs.push({ label: "720p · 5s (+4s 输入视频)", resolution: "720p", seconds: 5, tokenSeconds: 9, video_input: "video" });
   if (profile.audio) specs.push({ label: "720p · 5s · 无声", resolution: "720p", seconds: 5, generate_audio: false });
   return specs.map((spec) => {
-    const facts = { tokens: Math.round(estimateTokens(spec.seconds, spec.resolution)), resolution: spec.resolution };
+    const facts = { seconds: spec.seconds, tokens: Math.round(estimateTokens(spec.tokenSeconds ?? spec.seconds, spec.resolution)), resolution: spec.resolution };
     if (profile.videoInput) facts.video_input = spec.video_input || "none";
     if (profile.audio) facts.generate_audio = spec.generate_audio !== false;
     return { label: spec.label, facts: facts };
@@ -941,12 +942,10 @@ export function extractUsage(ctx) {
     const ratio = videoInputRatio(ctx.upstreamModel || ctx.model, metadata.resolution, metadata.content);
     const ratios = {};
     if (ratio !== 1) ratios.video_input_ratio = ratio;
-    if (ctx.billingMode === "per_second") ratios.seconds = seconds;
     return Object.keys(ratios).length ? ratios : null;
   }
   const resolution = videoResolution(ctx);
-  const facts = { tokens: estimateTokens(seconds, resolution), resolution: resolution };
-  if (ctx.billingMode === "per_second") facts.seconds = seconds;
+  const facts = { seconds: seconds, tokens: estimateTokens(seconds, resolution), resolution: resolution };
   // Every model reports video_input, including those whose profile omits it:
   // expressions saved when all Seedance models declared the field then keep
   // matching their no-video tier.

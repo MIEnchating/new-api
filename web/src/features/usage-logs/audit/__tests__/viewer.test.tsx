@@ -168,11 +168,10 @@ it.each([
         <AuditLogViewer scope='self' />
       </QueryClientProvider>
     )
-    const cell = await screen.findByRole(
-      'cell',
-      { name: new RegExp(headline) },
-      { timeout: 3000 }
-    )
+    // Wait for the fetched content before calculating accessible names for
+    // every table cell; polling roles can delay the query's render in jsdom.
+    await screen.findAllByText(headline, {}, { timeout: 3000 })
+    const cell = screen.getByRole('cell', { name: new RegExp(headline) })
     expect(cell).toHaveTextContent(headline)
     if ('id' in params || 'target_user_id' in params) {
       expect(cell).toHaveTextContent('(ID: 11)')
@@ -397,9 +396,8 @@ it.each([
         </QueryClientProvider>
       </I18nextProvider>
     )
-    expect(
-      await screen.findByRole('cell', { name: single }, { timeout: 5000 })
-    ).toBeVisible()
+    await screen.findAllByText(single, {}, { timeout: 5000 })
+    expect(screen.getByRole('cell', { name: single })).toBeVisible()
     expect(screen.getByRole('cell', { name: batch })).toBeVisible()
     expect(
       screen.queryByRole('cell', { name: 'channel.status_update' })

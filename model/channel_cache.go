@@ -59,6 +59,9 @@ func InitChannelCache() {
 		}
 		groups := strings.SplitSeq(channel.Group, ",")
 		for group := range groups {
+			if newGroup2model2channels[group] == nil {
+				newGroup2model2channels[group] = make(map[string][]int)
+			}
 			models := channel.GetModels()
 			for _, model := range models {
 				if _, ok := newGroup2model2channels[group][model]; !ok {
@@ -196,10 +199,11 @@ func LoadSatisfiedChannelSelectionSnapshotWithFilters(group string, modelName st
 	channelSyncLock.RLock()
 	defer channelSyncLock.RUnlock()
 
-	channelIDs, _ := filterCandidateIDs(group2model2channels[group][modelName], modelName, filters)
+	groupModels := cachedGroupModels(group)
+	channelIDs, _ := filterCandidateIDs(groupModels[modelName], modelName, filters)
 	if len(channelIDs) == 0 {
 		normalizedModel := ratio_setting.RoutingMatchModelName(modelName)
-		channelIDs, _ = filterCandidateIDs(group2model2channels[group][normalizedModel], modelName, filters)
+		channelIDs, _ = filterCandidateIDs(groupModels[normalizedModel], modelName, filters)
 	}
 
 	channels := make([]*Channel, 0, len(channelIDs))
@@ -224,10 +228,11 @@ func ListSatisfiedChannelCandidates(group string, modelName string, requestPath 
 	defer channelSyncLock.RUnlock()
 
 	filters := []dto.ChannelFilter{{Kind: dto.FilterRequestPath, RequestPath: requestPath}}
-	channelIDs, _ := filterCandidateIDs(group2model2channels[group][modelName], modelName, filters)
+	groupModels := cachedGroupModels(group)
+	channelIDs, _ := filterCandidateIDs(groupModels[modelName], modelName, filters)
 	if len(channelIDs) == 0 {
 		normalizedModel := ratio_setting.RoutingMatchModelName(modelName)
-		channelIDs, _ = filterCandidateIDs(group2model2channels[group][normalizedModel], modelName, filters)
+		channelIDs, _ = filterCandidateIDs(groupModels[normalizedModel], modelName, filters)
 	}
 
 	candidates := make([]ChannelSelectionCandidate, 0, len(channelIDs))
@@ -253,16 +258,15 @@ func ListSatisfiedChannelCandidates(group string, modelName string, requestPath 
 }
 
 func listSatisfiedChannelCandidatesFromDB(group string, modelName string, requestPath string) ([]ChannelSelectionCandidate, error) {
-	var abilities []Ability
-	query := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, modelName, true)
-	if err := query.Order("priority DESC, weight DESC").Find(&abilities).Error; err != nil {
+	abilities, err := findGroupAbilities(group, modelName)
+	if err != nil {
 		return nil, err
 	}
 	if len(abilities) == 0 {
 		normalizedModel := ratio_setting.FormatMatchingModelName(modelName)
 		if normalizedModel != modelName {
-			query = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, normalizedModel, true)
-			if err := query.Order("priority DESC, weight DESC").Find(&abilities).Error; err != nil {
+			abilities, err = findGroupAbilities(group, normalizedModel)
+			if err != nil {
 				return nil, err
 			}
 		}
@@ -306,6 +310,16 @@ func listSatisfiedChannelCandidatesFromDB(group string, modelName string, reques
 		})
 	}
 	return candidates, nil
+}
+
+// Caller holds channelSyncLock. Each node can use either side of a committed
+// rename until its channel cache is refreshed, including requests already open.
+func cachedGroupModels(group string) map[string][]int {
+	models, _ := common.LookupGroupWithRefresh(group, func(name string) (map[string][]int, bool) {
+		value := group2model2channels[name]
+		return value, len(value) > 0
+	})
+	return models
 }
 
 func GetRandomSatisfiedChannel(group string, model string, retry int, requestPath string) (*Channel, error) {

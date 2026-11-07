@@ -296,7 +296,11 @@ it('only offers legacy conversion in per-token and per-request modes', async () 
   expect(
     screen.getAllByRole('textbox', { name: 'Price per second' })[0]
   ).toHaveValue('0.35')
-  expect(await commit(editor.ref)).toMatchObject(data)
+  expect(await commit(editor.ref)).toMatchObject({
+    billingMode: 'tiered_expr',
+    billingExpr:
+      'lower(trim(u("resolution") ?? "")) == "1080p" ? tier("1080p", u("seconds") * 0.5) : (tier("base", u("seconds") * 0.35))',
+  })
 })
 
 it.each([
@@ -1073,14 +1077,15 @@ it('clears an invalid amount draft when pricing is reloaded with the same saved 
   expect(await commit(editor.ref)).toMatchObject({ price: '1' })
 })
 
-it('converts per-second site-currency edits back to USD and keeps the billing mode', async () => {
+it('saves per-second site-currency edits as a USD task expression', async () => {
   const editor = renderEditor({ billingMode: 'per-second', price: '0.2' })
   await selectCurrency('Site currency (CNY)')
   const price = screen.getByRole('textbox', { name: 'Price per second' })
   expect(price).toHaveValue('1.4')
   fireEvent.change(price, { target: { value: '2.8' } })
   expect(await commit(editor.ref)).toMatchObject({
-    billingMode: 'per-second',
+    billingMode: 'tiered_expr',
+    billingExpr: 'tier("base", u("seconds") * 0.4)',
     price: '0.4',
   })
 })
@@ -1127,7 +1132,9 @@ it('converts resolution prices between site currency and USD when switching and 
   expect(prices[0]).toHaveValue('1.4')
   expect((prices[1] as HTMLInputElement).value).toBe('3.5')
   fireEvent.change(prices[1], { target: { value: '7' } })
-  expect((await commit(editor.ref))?.secondPriceConfig?.prices['1080p']).toBe(1)
+  expect((await commit(editor.ref))?.billingExpr).toBe(
+    'lower(trim(u("resolution") ?? "")) == "1080p" ? tier("1080p", u("seconds") * 1) : (tier("base", u("seconds") * 0.2))'
+  )
   await selectCurrency('US dollar (USD)')
   expect(
     (screen.getAllByLabelText('Price per second')[1] as HTMLInputElement).value
@@ -1144,5 +1151,17 @@ it('blocks saving an overflowing resolution price and preserves an explicit zero
   fireEvent.change(price, { target: { value: '9'.repeat(309) } })
   expect(await commit(editor.ref)).toBeNull()
   fireEvent.change(price, { target: { value: '0' } })
-  expect((await commit(editor.ref))?.secondPriceConfig?.prices['1080p']).toBe(0)
+  expect((await commit(editor.ref))?.billingExpr).toBe(
+    'lower(trim(u("resolution") ?? "")) == "1080p" ? tier("1080p", u("seconds") * 0) : (tier("base", u("seconds") * 0.2))'
+  )
+})
+
+it('rejects conflicting resolution prices before saving an expression', async () => {
+  const editor = renderEditor({
+    billingMode: 'per-second',
+    price: '0.2',
+    secondPriceConfig: { prices: { '1080p': 0.5, '1080P': 0.7 } },
+  })
+  expect(await commit(editor.ref)).toBeNull()
+  expect(screen.getByText('Invalid pricing value')).toBeVisible()
 })

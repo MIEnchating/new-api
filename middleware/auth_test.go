@@ -124,11 +124,13 @@ func TestTokenAuthRestoresConfiguredGroupRoutesWhenOwnGroupIsHidden(t *testing.T
 	})
 	originalUsableGroups := setting.UserUsableGroups2JSONString()
 	originalGroupRatios := ratio_setting.GroupRatio2JSONString()
+	originalAliases := common.GetGroupAliases()
 	specialGroups := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup
 	originalSpecialGroups := specialGroups.ReadAll()
 	t.Cleanup(func() {
 		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(originalUsableGroups))
 		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalGroupRatios))
+		require.NoError(t, common.SetGroupAliases(originalAliases))
 		specialGroups.Clear()
 		specialGroups.AddAll(originalSpecialGroups)
 	})
@@ -213,7 +215,17 @@ func TestTokenAuthRestoresConfiguredGroupRoutesWhenOwnGroupIsHidden(t *testing.T
 	assertTokenGroup(fixedToken.Key, false, true)
 	assertTokenGroup(routeToken.Key, true, true)
 
-	specialGroups.Set(user.Group, map[string]string{"-:codex-pro": "hidden"})
+	// Existing HTTP and WebSocket credentials can keep their old group while
+	// settings have switched names, without replacing or weakening the token.
+	require.NoError(t, common.SetGroupAliases(map[string]string{"codex-pro": "codex-renamed"}))
+	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"codex-renamed":"Codex Pro"}`))
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"codex-renamed":0.14,"vue源码分组":1}`))
+	assertTokenGroup(fixedToken.Key, false, false)
+	assertTokenGroup(routeToken.Key, true, false)
+	assertTokenGroup(fixedToken.Key, false, true)
+	assertTokenGroup(routeToken.Key, true, true)
+
+	specialGroups.Set(user.Group, map[string]string{"-:codex-renamed": "hidden"})
 	router := gin.New()
 	router.GET("/v1/responses", TokenAuth(), func(c *gin.Context) {
 		t.Error("WebSocket credentials must not bypass group authorization")

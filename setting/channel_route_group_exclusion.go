@@ -3,6 +3,7 @@ package setting
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/QuantumNous/new-api/common"
 	"strings"
 	"sync"
 )
@@ -108,7 +109,10 @@ func GetChannelRouteGroupExclusion(group string) string {
 		return ""
 	}
 	channelRouteGroupExclusionsMu.RLock()
-	rule, ok := channelRouteGroupExclusions[group]
+	rule, ok := common.LookupGroup(group, func(name string) (ChannelRouteGroupExclusion, bool) {
+		value, exists := channelRouteGroupExclusions[name]
+		return value, exists
+	})
 	channelRouteGroupExclusionsMu.RUnlock()
 	if !ok || !rule.Enabled {
 		return ""

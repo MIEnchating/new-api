@@ -32,6 +32,17 @@ export const meta = {
       },
       description: { en: "Output video dimensions", zh: "输出视频尺寸" },
     },
+    // Requested output video dimensions.
+    resolution: {
+      enum: ["720x1280", "1280x720", "1792x1024", "1024x1792"],
+      enumLabels: {
+        "720x1280": { en: "720x1280", zh: "720x1280" },
+        "1280x720": { en: "1280x720", zh: "1280x720" },
+        "1792x1024": { en: "1792x1024", zh: "1792x1024" },
+        "1024x1792": { en: "1024x1792", zh: "1024x1792" },
+      },
+      description: { en: "Output video dimensions", zh: "输出视频尺寸" },
+    },
   },
   protocols: [{ name: "openai_responses", supports: ["stream", "sync", "background"] }, "openai_video"],
 };
@@ -136,8 +147,7 @@ export function extractUsage(ctx) {
   let seconds = Number(req.seconds || req.duration || defaultSeconds);
   if (!Number.isFinite(seconds) || seconds <= 0) seconds = defaultSeconds;
   const size = req.size || "720x1280";
-  if (ctx.billingMode === "per_second") return { seconds: Math.min(seconds, 3600), size: size, resolution: size };
-  return { seconds: Math.min(seconds, 3600), size: size };
+  return { seconds: Math.min(seconds, 3600), size: size, resolution: size };
 }
 
 export function extractUsageOnComplete(task, taskResult, body) {
@@ -220,7 +230,11 @@ export function buildContentRequest(ctx) {
   if (ctx.artifactKey !== "video") throw new Error("artifact_not_found");
   const url = videoURL(artifactData(ctx));
   if (url) return { url: url, method: ctx.clientRequest.method, credentialless: true };
-  return { url: ctx.baseUrl + "/v1/videos/" + encodeURIComponent(ctx.upstreamTaskId) + "/content", method: ctx.clientRequest.method, headers: { Authorization: "Bearer " + ctx.apiKey } };
+  return {
+    url: ctx.baseUrl + "/v1/videos/" + encodeURIComponent(ctx.upstreamTaskId) + "/content",
+    method: ctx.clientRequest.method,
+    headers: { Authorization: "Bearer " + ctx.apiKey },
+  };
 }
 
 export const protocols = {

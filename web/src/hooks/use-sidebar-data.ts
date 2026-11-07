@@ -59,7 +59,9 @@ import { ROLE } from '@/lib/roles'
 export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
   const { t } = useTranslation()
   const { data: allCustomPages = [] } = useCustomMenuPages()
-  const customPages = allCustomPages.filter((page) => page.enabled !== false)
+  const customPages = allCustomPages.filter(
+    (page) => page.enabled !== false && page.section !== 'header'
+  )
   const toNavItem = (page: (typeof customPages)[number]) => ({
     title: page.name,
     url:

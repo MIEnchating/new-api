@@ -770,7 +770,7 @@ export function extractUsage() { return {seconds:2}; }
 	}
 }
 
-func TestPerSecondTaskSubmission(t *testing.T) {
+func TestMigratedPerSecondExpressionSubmission(t *testing.T) {
 	service.InitHttpClient()
 	for _, tc := range []struct {
 		name                   string
@@ -800,7 +800,11 @@ func TestPerSecondTaskSubmission(t *testing.T) {
 				common.OptionMap = oldOptions
 			})
 			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(`{"declared-model":0.1}`))
-			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{"billing_setting.billing_mode": `{"declared-model":"per_second"}`, "billing_setting.plugin_billing_expr": `{}`, "group_ratio_setting.group_ratio": `{"default":1}`}))
+			pricing := model.PricingValues{"billing_setting.billing_mode": "per_second", "ModelPrice": .1, "ModelSecondPrice": map[string]any{"prices": map[string]float64{"1080p": .5, "free": 0}}}
+			require.NoError(t, model.ConvertPerSecondPricing(pricing))
+			expressions, err := common.Marshal(map[string]any{"declared-model": pricing["billing_setting.billing_expr"]})
+			require.NoError(t, err)
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{"billing_setting.billing_mode": `{"declared-model":"tiered_expr"}`, "billing_setting.billing_expr": string(expressions), "billing_setting.plugin_billing_expr": `{}`, "group_ratio_setting.group_ratio": `{"default":1}`}))
 			priceConfig, err := common.Marshal(map[string]any{"declared-model": map[string]any{"duration_field": "ignored", "resolution_field": "ignored", "prices": map[string]float64{"1080p": .5, "free": 0}}})
 			require.NoError(t, err)
 			common.OptionMap = map[string]string{"ModelSecondPrice": string(priceConfig)}
@@ -833,12 +837,10 @@ func TestPerSecondTaskSubmission(t *testing.T) {
 			}
 			require.Nil(t, taskErr, "%+v", taskErr)
 			require.NotNil(t, result)
-			assert.Equal(t, tc.wantPrice, info.PriceData.ModelPrice)
-			require.NotNil(t, info.PriceData.SecondPriceSnapshot)
-			assert.Equal(t, .1, info.PriceData.SecondPriceSnapshot.BasePrice)
-			assert.Equal(t, .5, info.PriceData.SecondPriceSnapshot.Prices["1080p"])
-			assert.Equal(t, common.QuotaFromFloat(tc.wantPrice*tc.wantSeconds*common.QuotaPerUnit), result.Quota)
-			assert.Equal(t, map[string]float64{"seconds": tc.wantSeconds}, info.PriceData.OtherRatios())
+			require.NotNil(t, info.TieredBillingSnapshot)
+			assert.Nil(t, info.PriceData.SecondPriceSnapshot)
+			assert.Equal(t, common.QuotaRound(tc.wantPrice*tc.wantSeconds*common.QuotaPerUnit), result.Quota)
+
 			if tc.immediate {
 				if strings.Contains(tc.usage, `resolution:"free"`) {
 					assert.Zero(t, reservation.held)

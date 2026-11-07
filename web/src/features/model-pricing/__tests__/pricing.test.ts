@@ -75,7 +75,7 @@ describe('shared model pricing', () => {
     }
   })
 
-  it('preserves per-second pricing through the shared editor helper', () => {
+  it('converts per-second drafts and synced prices to task expressions', () => {
     const options = pricingOptions({
       ModelPrice: '{"example":1}',
       ModelRatio: '{"example":2}',
@@ -89,8 +89,12 @@ describe('shared model pricing', () => {
 
     expect(JSON.parse(after.ModelPrice)).toEqual({ example: 0.4 })
     expect(JSON.parse(after.ModelRatio)).toEqual({})
+    expect(JSON.parse(after['billing_setting.billing_expr'])).toEqual({
+      example: 'tier("base", u("seconds") * 0.4)',
+    })
+    expect(JSON.parse(after.ModelSecondPrice)).toEqual({})
     expect(JSON.parse(after['billing_setting.billing_mode'])).toEqual({
-      example: 'per_second',
+      example: 'tiered_expr',
     })
     expect(
       pricingRow(
@@ -101,7 +105,7 @@ describe('shared model pricing', () => {
           price: '0.4',
         })
       ).billingMode
-    ).toBe('per-second')
+    ).toBe('tiered_expr')
 
     const synced = applyPriceSyncSelections(options, {
       example: {
@@ -111,7 +115,7 @@ describe('shared model pricing', () => {
     })
     expect(JSON.parse(synced.ModelPrice)).toEqual({ example: 0.5 })
     expect(JSON.parse(synced['billing_setting.billing_mode'])).toEqual({
-      example: 'per_second',
+      example: 'tiered_expr',
     })
   })
 

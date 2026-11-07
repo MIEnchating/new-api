@@ -26,6 +26,7 @@ interface LoadingStateProps {
   message?: string
   size?: 'sm' | 'md' | 'lg'
   inline?: boolean
+  variant?: 'default' | 'page'
 }
 
 const sizeMap = {
@@ -37,6 +38,33 @@ const sizeMap = {
 export function LoadingState(props: LoadingStateProps) {
   const { t } = useTranslation()
   const iconSize = sizeMap[props.size ?? 'md']
+
+  if (props.variant === 'page') {
+    return (
+      <div className={cn('app-loading-screen', props.className)}>
+        <div
+          className='app-loading-progress'
+          role='progressbar'
+          aria-label={props.message ?? t('Loading...')}
+        />
+        <div className='app-loading-mark' aria-hidden='true'>
+          <div className='app-loading-ring app-loading-ring-outer' />
+          <div className='app-loading-ring' />
+          <div className='app-loading-core'>
+            <svg viewBox='0 0 24 24' focusable='false'>
+              <path d='m12 3 9 5-9 5-9-5 9-5Z' />
+              <path d='m3 12 9 5 9-5M3 16l9 5 9-5' />
+            </svg>
+          </div>
+          <div className='app-loading-dots'>
+            <i />
+            <i />
+            <i />
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   if (props.inline) {
     return (

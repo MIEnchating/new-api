@@ -44,7 +44,10 @@ func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 func GetGroupEnabledModels(group string) []string {
 	var models []string
 	// Find distinct models
-	DB.Table("abilities").Where(commonGroupCol+" = ? and enabled = ?", group, true).Distinct("model").Pluck("model", &models)
+	DB.Table("abilities").Where(map[string]any{"group": common.GroupNames(group), "enabled": true}).Distinct("model").Pluck("model", &models)
+	if len(models) == 0 && refreshGroupAliases() == nil {
+		DB.Table("abilities").Where(map[string]any{"group": common.GroupNames(group), "enabled": true}).Distinct("model").Pluck("model", &models)
+	}
 	return models
 }
 
@@ -106,8 +109,7 @@ func GetChannelWithConstraints(
 	retry int,
 	filters []dto.ChannelFilter,
 ) (*Channel, error) {
-	var abilities []Ability
-	err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).Order("priority DESC, weight DESC").Find(&abilities).Error
+	abilities, err := findGroupAbilities(group, model)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +117,7 @@ func GetChannelWithConstraints(
 	// Like the memory cache, retry with the routing name (for example without
 	// @ modifiers) when no channel serves the exact name.
 	if normalized := ratio_setting.RoutingMatchModelName(model); len(abilities) == 0 && normalized != "" && normalized != model {
-		err = DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, normalized, true).Order("priority DESC, weight DESC").Find(&abilities).Error
+		abilities, err = findGroupAbilities(group, normalized)
 		if err != nil {
 			return nil, err
 		}
@@ -176,10 +178,8 @@ func GetChannelWithFilter(group string, model string, retry int, requestPath str
 }
 
 func loadSatisfiedChannelSelectionSnapshotFromDB(group string, model string, filters []dto.ChannelFilter) (*ChannelSelectionSnapshot, error) {
-	var abilities []Ability
-
-	channelQuery := DB.Where(&Ability{Group: group, Model: model, Enabled: true})
-	if err := channelQuery.Order("priority DESC, weight DESC").Find(&abilities).Error; err != nil {
+	abilities, err := findGroupAbilities(group, model)
+	if err != nil {
 		return nil, err
 	}
 	if len(abilities) == 0 {
@@ -223,6 +223,21 @@ func loadSatisfiedChannelSelectionSnapshotFromDB(group string, model string, fil
 	}
 
 	return newChannelSelectionSnapshot(candidates, false), nil
+}
+
+func findGroupAbilities(group, model string) ([]Ability, error) {
+	var abilities []Ability
+	query := DB.Where(map[string]any{"group": common.GroupNames(group), "model": model, "enabled": true})
+	if err := query.Order("priority DESC, weight DESC").Find(&abilities).Error; err != nil {
+		return nil, err
+	}
+	if len(abilities) == 0 && refreshGroupAliases() == nil {
+		query = DB.Where(map[string]any{"group": common.GroupNames(group), "model": model, "enabled": true})
+		if err := query.Order("priority DESC, weight DESC").Find(&abilities).Error; err != nil {
+			return nil, err
+		}
+	}
+	return abilities, nil
 }
 
 func filterAbilitiesByRequestPathAndModel(abilities []Ability, requestPath string, model string) []Ability {

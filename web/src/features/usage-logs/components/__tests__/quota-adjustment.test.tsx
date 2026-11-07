@@ -24,6 +24,7 @@ import {
 } from '@tanstack/react-table'
 import { act, render, screen, within } from '@testing-library/react'
 import { createInstance } from 'i18next'
+import { useMemo } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import {
   afterAll,
@@ -63,8 +64,9 @@ vi.hoisted(() => {
 afterAll(() => vi.unstubAllGlobals())
 
 function QuotaLogPreview(props: { log: UsageLog }) {
+  const data = useMemo(() => [props.log], [props.log])
   const table = useReactTable({
-    data: [props.log],
+    data,
     columns: useCommonLogsColumns(false, false),
     getCoreRowModel: getCoreRowModel(),
   })

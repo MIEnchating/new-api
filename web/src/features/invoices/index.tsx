@@ -43,10 +43,14 @@ export function InvoicesPage(props: { admin?: boolean }) {
         {props.admin ? t('Invoice management') : t('Invoice applications')}
       </SectionPageLayout.Title>
       <SectionPageLayout.Actions>
-        {props.admin && <InvoiceSettingsDialog />}
-        {props.admin && <InvoiceEmailTemplatesDialog />}
-        {props.admin && <InvoiceNotificationDialog />}
-        {props.admin && <InvoiceCopySettingsDialog />}
+        {props.admin && (
+          <div className='flex max-w-full flex-wrap items-center justify-end gap-2'>
+            <InvoiceSettingsDialog />
+            <InvoiceEmailTemplatesDialog />
+            <InvoiceNotificationDialog />
+            <InvoiceCopySettingsDialog />
+          </div>
+        )}
         {!props.admin && (
           <InvoiceApplicationForm
             open={applying}

@@ -49,19 +49,47 @@ func GetOrderedGroupNames() []string {
 }
 
 func GetUserUsableGroups(userGroup string) map[string]string {
-	groupsCopy := setting.GetUserUsableGroupsCopy()
+	groups := getUserUsableGroupsWithAliases(userGroup)
+	configured := ratio_setting.GetGroupRatioCopy()
+	for name := range groups {
+		if len(common.GroupNames(name)) > 1 {
+			if _, exists := configured[name]; !exists {
+				delete(groups, name)
+			}
+		}
+	}
+	return groups
+}
+
+func getUserUsableGroupsWithAliases(userGroup string) map[string]string {
+	// A fresh user row can reach a node whose settings still use the old name.
 	if userGroup != "" {
-		specialSettings, b := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(userGroup)
+		ratio_setting.ContainsGroupRatio(userGroup)
+	}
+	groupsCopy := setting.GetUserUsableGroupsCopy()
+	for group, desc := range groupsCopy {
+		for _, name := range common.GroupNames(group) {
+			groupsCopy[name] = desc
+		}
+	}
+	if userGroup != "" {
+		specialSettings, b := common.LookupGroup(userGroup, ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get)
 		if b {
 			// Additions are applied first so an explicit removal always wins.
 			explicitlyRemoved := make(map[string]struct{})
 			for specialGroup, desc := range specialSettings {
 				if groupToRemove, ok := strings.CutPrefix(specialGroup, "-:"); ok {
-					explicitlyRemoved[groupToRemove] = struct{}{}
+					for _, name := range common.GroupNames(groupToRemove) {
+						explicitlyRemoved[name] = struct{}{}
+					}
 				} else if groupToAdd, ok := strings.CutPrefix(specialGroup, "+:"); ok {
-					groupsCopy[groupToAdd] = desc
+					for _, name := range common.GroupNames(groupToAdd) {
+						groupsCopy[name] = desc
+					}
 				} else {
-					groupsCopy[specialGroup] = desc
+					for _, name := range common.GroupNames(specialGroup) {
+						groupsCopy[name] = desc
+					}
 				}
 			}
 			for groupToRemove := range explicitlyRemoved {
@@ -73,7 +101,10 @@ func GetUserUsableGroups(userGroup string) map[string]string {
 }
 
 func GroupInUserUsableGroups(userGroup, groupName string) bool {
-	_, ok := GetUserUsableGroups(userGroup)[groupName]
+	if groupName != "auto" {
+		ratio_setting.ContainsGroupRatio(groupName)
+	}
+	_, ok := getUserUsableGroupsWithAliases(userGroup)[groupName]
 	return ok
 }
 

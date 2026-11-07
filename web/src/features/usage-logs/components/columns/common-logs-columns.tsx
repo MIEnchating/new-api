@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { ColumnDef } from '@tanstack/react-table'
+import type { CellContext, ColumnDef } from '@tanstack/react-table'
 import { KeyRound, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -384,6 +384,163 @@ export function useCommonLogsColumns(
 ): ColumnDef<UsageLog>[] {
   const { t } = useTranslation()
   const currency = useSystemConfigStore((state) => state.config.currency)
+  // Keep the stateful cell mounted when translated headers or currency change.
+  const detailsCell = useMemo(
+    () =>
+      function DetailsCell({ row }: CellContext<UsageLog, unknown>) {
+        const { t, i18n } = useTranslation()
+        const [dialogOpen, setDialogOpen] = useState(false)
+        const [traceDialogOpen, setTraceDialogOpen] = useState(false)
+        const log = row.original
+        const other = parseLogOther(log.other)
+        const canViewExecutionTrace =
+          isAdmin &&
+          Boolean(log.request_id) &&
+          Boolean(other?.admin_info?.channel_execution_trace)
+        const upstreamRequestIds = getUpstreamRequestIds(
+          other?.admin_info?.upstream_request_ids,
+          log.upstream_request_id,
+          log.request_id
+        )
+
+        const pricingData = usePricingData(
+          log.type === 2 &&
+            other?.is_task === true &&
+            other.billing_mode === 'tiered_expr'
+        )
+        const usageSchema = pluginUsageSchema(
+          pricingData.models.find(
+            (model) => model.model_name === log.model_name
+          ),
+          other?.admin_info?.task_plugin?.key
+        )
+        const segments = buildDetailSegments(
+          log,
+          other,
+          t,
+          isAdmin,
+          i18n.language,
+          usageSchema
+        )
+        const primary = segments[0]
+        const hasMore = segments.length > 1
+        const fullDetailText =
+          segments.map((segment) => segment.text).join(' · ') ||
+          log.content ||
+          t('No details')
+        let primaryTextClass = 'text-foreground'
+        if (primary?.muted) {
+          primaryTextClass = 'text-muted-foreground/60'
+        } else if (primary?.danger) {
+          primaryTextClass = 'text-red-600 dark:text-red-400'
+        }
+        let detailPreview = <span className='text-muted-foreground/40'>—</span>
+        if (primary) {
+          const showAuditSecondary =
+            (log.type === 3 || log.type === 7) && segments[1]
+          if (showAuditSecondary) {
+            const secondary = segments[1]
+            detailPreview = (
+              <span className='min-w-0 leading-snug'>
+                <span className={cn('line-clamp-1', primaryTextClass)}>
+                  {primary.text}
+                </span>
+                <span className='text-muted-foreground line-clamp-1'>
+                  {secondary.text}
+                  {segments.length > 2 && (
+                    <span className='text-muted-foreground/40 ml-0.5'>
+                      +{segments.length - 2}
+                    </span>
+                  )}
+                </span>
+              </span>
+            )
+          } else {
+            detailPreview = (
+              <span
+                className={cn(
+                  'line-clamp-2 whitespace-normal leading-snug group-hover:underline',
+                  primaryTextClass
+                )}
+              >
+                {primary.text}
+                {hasMore && (
+                  <span className='text-muted-foreground/40 ml-0.5'>
+                    +{segments.length - 1}
+                  </span>
+                )}
+              </span>
+            )
+          }
+        } else if (log.content) {
+          detailPreview = (
+            <span className='text-muted-foreground line-clamp-2 whitespace-normal group-hover:underline'>
+              {renderLogContent(other, t) ?? log.content}
+            </span>
+          )
+        }
+
+        return (
+          <>
+            <TooltipProvider delay={200}>
+              <div className='flex w-full max-w-[340px] items-center gap-1.5'>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type='button'
+                        className='group flex min-w-0 flex-1 items-center gap-1 text-left text-xs'
+                        onClick={() => setDialogOpen(true)}
+                        aria-label={`${t('Click to view full details')}: ${fullDetailText}`}
+                      />
+                    }
+                  >
+                    {detailPreview}
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side='top'
+                    className='max-w-md break-words whitespace-pre-wrap'
+                  >
+                    {fullDetailText}
+                  </TooltipContent>
+                </Tooltip>
+              </div>
+            </TooltipProvider>
+            <DetailsDialog
+              log={log}
+              isAdmin={isAdmin}
+              isRoot={isRoot}
+              open={dialogOpen}
+              onOpenChange={setDialogOpen}
+              onViewExecutionTrace={
+                canViewExecutionTrace
+                  ? () => {
+                      setDialogOpen(false)
+                      setTraceDialogOpen(true)
+                    }
+                  : undefined
+              }
+            />
+            {canViewExecutionTrace ? (
+              <ExecutionTraceDialog
+                requestId={log.request_id}
+                upstreamRequestIds={upstreamRequestIds}
+                upstreamRequestChain={other?.admin_info?.upstream_request_chain}
+                upstreamRequestIdSources={
+                  other?.admin_info?.upstream_request_id_sources
+                }
+                isRetryIntermediate={
+                  other?.admin_info?.retry_intermediate === true
+                }
+                open={traceDialogOpen}
+                onOpenChange={setTraceDialogOpen}
+              />
+            ) : null}
+          </>
+        )
+      },
+    [isAdmin, isRoot]
+  )
   return useMemo(() => {
     const columns: ColumnDef<UsageLog>[] = [
       {
@@ -849,162 +1006,7 @@ export function useCommonLogsColumns(
       {
         accessorKey: 'content',
         header: t('Details'),
-        cell: function DetailsCell({ row }) {
-          const { t, i18n } = useTranslation()
-          const [dialogOpen, setDialogOpen] = useState(false)
-          const [traceDialogOpen, setTraceDialogOpen] = useState(false)
-          const log = row.original
-          const other = parseLogOther(log.other)
-          const canViewExecutionTrace =
-            isAdmin &&
-            Boolean(log.request_id) &&
-            Boolean(other?.admin_info?.channel_execution_trace)
-          const upstreamRequestIds = getUpstreamRequestIds(
-            other?.admin_info?.upstream_request_ids,
-            log.upstream_request_id,
-            log.request_id
-          )
-
-          const pricingData = usePricingData(
-            log.type === 2 &&
-              other?.is_task === true &&
-              other.billing_mode === 'tiered_expr'
-          )
-          const usageSchema = pluginUsageSchema(
-            pricingData.models.find(
-              (model) => model.model_name === log.model_name
-            ),
-            other?.admin_info?.task_plugin?.key
-          )
-          const segments = buildDetailSegments(
-            log,
-            other,
-            t,
-            isAdmin,
-            i18n.language,
-            usageSchema
-          )
-          const primary = segments[0]
-          const hasMore = segments.length > 1
-          const fullDetailText =
-            segments.map((segment) => segment.text).join(' · ') ||
-            log.content ||
-            t('No details')
-          let primaryTextClass = 'text-foreground'
-          if (primary?.muted) {
-            primaryTextClass = 'text-muted-foreground/60'
-          } else if (primary?.danger) {
-            primaryTextClass = 'text-red-600 dark:text-red-400'
-          }
-          let detailPreview = (
-            <span className='text-muted-foreground/40'>—</span>
-          )
-          if (primary) {
-            const showAuditSecondary =
-              (log.type === 3 || log.type === 7) && segments[1]
-            if (showAuditSecondary) {
-              const secondary = segments[1]
-              detailPreview = (
-                <span className='min-w-0 leading-snug'>
-                  <span className={cn('line-clamp-1', primaryTextClass)}>
-                    {primary.text}
-                  </span>
-                  <span className='text-muted-foreground line-clamp-1'>
-                    {secondary.text}
-                    {segments.length > 2 && (
-                      <span className='text-muted-foreground/40 ml-0.5'>
-                        +{segments.length - 2}
-                      </span>
-                    )}
-                  </span>
-                </span>
-              )
-            } else {
-              detailPreview = (
-                <span
-                  className={cn(
-                    'line-clamp-2 whitespace-normal leading-snug group-hover:underline',
-                    primaryTextClass
-                  )}
-                >
-                  {primary.text}
-                  {hasMore && (
-                    <span className='text-muted-foreground/40 ml-0.5'>
-                      +{segments.length - 1}
-                    </span>
-                  )}
-                </span>
-              )
-            }
-          } else if (log.content) {
-            detailPreview = (
-              <span className='text-muted-foreground line-clamp-2 whitespace-normal group-hover:underline'>
-                {renderLogContent(other, t) ?? log.content}
-              </span>
-            )
-          }
-
-          return (
-            <>
-              <TooltipProvider delay={200}>
-                <div className='flex w-full max-w-[340px] items-center gap-1.5'>
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type='button'
-                          className='group flex min-w-0 flex-1 items-center gap-1 text-left text-xs'
-                          onClick={() => setDialogOpen(true)}
-                          aria-label={`${t('Click to view full details')}: ${fullDetailText}`}
-                        />
-                      }
-                    >
-                      {detailPreview}
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side='top'
-                      className='max-w-md break-words whitespace-pre-wrap'
-                    >
-                      {fullDetailText}
-                    </TooltipContent>
-                  </Tooltip>
-                </div>
-              </TooltipProvider>
-              <DetailsDialog
-                log={log}
-                isAdmin={isAdmin}
-                isRoot={isRoot}
-                open={dialogOpen}
-                onOpenChange={setDialogOpen}
-                onViewExecutionTrace={
-                  canViewExecutionTrace
-                    ? () => {
-                        setDialogOpen(false)
-                        setTraceDialogOpen(true)
-                      }
-                    : undefined
-                }
-              />
-              {canViewExecutionTrace ? (
-                <ExecutionTraceDialog
-                  requestId={log.request_id}
-                  upstreamRequestIds={upstreamRequestIds}
-                  upstreamRequestChain={
-                    other?.admin_info?.upstream_request_chain
-                  }
-                  upstreamRequestIdSources={
-                    other?.admin_info?.upstream_request_id_sources
-                  }
-                  isRetryIntermediate={
-                    other?.admin_info?.retry_intermediate === true
-                  }
-                  open={traceDialogOpen}
-                  onOpenChange={setTraceDialogOpen}
-                />
-              ) : null}
-            </>
-          )
-        },
+        cell: detailsCell,
         size: 280,
         maxSize: 360,
       }
@@ -1013,5 +1015,5 @@ export function useCommonLogsColumns(
     return columns
     // Currency formatters read the store internally; invalidate cells when it changes.
     // oxlint-disable-next-line react-hooks/exhaustive-deps
-  }, [t, isAdmin, isRoot, showBillingSource, currency])
+  }, [t, isAdmin, isRoot, showBillingSource, currency, detailsCell])
 }

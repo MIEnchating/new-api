@@ -21,6 +21,7 @@ import { RouterProvider, createRouter } from '@tanstack/react-router'
 import { StrictMode } from 'react'
 import ReactDOM from 'react-dom/client'
 
+import { LoadingState } from '@/components/loading-state'
 import { initializeAndMountApplication } from '@/lib/application-root'
 import { installBuildMetadata } from '@/lib/build-metadata'
 import { applyFaviconToDom } from '@/lib/dom-utils'
@@ -55,6 +56,9 @@ const router = createRouter({
   context: { queryClient },
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,
+  defaultPendingComponent: () => <LoadingState variant='page' />,
+  defaultPendingMs: 0,
+  defaultPendingMinMs: 0,
 })
 
 // Register the router instance for type safety

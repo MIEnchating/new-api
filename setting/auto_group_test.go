@@ -9,11 +9,25 @@ import (
 )
 
 func TestUpdateAutoGroupsByJsonStringTreatsEmptyValueAsEmptyList(t *testing.T) {
-	original := append([]string(nil), autoGroups...)
-	t.Cleanup(func() { autoGroups = original })
+	original := AutoGroups2JsonString()
+	t.Cleanup(func() { require.NoError(t, UpdateAutoGroupsByJsonString(original)) })
 
 	require.NoError(t, UpdateAutoGroupsByJsonString("  "))
 	require.Empty(t, GetAutoGroups())
+}
+
+func TestAutoGroupSnapshotsSurviveUpdatesAndInvalidInput(t *testing.T) {
+	original := AutoGroups2JsonString()
+	t.Cleanup(func() { require.NoError(t, UpdateAutoGroupsByJsonString(original)) })
+	require.NoError(t, UpdateAutoGroupsByJsonString(`["vip","default"]`))
+	inFlight := GetAutoGroups()
+	require.NoError(t, UpdateAutoGroupsByJsonString(`["pro","default"]`))
+	assert.Equal(t, []string{"vip", "default"}, inFlight)
+	assert.Error(t, UpdateAutoGroupsByJsonString(`["broken",`))
+	assert.Equal(t, []string{"pro", "default"}, GetAutoGroups())
+	callerCopy := GetAutoGroups()
+	callerCopy[0] = "changed"
+	assert.Equal(t, []string{"pro", "default"}, GetAutoGroups())
 }
 
 func TestUpdateMaxTokenAutoGroupsAcceptsAnyPositiveInteger(t *testing.T) {

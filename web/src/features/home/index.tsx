@@ -16,23 +16,31 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import '@/styles/home.css'
 import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout'
 import { Footer } from '@/components/layout/components/footer'
+import { LoadingState } from '@/components/loading-state'
 import { RichContent } from '@/components/rich-content'
 import { useTheme } from '@/context/theme-provider'
+import { useStatus } from '@/hooks/use-status'
 import { isLikelyHtml } from '@/lib/content-format'
+import { resolveCustomMenuPageUrl } from '@/lib/custom-menu-pages'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { CTA, Features, Hero, HowItWorks, Stats } from './components'
+import { MEDIA_WORKSPACE_URL } from './constants'
 import { useHomePageContent } from './hooks'
 
 export function Home() {
   const { i18n, t } = useTranslation()
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const { resolvedTheme } = useTheme()
+  const { status } = useStatus()
+  const docsUrl =
+    (status?.docs_link as string | undefined) || 'https://docs.newapi.pro'
   const { auth } = useAuthStore()
   const isAuthenticated = !!auth.user
   const { content, isLoaded, isUrl } = useHomePageContent()
@@ -59,13 +67,7 @@ export function Home() {
   }, [isUrl, syncIframePreferences])
 
   if (!isLoaded) {
-    return (
-      <PublicLayout showMainContainer={false}>
-        <main className='flex min-h-screen items-center justify-center'>
-          <div className='text-muted-foreground'>{t('Loading...')}</div>
-        </main>
-      </PublicLayout>
-    )
+    return <LoadingState variant='page' />
   }
 
   if (content) {
@@ -122,12 +124,36 @@ export function Home() {
 
   return (
     <PublicLayout showMainContainer={false}>
-      <Hero isAuthenticated={isAuthenticated} />
-      <Stats />
-      <Features />
-      <HowItWorks />
-      <CTA isAuthenticated={isAuthenticated} />
-      <Footer />
+      <main className='home-page'>
+        <Hero isAuthenticated={isAuthenticated} />
+        <Stats />
+        <Features />
+        <HowItWorks />
+        <CTA isAuthenticated={isAuthenticated} />
+      </main>
+      <Footer
+        columns={[
+          {
+            title: t('Products'),
+            links: [
+              { text: t('Console'), href: '/dashboard' },
+              { text: t('Model Square'), href: '/pricing' },
+              {
+                text: t('Media workspace'),
+                href: resolveCustomMenuPageUrl(MEDIA_WORKSPACE_URL),
+              },
+            ],
+          },
+          {
+            title: t('Resources'),
+            links: [
+              { text: t('Read the documentation'), href: docsUrl },
+              { text: t('Site status'), href: '/site-status' },
+              { text: t('About'), href: '/about' },
+            ],
+          },
+        ]}
+      />
     </PublicLayout>
   )
 }

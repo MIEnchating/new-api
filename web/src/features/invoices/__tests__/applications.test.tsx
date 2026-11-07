@@ -829,6 +829,20 @@ it('opens administrator processing directly as a page without the application ta
     data: { success: true, data: { total: 1, items: [pending] } },
   })
   renderInvoice(<InvoicesPage admin />)
+  const settings = screen.getByRole('button', { name: 'Invoice settings' })
+  const actions = settings.parentElement
+  if (!actions) throw new Error('Invoice settings actions are missing')
+  expect(actions).toHaveClass('flex-wrap', 'gap-2')
+  expect(actions).not.toHaveClass('sm:gap-x-4')
+  expect(
+    within(actions).getByRole('button', { name: 'Email templates' })
+  ).toBeVisible()
+  expect(
+    within(actions).getByRole('button', { name: 'Notification settings' })
+  ).toBeVisible()
+  expect(
+    within(actions).getByRole('button', { name: 'Copy settings' })
+  ).toBeVisible()
   expect(
     await screen.findByRole('button', { name: 'View details' })
   ).toBeVisible()
@@ -949,7 +963,7 @@ it('opens a selected application in a drawer and returns to the compact list', a
   })
   expect(within(drawer).getByText('SECOND-TAX')).toBeVisible()
   expect(within(drawer).getByText(longTitle.trim())).toBeVisible()
-  await user.keyboard('{Escape}')
+  await user.click(within(drawer).getAllByRole('button', { name: 'Close' })[0])
   await waitFor(() =>
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   )
@@ -1270,9 +1284,12 @@ it.each([false, true])(
       data: { success: true, data: { total: 1, items } },
     })
     renderInvoice(<InvoiceRequestList admin={admin} />)
-    await user.click(
-      await screen.findByRole('button', { name: 'Copy invoice details' })
-    )
+    const copyButton = await screen.findByRole('button', {
+      name: 'Copy invoice details',
+    })
+    expect(copyButton.textContent).toBe('')
+    await waitFor(() => expect(copyButton).toBeEnabled())
+    await user.click(copyButton)
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     const expected = [
       'Invoice title: Example Company',
@@ -1297,9 +1314,11 @@ it.each([false, true])(
     writeText.mockClear()
     await user.click(screen.getByRole('button', { name: 'View details' }))
     const dialog = await screen.findByRole('dialog')
-    await user.click(
-      within(dialog).getByRole('button', { name: 'Copy invoice details' })
-    )
+    const detailCopy = within(dialog).getByRole('button', {
+      name: 'Copy invoice details',
+    })
+    expect(detailCopy.textContent).toBe('')
+    await user.click(detailCopy)
     expect(writeText).toHaveBeenCalledWith(expected.join('\n'))
     expect(within(dialog).getByRole('button', { name: 'Copied' })).toBeVisible()
   }

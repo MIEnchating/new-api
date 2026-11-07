@@ -14,6 +14,9 @@ export const meta = {
   fetchMode: "per_task",
   upstreams: ["vendor", "new_api"],
   usageSchema: {
+    // These endpoints do not report a standardized output resolution.
+    resolution: { enum: [""], enumLabels: { "": { en: "Unknown", zh: "未知" } }, description: { en: "Output video resolution", zh: "输出视频分辨率" } },
+    seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
     // Kling final unit deduction (estimated at submit, actual on completion).
     units: {
       type: "number",
@@ -22,12 +25,12 @@ export const meta = {
     },
   },
   usageExamples: [
-    { label: "v2.5 turbo std 5s", facts: { units: 1.5 } },
-    { label: "v2.6 pro 10s · audio", facts: { units: 10 } },
-    { label: "v3 pro 5s", facts: { units: 4 } },
-    { label: "v3 4k 5s", facts: { units: 15 } },
-    { label: "4.0 1080p 10s", facts: { units: 15 } },
-    { label: "4.0 1080p 10s · video input", facts: { units: 18 } },
+    { label: "v2.5 turbo std 5s", facts: { resolution: "", seconds: 5, units: 1.5 } },
+    { label: "v2.6 pro 10s · audio", facts: { resolution: "", seconds: 10, units: 10 } },
+    { label: "v3 pro 5s", facts: { resolution: "", seconds: 5, units: 4 } },
+    { label: "v3 4k 5s", facts: { resolution: "", seconds: 10, units: 15 } },
+    { label: "4.0 1080p 10s", facts: { resolution: "", seconds: 10, units: 15 } },
+    { label: "4.0 1080p 10s · video input", facts: { resolution: "", seconds: 10, units: 18 } },
   ],
   protocols: [{ name: "openai_responses", supports: ["stream", "sync", "background"] }, "openai_video"],
   // Kling's own paths; the gateway also serves each under /kling.
@@ -603,9 +606,9 @@ export function extractUsage(ctx) {
     units = unitsPerSecond(submitModel(ctx, req), outboundMode(source), source.metadata || {}) * duration;
   }
   if (ctx.usagePurpose === "billing_ratios") {
-    return ctx.billingMode === "per_second" ? { seconds: duration } : null;
+    return null;
   }
-  return ctx.billingMode === "per_second" ? { seconds: duration, units: units } : { units: units };
+  return { seconds: duration, units: units, resolution: "" };
 }
 
 export function buildQueryRequest(ctx) {
@@ -674,19 +677,19 @@ export function buildContentRequest(ctx) {
 }
 
 export function extractUsageOnComplete(ctx, _taskResult, body) {
-  if (isKling4Task(ctx)) return kling4CompletedUnits(ctx, body);
+  const facts = isKling4Task(ctx) ? kling4CompletedUnits(ctx, body) || {} : {};
   const data = (body && body.data) || {};
-  if (
-    !Object.prototype.hasOwnProperty.call(data, "final_unit_deduction") ||
-    data.final_unit_deduction === undefined ||
-    data.final_unit_deduction === null ||
-    data.final_unit_deduction === ""
-  ) {
-    return null;
+  if (!isKling4Task(ctx) && data.final_unit_deduction !== undefined && data.final_unit_deduction !== null && data.final_unit_deduction !== "") {
+    const units = Number(data.final_unit_deduction);
+    if (Number.isFinite(units)) facts.units = units;
   }
-  const units = Number.parseFloat(data.final_unit_deduction);
-  if (!Number.isFinite(units)) return null;
-  return { units: units };
+  const videos = isKling4Task(ctx) ? kling4Videos(kling4Entry(body, ctx.taskId)) : plainObject(data.task_result).videos;
+  const measured = Array.isArray(videos) && videos.length ? videos[0].duration : undefined;
+  if (typeof measured === "number" || (typeof measured === "string" && measured.trim() !== "")) {
+    const seconds = Number(measured);
+    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 3600) facts.seconds = seconds;
+  }
+  return Object.keys(facts).length ? facts : null;
 }
 
 export const protocols = {

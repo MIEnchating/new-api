@@ -1,18 +1,111 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+var groupAliasRefreshMutex sync.Mutex
+
+func init() {
+	common.RefreshGroupAliases = refreshGroupAliases
+}
+
+func refreshGroupAliases() error {
+	groupAliasRefreshMutex.Lock()
+	defer groupAliasRefreshMutex.Unlock()
+	if DB == nil {
+		return nil
+	}
+	var option Option
+	if err := DB.Where(&Option{Key: common.GroupAliasesOptionKey}).Find(&option).Error; err != nil {
+		return err
+	}
+	aliases := map[string]string{}
+	if option.Value != "" {
+		if err := common.UnmarshalJsonStr(option.Value, &aliases); err != nil {
+			return err
+		}
+	}
+	return common.SetGroupAliases(aliases)
+}
+
+// lockGroupAliases serializes renames and writes to the group registry across
+// nodes. SQLite serializes the initial write; other engines lock the row.
+func lockGroupAliases(tx *gorm.DB) (*Option, map[string]string, error) {
+	option := Option{Key: common.GroupAliasesOptionKey, Value: "{}"}
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&option).Error; err != nil {
+		return nil, nil, err
+	}
+	if err := lockForUpdate(tx).Where(&Option{Key: option.Key}).First(&option).Error; err != nil {
+		return nil, nil, err
+	}
+	aliases := map[string]string{}
+	if err := common.UnmarshalJsonStr(option.Value, &aliases); err != nil {
+		return nil, nil, err
+	}
+	return &option, aliases, nil
+}
+
+func validateGroupNamesWithTx(tx *gorm.DB, values map[string]string, renames map[string]string) error {
+	for _, key := range []string{"GroupRatio", "group_ratio_setting.group_ratio"} {
+		value, ok := values[key]
+		if !ok {
+			continue
+		}
+		_, aliases, err := lockGroupAliases(tx)
+		if err != nil {
+			return err
+		}
+		history, err := common.NewGroupAliasHistory(aliases)
+		if err != nil {
+			return err
+		}
+		var option Option
+		if err := tx.Where(&Option{Key: "GroupRatio"}).Find(&option).Error; err != nil {
+			return err
+		}
+		current := ratio_setting.GetGroupRatioCopy()
+		if option.Value != "" {
+			current = nil
+			if err := common.UnmarshalJsonStr(option.Value, &current); err != nil {
+				return err
+			}
+		}
+		for source, target := range renames {
+			delete(current, source)
+			current[target] = 0
+		}
+		var groups map[string]float64
+		if err := common.UnmarshalJsonStr(value, &groups); err != nil {
+			return err
+		}
+		seen := make(map[string]bool)
+		for name := range groups {
+			_, active := current[name]
+			identity := history.Identity(name)
+			if (len(history.Names(name)) > 1 && !active) || seen[identity] {
+				return errors.New("Retired group names cannot be reused")
+			}
+			seen[identity] = true
+		}
+	}
+	return nil
+}
 
 type groupRenameEffects struct {
 	userIDs             []int
 	subscriptionPlanIDs []int
 	channelsChanged     bool
+	tokens              []Token
 }
 
 // UpdateGroupSettingsAndReferences commits a group-settings snapshot together
@@ -29,13 +122,56 @@ func UpdateGroupSettingsAndReferences(optionValues map[string]string, renames ma
 
 	effects := groupRenameEffects{}
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := updateOptionsWithTx(tx, optionValues); err != nil {
+		option, aliases, err := lockGroupAliases(tx)
+		if err != nil {
+			return err
+		}
+		var ratioOption Option
+		if err := tx.Where(&Option{Key: "GroupRatio"}).Find(&ratioOption).Error; err != nil {
+			return err
+		}
+		groups := ratio_setting.GetGroupRatioCopy()
+		if ratioOption.Value != "" {
+			groups = nil
+			if err := common.UnmarshalJsonStr(ratioOption.Value, &groups); err != nil {
+				return err
+			}
+		}
+		history, err := common.NewGroupAliasHistory(aliases)
+		if err != nil {
+			return err
+		}
+		for source, target := range renames {
+			if _, exists := groups[source]; !exists {
+				return fmt.Errorf("source group %s does not exist", source)
+			}
+			if _, exists := groups[target]; exists {
+				return fmt.Errorf("target group %s already exists", target)
+			}
+			if history.Identity(source) == history.Identity(target) {
+				continue // Restore this group's own name without creating a cycle.
+			}
+			if len(history.Names(target)) > 1 {
+				return errors.New("Retired group names cannot be reused")
+			}
+			// Append after the last introduced name, even if source is an older
+			// restored name. Rewriting source would orphan intermediate names.
+			aliases[history.Names(source)[0]] = target
+		}
+		encoded, err := common.Marshal(aliases)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(option).Update("value", string(encoded)).Error; err != nil {
+			return err
+		}
+		if err := updateOptionsWithTx(tx, optionValues, renames); err != nil {
 			return err
 		}
 		if err := renameUserGroupsWithTx(tx, renames, &effects); err != nil {
 			return err
 		}
-		if err := renameTokenGroupsWithTx(tx, renames); err != nil {
+		if err := renameTokenGroupsWithTx(tx, renames, &effects); err != nil {
 			return err
 		}
 		if err := renameChannelGroupsWithTx(tx, renames, &effects); err != nil {
@@ -48,6 +184,16 @@ func UpdateGroupSettingsAndReferences(optionValues map[string]string, renames ma
 	})
 	if err != nil {
 		return err
+	}
+	// Publish identity history before replacing any local cache. Other nodes
+	// can discover the same committed history on a missing-name lookup.
+	if err := refreshGroupAliases(); err != nil {
+		return err
+	}
+	// A pre-commit fence can expire during a long transaction. Fence and clear
+	// after commit; in-flight old snapshots remain usable through aliases.
+	if err := invalidateTokensCache(effects.tokens); err != nil {
+		common.SysError(common.LogText("failed to refresh token caches after group rename: %s", err.Error()))
 	}
 
 	if effects.channelsChanged {
@@ -88,7 +234,7 @@ func renameUserGroupsWithTx(tx *gorm.DB, renames map[string]string, effects *gro
 	return nil
 }
 
-func renameTokenGroupsWithTx(tx *gorm.DB, renames map[string]string) error {
+func renameTokenGroupsWithTx(tx *gorm.DB, renames map[string]string, effects *groupRenameEffects) error {
 	var tokens []Token
 	conditions := make([]string, 0, len(renames)*3)
 	args := make([]any, 0, len(renames)*3)
@@ -147,9 +293,7 @@ func renameTokenGroupsWithTx(tx *gorm.DB, renames map[string]string) error {
 		}
 	}
 
-	if err := invalidateTokensCache(changedTokens); err != nil {
-		return err
-	}
+	effects.tokens = changedTokens
 	for _, token := range changedTokens {
 		if err := tx.Unscoped().Model(&Token{}).Where("id = ?", token.Id).Updates(map[string]any{
 			"group":              token.Group,

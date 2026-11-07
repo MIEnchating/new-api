@@ -172,7 +172,7 @@ export function CustomMenuPagesSection(props: CustomMenuPagesSectionProps) {
       <div className='space-y-4'>
         <p className='text-muted-foreground text-sm'>
           {t(
-            'Add embedded pages or external links to the sidebar. Choose who can see each item and where it appears.'
+            'Add embedded pages or external links to the sidebar, or external links to the top navigation. Choose who can see each item and where it appears.'
           )}
         </p>
         <div className='grid gap-4 xl:grid-cols-2'>
@@ -216,6 +216,19 @@ export function MenuPageEditor(props: {
   const icon = props.page.icon?.trim() ?? ''
   const isUploadedIcon = icon.startsWith('data:image/svg+xml;base64,')
   const isIconValid = isValidCustomMenuIcon(icon)
+  const isHeader = props.page.section === 'header'
+  const sectionLabels = {
+    chat: t('Chat'),
+    general: t('General'),
+    personal: t('Personal'),
+    header: t('Top'),
+  }
+  let section = props.page.section ?? 'general'
+  if (props.page.visibility === 'admin' && !isHeader) section = 'general'
+  const sectionLabel =
+    props.page.visibility === 'admin' && !isHeader
+      ? t('Admin')
+      : sectionLabels[section]
 
   const uploadIcon = async (file?: File) => {
     if (!file) return
@@ -297,52 +310,53 @@ export function MenuPageEditor(props: {
       </div>
 
       <div className='grid gap-4 sm:grid-cols-2'>
-        {props.page.visibility === 'public' ? (
-          <div className='space-y-2'>
-            <Label>{t('Menu location')}</Label>
-            <Select
-              value={props.page.section ?? 'general'}
-              onValueChange={(value) =>
-                props.onChange({ section: value as CustomMenuPageSection })
-              }
-            >
-              <SelectTrigger className='w-full'>
-                <SelectValue>
-                  {t(
-                    props.page.section === 'chat'
-                      ? 'Chat'
-                      : props.page.section === 'personal'
-                        ? 'Personal'
-                        : 'General'
-                  )}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent align='start' alignItemWithTrigger={false}>
-                <SelectItem value='chat'>{t('Chat')}</SelectItem>
-                <SelectItem value='general'>{t('General')}</SelectItem>
-                <SelectItem value='personal'>{t('Personal')}</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        ) : null}
-        <div
-          className={
-            props.page.visibility === 'public'
-              ? 'space-y-2'
-              : 'space-y-2 sm:col-span-2'
-          }
-        >
-          <Label>{t('Opening method')}</Label>
+        <div className='space-y-2'>
+          <Label htmlFor={`${props.page.id}-section`}>
+            {t('Menu location')}
+          </Label>
           <Select
-            value={props.page.openMode}
+            value={section}
+            onValueChange={(value) => {
+              if (!value) return
+              const patch: Partial<CustomMenuPage> = {
+                section: value as CustomMenuPageSection,
+              }
+              if (value === 'header') patch.openMode = 'external'
+              props.onChange(patch)
+            }}
+          >
+            <SelectTrigger id={`${props.page.id}-section`} className='w-full'>
+              <SelectValue>{sectionLabel}</SelectValue>
+            </SelectTrigger>
+            <SelectContent align='start' alignItemWithTrigger={false}>
+              {props.page.visibility === 'public' ? (
+                <>
+                  <SelectItem value='chat'>{t('Chat')}</SelectItem>
+                  <SelectItem value='general'>{t('General')}</SelectItem>
+                  <SelectItem value='personal'>{t('Personal')}</SelectItem>
+                </>
+              ) : (
+                <SelectItem value='general'>{t('Admin')}</SelectItem>
+              )}
+              <SelectItem value='header'>{t('Top')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className='space-y-2'>
+          <Label htmlFor={`${props.page.id}-open-mode`}>
+            {t('Opening method')}
+          </Label>
+          <Select
+            value={isHeader ? 'external' : props.page.openMode}
+            disabled={isHeader}
             onValueChange={(value) =>
               props.onChange({ openMode: value as CustomMenuPageOpenMode })
             }
           >
-            <SelectTrigger className='w-full'>
+            <SelectTrigger id={`${props.page.id}-open-mode`} className='w-full'>
               <SelectValue>
                 {t(
-                  props.page.openMode === 'external'
+                  isHeader || props.page.openMode === 'external'
                     ? 'Open external link'
                     : 'Embed with iframe'
                 )}
@@ -369,70 +383,72 @@ export function MenuPageEditor(props: {
         />
       </div>
 
-      <div className='space-y-2'>
-        <FieldGroup>
-          <Field data-invalid={!isIconValid}>
-            <FieldLabel htmlFor={`${props.page.id}-icon-url`}>
-              {t('Icon URL')}
-            </FieldLabel>
-            <Input
-              id={`${props.page.id}-icon-url`}
-              type='url'
-              value={isUploadedIcon ? '' : (props.page.icon ?? '')}
-              placeholder='https://example.com/icon.svg'
-              maxLength={32 * 1024}
-              aria-invalid={!isIconValid}
-              aria-describedby={
-                !isIconValid ? `${props.page.id}-icon-error` : undefined
-              }
-              onChange={(event) =>
-                props.onChange({ icon: event.target.value || undefined })
-              }
+      {!isHeader && (
+        <div className='space-y-2'>
+          <FieldGroup>
+            <Field data-invalid={!isIconValid}>
+              <FieldLabel htmlFor={`${props.page.id}-icon-url`}>
+                {t('Icon URL')}
+              </FieldLabel>
+              <Input
+                id={`${props.page.id}-icon-url`}
+                type='url'
+                value={isUploadedIcon ? '' : (props.page.icon ?? '')}
+                placeholder='https://example.com/icon.svg'
+                maxLength={32 * 1024}
+                aria-invalid={!isIconValid}
+                aria-describedby={
+                  !isIconValid ? `${props.page.id}-icon-error` : undefined
+                }
+                onChange={(event) =>
+                  props.onChange({ icon: event.target.value || undefined })
+                }
+              />
+              {!isIconValid && (
+                <FieldError id={`${props.page.id}-icon-error`}>
+                  {t('Icon URL must be a valid HTTP or HTTPS address')}
+                </FieldError>
+              )}
+            </Field>
+          </FieldGroup>
+          <div className='flex flex-wrap items-center gap-3'>
+            <div className='bg-background flex size-11 items-center justify-center rounded-md border border-dashed'>
+              {icon && isIconValid ? (
+                <img src={icon} alt={t('Icon preview')} className='size-5' />
+              ) : (
+                <Image className='text-muted-foreground size-5' />
+              )}
+            </div>
+            <input
+              ref={inputRef}
+              type='file'
+              aria-label={t('Upload SVG')}
+              accept='image/svg+xml,.svg'
+              className='sr-only'
+              onChange={(event) => uploadIcon(event.target.files?.[0])}
             />
-            {!isIconValid && (
-              <FieldError id={`${props.page.id}-icon-error`}>
-                {t('Icon URL must be a valid HTTP or HTTPS address')}
-              </FieldError>
-            )}
-          </Field>
-        </FieldGroup>
-        <div className='flex flex-wrap items-center gap-3'>
-          <div className='bg-background flex size-11 items-center justify-center rounded-md border border-dashed'>
-            {icon && isIconValid ? (
-              <img src={icon} alt={t('Icon preview')} className='size-5' />
-            ) : (
-              <Image className='text-muted-foreground size-5' />
-            )}
-          </div>
-          <input
-            ref={inputRef}
-            type='file'
-            aria-label={t('Upload SVG')}
-            accept='image/svg+xml,.svg'
-            className='sr-only'
-            onChange={(event) => uploadIcon(event.target.files?.[0])}
-          />
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            onClick={() => inputRef.current?.click()}
-          >
-            <Upload data-icon='inline-start' />
-            {t('Upload SVG')}
-          </Button>
-          {props.page.icon ? (
             <Button
               type='button'
-              variant='ghost'
+              variant='outline'
               size='sm'
-              onClick={() => props.onChange({ icon: undefined })}
+              onClick={() => inputRef.current?.click()}
             >
-              {t('Remove icon')}
+              <Upload data-icon='inline-start' />
+              {t('Upload SVG')}
             </Button>
-          ) : null}
+            {props.page.icon ? (
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                onClick={() => props.onChange({ icon: undefined })}
+              >
+                {t('Remove icon')}
+              </Button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      )}
     </section>
   )
 }

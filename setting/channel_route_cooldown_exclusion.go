@@ -3,6 +3,7 @@ package setting
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/QuantumNous/new-api/common"
 	"sort"
 	"strings"
 	"sync"
@@ -64,7 +65,10 @@ func ChannelRouteCooldownExcludedGroups2JSONString() string {
 
 func IsChannelRouteCooldownExcluded(group string) bool {
 	channelRouteCooldownExcludedGroupsMu.RLock()
-	_, excluded := channelRouteCooldownExcludedGroups[group]
+	_, excluded := common.LookupGroup(group, func(name string) (struct{}, bool) {
+		value, exists := channelRouteCooldownExcludedGroups[name]
+		return value, exists
+	})
 	channelRouteCooldownExcludedGroupsMu.RUnlock()
 	return excluded
 }

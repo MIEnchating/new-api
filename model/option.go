@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"maps"
 	"sort"
 	"strconv"
@@ -222,8 +223,17 @@ func loadOptionsFromDatabase() {
 	passkeyOptionMutex.Lock()
 	defer passkeyOptionMutex.Unlock()
 	options, _ := AllOption()
+	// Identity history must be visible before any individual group setting is
+	// replaced, so exclusions and overrides work across both cache generations.
+	if err := refreshGroupAliases(); err != nil {
+		common.SysError(common.LogText("failed to refresh group rename history: %s", err.Error()))
+		return
+	}
 	passkeyOptions := make(map[string]string)
 	for _, option := range options {
+		if option.Key == common.GroupAliasesOptionKey {
+			continue
+		}
 		if IsPasskeyDomainOption(option.Key) {
 			passkeyOptions[option.Key] = option.Value
 			continue
@@ -245,6 +255,9 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == common.GroupAliasesOptionKey {
+		return errors.New("Group rename history cannot be edited directly")
+	}
 	if key == InvoiceCopyFieldsOption {
 		_, err := parseInvoiceCopyFields(value)
 		return err
@@ -313,6 +326,9 @@ func validateOptionValue(key string, value string) error {
 }
 
 func UpdateOption(key string, value string) error {
+	if key == "GroupRatio" || key == "group_ratio_setting.group_ratio" {
+		return UpdateOptionsBulk(map[string]string{key: value})
+	}
 	if IsRequestPolicyOption(key) {
 		return UpdateRequestPolicyOptions(map[string]string{key: value})
 	}
@@ -382,7 +398,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 	}
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		return updateOptionsWithTx(tx, values)
+		return updateOptionsWithTx(tx, values, nil)
 	})
 	if err != nil {
 		return err
@@ -396,7 +412,10 @@ func UpdateOptionsBulk(values map[string]string) error {
 	return nil
 }
 
-func updateOptionsWithTx(tx *gorm.DB, values map[string]string) error {
+func updateOptionsWithTx(tx *gorm.DB, values map[string]string, renames map[string]string) error {
+	if err := validateGroupNamesWithTx(tx, values, renames); err != nil {
+		return err
+	}
 	for key, value := range values {
 		option := Option{Key: key}
 		if err := tx.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {

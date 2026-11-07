@@ -151,13 +151,16 @@ func TestModelRateLimitCountsConfiguredGroupsSeparately(t *testing.T) {
 	previousEnabled, previousMinutes := setting.ModelRequestRateLimitEnabled, setting.ModelRequestRateLimitDurationMinutes
 	previousTotal, previousSuccess := setting.ModelRequestRateLimitCount, setting.ModelRequestRateLimitSuccessCount
 	previousGroups, previousRedisEnabled := setting.ModelRequestRateLimitGroup, common.RedisEnabled
+	previousAliases := common.GetGroupAliases()
 	t.Cleanup(func() {
 		setting.ModelRequestRateLimitEnabled, setting.ModelRequestRateLimitDurationMinutes = previousEnabled, previousMinutes
 		setting.ModelRequestRateLimitCount, setting.ModelRequestRateLimitSuccessCount = previousTotal, previousSuccess
 		setting.ModelRequestRateLimitGroup, common.RedisEnabled = previousGroups, previousRedisEnabled
+		require.NoError(t, common.SetGroupAliases(previousAliases))
 	})
 	setting.ModelRequestRateLimitEnabled, setting.ModelRequestRateLimitDurationMinutes = true, 1
 	common.RedisEnabled = false
+	require.NoError(t, common.SetGroupAliases(map[string]string{"a": "a-renamed"}))
 
 	// Groups a and b have their own limits; c and d have none and share the global one.
 	steps := []struct {
@@ -165,6 +168,7 @@ func TestModelRateLimitCountsConfiguredGroupsSeparately(t *testing.T) {
 		want  int
 	}{
 		{"a", http.StatusOK}, {"a", http.StatusTooManyRequests},
+		{"a-renamed", http.StatusTooManyRequests},
 		{"b", http.StatusOK}, {"b", http.StatusTooManyRequests},
 		{"c", http.StatusOK}, {"d", http.StatusTooManyRequests},
 	}

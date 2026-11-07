@@ -4,6 +4,8 @@
 const OMNI_VIDEO_TOKENS_PER_SECOND = { "360p": 1931, "720p": 5792, "1080p": 8688, "4k": 17376 };
 const RESOLUTIONS = Object.keys(OMNI_VIDEO_TOKENS_PER_SECOND);
 const OMNI_USAGE_SCHEMA = {
+  seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
+  resolution: { enum: RESOLUTIONS, description: { en: "Output video resolution", zh: "输出视频分辨率" } },
   // Input tokens (reported on completion).
   input_tokens: {
     type: "number",
@@ -25,7 +27,7 @@ const OMNI_USAGE_SCHEMA = {
 };
 // Input and text output are only known on completion, which reports them.
 function omniUsageFacts(seconds, resolution) {
-  return { input_tokens: 0, output_tokens: 0, video_tokens: seconds * OMNI_VIDEO_TOKENS_PER_SECOND[resolution] };
+  return { seconds: seconds, resolution: resolution, input_tokens: 0, output_tokens: 0, video_tokens: seconds * OMNI_VIDEO_TOKENS_PER_SECOND[resolution] };
 }
 
 export const meta = {

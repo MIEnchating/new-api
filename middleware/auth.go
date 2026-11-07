@@ -700,12 +700,11 @@ func resolveTokenUsingGroup(token *model.Token, userGroup string) (string, error
 		if len(routes) == 0 {
 			return "", fmt.Errorf("密钥路由没有已启用的分组")
 		}
-		usableGroups := service.GetUserUsableGroups(userGroup)
 		for _, route := range routes {
 			if route.Group == "auto" {
 				return "", fmt.Errorf("密钥路由不支持 auto 分组")
 			}
-			if _, ok := usableGroups[route.Group]; !ok {
+			if !service.GroupInUserUsableGroups(userGroup, route.Group) {
 				return "", fmt.Errorf("无权访问 %s 分组", route.Group)
 			}
 			if !ratio_setting.ContainsGroupRatio(route.Group) {
@@ -719,7 +718,7 @@ func resolveTokenUsingGroup(token *model.Token, userGroup string) (string, error
 	if tokenGroup == "" {
 		return userGroup, nil
 	}
-	if _, ok := service.GetUserUsableGroups(userGroup)[tokenGroup]; !ok {
+	if !service.GroupInUserUsableGroups(userGroup, tokenGroup) {
 		return "", fmt.Errorf("无权访问 %s 分组", tokenGroup)
 	}
 	if tokenGroup != "auto" && !ratio_setting.ContainsGroupRatio(tokenGroup) {

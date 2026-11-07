@@ -544,7 +544,6 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 		}
 		if key == "billing_setting.billing_mode" {
 			if value != billing_setting.BillingModeRatio &&
-				value != billing_setting.BillingModePerSecond &&
 				value != billing_setting.BillingModeTieredExpr {
 				return errors.New("invalid billing mode")
 			}
@@ -626,11 +625,7 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 			}
 		}
 	}
-	if values["billing_setting.billing_mode"] == billing_setting.BillingModePerSecond {
-		if _, exists := values["ModelPrice"]; !exists {
-			return errors.New("per-second price is required")
-		}
-	}
+
 	return nil
 }
 
@@ -658,6 +653,10 @@ func UpdateModelPricing(changes []ModelPricingChange) error {
 			pricing := change.Pricing
 			if change.Reset {
 				pricing = modelPricingValues(defaults, change.ModelName)
+			}
+			pricing = maps.Clone(pricing)
+			if err := ConvertPerSecondPricing(pricing); err != nil {
+				return err
 			}
 			if err := validateModelPricing(change.ModelName, pricing, previous); err != nil {
 				return err
@@ -700,9 +699,14 @@ func UpdateModelPricingOptions(updates map[string]string) error {
 			values[key] = entries
 		}
 		for name := range names {
-			if err := validateModelPricing(name, modelPricingValues(values, name), modelPricingValues(previous, name)); err != nil {
+			pricing := modelPricingValues(values, name)
+			if err := ConvertPerSecondPricing(pricing); err != nil {
 				return err
 			}
+			if err := validateModelPricing(name, pricing, modelPricingValues(previous, name)); err != nil {
+				return err
+			}
+			replaceModelPricing(values, name, pricing)
 		}
 		return nil
 	})

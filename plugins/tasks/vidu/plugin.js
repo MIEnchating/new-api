@@ -31,6 +31,7 @@ export const meta = {
   fetchMode: "per_task",
   upstreams: ["vendor", "new_api"],
   usageSchema: {
+    seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
     // estimated/actual Vidu credits
     credits: {
       type: "number",
@@ -60,12 +61,12 @@ export const meta = {
   // credits is 0 in examples because this plugin does not estimate vendor credits;
   // schema completeness requires the key. Actual credits arrive from upstream.
   usageExamples: [
-    { label: "q4 5s 4K", facts: { credits: 0, duration: 5, resolution: "4K" } },
-    { label: "q3 pro 5s 1080p", facts: { credits: 0, duration: 5, resolution: "1080p" } },
-    { label: "q2 5s 720p", facts: { credits: 0, duration: 5, resolution: "720p" } },
-    { label: "q1 5s 1080p", facts: { credits: 0, duration: 5, resolution: "1080p" } },
-    { label: "2.0 4s 360p", facts: { credits: 0, duration: 4, resolution: "360p" } },
-    { label: "2.0 8s 720p", facts: { credits: 0, duration: 8, resolution: "720p" } },
+    { label: "q4 5s 4K", facts: { credits: 0, seconds: 5, duration: 5, resolution: "4K" } },
+    { label: "q3 pro 5s 1080p", facts: { credits: 0, seconds: 5, duration: 5, resolution: "1080p" } },
+    { label: "q2 5s 720p", facts: { credits: 0, seconds: 5, duration: 5, resolution: "720p" } },
+    { label: "q1 5s 1080p", facts: { credits: 0, seconds: 5, duration: 5, resolution: "1080p" } },
+    { label: "2.0 4s 360p", facts: { credits: 0, seconds: 4, duration: 4, resolution: "360p" } },
+    { label: "2.0 8s 720p", facts: { credits: 0, seconds: 8, duration: 8, resolution: "720p" } },
   ],
   // Vidu request and response bodies, for clients and for a downstream New API
   // gateway, at Vidu's own paths; the gateway also serves each under /vidu.
@@ -416,9 +417,9 @@ export function parseSubmitResponse(ctx, resp) {
 export function extractUsage(ctx) {
   const settings = submitSettings(ctx, actionFor(ctx.requestBody || {}));
   if (ctx.usagePurpose === "billing_ratios") {
-    return ctx.billingMode === "per_second" ? { seconds: settings.duration } : null;
+    return null;
   }
-  return ctx.billingMode === "per_second" ? Object.assign({ seconds: settings.duration }, settings) : settings;
+  return Object.assign({ seconds: settings.duration }, settings);
 }
 
 export function buildQueryRequest(ctx) {
@@ -462,10 +463,21 @@ export function buildContentRequest(ctx) {
 }
 
 export function extractUsageOnComplete(_task, _taskResult, body) {
-  if (!body || !Object.prototype.hasOwnProperty.call(body, "credits") || body.credits === undefined || body.credits === null) return null;
-  const credits = Number(body.credits);
-  if (!Number.isFinite(credits)) return null;
-  return { credits: credits };
+  if (!body) return null;
+  const facts = {};
+  if (body.credits !== undefined && body.credits !== null && body.credits !== "") {
+    const credits = Number(body.credits);
+    if (Number.isFinite(credits)) facts.credits = credits;
+  }
+  const measured = body.duration;
+  if (typeof measured === "number" || (typeof measured === "string" && measured.trim() !== "")) {
+    const seconds = Number(measured);
+    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 3600) {
+      facts.seconds = seconds;
+      facts.duration = seconds;
+    }
+  }
+  return Object.keys(facts).length ? facts : null;
 }
 
 export const protocols = {

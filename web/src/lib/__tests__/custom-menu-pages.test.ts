@@ -64,6 +64,21 @@ describe('custom menu pages', () => {
     )
   })
 
+  test('parses top links and normalizes them to external opening', () => {
+    const pages = parseCustomMenuPages([
+      {
+        id: 'page_header01',
+        name: 'Help',
+        url: 'https://example.com/help',
+        visibility: 'public',
+        section: 'header',
+        openMode: 'iframe',
+      },
+    ])
+    expect(pages).toHaveLength(1)
+    expect(pages[0]).toMatchObject({ section: 'header', openMode: 'external' })
+  })
+
   test('preserves the external link opening method', () => {
     const pages = parseCustomMenuPages([
       {

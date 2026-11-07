@@ -60,7 +60,7 @@ func HasTokenGroupRoutes(c *gin.Context) bool {
 // is still authorized by the freshly authenticated token.
 func RestoreTokenGroupRoute(c *gin.Context, group, modelName, requestPath string) bool {
 	for index, route := range getTokenGroupRoutes(c) {
-		if route.Group == group {
+		if common.GroupIdentity(route.Group) == common.GroupIdentity(group) {
 			setTokenGroupRouteContext(c, index, route, modelName, requestPath)
 			return true
 		}
@@ -80,7 +80,7 @@ func getTokenGroupRoutes(c *gin.Context) []model.TokenGroupRoute {
 }
 
 func isLastTokenGroupRoute(routes []model.TokenGroupRoute, group string) bool {
-	return len(routes) > 0 && routes[len(routes)-1].Group == group
+	return len(routes) > 0 && common.GroupIdentity(routes[len(routes)-1].Group) == common.GroupIdentity(group)
 }
 
 func tokenGroupRouteStateIndexKey(tokenID int) string {
@@ -88,7 +88,7 @@ func tokenGroupRouteStateIndexKey(tokenID int) string {
 }
 
 func tokenGroupRouteScope(group string, modelName string, requestPath string) string {
-	return group + "\x00" + modelName + "\x00" + requestPath
+	return common.GroupIdentity(group) + "\x00" + modelName + "\x00" + requestPath
 }
 
 func tokenGroupRouteCooldownKey(tokenID int, group string, modelName string, requestPath string) string {
@@ -465,7 +465,7 @@ func MarkTokenGroupRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 	cooldownSeconds := common.GetContextKeyInt(c, constant.ContextKeyTokenGroupRouteCooldown)
 	if cooldownSeconds <= 0 {
 		for _, route := range routes {
-			if route.Group == group {
+			if common.GroupIdentity(route.Group) == common.GroupIdentity(group) {
 				cooldownSeconds = route.CooldownSeconds
 				break
 			}
@@ -517,7 +517,7 @@ func MarkTokenGroupRouteSuccess(c *gin.Context) {
 
 func findTokenGroupRouteIndex(routes []model.TokenGroupRoute, group string) int {
 	for index, route := range routes {
-		if route.Group == group {
+		if common.GroupIdentity(route.Group) == common.GroupIdentity(group) {
 			return index
 		}
 	}

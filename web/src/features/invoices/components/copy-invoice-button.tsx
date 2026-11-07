@@ -56,10 +56,11 @@ export function InvoiceCopyButton(props: { request: InvoiceRequest }) {
       value={invoiceDetails}
       disabled={!settings.data || settings.isError || !invoiceDetails}
       variant='outline'
-      size='sm'
+      size='icon'
+      className='size-7'
+      iconClassName='size-3.5'
+      tooltip={t('Copy invoice details')}
       aria-label={t('Copy invoice details')}
-    >
-      {t('Copy invoice details')}
-    </CopyButton>
+    />
   )
 }

@@ -2,11 +2,124 @@ package service
 
 import (
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestRenamedGroupKeepsRouteCooldownAndConnection(t *testing.T) {
+	originalDB, originalLogDB := model.DB, model.LOG_DB
+	t.Cleanup(func() { model.DB, model.LOG_DB = originalDB, originalLogDB })
+	setupTokenGroupRouteTest(t)
+	originalAliases := common.GetGroupAliases()
+	t.Cleanup(func() { require.NoError(t, common.SetGroupAliases(originalAliases)) })
+	require.NoError(t, common.SetGroupAliases(nil))
+	until := FreezeTokenGroupRoute(11, "vip", tokenRouteTestModel, tokenRouteTestPath, 60)
+	require.NoError(t, common.SetGroupAliases(map[string]string{"vip": "pro"}))
+	assert.Equal(t, until, GetTokenGroupRouteCooldownUntil(11, "pro", tokenRouteTestModel, tokenRouteTestPath, common.GetTimestamp()))
+	ctx := newTokenRouteContext([]model.TokenGroupRoute{{Group: "pro", Priority: 1}})
+	assert.True(t, RestoreTokenGroupRoute(ctx, "vip", tokenRouteTestModel, tokenRouteTestPath))
+	assert.False(t, RestoreTokenGroupRoute(ctx, "unrelated", tokenRouteTestModel, tokenRouteTestPath))
+	// Restoring the original name keeps both the old connection and cooldown.
+	ctx = newTokenRouteContext([]model.TokenGroupRoute{{Group: "vip", Priority: 1}})
+	assert.True(t, RestoreTokenGroupRoute(ctx, "pro", tokenRouteTestModel, tokenRouteTestPath))
+	assert.Equal(t, until, GetTokenGroupRouteCooldownUntil(11, "vip", tokenRouteTestModel, tokenRouteTestPath, common.GetTimestamp()))
+}
+
+func TestPrepareGroupSettingsUpdateRestoresHistoricalName(t *testing.T) {
+	setGroupRenameOptionMap(t, map[string]string{
+		"GroupRatio":       `{"default":1,"pro":2.5}`,
+		"UserUsableGroups": `{"pro":"Paid"}`,
+		"AutoGroups":       `["pro","default"]`,
+		"GroupGroupRatio":  `{"pro":{"pro":0.75}}`,
+	})
+	updates, renames, err := PrepareGroupSettingsUpdate(
+		map[string]string{"GroupRatio": `{"default":1,"vip":2.5}`},
+		[]GroupRename{{From: "pro", To: "vip"}},
+	)
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"pro": "vip"}, renames)
+	assert.JSONEq(t, `{"vip":"Paid"}`, updates["UserUsableGroups"])
+	assert.JSONEq(t, `["vip","default"]`, updates["AutoGroups"])
+	assert.JSONEq(t, `{"vip":{"vip":0.75}}`, updates["GroupGroupRatio"])
+}
+
+func TestRenamedGroupPermissionsAndPricesAcrossCacheGenerations(t *testing.T) {
+	originalAliases := common.GetGroupAliases()
+	originalRatios := ratio_setting.GroupRatio2JSONString()
+	originalOverrides := ratio_setting.GroupGroupRatio2JSONString()
+	originalSchedules := ratio_setting.GroupRatioSchedule2JSONString()
+	originalUsable := setting.UserUsableGroups2JSONString()
+	originalSpecial := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.ReadAll()
+	originalLimits := setting.ModelRequestRateLimitGroup2JSONString()
+	originalTopup := common.TopupGroupRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, common.SetGroupAliases(originalAliases))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalRatios))
+		require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(originalOverrides))
+		require.NoError(t, ratio_setting.UpdateGroupRatioScheduleByJSONString(originalSchedules))
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(originalUsable))
+		ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Clear()
+		ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.AddAll(originalSpecial)
+		require.NoError(t, setting.UpdateModelRequestRateLimitGroupByJSONString(originalLimits))
+		require.NoError(t, common.UpdateTopupGroupRatioByJSONString(originalTopup))
+	})
+	require.NoError(t, common.SetGroupAliases(map[string]string{"vip": "pro"}))
+	for _, cachedName := range []string{"vip", "pro"} {
+		t.Run(cachedName, func(t *testing.T) {
+			ratios, err := common.Marshal(map[string]float64{cachedName: 2.5})
+			require.NoError(t, err)
+			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(string(ratios)))
+			require.NoError(t, common.UpdateTopupGroupRatioByJSONString(string(ratios)))
+			usable, err := common.Marshal(map[string]string{cachedName: "Paid"})
+			require.NoError(t, err)
+			require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(string(usable)))
+			schedules, err := common.Marshal(map[string]ratio_setting.GroupRatioSchedule{cachedName: {
+				Enabled: true, Periods: []ratio_setting.GroupRatioSchedulePeriod{{Start: "00:00", End: "23:59", Ratio: 3.5}},
+			}})
+			require.NoError(t, err)
+			require.NoError(t, ratio_setting.UpdateGroupRatioScheduleByJSONString(string(schedules)))
+			overrides, err := common.Marshal(map[string]map[string]float64{cachedName: {cachedName: 0.75}})
+			require.NoError(t, err)
+			require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(string(overrides)))
+			limits, err := common.Marshal(map[string][2]int{cachedName: {10, 5}})
+			require.NoError(t, err)
+			require.NoError(t, setting.UpdateModelRequestRateLimitGroupByJSONString(string(limits)))
+			ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Clear()
+			for _, requestName := range []string{"vip", "pro"} {
+				assert.True(t, GroupInUserUsableGroups(requestName, requestName))
+				assert.Equal(t, map[string]string{cachedName: "Paid"}, GetUserUsableGroups(requestName))
+				assert.Equal(t, 2.5, common.GetTopupGroupRatio(requestName))
+				ratio, enabled, active := GetEffectiveGroupRatio("default", requestName, time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC))
+				assert.Equal(t, 3.5, ratio)
+				assert.True(t, enabled)
+				assert.True(t, active)
+				ratio, _, _ = GetEffectiveGroupRatio(requestName, requestName, time.Now())
+				assert.Equal(t, 0.75, ratio)
+				total, success, found := setting.GetGroupRateLimit(requestName)
+				assert.True(t, found)
+				assert.Equal(t, 10, total)
+				assert.Equal(t, 5, success)
+			}
+			// An explicit removal must win even if base permissions and special
+			// permissions have been refreshed in a different order on this node.
+			for _, excluded := range []string{"vip", "pro"} {
+				ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Clear()
+				ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.AddAll(map[string]map[string]string{
+					"pro": {"-:" + excluded: "", "+:vip": "Paid"},
+				})
+				assert.False(t, GroupInUserUsableGroups("vip", "vip"))
+				assert.False(t, GroupInUserUsableGroups("vip", "pro"))
+			}
+			assert.False(t, GroupInUserUsableGroups("vip", "unrelated"))
+		})
+	}
+}
 
 func setGroupRenameOptionMap(t *testing.T, values map[string]string) {
 	t.Helper()

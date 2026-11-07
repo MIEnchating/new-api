@@ -73,7 +73,10 @@ func CheckGroupRatioSchedule(jsonString string) error {
 
 func GetGroupRatioSchedule(group string) (GroupRatioSchedule, bool) {
 	groupRatioScheduleMu.RLock()
-	schedule, ok := groupRatioSchedules[group]
+	schedule, ok := common.LookupGroup(group, func(name string) (GroupRatioSchedule, bool) {
+		value, exists := groupRatioSchedules[name]
+		return value, exists
+	})
 	groupRatioScheduleMu.RUnlock()
 	if !ok {
 		return GroupRatioSchedule{}, false

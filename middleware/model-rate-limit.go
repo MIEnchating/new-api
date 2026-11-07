@@ -196,7 +196,7 @@ func ModelRequestRateLimit() func(c *gin.Context) {
 		if found {
 			totalMaxCount = groupTotalCount
 			successMaxCount = groupSuccessCount
-			subject += ":" + group
+			subject += ":" + common.GroupIdentity(group)
 		}
 
 		// 根据存储类型选择并执行限流处理器

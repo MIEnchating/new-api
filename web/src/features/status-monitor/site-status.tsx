@@ -236,10 +236,7 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
     <>
       <TooltipProvider delay={0}>
         <div
-          className='grid h-8 min-w-0 items-end gap-px sm:gap-0.5'
-          style={{
-            gridTemplateColumns: `repeat(${heartbeats.length}, minmax(0, 1fr))`,
-          }}
+          className='grid h-8 min-w-0 grid-cols-48 gap-0.5'
           aria-label={t('Request history')}
         >
           {heartbeats.map((heartbeat, index) => {
@@ -269,8 +266,7 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
                       aria-label={label}
                       tabIndex={0}
                       className={cn(
-                        'block min-h-3 cursor-default rounded-full transition-[transform,filter,box-shadow] duration-150 ease-out focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none hover:z-10 hover:-translate-y-1 hover:brightness-110 hover:shadow-sm',
-                        heartbeat.status === 1 ? 'h-8' : 'h-5',
+                        'block h-8 min-w-0 cursor-default rounded-full transition-[transform,filter,box-shadow] duration-150 ease-out focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none hover:z-10 hover:-translate-y-1 hover:brightness-110 hover:shadow-sm',
                         meta.dotClassName
                       )}
                     />

@@ -807,11 +807,12 @@ export function parseTaskResult() { return {}; }
 						"billing_setting.billing_mode": billing_setting.BillingModePerSecond,
 					},
 				}
-				require.NoError(t, model.UpdateModelPricing([]model.ModelPricingChange{perSecond}))
+				// A text model cannot supply the seconds required by the converted expression.
+				require.ErrorContains(t, model.UpdateModelPricing([]model.ModelPricingChange{perSecond}), "no task plugin usage schema")
 				loaded, err = model.GetModelPricingSnapshot([]string{"matrix-priced"})
 				require.NoError(t, err)
-				assert.Equal(t, float64(0.4), loaded.Entries[0].Effective["ModelPrice"])
-				assert.Equal(t, billing_setting.BillingModePerSecond, loaded.Entries[0].Effective["billing_setting.billing_mode"])
+				assert.Equal(t, float64(0), loaded.Entries[0].Effective["ModelPrice"])
+				assert.Equal(t, billing_setting.BillingModeRatio, loaded.Entries[0].Effective["billing_setting.billing_mode"])
 				stale := changes[0]
 				changes[0].ExpectedVersion = loaded.Entries[0].Version
 				changes[0].Pricing = model.PricingValues{"billing_setting.billing_mode": "tiered_expr", "billing_setting.billing_expr": `tier("base", p * 2 + c * 8 + cr * 0 + cc * 2.5)`, "ModelRatio": float64(1)}
@@ -1091,6 +1092,27 @@ export function parseTaskResult() { return {}; }
 				modelManagementRequest(t, SyncUpstreamPreview, "GET", "/api/models/sync_upstream/preview?locale=zh", nil, &preview)
 				assert.False(t, preview.Success)
 			})
+			t.Run("legacy_per_second_writes_persist_only_expressions", func(t *testing.T) {
+				before, err := model.GetModelPricingSnapshot([]string{"matrix-task"})
+				require.NoError(t, err)
+				require.NoError(t, model.UpdateModelPricing([]model.ModelPricingChange{{ModelName: "matrix-task", ExpectedVersion: before.Entries[0].Version, Pricing: model.PricingValues{"ModelPrice": .4, "billing_setting.billing_mode": "per_second"}}}))
+				after, err := model.GetModelPricingSnapshot([]string{"matrix-task"})
+				require.NoError(t, err)
+				assert.Equal(t, "tiered_expr", after.Entries[0].Configured["billing_setting.billing_mode"])
+				assert.Equal(t, `tier("base", u("seconds") * 0.4)`, after.Entries[0].Configured["billing_setting.billing_expr"])
+				assert.NotContains(t, after.Entries[0].Configured, "ModelSecondPrice")
+				require.NoError(t, model.UpdateModelPricingOptions(map[string]string{"ModelPrice": `{"matrix-task":0.2}`, "billing_setting.billing_mode": `{"matrix-task":"per_second"}`}))
+				after, err = model.GetModelPricingSnapshot([]string{"matrix-task"})
+				require.NoError(t, err)
+				assert.Equal(t, "tiered_expr", after.Entries[0].Configured["billing_setting.billing_mode"])
+				assert.Equal(t, `tier("base", u("seconds") * 0.2)`, after.Entries[0].Configured["billing_setting.billing_expr"])
+				// Conversion must still validate against the plugin's seconds-only schema.
+				require.Error(t, model.UpdateModelPricingOptions(map[string]string{"billing_setting.billing_mode": `{"matrix-task":"per_second"}`, "ModelSecondPrice": `{"matrix-task":{"prices":{"1080p":0.8}}}`}))
+				unchanged, err := model.GetModelPricingSnapshot([]string{"matrix-task"})
+				require.NoError(t, err)
+				assert.Equal(t, after.Entries[0].Configured, unchanged.Entries[0].Configured)
+			})
+
 		})
 	}
 }

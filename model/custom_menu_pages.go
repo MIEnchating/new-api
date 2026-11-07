@@ -20,6 +20,7 @@ const (
 	CustomMenuSectionChat      = "chat"
 	CustomMenuSectionGeneral   = "general"
 	CustomMenuSectionPersonal  = "personal"
+	CustomMenuSectionHeader    = "header"
 	maxCustomMenuPages         = 20
 	maxCustomMenuIconLength    = 32 * 1024
 )
@@ -90,7 +91,9 @@ func ParseCustomMenuPages(raw string) ([]CustomMenuPage, error) {
 		if page.OpenMode != CustomMenuOpenModeIframe && page.OpenMode != CustomMenuOpenModeExternal {
 			return nil, fmt.Errorf("第 %d 个菜单项打开方式无效", i+1)
 		}
-		if page.Visibility == CustomMenuVisibilityPublic {
+		if page.Section == CustomMenuSectionHeader {
+			page.OpenMode = CustomMenuOpenModeExternal
+		} else if page.Visibility == CustomMenuVisibilityPublic {
 			if page.Section == "" {
 				page.Section = CustomMenuSectionGeneral
 			}

@@ -14,6 +14,8 @@ export const meta = {
   fetchMode: "per_task",
   upstreams: ["vendor", "new_api"],
   usageSchema: {
+    // These endpoints do not report a standardized output resolution.
+    resolution: { enum: [""], enumLabels: { "": { en: "Unknown", zh: "未知" } }, description: { en: "Output video resolution", zh: "输出视频分辨率" } },
     // Requested video duration in seconds. S2.0 Pro is fixed at 5; 3.0 req_keys allow 5 or 10.
     seconds: {
       type: "number",
@@ -33,13 +35,13 @@ export const meta = {
     },
   },
   usageExamples: [
-    { label: "S2.0 Pro 5s", facts: { seconds: 5, product: "s2_pro" } },
-    { label: "3.0 720P 5s", facts: { seconds: 5, product: "v30_720p" } },
-    { label: "3.0 720P 10s", facts: { seconds: 10, product: "v30_720p" } },
-    { label: "3.0 1080P 5s", facts: { seconds: 5, product: "v30_1080p" } },
-    { label: "3.0 1080P 10s", facts: { seconds: 10, product: "v30_1080p" } },
-    { label: "3.0 Pro 5s", facts: { seconds: 5, product: "v30_pro" } },
-    { label: "3.0 Pro 10s", facts: { seconds: 10, product: "v30_pro" } },
+    { label: "S2.0 Pro 5s", facts: { resolution: "", seconds: 5, product: "s2_pro" } },
+    { label: "3.0 720P 5s", facts: { resolution: "", seconds: 5, product: "v30_720p" } },
+    { label: "3.0 720P 10s", facts: { resolution: "", seconds: 10, product: "v30_720p" } },
+    { label: "3.0 1080P 5s", facts: { resolution: "", seconds: 5, product: "v30_1080p" } },
+    { label: "3.0 1080P 10s", facts: { resolution: "", seconds: 10, product: "v30_1080p" } },
+    { label: "3.0 Pro 5s", facts: { resolution: "", seconds: 5, product: "v30_pro" } },
+    { label: "3.0 Pro 10s", facts: { resolution: "", seconds: 10, product: "v30_pro" } },
   ],
   protocols: [{ name: "openai_responses", supports: ["stream", "sync", "background"] }, "openai_video"],
   // Jimeng's Bearer API, which takes the bodies of the signed
@@ -378,9 +380,9 @@ export function parseSubmitResponse(ctx, resp) {
 export function extractUsage(ctx) {
   const reqKey = submitReqKey(ctx);
   if (ctx.usagePurpose === "billing_ratios") {
-    return ctx.billingMode === "per_second" ? { seconds: Math.min(outboundSeconds(ctx.requestBody || {}, reqKey), 3600) } : null;
+    return null;
   }
-  return { seconds: outboundSeconds(ctx.requestBody || {}, reqKey), product: productForReqKey(reqKey) };
+  return { resolution: "", seconds: outboundSeconds(ctx.requestBody || {}, reqKey), product: productForReqKey(reqKey) };
 }
 
 export function buildQueryRequest(ctx) {

@@ -64,7 +64,7 @@ func GetGroupRatioCopy() map[string]float64 {
 }
 
 func ContainsGroupRatio(name string) bool {
-	_, ok := groupRatioMap.Get(name)
+	_, ok := common.LookupGroupWithRefresh(name, groupRatioMap.Get)
 	return ok
 }
 
@@ -77,7 +77,7 @@ func UpdateGroupRatioByJSONString(jsonStr string) error {
 }
 
 func GetGroupRatio(name string) float64 {
-	ratio, ok := groupRatioMap.Get(name)
+	ratio, ok := common.LookupGroupWithRefresh(name, groupRatioMap.Get)
 	if !ok {
 		common.SysLog(common.LogText("group ratio not found: %s", name))
 		return 1
@@ -86,11 +86,18 @@ func GetGroupRatio(name string) float64 {
 }
 
 func GetGroupGroupRatio(userGroup, usingGroup string) (float64, bool) {
-	gp, ok := groupGroupRatioMap.Get(userGroup)
+	// Pinned channels can bypass group-based channel lookup. Discover a rename
+	// here too, before deciding that a user-specific price does not exist.
+	ContainsGroupRatio(userGroup)
+	ContainsGroupRatio(usingGroup)
+	gp, ok := common.LookupGroup(userGroup, groupGroupRatioMap.Get)
 	if !ok {
 		return -1, false
 	}
-	ratio, ok := gp[usingGroup]
+	ratio, ok := common.LookupGroup(usingGroup, func(name string) (float64, bool) {
+		value, exists := gp[name]
+		return value, exists
+	})
 	if !ok {
 		return -1, false
 	}

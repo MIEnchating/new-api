@@ -32,7 +32,10 @@ func UpdateTopupGroupRatioByJSONString(jsonStr string) error {
 func GetTopupGroupRatio(name string) float64 {
 	topupGroupRatioMutex.RLock()
 	defer topupGroupRatioMutex.RUnlock()
-	ratio, ok := topupGroupRatio[name]
+	ratio, ok := LookupGroupWithRefresh(name, func(group string) (float64, bool) {
+		value, exists := topupGroupRatio[group]
+		return value, exists
+	})
 	if !ok {
 		SysError(LogText("topup group ratio not found: %s", name))
 		return 1

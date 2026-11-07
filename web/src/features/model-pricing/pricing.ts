@@ -252,17 +252,44 @@ export function pricingRow(
   }
 }
 
+// The per-second form is a convenience editor for task expressions only.
+export function perSecondExpression(data: ModelRatioData): string {
+  const price = Number(data.price)
+  if (!data.price?.trim() || !Number.isFinite(price) || price < 0) {
+    throw new Error(t('Enter a finite, non-negative price'))
+  }
+  let expression = `tier("base", u("seconds") * ${price})`
+  const prices = new Map<string, number>()
+  for (const [name, value] of Object.entries(
+    data.secondPriceConfig?.prices ?? {}
+  )) {
+    const resolution = name.trim().toLowerCase()
+    if (
+      !resolution ||
+      !Number.isFinite(value) ||
+      value < 0 ||
+      (prices.has(resolution) && prices.get(resolution) !== value)
+    ) {
+      throw new Error(t('Invalid pricing value'))
+    }
+    prices.set(resolution, value)
+  }
+  for (const resolution of [...prices.keys()].sort().reverse()) {
+    const literal = JSON.stringify(resolution)
+    expression = `lower(trim(u("resolution") ?? "")) == ${literal} ? tier(${literal}, u("seconds") * ${prices.get(resolution)}) : (${expression})`
+  }
+  return expression
+}
+
 export function pricingFromDraft(data: ModelRatioData): PricingValues {
   const values: PricingValues = {
     ...(data.pluginBillingExpr === undefined
       ? {}
       : { 'billing_setting.plugin_billing_expr': data.pluginBillingExpr }),
     'billing_setting.billing_mode':
-      data.billingMode === 'tiered_expr'
+      data.billingMode === 'tiered_expr' || data.billingMode === 'per-second'
         ? 'tiered_expr'
-        : data.billingMode === 'per-second'
-          ? 'per_second'
-          : 'ratio',
+        : 'ratio',
   }
   for (const [field, key] of Object.entries(pricingFieldMap)) {
     const value = data[field as keyof typeof pricingFieldMap]
@@ -286,8 +313,9 @@ export function pricingFromDraft(data: ModelRatioData): PricingValues {
       data.requestRuleExpr || ''
     )
   }
-  if (data.billingMode === 'per-second' && data.secondPriceConfig) {
-    values[secondPriceKey] = data.secondPriceConfig
+  if (data.billingMode === 'per-second') {
+    values['billing_setting.billing_mode'] = 'tiered_expr'
+    values['billing_setting.billing_expr'] = perSecondExpression(data)
   }
   return values
 }

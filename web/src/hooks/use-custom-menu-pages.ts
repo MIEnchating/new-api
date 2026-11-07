@@ -45,5 +45,5 @@ export const customMenuPagesQueryOptions = (role: number) =>
 
 export function useCustomMenuPages() {
   const role = useAuthStore((state) => state.auth.user?.role ?? 0)
-  return useQuery(customMenuPagesQueryOptions(role))
+  return useQuery({ ...customMenuPagesQueryOptions(role), enabled: role > 0 })
 }

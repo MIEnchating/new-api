@@ -43,171 +43,170 @@
         margin: 0;
       }
 
-      #app-bootstrap {
-        --bootstrap-background: oklch(1 0 0);
-        --bootstrap-foreground: oklch(0.49 0 0);
-        --bootstrap-track: oklch(0.93 0 0);
-        --bootstrap-primary: oklch(0.692 0.141 243.716);
+      /* Shared by the HTML bootstrap and LoadingState's page variant. Inline
+         styles keep the very first paint independent of the application bundle. */
+      .app-loading-screen {
+        --loading-surface: #f8faff;
+        --loading-card: #fff;
+        --loading-blue: #2b5cbe;
+        --loading-line: #dce7fb;
         position: fixed;
         inset: 0;
+        z-index: 50;
         display: grid;
         place-items: center;
-        background: var(--background, var(--bootstrap-background));
-        color: var(--muted-foreground, var(--bootstrap-foreground));
+        overflow: hidden;
+        background: radial-gradient(
+          ellipse at 50% 45%,
+          #eaf1ff 0,
+          var(--loading-surface) 58%
+        );
+        color: var(--loading-blue);
       }
-
-      #app-bootstrap-progress {
-        position: fixed;
-        z-index: 1;
-        top: 0;
-        left: 0;
-        width: 100%;
+      .app-loading-screen::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background-image:
+          linear-gradient(var(--loading-line) 1px, transparent 1px),
+          linear-gradient(90deg, var(--loading-line) 1px, transparent 1px);
+        background-size: 56px 56px;
+        mask-image: radial-gradient(ellipse at center, #0005, transparent 65%);
+        pointer-events: none;
+      }
+      .app-loading-progress {
+        position: absolute;
+        inset: 0 0 auto;
         height: 2px;
         overflow: hidden;
-        background: var(--border, var(--bootstrap-track));
+        background: var(--loading-line);
       }
-
-      #app-bootstrap-progress-bar {
-        width: 32%;
-        height: 100%;
-        background: currentColor;
-        animation: app-bootstrap-progress 1.6s ease-in-out infinite;
-      }
-
-      #app-bootstrap-mark {
-        box-sizing: border-box;
-        width: min(280px, calc(100vw - 48px));
-        aspect-ratio: 2;
-      }
-
-      #app-bootstrap-mark svg {
+      .app-loading-progress::after {
+        content: '';
         display: block;
-        width: 100%;
         height: 100%;
-        overflow: visible;
+        width: 32%;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--loading-blue),
+          transparent
+        );
+        animation: app-loading-progress 2.2s ease-in-out infinite;
+      }
+      .app-loading-mark {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: min(320px, calc(100vw - 48px));
+        aspect-ratio: 1;
+      }
+      .app-loading-ring {
+        position: absolute;
+        inset: 12%;
+        border: 1px solid var(--loading-line);
+        border-radius: 50%;
+        animation: app-loading-orbit 8s linear infinite;
+      }
+      .app-loading-ring::before {
+        content: '';
+        position: absolute;
+        top: -4px;
+        left: calc(50% - 4px);
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--loading-blue);
+        box-shadow: 0 0 0 5px
+          color-mix(in srgb, var(--loading-blue) 9%, transparent);
+      }
+      .app-loading-ring-outer {
+        inset: 0;
+        opacity: 0.55;
+        animation-duration: 12s;
+        animation-direction: reverse;
+        animation-delay: -4s;
+      }
+      .app-loading-core {
+        display: grid;
+        place-items: center;
+        width: 88px;
+        height: 88px;
+        border: 1px solid var(--loading-line);
+        border-radius: 26px;
+        background: var(--loading-card);
+        box-shadow:
+          0 16px 48px -16px #2b5cbe40,
+          0 0 0 12px color-mix(in srgb, var(--loading-card) 50%, transparent);
+        animation: app-loading-breathe 3s ease-in-out infinite;
+      }
+      .app-loading-core svg {
+        width: 38px;
+        height: 38px;
         fill: none;
+        stroke: currentColor;
+        stroke-width: 1.4;
         stroke-linecap: round;
         stroke-linejoin: round;
       }
-
-      .app-bootstrap-route {
-        stroke: var(--border, var(--bootstrap-track));
-        stroke-width: 1.25;
+      .app-loading-dots {
+        position: absolute;
+        bottom: -36px;
+        display: flex;
+        gap: 8px;
       }
-
-      .app-bootstrap-packet {
-        stroke: var(--primary, var(--bootstrap-primary));
-        stroke-width: 1.75;
-        stroke-dasharray: 8 100;
-        animation: app-bootstrap-flow 2.8s linear infinite;
+      .app-loading-dots i {
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.3;
+        animation: app-loading-breathe 1.8s ease-in-out infinite;
       }
-
-      .app-bootstrap-lane-middle {
-        animation-delay: -0.4s;
+      .app-loading-dots i:nth-child(2) {
+        animation-delay: 0.2s;
       }
-
-      .app-bootstrap-lane-bottom {
-        animation-delay: -0.8s;
+      .app-loading-dots i:nth-child(3) {
+        animation-delay: 0.4s;
       }
-
-      .app-bootstrap-outgoing .app-bootstrap-packet {
-        animation-delay: -1.4s;
+      :root.dark .app-loading-screen {
+        --loading-surface: #101827;
+        --loading-card: #19263d;
+        --loading-blue: #83b0ff;
+        --loading-line: #263958;
+        background: radial-gradient(
+          ellipse at 50% 45%,
+          #1a2b49 0,
+          var(--loading-surface) 58%
+        );
       }
-
-      .app-bootstrap-outgoing .app-bootstrap-lane-middle {
-        animation-delay: -1.8s;
-      }
-
-      .app-bootstrap-outgoing .app-bootstrap-lane-bottom {
-        animation-delay: -2.2s;
-      }
-
-      .app-bootstrap-node {
-        fill: var(--muted, var(--bootstrap-track));
-        fill-opacity: 0.5;
-        stroke: var(--border, var(--bootstrap-track));
-        stroke-width: 1.25;
-      }
-
-      .app-bootstrap-gateway {
-        fill: var(--primary, var(--bootstrap-primary));
-        stroke: var(--primary, var(--bootstrap-primary));
-        stroke-width: 1.25;
-        animation: app-bootstrap-gateway 2.8s ease-in-out infinite;
-      }
-
-      .app-bootstrap-symbol {
-        stroke: var(--primary, var(--bootstrap-primary));
-        stroke-width: 1.75;
-      }
-
-      @keyframes app-bootstrap-flow {
-        from {
-          stroke-dashoffset: 108;
-        }
-
+      @keyframes app-loading-orbit {
         to {
-          stroke-dashoffset: 0;
+          transform: rotate(360deg);
         }
       }
-
-      @keyframes app-bootstrap-gateway {
-        0%,
-        100% {
-          fill-opacity: 0.04;
-          stroke-opacity: 0.45;
-        }
-
-        45%,
-        65% {
-          fill-opacity: 0.12;
-          stroke-opacity: 0.9;
-        }
-      }
-
-      @keyframes app-bootstrap-progress {
-        0% {
+      @keyframes app-loading-progress {
+        from {
           transform: translateX(-100%);
         }
-
-        100% {
-          transform: translateX(312.5%);
+        to {
+          transform: translateX(412.5%);
         }
       }
-
-      :root.dark #app-bootstrap {
-        --bootstrap-background: oklch(0.235 0 0);
-        --bootstrap-foreground: oklch(0.78 0 0);
-        --bootstrap-track: oklch(1 0 0 / 10%);
-        --bootstrap-primary: oklch(0.54 0.142 248.516);
-      }
-
-      @media (prefers-color-scheme: dark) {
-        :root:not(.light) #app-bootstrap {
-          --bootstrap-background: oklch(0.235 0 0);
-          --bootstrap-foreground: oklch(0.78 0 0);
-          --bootstrap-track: oklch(1 0 0 / 10%);
-          --bootstrap-primary: oklch(0.54 0.142 248.516);
+      @keyframes app-loading-breathe {
+        50% {
+          opacity: 0.7;
+          transform: translateY(-3px);
         }
       }
-
       @media (prefers-reduced-motion: reduce) {
-        #app-bootstrap-mark *,
-        #app-bootstrap-progress-bar {
+        .app-loading-screen .app-loading-mark *,
+        .app-loading-screen::before,
+        .app-loading-screen *::after {
           animation: none;
         }
-
-        .app-bootstrap-packet {
-          stroke-dashoffset: -46;
-        }
-
-        .app-bootstrap-gateway {
-          fill-opacity: 0.08;
-          stroke-opacity: 0.65;
-        }
-
-        #app-bootstrap-progress-bar {
-          transform: translateX(0);
+        .app-loading-ring-outer {
+          transform: rotate(120deg);
         }
       }
     </style>
@@ -252,99 +251,27 @@
       })()
     </script>
     <div id="root" translate="no" class="notranslate">
-      <div id="app-bootstrap">
+      <div id="app-bootstrap" class="app-loading-screen">
         <div
           id="app-bootstrap-progress"
+          class="app-loading-progress"
           role="progressbar"
           aria-label="Loading"
+        ></div>
+        <div
+          id="app-bootstrap-mark"
+          class="app-loading-mark"
+          aria-hidden="true"
         >
-          <div id="app-bootstrap-progress-bar"></div>
-        </div>
-        <div id="app-bootstrap-mark" aria-hidden="true">
-          <svg viewBox="0 0 240 120" focusable="false">
-            <defs>
-              <path
-                id="app-bootstrap-in-top"
-                pathLength="100"
-                d="M24 24H60Q72 24 72 36V48Q72 60 84 60H96"
-              />
-              <path
-                id="app-bootstrap-in-middle"
-                pathLength="100"
-                d="M24 60H96"
-              />
-              <path
-                id="app-bootstrap-in-bottom"
-                pathLength="100"
-                d="M24 96H60Q72 96 72 84V72Q72 60 84 60H96"
-              />
-              <path
-                id="app-bootstrap-out-top"
-                pathLength="100"
-                d="M144 60H156Q168 60 168 48V36Q168 24 180 24H216"
-              />
-              <path
-                id="app-bootstrap-out-middle"
-                pathLength="100"
-                d="M144 60H216"
-              />
-              <path
-                id="app-bootstrap-out-bottom"
-                pathLength="100"
-                d="M144 60H156Q168 60 168 72V84Q168 96 180 96H216"
-              />
-            </defs>
-            <g class="app-bootstrap-route">
-              <use href="#app-bootstrap-in-top" />
-              <use href="#app-bootstrap-in-middle" />
-              <use href="#app-bootstrap-in-bottom" />
-              <use href="#app-bootstrap-out-top" />
-              <use href="#app-bootstrap-out-middle" />
-              <use href="#app-bootstrap-out-bottom" />
-            </g>
-            <g>
-              <use class="app-bootstrap-packet" href="#app-bootstrap-in-top" />
-              <use
-                class="app-bootstrap-packet app-bootstrap-lane-middle"
-                href="#app-bootstrap-in-middle"
-              />
-              <use
-                class="app-bootstrap-packet app-bootstrap-lane-bottom"
-                href="#app-bootstrap-in-bottom"
-              />
-            </g>
-            <g class="app-bootstrap-outgoing">
-              <use class="app-bootstrap-packet" href="#app-bootstrap-out-top" />
-              <use
-                class="app-bootstrap-packet app-bootstrap-lane-middle"
-                href="#app-bootstrap-out-middle"
-              />
-              <use
-                class="app-bootstrap-packet app-bootstrap-lane-bottom"
-                href="#app-bootstrap-out-bottom"
-              />
-            </g>
-            <g class="app-bootstrap-node">
-              <rect x="12" y="18" width="12" height="12" rx="3" />
-              <rect x="12" y="54" width="12" height="12" rx="3" />
-              <rect x="12" y="90" width="12" height="12" rx="3" />
-              <rect x="216" y="18" width="12" height="12" rx="3" />
-              <rect x="216" y="54" width="12" height="12" rx="3" />
-              <rect x="216" y="90" width="12" height="12" rx="3" />
-            </g>
-            <rect
-              class="app-bootstrap-gateway"
-              x="96"
-              y="36"
-              width="48"
-              height="48"
-              rx="8"
-            />
-            <path
-              class="app-bootstrap-symbol"
-              d="m113 53-7 7 7 7m14-14 7 7-7 7m-5-17-4 20"
-            />
-          </svg>
+          <div class="app-loading-ring app-loading-ring-outer"></div>
+          <div class="app-loading-ring"></div>
+          <div class="app-loading-core">
+            <svg viewBox="0 0 24 24" focusable="false">
+              <path d="m12 3 9 5-9 5-9-5 9-5Z" />
+              <path d="m3 12 9 5 9-5M3 16l9 5 9-5" />
+            </svg>
+          </div>
+          <div class="app-loading-dots"><i></i><i></i><i></i></div>
         </div>
       </div>
     </div>

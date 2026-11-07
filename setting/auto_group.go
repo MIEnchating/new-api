@@ -2,8 +2,10 @@ package setting
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/QuantumNous/new-api/common"
@@ -14,6 +16,8 @@ const DefaultMaxTokenAutoGroups = 5
 var autoGroups = []string{
 	"default",
 }
+
+var autoGroupsMutex sync.RWMutex
 
 var DefaultUseAutoGroup = false
 
@@ -27,12 +31,18 @@ func UpdateAutoGroupsByJsonString(jsonString string) error {
 	if strings.TrimSpace(jsonString) == "" {
 		jsonString = "[]"
 	}
-	autoGroups = make([]string, 0)
-	return common.Unmarshal([]byte(jsonString), &autoGroups)
+	groups := make([]string, 0)
+	if err := common.Unmarshal([]byte(jsonString), &groups); err != nil {
+		return err
+	}
+	autoGroupsMutex.Lock()
+	autoGroups = groups
+	autoGroupsMutex.Unlock()
+	return nil
 }
 
 func AutoGroups2JsonString() string {
-	jsonBytes, err := common.Marshal(autoGroups)
+	jsonBytes, err := common.Marshal(GetAutoGroups())
 	if err != nil {
 		return "[]"
 	}
@@ -40,7 +50,9 @@ func AutoGroups2JsonString() string {
 }
 
 func GetAutoGroups() []string {
-	return autoGroups
+	autoGroupsMutex.RLock()
+	defer autoGroupsMutex.RUnlock()
+	return slices.Clone(autoGroups)
 }
 
 func GetMaxTokenAutoGroups() int {

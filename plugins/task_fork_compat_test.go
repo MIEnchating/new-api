@@ -1,6 +1,9 @@
 package plugins_test
 
 import (
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -28,7 +31,7 @@ func pluginMap(t *testing.T, value any) map[string]any {
 	return result
 }
 
-func TestMigratedTaskPluginsPreservePerSecondBilling(t *testing.T) {
+func TestTaskPluginsExposeSecondsForExpressions(t *testing.T) {
 	tests := []struct {
 		key         string
 		name        string
@@ -54,6 +57,8 @@ func TestMigratedTaskPluginsPreservePerSecondBilling(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.key+" "+test.name, func(t *testing.T) {
 			plugin := loadBuiltinTaskPlugin(t, test.key)
+			schema, _ := plugin.Meta.UsageForModel(test.model)
+			require.NoError(t, billing_setting.SmokeTestTaskExpr(`tier("base", u("seconds") * 0.4)`, schema))
 			baseContext := map[string]any{
 				"requestBody":   test.requestBody,
 				"model":         test.model,
@@ -64,11 +69,7 @@ func TestMigratedTaskPluginsPreservePerSecondBilling(t *testing.T) {
 			require.NoError(t, err)
 			assert.Nil(t, value)
 
-			baseContext["billingMode"] = "per_second"
-			value, err = plugin.Engine.Call(t.Context(), "extractUsage", baseContext)
-			require.NoError(t, err)
-			ratios := pluginMap(t, value)
-			assert.Equal(t, test.seconds, ratios["seconds"])
+			baseContext["billingMode"] = "tiered_expr"
 			baseContext["usagePurpose"] = "facts"
 			value, err = plugin.Engine.Call(t.Context(), "extractUsage", baseContext)
 			require.NoError(t, err)
@@ -212,7 +213,7 @@ func TestSoraPluginPreservesOfficialFieldCleanupAndH3Duration(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, float64(5), pluginMap(t, usage)["seconds"])
 	usage, err = plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
-		"upstreamModel": "sora-2-pro", "requestBody": map[string]any{"seconds": 8, "size": "1792x1024"}, "usagePurpose": "facts", "billingMode": "per_second",
+		"upstreamModel": "sora-2-pro", "requestBody": map[string]any{"seconds": 8, "size": "1792x1024"}, "usagePurpose": "facts", "billingMode": "tiered_expr",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{"seconds": float64(8), "size": "1792x1024", "resolution": "1792x1024"}, pluginMap(t, usage))
@@ -230,6 +231,43 @@ func TestSoraPluginPreservesOfficialFieldCleanupAndH3Duration(t *testing.T) {
 			value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{}, map[string]any{}, tc.body)
 			require.NoError(t, err)
 			assert.Equal(t, tc.want, pluginMap(t, value))
+		})
+	}
+}
+
+func TestVideoExpressionsUseMeasuredSecondsAndKeepMissingEstimates(t *testing.T) {
+	for _, tc := range []struct {
+		key, model string
+		body       map[string]any
+		want       any
+	}{
+		{"doubao", "doubao-seedance-2-0-260128", map[string]any{"status": "succeeded", "duration": 2.5}, 2.5},
+		{"kling", "kling-v3", map[string]any{"data": map[string]any{"task_result": map[string]any{"videos": []any{map[string]any{"duration": "2.5"}}}}}, 2.5},
+		{"vidu", "viduq3-pro", map[string]any{"duration": 2.5}, 2.5},
+		{"sora", "sora-2", map[string]any{"seconds": "2.5"}, 2.5},
+		{"vidu", "viduq3-pro", map[string]any{"duration": 0}, float64(0)},
+		{"kling", "kling-v3", map[string]any{"data": map[string]any{"task_result": map[string]any{"videos": []any{map[string]any{"duration": 0}}}}}, float64(0)},
+		{"vidu", "viduq3-pro", map[string]any{"duration": -1}, nil},
+		{"vidu", "viduq3-pro", map[string]any{"duration": 3601}, nil},
+		{"vidu", "viduq3-pro", map[string]any{"duration": true}, nil},
+		{"kling", "kling-v3", map[string]any{"data": map[string]any{"final_unit_deduction": 1}}, nil},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			plugin := loadBuiltinTaskPlugin(t, tc.key)
+			schema, _ := plugin.Meta.UsageForModel(tc.model)
+			require.NoError(t, billing_setting.SmokeTestTaskExpr(`tier("base", u("seconds") * 0.4)`, schema))
+			value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"model": tc.model, "upstreamModel": tc.model}, map[string]any{}, tc.body)
+			require.NoError(t, err)
+			facts := pluginMap(t, value)
+			assert.Equal(t, tc.want, facts["seconds"])
+			snap := &billingexpr.BillingSnapshot{TaskUsageBilling: true, ExprString: `tier("base", u("seconds") * 0.4)`, QuotaPerUnit: 500000, GroupRatio: 1, UsageFacts: map[string]any{"seconds": 5.0}}
+			settled, _, err := service.EvaluateTaskCompletionUsage(snap, facts)
+			require.NoError(t, err)
+			wantSeconds := 5.0
+			if tc.want != nil {
+				wantSeconds = tc.want.(float64)
+			}
+			assert.Equal(t, common.QuotaRound(wantSeconds*.4*500000), settled.ActualQuotaAfterGroup)
 		})
 	}
 }

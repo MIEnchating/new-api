@@ -468,7 +468,7 @@ func TestVertexAIOmniUsageAndVideoDecoder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{"seconds": float64(8), "resolution": "1080p", "generate_audio": true}, decodePluginValue(t, ratios), "token quantities must not multiply existing legacy prices")
 	schema, _ := plugin.Meta.UsageForModel(omni)
-	assert.ElementsMatch(t, []string{"input_tokens", "output_tokens", "video_tokens"}, slices.Collect(maps.Keys(schema)))
+	assert.ElementsMatch(t, []string{"input_tokens", "output_tokens", "resolution", "seconds", "video_tokens"}, slices.Collect(maps.Keys(schema)))
 
 	// Thinking is billed as text output.
 	completed, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": omni}, map[string]any{}, map[string]any{

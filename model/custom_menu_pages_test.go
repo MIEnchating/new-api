@@ -120,3 +120,27 @@ func TestParseCustomMenuPagesIcons(t *testing.T) {
 		})
 	}
 }
+
+func TestParseCustomMenuPagesHeader(t *testing.T) {
+	for _, visibility := range []string{CustomMenuVisibilityPublic, CustomMenuVisibilityAdmin} {
+		t.Run(visibility, func(t *testing.T) {
+			raw, err := common.Marshal([]CustomMenuPage{{
+				ID: "page_header01", Name: "External", URL: "https://example.com/?issuer={origin}",
+				Visibility: visibility, Section: "header", OpenMode: CustomMenuOpenModeIframe,
+			}})
+			require.NoError(t, err)
+			pages, err := ParseCustomMenuPages(string(raw))
+			require.NoError(t, err)
+			require.Len(t, pages, 1)
+			assert.Equal(t, "header", pages[0].Section)
+			assert.Equal(t, CustomMenuOpenModeExternal, pages[0].OpenMode)
+			assert.Equal(t, visibility, pages[0].Visibility)
+			assert.Equal(t, "https://example.com/?issuer={origin}", pages[0].URL)
+			saved, err := common.Marshal(pages)
+			require.NoError(t, err)
+			reloaded, err := ParseCustomMenuPages(string(saved))
+			require.NoError(t, err)
+			assert.Equal(t, pages, reloaded)
+		})
+	}
+}

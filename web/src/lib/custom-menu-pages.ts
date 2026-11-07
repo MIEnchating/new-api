@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 export type CustomMenuPageVisibility = 'public' | 'admin'
-export type CustomMenuPageSection = 'chat' | 'general' | 'personal'
+export type CustomMenuPageSection = 'chat' | 'general' | 'personal' | 'header'
 export type CustomMenuPageOpenMode = 'iframe' | 'external'
 
 export type CustomMenuPage = {
@@ -76,7 +76,8 @@ export function parseCustomMenuPages(value: unknown): CustomMenuPage[] {
         (page.section === undefined ||
           page.section === 'chat' ||
           page.section === 'general' ||
-          page.section === 'personal') &&
+          page.section === 'personal' ||
+          page.section === 'header') &&
         (page.icon === undefined ||
           (typeof page.icon === 'string' &&
             isValidCustomMenuIcon(page.icon))) &&
@@ -86,7 +87,10 @@ export function parseCustomMenuPages(value: unknown): CustomMenuPage[] {
       return [
         {
           ...(page as CustomMenuPage),
-          openMode: page.openMode === 'external' ? 'external' : 'iframe',
+          openMode:
+            page.section === 'header' || page.openMode === 'external'
+              ? 'external'
+              : 'iframe',
           enabled: page.enabled !== false,
         },
       ]

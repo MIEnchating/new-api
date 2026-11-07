@@ -24,6 +24,7 @@ import {
 } from '@tanstack/react-table'
 import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { createInstance } from 'i18next'
+import { useMemo } from 'react'
 import { I18nextProvider } from 'react-i18next'
 import { afterAll, afterEach, beforeEach, expect, test, vi } from 'vitest'
 
@@ -80,8 +81,12 @@ function DetailPreview(props: {
   isAdmin: boolean
   type?: number
 }) {
+  const data = useMemo(
+    () => [makeLog(props.other, props.type)],
+    [props.other, props.type]
+  )
   const table = useReactTable({
-    data: [makeLog(props.other, props.type)],
+    data,
     columns: useCommonLogsColumns(props.isAdmin, false),
     getCoreRowModel: getCoreRowModel(),
   })
@@ -133,7 +138,7 @@ function renderPreview(other: LogOtherData, isAdmin = true, type?: number) {
   return screen.getByRole('button', { name: /./ })
 }
 
-test('keeps log details open when the parent refreshes with unchanged data', async () => {
+test('keeps log details open across parent, language, and currency updates', async () => {
   const other = { model_price: 0.25 }
   const wrapper = ({ children }: { children: React.ReactNode }) => (
     <I18nextProvider i18n={i18n}>
@@ -150,6 +155,14 @@ test('keeps log details open when the parent refreshes with unchanged data', asy
   )
   expect(await screen.findByRole('dialog')).toBeVisible()
   rerender(<DetailPreview other={other} isAdmin />)
+  expect(screen.getByRole('dialog')).toBeVisible()
+  await act(() => i18n.changeLanguage('zh'))
+  expect(screen.getByRole('dialog')).toBeVisible()
+  act(() => {
+    useSystemConfigStore.getState().setConfig({
+      currency: { ...DEFAULT_CURRENCY_CONFIG, quotaDisplayType: 'CNY' },
+    })
+  })
   expect(screen.getByRole('dialog')).toBeVisible()
 })
 

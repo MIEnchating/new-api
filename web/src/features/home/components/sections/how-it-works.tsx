@@ -16,73 +16,150 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Settings, Zap, BarChart3 } from 'lucide-react'
+import CherryStudio from '@lobehub/icons/es/CherryStudio/components/Mono.js'
+import { Link } from '@tanstack/react-router'
+import { ArrowUpRight, Code2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { AnimateInView } from '@/components/animate-in-view'
+import { ProviderBadge } from '@/components/provider-badge'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
+import { Button } from '@/components/ui/button'
+import { useStatus } from '@/hooks/use-status'
+
+import { HeroTerminalDemo } from '../hero-terminal-demo'
 
 export function HowItWorks() {
   const { t } = useTranslation()
-
+  const { status } = useStatus()
+  const docsUrl =
+    (status?.docs_link as string | undefined) || 'https://docs.newapi.pro'
   const steps = [
     {
-      num: '1',
-      title: t('Configure'),
-      desc: t(
-        'Add your API keys, set up channels and configure access permissions'
-      ),
-      icon: <Settings className='size-6' strokeWidth={1.5} />,
+      title: t('Create an API key'),
+      desc: t('Set up a key in the console and define how it can be used.'),
     },
     {
-      num: '2',
-      title: t('Connect'),
-      desc: t(
-        'Connect through OpenAI, Claude, Gemini, and other compatible API routes'
-      ),
-      icon: <Zap className='size-6' strokeWidth={1.5} />,
+      title: t('Choose a model'),
+      desc: t('Compare available models and pricing for your workload.'),
     },
     {
-      num: '3',
-      title: t('Monitor'),
-      desc: t('Track usage, costs and performance with real-time analytics'),
-      icon: <BarChart3 className='size-6' strokeWidth={1.5} />,
+      title: t('Connect your application'),
+      desc: t(
+        'Use the API address and key in your SDK or compatible application.'
+      ),
     },
   ]
-
   return (
-    <section className='border-border/40 relative z-10 border-t px-6 py-24 md:py-32'>
+    <section
+      className='home-integration px-6 py-16 sm:px-8 lg:py-20'
+      aria-labelledby='home-integration-title'
+    >
       <div className='mx-auto max-w-6xl'>
-        <AnimateInView className='mb-16 text-center md:mb-20'>
-          <p className='text-muted-foreground mb-3 text-xs font-medium tracking-widest uppercase'>
-            {t('How It Works')}
-          </p>
-          <h2 className='text-2xl font-bold tracking-tight md:text-3xl'>
-            {t('Three steps to get started')}
-          </h2>
-        </AnimateInView>
-
-        <div className='grid gap-8 md:grid-cols-3 md:gap-12'>
-          {steps.map((step, i) => (
-            <AnimateInView
-              key={step.num}
-              delay={i * 150}
-              animation='fade-up'
-              className='relative flex flex-col items-center text-center'
+        <AnimateInView className='flex flex-col justify-between gap-6 sm:flex-row sm:items-end'>
+          <div>
+            <p className='home-eyebrow mb-4'>{t('How It Works')}</p>
+            <h2
+              id='home-integration-title'
+              className='text-3xl leading-tight font-semibold tracking-tight text-balance sm:text-4xl'
             >
-              <div className='relative mb-6'>
-                <div className='text-muted-foreground border-border/50 bg-muted/30 flex size-16 items-center justify-center rounded-2xl border transition-colors'>
-                  {step.icon}
-                </div>
-                <div className='bg-foreground text-background absolute -top-2 -right-2 flex size-6 items-center justify-center rounded-full text-xs font-bold'>
-                  {step.num}
-                </div>
-              </div>
-              <h3 className='mb-2 text-base font-semibold'>{step.title}</h3>
-              <p className='text-muted-foreground max-w-[240px] text-sm leading-relaxed'>
+              {t('Three steps to get started')}
+            </h2>
+          </div>
+          <Button
+            role='link'
+            variant='outline'
+            className='h-11 w-fit gap-2 rounded-xl px-5 has-data-[icon=inline-end]:pr-5'
+            render={
+              docsUrl.startsWith('http') ? (
+                <a href={docsUrl} target='_blank' rel='noopener noreferrer' />
+              ) : (
+                <Link to={docsUrl} />
+              )
+            }
+          >
+            {t('Read the documentation')}
+            <ArrowUpRight data-icon='inline-end' />
+          </Button>
+        </AnimateInView>
+        <ol className='home-steps mt-12 grid gap-8 md:grid-cols-3 md:gap-10'>
+          {steps.map((step, index) => (
+            <AnimateInView
+              as='li'
+              key={step.title}
+              delay={index * 100}
+              className='relative'
+            >
+              <span
+                className='home-step-number mb-6 inline-flex size-11 items-center justify-center rounded-xl border font-mono text-sm'
+                aria-hidden='true'
+              >
+                0{index + 1}
+              </span>
+              <h3 className='text-lg font-semibold'>{step.title}</h3>
+              <p className='text-muted-foreground mt-3 max-w-xs text-base leading-8'>
                 {step.desc}
               </p>
             </AnimateInView>
           ))}
+        </ol>
+        <div className='bg-background border-border/60 mt-12 overflow-hidden rounded-2xl border'>
+          <Accordion className='px-5 sm:px-7'>
+            <AccordionItem value='api-example'>
+              <AccordionTrigger className='items-center py-5 hover:no-underline'>
+                <span className='flex items-center gap-3'>
+                  <Code2 className='text-primary size-5' aria-hidden='true' />
+                  {t('View API example')}
+                </span>
+              </AccordionTrigger>
+              <AccordionContent className='pb-6'>
+                <HeroTerminalDemo />
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+          <div className='border-border/60 flex flex-col justify-between gap-5 border-t px-5 py-6 sm:px-7 lg:flex-row lg:items-center'>
+            <div className='max-w-lg'>
+              <p className='text-sm font-medium'>
+                {t('Supported Applications')}
+              </p>
+              <p className='text-muted-foreground mt-2 text-xs leading-6'>
+                {t(
+                  'Supports one-click configuration and perfectly adapts to NewAPI multi-protocol configuration.'
+                )}
+              </p>
+            </div>
+            <div className='flex flex-wrap gap-x-6 gap-y-4'>
+              <a
+                href='https://cherry-ai.com'
+                target='_blank'
+                rel='noopener noreferrer'
+                className='flex items-center gap-2 text-sm hover:underline'
+              >
+                <ProviderBadge
+                  label='Cherry Studio'
+                  iconNode={<CherryStudio size={18} />}
+                  colorText={false}
+                  type='text'
+                  copyable={false}
+                />
+                <ArrowUpRight className='size-3.5' aria-hidden='true' />
+              </a>
+              <a
+                href='https://ccswitch.io'
+                target='_blank'
+                rel='noopener noreferrer'
+                className='flex items-center gap-2 text-sm hover:underline'
+              >
+                CC Switch
+                <ArrowUpRight className='size-3.5' aria-hidden='true' />
+              </a>
+            </div>
+          </div>
         </div>
       </div>
     </section>

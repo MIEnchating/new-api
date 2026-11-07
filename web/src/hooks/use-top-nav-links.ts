@@ -19,8 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { useCustomMenuPages } from '@/hooks/use-custom-menu-pages'
 import { useStatus } from '@/hooks/use-status'
+import { resolveCustomMenuPageUrl } from '@/lib/custom-menu-pages'
 import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
+import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 export type TopNavLink = {
@@ -47,6 +50,7 @@ export function useTopNavLinks(): TopNavLink[] {
   const { t } = useTranslation()
   const { status } = useStatus()
   const { auth } = useAuthStore()
+  const { data: customPages = [] } = useCustomMenuPages()
 
   // Parse HeaderNavModules
   const modules = useMemo(() => {
@@ -107,6 +111,21 @@ export function useTopNavLinks(): TopNavLink[] {
   // About
   if (modules?.about !== false) {
     links.push({ title: t('About'), href: '/about' })
+  }
+
+  for (const page of customPages) {
+    if (page.section !== 'header' || page.enabled === false) continue
+    if (
+      !auth.user ||
+      (page.visibility === 'admin' && auth.user.role < ROLE.ADMIN)
+    ) {
+      continue
+    }
+    links.push({
+      title: page.name,
+      href: resolveCustomMenuPageUrl(page.url),
+      external: true,
+    })
   }
 
   return links

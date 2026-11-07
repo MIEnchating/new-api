@@ -74,7 +74,11 @@ import {
   isValidPricingCurrency,
   USD_PRICING_CURRENCY,
 } from '@/features/model-pricing/currency'
-import { pricingFromDraft, pricingRow } from '@/features/model-pricing/pricing'
+import {
+  perSecondExpression,
+  pricingFromDraft,
+  pricingRow,
+} from '@/features/model-pricing/pricing'
 import { PricingAmountInput } from '@/features/model-pricing/pricing-amount-input'
 import {
   PricingConversionDialog,
@@ -765,6 +769,11 @@ export const ModelPricingEditorPanel = forwardRef<
         }
       }
 
+      if (pricingMode === 'per-second') {
+        data.billingExpr = perSecondExpression(data)
+        data.billingMode = 'tiered_expr'
+        delete data.secondPriceConfig
+      }
       return data
     },
     [
@@ -866,10 +875,20 @@ export const ModelPricingEditorPanel = forwardRef<
         }
         const isValid = await form.trigger()
         if (!isValid || !validatePricingValues()) return null
-        return buildSubmitData(form.getValues())
+        try {
+          return buildSubmitData(form.getValues())
+        } catch (error) {
+          form.setError('price', {
+            message:
+              error instanceof Error
+                ? error.message
+                : t('Invalid pricing value'),
+          })
+          return null
+        }
       },
     }),
-    [form, validatePricingValues, buildSubmitData]
+    [form, validatePricingValues, buildSubmitData, t]
   )
 
   const configureOrdinaryPricing = () => {
