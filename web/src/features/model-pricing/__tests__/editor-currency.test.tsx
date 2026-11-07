@@ -245,62 +245,35 @@ it('previews legacy conversion in the selected currency and applies only after c
   expect(
     screen.getByRole('button', { name: 'Convert to expression' })
   ).toBeDisabled()
-  await userEvent.setup().click(screen.getByRole('tab', { name: 'Per-second' }))
-  expect(
-    screen.queryByText(
-      'After conversion, expression reservation and rounding rules apply. Effective unit prices are preserved; individual rounded charges may differ.'
-    )
-  ).not.toBeInTheDocument()
 })
 
-it('only offers legacy conversion in per-token and per-request modes', async () => {
-  vi.spyOn(api, 'post').mockResolvedValue({
-    data: { success: true, data: { effective: { ModelRatio: 1 } } },
-  })
-  const data: Partial<ModelRatioData> = {
+it('opens legacy per-second drafts as expressions and preserves resolution prices', async () => {
+  const editor = renderEditor({
     billingMode: 'per-second',
     price: '0.35',
-    secondPriceConfig: {
-      prices: { '1080p': 0.5 },
-    },
-  }
-  const editor = renderEditor(data)
-  const user = userEvent.setup()
-  for (const legacyMode of [
-    'Per-token (deprecated)',
-    'Per-request (deprecated)',
-  ]) {
-    expect(screen.getByRole('tab', { name: 'Per-second' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-    expect(
-      screen.queryByRole('button', { name: 'Convert to expression' })
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByText(
-        'Legacy pricing is deprecated. Convert the current prices to an expression draft, then save to apply it.'
-      )
-    ).not.toBeInTheDocument()
-    expect(
-      screen.queryByText(
-        'After conversion, expression reservation and rounding rules apply. Effective unit prices are preserved; individual rounded charges may differ.'
-      )
-    ).not.toBeInTheDocument()
-    await user.click(screen.getByRole('tab', { name: legacyMode }))
-    expect(
-      screen.getByRole('button', { name: 'Convert to expression' })
-    ).toBeEnabled()
-    await user.click(screen.getByRole('tab', { name: 'Per-second' }))
-  }
+    secondPriceConfig: { prices: { '1080p': 0.5 } },
+    pluginBillingExpr: { provider: 'tier("provider", u("seconds") * 0.8)' },
+  })
+  expect(screen.getByRole('tab', { name: 'Expression' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
   expect(
-    screen.getAllByRole('textbox', { name: 'Price per second' })[0]
-  ).toHaveValue('0.35')
-  expect(await commit(editor.ref)).toMatchObject({
+    screen.queryByRole('tab', { name: 'Per-second' })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole('textbox', { name: 'Price per second' })
+  ).not.toBeInTheDocument()
+  expect(editor.dirty).toHaveBeenLastCalledWith(false)
+  const expected = {
     billingMode: 'tiered_expr',
     billingExpr:
       'lower(trim(u("resolution") ?? "")) == "1080p" ? tier("1080p", u("seconds") * 0.5) : (tier("base", u("seconds") * 0.35))',
-  })
+    pluginBillingExpr: { provider: 'tier("provider", u("seconds") * 0.8)' },
+  }
+  expect(await commit(editor.ref)).toMatchObject(expected)
+  await selectCurrency('Site currency (CNY)')
+  expect(await commit(editor.ref)).toMatchObject(expected)
 })
 
 it.each([
@@ -1077,19 +1050,6 @@ it('clears an invalid amount draft when pricing is reloaded with the same saved 
   expect(await commit(editor.ref)).toMatchObject({ price: '1' })
 })
 
-it('saves per-second site-currency edits as a USD task expression', async () => {
-  const editor = renderEditor({ billingMode: 'per-second', price: '0.2' })
-  await selectCurrency('Site currency (CNY)')
-  const price = screen.getByRole('textbox', { name: 'Price per second' })
-  expect(price).toHaveValue('1.4')
-  fireEvent.change(price, { target: { value: '2.8' } })
-  expect(await commit(editor.ref)).toMatchObject({
-    billingMode: 'tiered_expr',
-    billingExpr: 'tier("base", u("seconds") * 0.4)',
-    price: '0.4',
-  })
-})
-
 it('preserves time billing on direct save and blocks incomplete local conditions', async () => {
   const expression =
     'hour("Asia/Shanghai") >= 9 ? tier("peak", p * 3 + cr * 0 + c * 9) : tier("off", p * 1 + c * 2)'
@@ -1121,47 +1081,29 @@ it('preserves time billing on direct save and blocks incomplete local conditions
   })
 })
 
-it('converts resolution prices between site currency and USD when switching and saving', async () => {
+it('preserves explicit zero prices when migrating a legacy per-second draft', async () => {
   const editor = renderEditor({
     billingMode: 'per-second',
-    price: '0.2',
-    secondPriceConfig: { prices: { '1080p': 0.5 } },
+    price: '0',
+    secondPriceConfig: { prices: { '1080p': 0 } },
   })
-  await selectCurrency('Site currency (CNY)')
-  const prices = screen.getAllByLabelText('Price per second')
-  expect(prices[0]).toHaveValue('1.4')
-  expect((prices[1] as HTMLInputElement).value).toBe('3.5')
-  fireEvent.change(prices[1], { target: { value: '7' } })
   expect((await commit(editor.ref))?.billingExpr).toBe(
-    'lower(trim(u("resolution") ?? "")) == "1080p" ? tier("1080p", u("seconds") * 1) : (tier("base", u("seconds") * 0.2))'
-  )
-  await selectCurrency('US dollar (USD)')
-  expect(
-    (screen.getAllByLabelText('Price per second')[1] as HTMLInputElement).value
-  ).toBe('1')
-})
-
-it('blocks saving an overflowing resolution price and preserves an explicit zero', async () => {
-  const editor = renderEditor({
-    billingMode: 'per-second',
-    price: '0.2',
-    secondPriceConfig: { prices: { '1080p': 0.5 } },
-  })
-  const price = screen.getAllByLabelText('Price per second')[1]
-  fireEvent.change(price, { target: { value: '9'.repeat(309) } })
-  expect(await commit(editor.ref)).toBeNull()
-  fireEvent.change(price, { target: { value: '0' } })
-  expect((await commit(editor.ref))?.billingExpr).toBe(
-    'lower(trim(u("resolution") ?? "")) == "1080p" ? tier("1080p", u("seconds") * 0) : (tier("base", u("seconds") * 0.2))'
+    'lower(trim(u("resolution") ?? "")) == "1080p" ? tier("1080p", u("seconds") * 0) : (tier("base", u("seconds") * 0))'
   )
 })
 
-it('rejects conflicting resolution prices before saving an expression', async () => {
-  const editor = renderEditor({
-    billingMode: 'per-second',
+it.each<Partial<ModelRatioData>>([
+  {
     price: '0.2',
     secondPriceConfig: { prices: { '1080p': 0.5, '1080P': 0.7 } },
-  })
-  expect(await commit(editor.ref)).toBeNull()
-  expect(screen.getByText('Invalid pricing value')).toBeVisible()
-})
+  },
+  { price: '0.2', secondPriceConfig: { prices: { '1080p': Infinity } } },
+  { price: '-1' },
+])(
+  'blocks invalid legacy per-second configuration instead of saving a fallback price: %j',
+  async (data) => {
+    const editor = renderEditor({ billingMode: 'per-second', ...data })
+    expect(await commit(editor.ref)).toBeNull()
+    expect(screen.getByRole('alert')).toBeVisible()
+  }
+)

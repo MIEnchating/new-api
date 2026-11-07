@@ -56,11 +56,7 @@ export type ModelPricingFormValues = z.infer<
   ReturnType<typeof createModelPricingSchema>
 >
 
-export type PricingMode =
-  | 'per-token'
-  | 'per-request'
-  | 'per-second'
-  | 'tiered_expr'
+export type PricingMode = 'per-token' | 'per-request' | 'tiered_expr'
 
 export type LaneKey =
   | 'completion'
@@ -81,7 +77,8 @@ export type ModelRatioData = {
   imageRatio?: string
   audioRatio?: string
   audioCompletionRatio?: string
-  billingMode?: PricingMode
+  // Legacy drafts remain readable, but cannot be selected as a pricing mode.
+  billingMode?: PricingMode | 'per-second'
   billingExpr?: string
   requestRuleExpr?: string
   secondPriceConfig?: {
@@ -261,7 +258,7 @@ export function createInitialLaneState(data?: ModelRatioData | null) {
 
 export function buildPreviewRows(
   values: ModelPricingFormValues,
-  mode: PricingMode,
+  mode: NonNullable<ModelRatioData['billingMode']>,
   billingExpr: string,
   requestRuleExpr: string,
   promptPrice: string,

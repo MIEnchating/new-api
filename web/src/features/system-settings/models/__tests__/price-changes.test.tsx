@@ -347,6 +347,24 @@ const savedVideo = {
   BillingMode: '{"video-model":"per_second"}',
 }
 
+it('keeps legacy prices readable without offering a per-second mode filter', async () => {
+  await renderForm({ savedValues: savedVideo })
+  expect(screen.getByRole('row', { name: /video-model/ })).toBeVisible()
+  const modeFilter = screen
+    .getAllByRole('button', { name: 'Mode' })
+    .find((button) => button.getAttribute('aria-haspopup') === 'dialog')
+  assert(modeFilter)
+  await userEvent.setup().click(modeFilter)
+  expect(
+    screen.queryByRole('option', { name: /Per-second/ })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.getByRole('option', { name: /^Expression\s*\d*$/ })
+  ).toBeVisible()
+  expect(screen.getByRole('option', { name: /Per-request/ })).toBeVisible()
+  expect(screen.getByRole('option', { name: /Per-token/ })).toBeVisible()
+})
+
 it('shows and confirms resolution-specific per-second price changes', async () => {
   const user = userEvent.setup()
   const { onSave } = await renderForm({

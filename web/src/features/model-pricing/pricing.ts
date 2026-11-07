@@ -252,7 +252,7 @@ export function pricingRow(
   }
 }
 
-// The per-second form is a convenience editor for task expressions only.
+// Convert legacy per-second drafts and imported prices to task expressions.
 export function perSecondExpression(data: ModelRatioData): string {
   const price = Number(data.price)
   if (!data.price?.trim() || !Number.isFinite(price) || price < 0) {

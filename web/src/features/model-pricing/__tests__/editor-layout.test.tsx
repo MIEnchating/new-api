@@ -257,55 +257,19 @@ it('retains the model identity and heading when the editor is used standalone', 
   expect(screen.getByRole('textbox', { name: 'Model name' })).toBeDisabled()
 })
 
-it('stacks per-second fields in narrow panels and enables paired fields in wide panels', async () => {
+it('offers only upstream billing modes without per-second or resolution controls', () => {
   renderEditor()
-  await userEvent.setup().click(screen.getByRole('tab', { name: 'Per-second' }))
-  const panel = screen.getByRole('tabpanel', { name: 'Per-second' })
-  expect(panel).toHaveClass('@container/pricing-fields', 'min-w-0')
+  expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
+    'Expression',
+    'Per-token (deprecated)',
+    'Per-request (deprecated)',
+  ])
   expect(
-    within(panel).queryByRole('textbox', { name: 'Resolution field' })
+    screen.queryByRole('textbox', { name: 'Price per second' })
   ).not.toBeInTheDocument()
   expect(
-    within(panel).queryByRole('textbox', { name: 'Duration field' })
+    screen.queryByRole('button', { name: 'Add resolution price' })
   ).not.toBeInTheDocument()
-  await userEvent
-    .setup()
-    .click(screen.getByRole('button', { name: 'Add resolution price' }))
-  const row = within(panel)
-    .getByRole('textbox', { name: 'Resolution' })
-    .closest('[data-slot=field]')?.parentElement
-  expect(row).toHaveClass(
-    'grid-cols-1',
-    '@min-[400px]/pricing-fields:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]'
-  )
-})
-
-it('keeps resolution prices associated with their labels when another row is removed', async () => {
-  renderEditor()
-  const user = userEvent.setup()
-  await user.click(screen.getByRole('tab', { name: 'Per-second' }))
-  await user.click(screen.getByRole('button', { name: 'Add resolution price' }))
-  await user.type(screen.getByRole('textbox', { name: 'Resolution' }), '720p')
-  await user.type(
-    screen.getAllByRole('textbox', { name: 'Price per second' })[1],
-    '0.01'
-  )
-  await user.click(screen.getByRole('button', { name: 'Add resolution price' }))
-  await user.type(
-    screen.getAllByRole('textbox', { name: 'Resolution' })[1],
-    '1080p'
-  )
-  await user.type(
-    screen.getAllByRole('textbox', { name: 'Price per second' })[2],
-    '0.02'
-  )
-  await user.click(screen.getAllByRole('button', { name: 'Remove' })[0])
-  expect(screen.getByRole('textbox', { name: 'Resolution' })).toHaveValue(
-    '1080p'
-  )
-  expect(
-    screen.getAllByRole('textbox', { name: 'Price per second' })[1]
-  ).toHaveValue('0.02')
 })
 
 it('updates the preview for explicit zero and disabled prices and explains dependent audio controls', async () => {

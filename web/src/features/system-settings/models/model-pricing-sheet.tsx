@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Plus, Save, Trash2 } from 'lucide-react'
+import { AlertTriangle, Save } from 'lucide-react'
 import {
   forwardRef,
   useCallback,
@@ -33,10 +33,7 @@ import {
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 
-import {
-  SideDrawerSectionHeader,
-  sideDrawerContentClassName,
-} from '@/components/drawer-layout'
+import { sideDrawerContentClassName } from '@/components/drawer-layout'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
@@ -99,7 +96,6 @@ import { cn } from '@/lib/utils'
 import { usePricingPreferencesStore } from '@/stores/pricing-preferences-store'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
-import { SettingsControlGroup } from '../components/settings-form-layout'
 import {
   EMPTY_LANE_ENABLED,
   EMPTY_LANE_PRICES,
@@ -149,16 +145,6 @@ export type ModelPricingEditorPanelHandle = {
 }
 
 const DEFAULT_TOKEN_BILLING_EXPR = 'tier("base", p * 0 + c * 0)'
-type ResolutionPriceRow = { id: string; resolution: string; price: string }
-let resolutionPriceRowId = 0
-
-function createResolutionPriceRowId() {
-  const uuid = globalThis.crypto?.randomUUID?.()
-  if (uuid) return uuid
-  resolutionPriceRowId += 1
-  return `resolution-${Date.now()}-${resolutionPriceRowId}`
-}
-
 export const ModelPricingSheet = forwardRef<
   ModelPricingEditorPanelHandle,
   ModelPricingSheetProps
@@ -210,7 +196,7 @@ export const ModelPricingEditorPanel = forwardRef<
   ModelPricingEditorPanelProps
 >(function ModelPricingEditorPanel(
   {
-    editData,
+    editData: sourceEditData,
     className,
     onSave,
     isSaving,
@@ -223,8 +209,37 @@ export const ModelPricingEditorPanel = forwardRef<
   ref
 ) {
   const { t } = useTranslation()
+  const legacyPricing = useMemo<{
+    data: typeof sourceEditData
+    error: string
+  }>(() => {
+    if (sourceEditData?.billingMode !== 'per-second') {
+      return { data: sourceEditData, error: '' }
+    }
+    try {
+      return {
+        data: {
+          ...sourceEditData,
+          billingMode: 'tiered_expr',
+          billingExpr: perSecondExpression(sourceEditData),
+          requestRuleExpr: '',
+        },
+        error: '',
+      }
+    } catch (error) {
+      return {
+        data: {
+          ...sourceEditData,
+          billingMode: 'tiered_expr',
+          billingExpr: '',
+        },
+        error:
+          error instanceof Error ? error.message : t('Invalid pricing value'),
+      }
+    }
+  }, [sourceEditData, t])
+  const editData = legacyPricing.data
   const promptPriceId = useId()
-  const resolutionPricingId = useId()
   const formElementRef = useRef<HTMLFormElement>(null)
   const currencyConfig = useSystemConfigStore((state) => state.config.currency)
   const preference = usePricingPreferencesStore((state) => state.currency)
@@ -260,9 +275,6 @@ export const ModelPricingEditorPanel = forwardRef<
   const [pluginExpressions, setPluginExpressions] = useState<
     Record<string, string>
   >({})
-  const [resolutionPrices, setResolutionPrices] = useState<
-    ResolutionPriceRow[]
-  >([])
   const [editorReloadToken, setEditorReloadToken] = useState(0)
   const [ordinaryPricingModel, setOrdinaryPricingModel] = useState<
     string | null
@@ -282,9 +294,7 @@ export const ModelPricingEditorPanel = forwardRef<
       editData.audioCompletionRatio,
     ].some(hasValue)
   let initialPricingMode: PricingMode = 'tiered_expr'
-  if (editData?.billingMode === 'per-second') {
-    initialPricingMode = 'per-second'
-  } else if (editData?.billingMode !== 'tiered_expr' && hasLegacyPricing) {
+  if (editData?.billingMode !== 'tiered_expr' && hasLegacyPricing) {
     initialPricingMode = hasValue(editData?.price) ? 'per-request' : 'per-token'
   }
   const initialBillingExpr =
@@ -405,15 +415,6 @@ export const ModelPricingEditorPanel = forwardRef<
       setPricingMode(initialPricingMode)
       setBillingExpr(initialBillingExpr)
       setRequestRuleExpr(editData.requestRuleExpr || '')
-      setResolutionPrices(
-        Object.entries(editData.secondPriceConfig?.prices || {}).map(
-          ([resolution, price], index) => ({
-            id: `${resolution}-${index}`,
-            resolution,
-            price: String(price),
-          })
-        )
-      )
     } else {
       form.reset({
         name: '',
@@ -429,7 +430,6 @@ export const ModelPricingEditorPanel = forwardRef<
       setPricingMode('tiered_expr')
       setBillingExpr(DEFAULT_TOKEN_BILLING_EXPR)
       setRequestRuleExpr('')
-      setResolutionPrices([])
     }
 
     setPromptPrice(nextLaneState.promptPrice)
@@ -458,21 +458,7 @@ export const ModelPricingEditorPanel = forwardRef<
         pricingMode !== initialPricingMode ||
         billingExpr !== initialBillingExpr ||
         requestRuleExpr !== (editData?.requestRuleExpr ?? '') ||
-        !pluginExpressionsEqual(
-          pluginExpressions,
-          editData?.pluginBillingExpr
-        ) ||
-        JSON.stringify(
-          resolutionPrices.map(({ resolution, price }) => ({
-            resolution,
-            price,
-          }))
-        ) !==
-          JSON.stringify(
-            Object.entries(editData?.secondPriceConfig?.prices || {}).map(
-              ([resolution, price]) => ({ resolution, price: String(price) })
-            )
-          )
+        !pluginExpressionsEqual(pluginExpressions, editData?.pluginBillingExpr)
     )
   }, [
     onDirtyChange,
@@ -484,7 +470,6 @@ export const ModelPricingEditorPanel = forwardRef<
     initialPricingMode,
     initialBillingExpr,
     pluginExpressions,
-    resolutionPrices,
   ])
 
   const setFormValue = (field: keyof ModelPricingFormValues, value: string) => {
@@ -645,7 +630,9 @@ export const ModelPricingEditorPanel = forwardRef<
   ])
 
   const warnings = useMemo(() => {
-    const nextWarnings: string[] = []
+    const nextWarnings: string[] = legacyPricing.error
+      ? [legacyPricing.error]
+      : []
     const hasConflict =
       !!editData?.price &&
       [
@@ -687,9 +674,18 @@ export const ModelPricingEditorPanel = forwardRef<
     }
 
     return nextWarnings
-  }, [editData, laneEnabled, lanePrices, pricingMode, promptPrice, t])
+  }, [
+    editData,
+    legacyPricing.error,
+    laneEnabled,
+    lanePrices,
+    pricingMode,
+    promptPrice,
+    t,
+  ])
 
   const validatePricingValues = useCallback(() => {
+    if (legacyPricing.error) return false
     if (
       pricingMode === 'per-token' &&
       ((toNumberOrNull(promptPrice) === 0 &&
@@ -733,7 +729,15 @@ export const ModelPricingEditorPanel = forwardRef<
     }
 
     return true
-  }, [form, laneEnabled, lanePrices, pricingMode, promptPrice, t])
+  }, [
+    form,
+    legacyPricing.error,
+    laneEnabled,
+    lanePrices,
+    pricingMode,
+    promptPrice,
+    t,
+  ])
 
   const buildSubmitData = useCallback(
     (values: ModelPricingFormValues) => {
@@ -759,21 +763,6 @@ export const ModelPricingEditorPanel = forwardRef<
         data.billingExpr = resolvedBillingExpr
         data.requestRuleExpr = requestRuleExpr
       }
-      if (pricingMode === 'per-second' && resolutionPrices.length) {
-        data.secondPriceConfig = {
-          prices: Object.fromEntries(
-            resolutionPrices
-              .filter((row) => row.resolution.trim() && row.price !== '')
-              .map((row) => [row.resolution.trim(), Number(row.price)])
-          ),
-        }
-      }
-
-      if (pricingMode === 'per-second') {
-        data.billingExpr = perSecondExpression(data)
-        data.billingMode = 'tiered_expr'
-        delete data.secondPriceConfig
-      }
       return data
     },
     [
@@ -783,7 +772,6 @@ export const ModelPricingEditorPanel = forwardRef<
       pluginExpressions,
       editData,
       pluginVariants,
-      resolutionPrices,
     ]
   )
 
@@ -1052,9 +1040,6 @@ export const ModelPricingEditorPanel = forwardRef<
                       <TabsTrigger value='per-request'>
                         {t('Per-request (deprecated)')}
                       </TabsTrigger>
-                      <TabsTrigger value='per-second'>
-                        {t('Per-second')}
-                      </TabsTrigger>
                     </TabsList>
 
                     {isLegacyPricingMode && (
@@ -1249,159 +1234,6 @@ export const ModelPricingEditorPanel = forwardRef<
                             </FormItem>
                           )}
                         />
-                      </FieldGroup>
-                    </TabsContent>
-
-                    <TabsContent
-                      value='per-second'
-                      className='@container/pricing-fields min-w-0 pt-0'
-                    >
-                      <FieldGroup className='gap-4'>
-                        <FormField
-                          control={form.control}
-                          name='price'
-                          render={({ field }) => (
-                            <FormItem className='contents'>
-                              <Field>
-                                <FormLabel>{t('Price per second')}</FormLabel>
-                                <InputGroup className='has-[[data-pricing-error]]:h-auto has-[[data-pricing-error]]:flex-wrap'>
-                                  <InputGroupAddon>
-                                    {currency.symbol}
-                                  </InputGroupAddon>
-                                  <FormControl>
-                                    <PricingAmountInput
-                                      {...field}
-                                      value={field.value ?? ''}
-                                      currency={currency}
-                                      grouped
-                                      placeholder='0.01'
-                                      onChange={field.onChange}
-                                    />
-                                  </FormControl>
-                                  <InputGroupAddon align='inline-end'>
-                                    {t('per second')}
-                                  </InputGroupAddon>
-                                </InputGroup>
-                                <FormDescription>
-                                  {t(
-                                    'Cost in {{currency}} for each generated video second.',
-                                    { currency: currency.label }
-                                  )}
-                                </FormDescription>
-                                <FormMessage />
-                              </Field>
-                            </FormItem>
-                          )}
-                        />
-                        <SettingsControlGroup className='space-y-0 p-3 @min-[480px]/pricing-fields:p-4'>
-                          <FieldGroup className='gap-4'>
-                            <SideDrawerSectionHeader
-                              title={t('Resolution pricing (optional)')}
-                              description={t(
-                                'Configure different prices per second for each resolution.'
-                              )}
-                            />
-                            <div className='flex min-w-0 flex-col gap-3'>
-                              {resolutionPrices.map((row) => (
-                                <div
-                                  className='grid min-w-0 grid-cols-1 items-end gap-3 border-t pt-3 first:border-t-0 first:pt-0 @min-[400px]/pricing-fields:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]'
-                                  key={row.id}
-                                >
-                                  <Field className='min-w-0'>
-                                    <FieldLabel
-                                      htmlFor={`${resolutionPricingId}-${row.id}-resolution`}
-                                    >
-                                      {t('Resolution')}
-                                    </FieldLabel>
-                                    <Input
-                                      id={`${resolutionPricingId}-${row.id}-resolution`}
-                                      placeholder='1080p'
-                                      value={row.resolution}
-                                      onChange={(event) =>
-                                        setResolutionPrices((current) =>
-                                          current.map((item) =>
-                                            item.id === row.id
-                                              ? {
-                                                  ...item,
-                                                  resolution:
-                                                    event.target.value,
-                                                }
-                                              : item
-                                          )
-                                        )
-                                      }
-                                    />
-                                  </Field>
-                                  <Field className='min-w-0'>
-                                    <FieldLabel
-                                      htmlFor={`${resolutionPricingId}-${row.id}-price`}
-                                    >
-                                      {t('Price per second')}
-                                    </FieldLabel>
-                                    <PricingAmountInput
-                                      id={`${resolutionPricingId}-${row.id}-price`}
-                                      className='tabular-nums'
-                                      placeholder='0.01'
-                                      value={row.price}
-                                      currency={currency}
-                                      onChange={(price) =>
-                                        setResolutionPrices((current) =>
-                                          current.map((item) =>
-                                            item.id === row.id
-                                              ? {
-                                                  ...item,
-                                                  price,
-                                                }
-                                              : item
-                                          )
-                                        )
-                                      }
-                                    />
-                                  </Field>
-                                  <Button
-                                    type='button'
-                                    variant='ghost'
-                                    size='icon'
-                                    className='text-muted-foreground justify-self-end'
-                                    aria-label={t('Remove')}
-                                    title={t('Remove')}
-                                    onClick={() =>
-                                      setResolutionPrices((current) =>
-                                        current.filter(
-                                          (item) => item.id !== row.id
-                                        )
-                                      )
-                                    }
-                                  >
-                                    <Trash2 aria-hidden='true' />
-                                  </Button>
-                                </div>
-                              ))}
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                className='w-full @min-[480px]/pricing-fields:w-fit'
-                                onClick={() =>
-                                  setResolutionPrices((current) => [
-                                    ...current,
-                                    {
-                                      id: createResolutionPriceRowId(),
-                                      resolution: '',
-                                      price: '',
-                                    },
-                                  ])
-                                }
-                              >
-                                <Plus
-                                  data-icon='inline-start'
-                                  aria-hidden='true'
-                                />
-                                {t('Add resolution price')}
-                              </Button>
-                            </div>
-                          </FieldGroup>
-                        </SettingsControlGroup>
                       </FieldGroup>
                     </TabsContent>
 

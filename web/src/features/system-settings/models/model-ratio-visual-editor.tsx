@@ -59,7 +59,6 @@ import { splitPluginBillingExprKey } from '@/features/pricing/lib/plugin-pricing
 import { useMediaQuery } from '@/hooks'
 
 import { safeJsonParse } from '../utils/json-parser'
-import type { PricingMode } from './model-pricing-core'
 import {
   ModelPricingIssueDetails,
   ModelPricingIssueSummary,
@@ -385,18 +384,16 @@ const ModelRatioVisualEditorComponent = forwardRef<
     const counts = {
       'per-token': 0,
       'per-request': 0,
-      'per-second': 0,
       tiered_expr: 0,
       [TASK_PRICING_MODE_FILTER]: 0,
     }
     for (const model of models) {
       const mode =
         model.billingMode === 'per-request' ||
-        model.billingMode === 'per-second' ||
         model.billingMode === 'tiered_expr'
           ? model.billingMode
           : 'per-token'
-      counts[mode] += 1
+      if (model.billingMode !== 'per-second') counts[mode] += 1
       if (
         taskModelNames.has(model.name) &&
         model.billingMode === 'tiered_expr' &&
@@ -442,7 +439,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       // A pending deletion has no draft to edit; it offers undo instead.
       if (model.isDraftDeleted) return
       const editableModel = model.draft ?? model.saved ?? model
-      let editBillingMode: PricingMode = 'per-token'
+      let editBillingMode: ModelRatioData['billingMode'] = 'per-token'
       if (editableModel.billingMode === 'tiered_expr') {
         editBillingMode = 'tiered_expr'
       } else if (editableModel.price && editableModel.price !== '') {
@@ -867,11 +864,6 @@ const ModelRatioVisualEditorComponent = forwardRef<
                     label: 'Per-request (deprecated)',
                     value: 'per-request',
                     count: modeCounts['per-request'],
-                  },
-                  {
-                    label: 'Per-second',
-                    value: 'per-second',
-                    count: modeCounts['per-second'],
                   },
                   {
                     label: 'Expression',
