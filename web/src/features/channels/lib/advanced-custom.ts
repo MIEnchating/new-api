@@ -176,6 +176,14 @@ export const ADVANCED_CUSTOM_INCOMING_PATH_OPTIONS: AdvancedCustomIncomingPathOp
       value: '/v1beta/models/{model}:batchEmbedContents',
       label: 'Gemini Batch Embed Contents',
     },
+    {
+      value: '/v1/tools/search',
+      label: 'DeepSeek Search',
+    },
+    {
+      value: '/v1/tools/fetch',
+      label: 'DeepSeek Fetch',
+    },
   ]
 
 const ADVANCED_CUSTOM_ROUTE_SUMMARY_LABELS: Record<string, string> = {
@@ -499,7 +507,7 @@ function getAdvancedCustomNativeAuth(
   return bearerHeaderAuth()
 }
 
-function getAdvancedCustomIncomingPathOptions(
+export function getAdvancedCustomIncomingPathOptions(
   converter: AdvancedCustomConverter
 ): AdvancedCustomIncomingPathOption[] {
   return ADVANCED_CUSTOM_INCOMING_PATH_OPTIONS.filter((option) =>

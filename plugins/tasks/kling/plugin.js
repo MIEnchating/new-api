@@ -28,7 +28,7 @@ export const meta = {
     { label: "v2.5 turbo std 5s", facts: { resolution: "", seconds: 5, units: 1.5 } },
     { label: "v2.6 pro 10s · audio", facts: { resolution: "", seconds: 10, units: 10 } },
     { label: "v3 pro 5s", facts: { resolution: "", seconds: 5, units: 4 } },
-    { label: "v3 4k 5s", facts: { resolution: "", seconds: 10, units: 15 } },
+    { label: "v3 4k 5s", facts: { resolution: "", seconds: 5, units: 15 } },
     { label: "4.0 1080p 10s", facts: { resolution: "", seconds: 10, units: 15 } },
     { label: "4.0 1080p 10s · video input", facts: { resolution: "", seconds: 10, units: 18 } },
   ],

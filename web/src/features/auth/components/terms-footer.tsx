@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Trans } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 
 import { cn } from '@/lib/utils'
 
@@ -30,6 +30,7 @@ interface TermsFooterProps {
 }
 
 export function TermsFooter(props: TermsFooterProps) {
+  const { t } = useTranslation()
   const translationKey = getTermsFooterTranslationKey(
     props.variant ?? 'sign-in',
     Boolean(props.status?.user_agreement_enabled),
@@ -45,6 +46,7 @@ export function TermsFooter(props: TermsFooterProps) {
       )}
     >
       <Trans
+        t={t}
         i18nKey={translationKey}
         components={{
           agreement: (

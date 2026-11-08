@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Trans } from 'react-i18next'
+import { Trans, useTranslation } from 'react-i18next'
 
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
@@ -38,6 +38,7 @@ interface LegalConsentCopyProps {
 }
 
 export function LegalConsentCopy(props: LegalConsentCopyProps) {
+  const { t } = useTranslation()
   const translationKey = getLegalConsentTranslationKey(
     props.hasUserAgreement,
     props.hasPrivacyPolicy
@@ -46,6 +47,7 @@ export function LegalConsentCopy(props: LegalConsentCopyProps) {
 
   return (
     <Trans
+      t={t}
       i18nKey={translationKey}
       components={{
         agreement: (

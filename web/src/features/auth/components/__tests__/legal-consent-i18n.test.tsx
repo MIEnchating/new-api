@@ -18,11 +18,13 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 
+import { act, cleanup, render, screen, within } from '@testing-library/react'
 import { createInstance } from 'i18next'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { I18nextProvider } from 'react-i18next'
-import { describe, test } from 'vitest'
+import { afterEach, describe, expect, test } from 'vitest'
 
+import en from '@/i18n/locales/en.json'
 import zh from '@/i18n/locales/zh.json'
 
 import {
@@ -32,7 +34,53 @@ import {
 import { LegalConsentCopy } from '../legal-consent'
 import { TermsFooter } from '../terms-footer'
 
+afterEach(cleanup)
+
 describe('legal consent internationalization', () => {
+  test.each(['sign-in', 'sign-up'] as const)(
+    'updates consent and the %s footer when the language changes',
+    async (variant) => {
+      const i18n = createInstance()
+      await i18n.init({ lng: 'en', resources: { en, zh } })
+      render(
+        <I18nextProvider i18n={i18n}>
+          <section aria-label='Consent'>
+            <LegalConsentCopy hasUserAgreement hasPrivacyPolicy />
+          </section>
+          <section aria-label='Terms'>
+            <TermsFooter
+              variant={variant}
+              status={{
+                user_agreement_enabled: true,
+                privacy_policy_enabled: true,
+              }}
+            />
+          </section>
+        </I18nextProvider>
+      )
+      const consent = screen.getByRole('region', { name: 'Consent' })
+      const terms = screen.getByRole('region', { name: 'Terms' })
+      expect(consent).toHaveTextContent('I have read and agree to the')
+      expect(
+        within(terms).getByRole('link', { name: 'Privacy Policy' })
+      ).toHaveAttribute('href', '/privacy-policy')
+      await act(async () => {
+        await i18n.changeLanguage('zh')
+      })
+      expect(consent).toHaveTextContent('我已阅读并同意')
+      expect(terms).toHaveTextContent(
+        variant === 'sign-in'
+          ? '点击登录即表示您同意我们的'
+          : '创建账户即表示您同意我们的'
+      )
+      expect(
+        within(consent).getByRole('link', { name: '用户协议' })
+      ).toHaveAttribute('href', '/user-agreement')
+      expect(
+        within(terms).getByRole('link', { name: '隐私政策' })
+      ).toHaveAttribute('href', '/privacy-policy')
+    }
+  )
   test('selects a complete sentence for every enabled document combination', () => {
     assert.equal(
       getLegalConsentTranslationKey(true, true),
