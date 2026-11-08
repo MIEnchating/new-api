@@ -16,7 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { queryOptions } from '@tanstack/react-query'
+import i18next from 'i18next'
+
 import { api } from '@/lib/api'
+import { handleServerError } from '@/lib/handle-server-error'
 
 import type { HomePageContentResponse } from './types'
 
@@ -37,3 +41,34 @@ export async function getHomePageContent(): Promise<HomePageContentResponse> {
   })
   return res.data
 }
+
+export const homePageContentQueryOptions = queryOptions({
+  queryKey: ['home-page-content'],
+  staleTime: 30_000,
+  refetchOnWindowFocus: false,
+  queryFn: async (): Promise<string> => {
+    let cached = ''
+    try {
+      cached = localStorage.getItem('home_page_content') ?? ''
+    } catch {
+      // The in-memory query cache also works when browser storage is disabled.
+    }
+
+    let content: string
+    try {
+      const response = await getHomePageContent()
+      content = response.success ? (response.data ?? '') : ''
+    } catch (error) {
+      handleServerError(error, i18next.t('Failed to load home page content'))
+      return cached
+    }
+
+    try {
+      if (content) localStorage.setItem('home_page_content', content)
+      else localStorage.removeItem('home_page_content')
+    } catch {
+      // Storage availability must not prevent the homepage from rendering.
+    }
+    return content
+  },
+})

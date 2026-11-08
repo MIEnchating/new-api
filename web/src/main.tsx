@@ -21,7 +21,7 @@ import { RouterProvider, createRouter } from '@tanstack/react-router'
 import { StrictMode } from 'react'
 import ReactDOM from 'react-dom/client'
 
-import { LoadingState } from '@/components/loading-state'
+import { homePageContentQueryOptions } from '@/features/home/api'
 import { initializeAndMountApplication } from '@/lib/application-root'
 import { installBuildMetadata } from '@/lib/build-metadata'
 import { applyFaviconToDom } from '@/lib/dom-utils'
@@ -56,9 +56,6 @@ const router = createRouter({
   context: { queryClient },
   defaultPreload: 'intent',
   defaultPreloadStaleTime: 0,
-  defaultPendingComponent: () => <LoadingState variant='page' />,
-  defaultPendingMs: 0,
-  defaultPendingMinMs: 0,
 })
 
 // Register the router instance for type safety
@@ -108,7 +105,17 @@ if (!rootElement) {
 })()
 void initializeAndMountApplication(
   rootElement,
-  initializeI18n,
+  async () => {
+    // Keep the original HTML animation alive while startup work runs in parallel.
+    // React receives a ready router and the same homepage query cache afterward.
+    await Promise.all([
+      initializeI18n(),
+      router.load(),
+      window.location.pathname === '/'
+        ? queryClient.ensureQueryData(homePageContentQueryOptions)
+        : Promise.resolve(),
+    ])
+  },
   (applicationRoot) => {
     const root = ReactDOM.createRoot(applicationRoot)
     root.render(

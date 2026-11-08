@@ -25,6 +25,7 @@ import {
 } from '@tanstack/react-router'
 import { act, render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { StrictMode } from 'react'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import { ThemeProvider } from '@/context/theme-provider'
@@ -47,6 +48,7 @@ async function renderHome(
     content?: string
     docs?: string
     waitForContent?: Promise<void>
+    client?: QueryClient
   } = {}
 ) {
   if (options.authenticated) {
@@ -62,9 +64,11 @@ async function renderHome(
       },
     }
   })
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
+  const client =
+    options.client ??
+    new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
   client.setQueryData(['status'], {
     docs_link: options.docs ?? 'https://example.com/docs',
   })
@@ -74,11 +78,13 @@ async function renderHome(
   })
   await router.load()
   const view = render(
-    <QueryClientProvider client={client}>
-      <ThemeProvider defaultTheme='light'>
-        <RouterProvider router={router} />
-      </ThemeProvider>
-    </QueryClientProvider>
+    <StrictMode>
+      <QueryClientProvider client={client}>
+        <ThemeProvider defaultTheme='light'>
+          <RouterProvider router={router} />
+        </ThemeProvider>
+      </QueryClientProvider>
+    </StrictMode>
   )
   return { ...view, client }
 }
@@ -306,9 +312,7 @@ test.each(['', 'https://example.com/custom'])(
       finishLoading = resolve
     })
     const { unmount, client } = await renderHome({ content, waitForContent })
-    expect(
-      screen.getByRole('progressbar', { name: 'Loading...' })
-    ).toBeVisible()
+    expect(screen.getByText('Loading...')).toBeVisible()
     expect(screen.queryByRole('heading', { level: 1 })).not.toBeInTheDocument()
     await act(async () => {
       finishLoading()
@@ -329,10 +333,26 @@ test.each(['', 'https://example.com/custom'])(
         })
       ).toBeVisible()
     }
-    expect(
-      screen.queryByRole('progressbar', { name: 'Loading...' })
-    ).not.toBeInTheDocument()
+    expect(screen.queryByText('Loading...')).not.toBeInTheDocument()
     unmount()
     client.clear()
   }
 )
+
+test('homepage remounts reuse resolved content without replaying full-page loading or repeating the request', async () => {
+  const first = await renderHome()
+  await screen.findByRole('heading', { level: 1, name: /Connect with AI/ })
+  first.unmount()
+  const second = await renderHome({ client: first.client })
+  expect(screen.queryByText('Loading...')).not.toBeInTheDocument()
+  expect(
+    screen.getByRole('heading', { level: 1, name: /Connect with AI/ })
+  ).toBeVisible()
+  expect(
+    vi
+      .mocked(api.get)
+      .mock.calls.filter(([url]) => url === '/api/home_page_content')
+  ).toHaveLength(1)
+  second.unmount()
+  first.client.clear()
+})

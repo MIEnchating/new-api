@@ -67,7 +67,13 @@ export function Home() {
   }, [isUrl, syncIframePreferences])
 
   if (!isLoaded) {
-    return <LoadingState variant='page' />
+    return (
+      <PublicLayout showMainContainer={false}>
+        <main className='flex min-h-svh items-center justify-center'>
+          <LoadingState />
+        </main>
+      </PublicLayout>
+    )
   }
 
   if (content) {
