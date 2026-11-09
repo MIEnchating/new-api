@@ -35,9 +35,10 @@ export default defineConfig({
   },
   test: {
     environment: 'jsdom',
-    // Run isolated jsdom workers on Node.js via the package scripts: Bun's
-    // worker_threads compatibility can stall worker startup and termination.
-    pool: 'threads',
+    // Keep jsdom suites in separate Node.js processes: thread workers can
+    // stall startup and unrelated tests when heavy suites run together.
+    pool: 'forks',
+    maxWorkers: 2,
     server: {
       // Bun marks Zod's ESM namespace as __esModule, so Vitest's external
       // CJS interop unwraps its default export and loses the named `z` export.
