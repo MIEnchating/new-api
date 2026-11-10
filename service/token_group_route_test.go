@@ -251,14 +251,6 @@ func TestSelectTokenGroupRouteUsesSingleCooldownMGet(t *testing.T) {
 	assert.Equal(t, 3, channel.Id)
 	assert.Equal(t, 1, hook.commandCount("mget"))
 	assert.Zero(t, hook.commandCount("get"))
-	state, exists := channelExecutionTraceStateFromContext(ctx)
-	require.True(t, exists)
-	require.Len(t, state.trace.RouteGroupStatuses, 3)
-	assert.Equal(t, "skipped", state.trace.RouteGroupStatuses[0].Status)
-	assert.Equal(t, now+60, state.trace.RouteGroupStatuses[0].CooldownUntil)
-	assert.Equal(t, "skipped", state.trace.RouteGroupStatuses[1].Status)
-	assert.Equal(t, now+90, state.trace.RouteGroupStatuses[1].CooldownUntil)
-	assert.Equal(t, "active", state.trace.RouteGroupStatuses[2].Status)
 }
 
 func TestTokenGroupRouteAffinityMemoryStoreIsBounded(t *testing.T) {
@@ -505,34 +497,6 @@ func TestTokenGroupRouteSkipsFrozenGroupAndReturnsAfterCooldownCleared(t *testin
 	require.NotNil(t, channel)
 	assert.Equal(t, "fallback", group)
 	assert.Equal(t, 1, channel.Id)
-	traceState, traceExists := channelExecutionTraceStateFromContext(ctx)
-	require.True(t, traceExists)
-	require.NotEmpty(t, traceState.trace.Events)
-	assert.Equal(t, "fallback", traceState.trace.Group)
-	assert.Equal(t, []string{"premium", "fallback"}, traceState.trace.RouteGroups)
-	require.Len(t, traceState.trace.RouteGroupStatuses, 2)
-	assert.Equal(t, []ChannelExecutionRouteGroupStatus{
-		{Group: "premium", Status: "skipped", CooldownUntil: traceState.trace.RouteGroupStatuses[0].CooldownUntil},
-		{Group: "fallback", Status: "active"},
-	}, traceState.trace.RouteGroupStatuses)
-	assert.Equal(t, "skipped", traceState.trace.Events[0].State)
-	assert.Equal(t, "premium", traceState.trace.Events[0].Group)
-	assert.Equal(t, "active", traceState.trace.Events[len(traceState.trace.Events)-1].State)
-	assert.Equal(t, "fallback", traceState.trace.Events[len(traceState.trace.Events)-1].Group)
-
-	MarkChannelExecutionSuccess(ctx)
-	adminInfo := map[string]interface{}{}
-	AppendChannelExecutionTraceAdminInfo(ctx, adminInfo)
-	persistedTrace, exists := adminInfo["channel_execution_trace"].(ChannelExecutionTrace)
-	require.True(t, exists)
-	assert.Equal(t, "fallback", persistedTrace.Group)
-	assert.Equal(t, []string{"premium", "fallback"}, persistedTrace.RouteGroups)
-	assert.Equal(t, []ChannelExecutionRouteGroupStatus{
-		{Group: "premium", Status: "skipped", CooldownUntil: persistedTrace.RouteGroupStatuses[0].CooldownUntil},
-		{Group: "fallback", Status: "success"},
-	}, persistedTrace.RouteGroupStatuses)
-	require.NotEmpty(t, persistedTrace.Events)
-	assert.Equal(t, "success", persistedTrace.Events[len(persistedTrace.Events)-1].State)
 
 	ClearTokenGroupRouteCooldown(11, "premium", tokenRouteTestModel, tokenRouteTestPath)
 	nextCtx := newTokenRouteContext(routes)
@@ -689,13 +653,6 @@ func TestTokenGroupRouteStickyRecordsSuccessfulFallback(t *testing.T) {
 	assert.Equal(t, "fallback", group)
 	assert.Equal(t, 1, channel.Id)
 
-	MarkChannelExecutionSuccess(nextCtx)
-	traceState, exists := channelExecutionTraceStateFromContext(nextCtx)
-	require.True(t, exists)
-	require.NotEmpty(t, traceState.trace.Events)
-	successEvent := traceState.trace.Events[len(traceState.trace.Events)-1]
-	assert.Equal(t, "success", successEvent.State)
-	assert.Equal(t, channel.Id, successEvent.ChannelID)
 }
 
 func TestTokenGroupRouteStickyClearsOnFailure(t *testing.T) {

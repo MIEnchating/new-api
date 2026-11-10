@@ -66,19 +66,6 @@ func TestShouldRetryRejectsContextWindowErrorWithRetryableStatus(t *testing.T) {
 	assert.False(t, shouldRetry(c, err, 2))
 }
 
-func TestChannelExecutionErrorReasonIncludesHiddenTransportCause(t *testing.T) {
-	err := types.NewError(
-		errors.New(`Post "https://upstream.example/v1/responses?key=diagnostic-key": EOF`),
-		types.ErrorCodeDoRequestFailed,
-		types.ErrOptionWithHideErrMsg("upstream error: do request failed"),
-	)
-
-	reason := channelExecutionErrorReason(err)
-	assert.Contains(t, reason, "upstream error: do request failed")
-	assert.Contains(t, reason, "https://upstream.example/v1/responses?key=diagnostic-key")
-	assert.Contains(t, reason, "transport_error=")
-}
-
 func TestReloadChannelForRetryRestoresCompleteChannel(t *testing.T) {
 	oldDB := model.DB
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled

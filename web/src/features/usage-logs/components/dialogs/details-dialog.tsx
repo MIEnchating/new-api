@@ -16,9 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import type { TFunction } from 'i18next'
 import {
-  Activity,
   Copy,
   Check,
   ChevronRight,
@@ -33,11 +31,6 @@ import {
   UserCog,
   Info,
   LogIn,
-  CheckCircle2,
-  CircleDot,
-  SkipForward,
-  Snowflake,
-  XCircle,
 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
@@ -95,7 +88,6 @@ import {
 import {
   USAGE_BILLING_PATH,
   type LogOtherData,
-  type ChannelExecutionTraceInfo,
 } from '../../types'
 import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
@@ -171,127 +163,6 @@ function DetailSection(props: {
         {props.children}
       </div>
     </div>
-  )
-}
-
-function routeGroupStatusLabel(status?: string) {
-  switch (status) {
-    case 'active':
-      return 'Active'
-    case 'cooling':
-      return 'Cooling'
-    case 'skipped':
-      return 'Skipped'
-    case 'success':
-      return 'Succeeded'
-    case 'failed':
-      return 'Failed'
-    case 'not_executed':
-      return 'Not executed'
-    default:
-      return 'Pending'
-  }
-}
-
-function routeGroupStatusIcon(status?: string) {
-  switch (status) {
-    case 'success':
-      return CheckCircle2
-    case 'failed':
-      return XCircle
-    case 'cooling':
-      return Snowflake
-    case 'skipped':
-    case 'not_executed':
-      return SkipForward
-    default:
-      return CircleDot
-  }
-}
-
-function routeGroupStatusClass(status?: string) {
-  switch (status) {
-    case 'success':
-      return 'text-emerald-600 dark:text-emerald-400'
-    case 'failed':
-      return 'text-rose-600 dark:text-rose-400'
-    case 'cooling':
-      return 'text-amber-600 dark:text-amber-400'
-    case 'active':
-      return 'text-sky-600 dark:text-sky-400'
-    default:
-      return 'text-muted-foreground'
-  }
-}
-
-type RouteGroupStatus = NonNullable<
-  ChannelExecutionTraceInfo['route_group_statuses']
->[number]
-
-function RouteGroupChain(props: {
-  groups: string[]
-  statuses?: RouteGroupStatus[]
-  actualGroup?: string
-  traceStatus?: ChannelExecutionTraceInfo['status']
-  t: TFunction
-}) {
-  const statusByGroup = new Map(
-    props.statuses?.map((item) => [item.group, item.status]) ?? []
-  )
-  const traceFinished =
-    props.traceStatus === 'success' ||
-    props.traceStatus === 'failed' ||
-    props.traceStatus === 'cancelled'
-
-  return (
-    <span className='flex min-w-0 flex-wrap items-center gap-x-1 gap-y-1.5'>
-      {props.groups.map((group, index) => {
-        let status: string | undefined = statusByGroup.get(group)
-        if (!status && group === props.actualGroup) {
-          if (props.traceStatus === 'success') {
-            status = 'success'
-          } else if (
-            props.traceStatus === 'failed' ||
-            props.traceStatus === 'cancelled'
-          ) {
-            status = 'failed'
-          } else {
-            status = 'active'
-          }
-        } else if (
-          traceFinished &&
-          group !== props.actualGroup &&
-          (!status || status === 'pending')
-        ) {
-          status = 'not_executed'
-        }
-        const StatusIcon = routeGroupStatusIcon(status)
-        return (
-          <span key={group} className='contents'>
-            {index > 0 ? (
-              <ChevronRight
-                className='text-muted-foreground size-3 shrink-0'
-                aria-hidden='true'
-              />
-            ) : null}
-            <span className='bg-background inline-flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 shadow-xs'>
-              <span className='font-mono text-xs font-medium break-all'>
-                {group}
-              </span>
-              <span
-                className={cn(
-                  'inline-flex shrink-0 items-center gap-1 text-[11px]',
-                  routeGroupStatusClass(status)
-                )}
-              >
-                <StatusIcon className='size-3' aria-hidden='true' />
-                {props.t(routeGroupStatusLabel(status))}
-              </span>
-            </span>
-          </span>
-        )
-      })}
-    </span>
   )
 }
 
@@ -775,7 +646,6 @@ interface DetailsDialogProps {
   isRoot: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
-  onViewExecutionTrace?: () => void
 }
 
 export function DetailsDialog(props: DetailsDialogProps) {
@@ -809,37 +679,8 @@ export function DetailsDialog(props: DetailsDialogProps) {
     !!props.log.ip && (showTiming || isManage || (props.isAdmin && isTopup))
   const adminInfo = other?.admin_info
   const isRetryIntermediate = adminInfo?.retry_intermediate === true
-  const executionTrace = adminInfo?.channel_execution_trace
-  let executionTraceStatus = executionTrace?.status
-  if (executionTraceStatus === 'running') {
-    // A persisted consume log is created only after the upstream response is
-    // complete. Use that terminal log type when the Redis trace is stale.
-    if (props.log.type === 2) {
-      executionTraceStatus = 'success'
-    } else if (props.log.type === 5) {
-      executionTraceStatus = 'failed'
-    }
-  }
-  const executionRouteGroups = executionTrace?.route_groups ?? []
-  const actualExecutionGroup =
-    executionTrace?.group || props.log.group || other?.group || ''
   let groupDetails: React.ReactNode = null
-  if (executionRouteGroups.length > 0) {
-    groupDetails = (
-      <DetailRow
-        label={t('Group route chain')}
-        value={
-          <RouteGroupChain
-            groups={executionRouteGroups}
-            statuses={executionTrace?.route_group_statuses}
-            actualGroup={actualExecutionGroup}
-            traceStatus={executionTraceStatus}
-            t={t}
-          />
-        }
-      />
-    )
-  } else if (props.log.group || other?.group) {
+  if (props.log.group || other?.group) {
     groupDetails = (
       <DetailRow
         label={t('Group')}
@@ -1062,19 +903,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
             size='sm'
             copyable={false}
           />
-          {props.isAdmin && executionTrace && props.onViewExecutionTrace ? (
-            <Button
-              type='button'
-              size='sm'
-              variant='outline'
-              className='h-7 gap-1.5 px-2 text-xs'
-              onClick={props.onViewExecutionTrace}
-              aria-label={t('View execution trace')}
-            >
-              <Activity className='size-3.5' aria-hidden='true' />
-              <span>{t('View execution trace')}</span>
-            </Button>
-          ) : null}
         </>
       }
       description={t('View the complete details for this log entry')}

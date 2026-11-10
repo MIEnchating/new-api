@@ -266,6 +266,52 @@ describe('status page separation', () => {
     expect(within(card).getByLabelText('Request history')).toBeVisible()
   })
 
+  it.each([1, 3, 50])(
+    'places the newest of %i requests at the right edge and reserves empty slots on the left',
+    async (count) => {
+      const heartbeats = Array.from({ length: count }, (_, index) => ({
+        time: new Date(Date.UTC(2026, 10, 10, 10, index)).toISOString(),
+        status: index === count - 1 ? 0 : 1,
+        msg: `Request ${index + 1}`,
+      })).reverse()
+      vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+        data: {
+          success: true,
+          data:
+            url === '/api/uptime/status'
+              ? [
+                  {
+                    categoryName: 'requests',
+                    monitors: [{ name: 'API', status: 1, heartbeats }],
+                  },
+                ]
+              : '',
+        },
+      }))
+      await renderSiteStatus()
+      const timeline = await screen.findByLabelText('Request history')
+      expect(timeline.children).toHaveLength(48)
+      expect(timeline.lastElementChild).toHaveAttribute(
+        'aria-label',
+        expect.stringContaining(`Request ${count}`)
+      )
+      const requests = within(timeline).getAllByLabelText(/Status:/)
+      expect(requests).toHaveLength(Math.min(count, 48))
+      expect(requests[0]).toHaveAttribute(
+        'aria-label',
+        expect.stringContaining(`Request ${Math.max(1, count - 47)}`)
+      )
+      if (count < 48) {
+        expect(timeline.firstElementChild).toHaveAttribute(
+          'aria-hidden',
+          'true'
+        )
+        expect(timeline.firstElementChild).not.toHaveAttribute('tabindex')
+      }
+      expect(screen.getByText('Latest request')).toBeVisible()
+    }
+  )
+
   beforeEach(() => {
     vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
     useAuthStore.getState().auth.reset()

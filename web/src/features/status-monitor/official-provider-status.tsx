@@ -260,7 +260,7 @@ function OfficialSummaryMetric(props: {
   return (
     <div
       className={cn(
-        'bg-muted/35 flex min-w-0 items-center gap-3 rounded-md px-3 py-3 sm:px-4',
+        'bg-card flex min-w-0 items-center gap-3 rounded-xl border px-3 py-3 shadow-xs sm:px-4',
         props.className
       )}
     >
@@ -274,13 +274,11 @@ function OfficialSummaryMetric(props: {
             'bg-muted text-muted-foreground'
         )}
       >
-        <Icon className='size-4' />
+        <Icon aria-hidden='true' className='size-4' />
       </span>
       <div className='min-w-0'>
-        <div className='truncate text-lg font-semibold tabular-nums'>
-          {props.value}
-        </div>
-        <div className='text-muted-foreground truncate text-xs'>
+        <div className='text-lg font-semibold tabular-nums'>{props.value}</div>
+        <div className='text-muted-foreground text-xs leading-5 [overflow-wrap:anywhere]'>
           {props.label}
         </div>
       </div>
@@ -320,13 +318,13 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
       : null
 
   return (
-    <article className='bg-card hover:border-foreground/20 min-w-0 overflow-hidden rounded-xl border shadow-xs transition-[box-shadow,border-color] duration-200 hover:shadow-md'>
-      <header className='space-y-2.5 p-4'>
-        <div className='flex flex-wrap items-center justify-between gap-3'>
+    <article className='bg-card flex min-w-0 flex-col overflow-hidden rounded-xl border shadow-xs'>
+      <header className='flex flex-col gap-3 p-4 sm:p-5'>
+        <div className='flex min-w-0 flex-col items-start gap-3'>
           <div className='flex min-w-0 items-center gap-3'>
             <span
               className={cn(
-                'flex size-9 shrink-0 items-center justify-center rounded-lg',
+                'flex size-10 shrink-0 items-center justify-center rounded-xl',
                 meta.iconSurfaceClassName
               )}
             >
@@ -339,13 +337,16 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
               {provider.provider}
             </h3>
           </div>
-          <div className='flex flex-wrap items-center gap-x-3 gap-y-2'>
+          <div className='flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-2'>
             <StatusBadge
               variant={meta.variant}
               copyable={false}
               type='text'
               showDot
-              className='gap-2 text-xs leading-5 whitespace-normal'
+              className={cn(
+                'h-auto gap-1.5 rounded-md px-2 py-1 text-xs leading-5 whitespace-normal',
+                meta.iconSurfaceClassName
+              )}
             >
               {t(meta.label)}
             </StatusBadge>
@@ -385,7 +386,7 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
       ) : null}
 
       {activeIncidents.length > 0 ? (
-        <div className='space-y-2 px-4 pb-3'>
+        <div className='flex flex-col gap-3 px-4 pb-4 sm:px-5'>
           {activeIncidents.map((incident) => {
             const incidentComponents = incident.components
             const hasDetails =
@@ -394,7 +395,7 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
             return (
               <Collapsible
                 key={`${incident.name}-${incident.updated_at}`}
-                className='bg-muted/20 min-w-0 space-y-2.5 rounded-lg border p-3'
+                className='bg-muted/20 flex min-w-0 flex-col gap-2.5 rounded-lg border p-3'
               >
                 <div className='space-y-2.5'>
                   <h4 className='text-sm leading-6 font-semibold [overflow-wrap:anywhere]'>
@@ -500,7 +501,7 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
         <Collapsible
           open={componentsOpen}
           onOpenChange={setComponentsOpen}
-          className='@container mx-4 border-t'
+          className='@container mx-4 border-t sm:mx-5'
         >
           <CollapsibleTrigger
             data-press-animation='none'
@@ -522,7 +523,12 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
             </div>
           </CollapsibleTrigger>
           <CollapsibleContent className='pb-4'>
-            <div className='grid min-w-0 gap-2 @min-[28rem]:grid-cols-2'>
+            <div
+              className={cn(
+                'grid min-w-0 gap-2',
+                serviceComponents.length > 1 && '@min-[22rem]:grid-cols-2'
+              )}
+            >
               {serviceComponents.map((component) => (
                 <ProviderComponentRow
                   key={component.id || component.name}
@@ -534,8 +540,8 @@ function ProviderCard({ provider }: { provider: OfficialProviderStatus }) {
           </CollapsibleContent>
         </Collapsible>
       ) : null}
-      <footer className='bg-muted/10 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t px-4 py-2'>
-        <div className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs'>
+      <footer className='bg-muted/20 mt-auto flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-t px-4 py-3 sm:px-5'>
+        <div className='text-muted-foreground flex min-w-0 flex-col gap-1 text-xs'>
           <p>{t('Official check time')}</p>
           <p className='flex items-center gap-1.5 leading-5 tabular-nums'>
             <Clock3 aria-hidden='true' className='size-3.5 shrink-0' />
@@ -679,37 +685,40 @@ export function OfficialProviderStatuses(props: {
                 </span>
               ) : null}
             </div>
-
-            {!props.loading && providers.length > 0 ? (
-              <div className='grid grid-cols-2 gap-2 lg:grid-cols-4'>
-                <OfficialSummaryMetric
-                  label={t('Operational')}
-                  value={`${operationalProviders} / ${providers.length}`}
-                  icon={CheckCircle2}
-                  tone='success'
-                />
-                <OfficialSummaryMetric
-                  label={t('Affected providers')}
-                  value={String(affectedProviders)}
-                  icon={AlertTriangle}
-                  tone={affectedProviders > 0 ? 'warning' : 'default'}
-                />
-                <OfficialSummaryMetric
-                  label={t('Active incidents')}
-                  value={String(activeIncidents)}
-                  icon={BellRing}
-                  tone={activeIncidents > 0 ? 'warning' : 'default'}
-                />
-                <OfficialSummaryMetric
-                  label={t('Official status unavailable')}
-                  value={String(unavailableProviders)}
-                  icon={CircleDashed}
-                  tone={unavailableProviders > 0 ? 'danger' : 'default'}
-                />
-              </div>
-            ) : null}
           </div>
         )}
+
+        {providers.length > 0 ? (
+          <section
+            aria-label={t('Official provider status')}
+            className='grid grid-cols-2 gap-3 lg:grid-cols-4'
+          >
+            <OfficialSummaryMetric
+              label={t('Operational')}
+              value={`${operationalProviders} / ${providers.length}`}
+              icon={CheckCircle2}
+              tone='success'
+            />
+            <OfficialSummaryMetric
+              label={t('Affected providers')}
+              value={String(affectedProviders)}
+              icon={AlertTriangle}
+              tone={affectedProviders > 0 ? 'warning' : 'default'}
+            />
+            <OfficialSummaryMetric
+              label={t('Active incidents')}
+              value={String(activeIncidents)}
+              icon={BellRing}
+              tone={activeIncidents > 0 ? 'warning' : 'default'}
+            />
+            <OfficialSummaryMetric
+              label={t('Official status unavailable')}
+              value={String(unavailableProviders)}
+              icon={CircleDashed}
+              tone={unavailableProviders > 0 ? 'danger' : 'default'}
+            />
+          </section>
+        ) : null}
 
         {props.failed && providers.length > 0 ? (
           <Alert variant='destructive'>

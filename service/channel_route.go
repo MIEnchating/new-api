@@ -395,22 +395,18 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 			if err != nil {
 				return nil, err
 			}
-			candidates := snapshot.Candidates()
 			if selectAffinity {
 				channel, affinityErr := getSatisfiedChannelAffinityCandidateFromSnapshot(param, group, affinityChannelID, snapshot)
 				if affinityErr != nil {
 					return nil, affinityErr
 				}
 				if channel != nil {
-					TrackChannelExecutionAffinityHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id, "channel_affinity")
-					trackChannelExecutionSelectionWithCandidates(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, candidates, nil)
 					markPostGroupChannelSelected(param, channel)
 					return channel, nil
 				}
 			}
 			channel, selectErr := snapshot.Select(retry, nil)
 			if selectErr == nil && channel != nil {
-				trackChannelExecutionSelectionWithCandidates(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, candidates, nil)
 				markPostGroupChannelSelected(param, channel)
 			}
 			return channel, selectErr
@@ -421,15 +417,12 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 				return nil, err
 			}
 			if channel != nil {
-				TrackChannelExecutionAffinityHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id, "channel_affinity")
-				TrackChannelExecutionSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry)
 				markPostGroupChannelSelected(param, channel)
 				return channel, nil
 			}
 		}
 		channel, err := model.GetRandomSatisfiedChannelWithConstraints(group, param.ModelName, retry, GetChannelConstraints(param.Ctx).Filters)
 		if err == nil && channel != nil {
-			TrackChannelExecutionSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry)
 			markPostGroupChannelSelected(param, channel)
 		}
 		return channel, err
@@ -454,7 +447,6 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 		affinityCooldownUntil := cooldownUntil(affinityChannelID)
 		if affinityCooldownUntil > now {
 			if affinityChannel, _ := model.CacheGetChannel(affinityChannelID); affinityChannel != nil {
-				TrackChannelExecutionSkipped(param.Ctx, group, param.ModelName, param.RequestPath, affinityChannel, "affinity_cooling", affinityCooldownUntil)
 			}
 		} else {
 			channel, err := getSatisfiedChannelAffinityCandidateFromSnapshot(param, group, affinityChannelID, snapshot)
@@ -463,8 +455,6 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 			}
 			if channel != nil {
 				TrackChannelRouteSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
-				TrackChannelExecutionAffinityHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id, "channel_affinity")
-				trackChannelExecutionSelectionWithCandidates(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, candidates, cooldowns)
 				markPostGroupChannelSelected(param, channel)
 				logger.LogDebug(param.Ctx, "channel route selected request-affinity channel: group=%s channel=%d", group, channel.Id)
 				return channel, nil
@@ -482,14 +472,12 @@ func selectSatisfiedChannel(param *RetryParam, group string, retry int) (*model.
 			frozen := until > now
 			if frozen {
 				logger.LogDebug(param.Ctx, "channel route skipped cooldown channel: group=%s channel=%d", group, channel.Id)
-				TrackChannelExecutionSkipped(param.Ctx, group, param.ModelName, param.RequestPath, channel, "cooling", until)
 			}
 			return !frozen
 		},
 	)
 	if err == nil && channel != nil {
 		TrackChannelRouteSelection(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
-		trackChannelExecutionSelectionWithCandidates(param.Ctx, group, param.ModelName, param.RequestPath, channel, retry, candidates, cooldowns)
 		markPostGroupChannelSelected(param, channel)
 	}
 	return channel, err
@@ -541,7 +529,6 @@ func MarkChannelRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 		return switchChannel
 	}
 	until := FreezeChannelRoute(group, channelID, cooldownSeconds)
-	TrackChannelExecutionCooling(c, group, channelID, until)
 	logger.LogWarn(c, fmt.Sprintf("channel route frozen: group=%s channel=%d cooldown=%ds until=%d",
 		group, channelID, cooldownSeconds, until))
 	return switchChannel

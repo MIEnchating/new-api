@@ -57,7 +57,6 @@ import {
   decodeBillingExprB64,
   getTieredBillingSummary,
   hasAnyCacheTokens,
-  getUpstreamRequestIds,
   parseLogOther,
   isViolationFeeLog,
   logTokenName,
@@ -72,7 +71,6 @@ import {
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
 import { DetailsDialog } from '../dialogs/details-dialog'
-import { ExecutionTraceDialog } from '../dialogs/execution-trace-dialog'
 import { LogCostDisplay } from '../log-cost-display'
 import { ModelBadge } from '../model-badge'
 import { RetryChainPopover } from '../retry-chain-popover'
@@ -390,19 +388,8 @@ export function useCommonLogsColumns(
       function DetailsCell({ row }: CellContext<UsageLog, unknown>) {
         const { t, i18n } = useTranslation()
         const [dialogOpen, setDialogOpen] = useState(false)
-        const [traceDialogOpen, setTraceDialogOpen] = useState(false)
         const log = row.original
         const other = parseLogOther(log.other)
-        const canViewExecutionTrace =
-          isAdmin &&
-          Boolean(log.request_id) &&
-          Boolean(other?.admin_info?.channel_execution_trace)
-        const upstreamRequestIds = getUpstreamRequestIds(
-          other?.admin_info?.upstream_request_ids,
-          log.upstream_request_id,
-          log.request_id
-        )
-
         const pricingData = usePricingData(
           log.type === 2 &&
             other?.is_task === true &&
@@ -512,30 +499,7 @@ export function useCommonLogsColumns(
               isRoot={isRoot}
               open={dialogOpen}
               onOpenChange={setDialogOpen}
-              onViewExecutionTrace={
-                canViewExecutionTrace
-                  ? () => {
-                      setDialogOpen(false)
-                      setTraceDialogOpen(true)
-                    }
-                  : undefined
-              }
             />
-            {canViewExecutionTrace ? (
-              <ExecutionTraceDialog
-                requestId={log.request_id}
-                upstreamRequestIds={upstreamRequestIds}
-                upstreamRequestChain={other?.admin_info?.upstream_request_chain}
-                upstreamRequestIdSources={
-                  other?.admin_info?.upstream_request_id_sources
-                }
-                isRetryIntermediate={
-                  other?.admin_info?.retry_intermediate === true
-                }
-                open={traceDialogOpen}
-                onOpenChange={setTraceDialogOpen}
-              />
-            ) : null}
           </>
         )
       },

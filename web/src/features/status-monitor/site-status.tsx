@@ -24,6 +24,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronRight,
+  ArrowRight,
   CircleDashed,
   Wrench,
   Search,
@@ -206,7 +207,13 @@ function MonitorStatusBadge(props: { status: number }) {
     <StatusBadge
       variant={meta.variant}
       type='text'
-      className='text-xs'
+      className={cn('h-auto gap-1.5 rounded-md px-2 py-1 text-xs', {
+        'bg-success/10': meta.variant === 'success',
+        'bg-destructive/10': meta.variant === 'danger',
+        'bg-warning/10': meta.variant === 'warning',
+        'bg-info/10': meta.variant === 'info',
+        'bg-muted': meta.variant === 'neutral',
+      })}
       copyable={false}
     >
       <Icon data-icon='inline-start' />
@@ -236,9 +243,17 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
     <>
       <TooltipProvider delay={0}>
         <div
-          className='grid h-8 min-w-0 grid-cols-48 gap-0.5'
+          className='grid h-7 min-w-0 grid-cols-48 gap-0.5'
+          dir='ltr'
           aria-label={t('Request history')}
         >
+          {Array.from({ length: 48 - heartbeats.length }, (_, index) => (
+            <span
+              key={`empty-${index}`}
+              aria-hidden='true'
+              className='bg-muted/70 block h-7 min-w-0 rounded-sm'
+            />
+          ))}
           {heartbeats.map((heartbeat, index) => {
             const meta = getStatusMeta(heartbeat.status)
             const hasPing =
@@ -266,7 +281,7 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
                       aria-label={label}
                       tabIndex={0}
                       className={cn(
-                        'block h-8 min-w-0 cursor-default rounded-full transition-[transform,filter,box-shadow] duration-150 ease-out focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none hover:z-10 hover:-translate-y-1 hover:brightness-110 hover:shadow-sm',
+                        'block h-7 min-w-0 cursor-default rounded-sm transition-opacity hover:opacity-75 focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none',
                         meta.dotClassName
                       )}
                     />
@@ -299,25 +314,47 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
           })}
         </div>
       </TooltipProvider>
-      <div className='text-muted-foreground mt-1.5 flex items-center justify-between gap-3 text-[11px] tabular-nums'>
-        <span className='truncate'>
-          {formatTimelineBoundary(heartbeats[0]?.time)}
+      <div className='text-muted-foreground mt-2 flex items-start justify-between gap-3 text-[11px] tabular-nums'>
+        <span className='min-w-0'>
+          <span className='block'>{t('Earlier requests')}</span>
+          {heartbeats.length === 48 ? (
+            <span className='mt-0.5 block truncate'>
+              {formatTimelineBoundary(heartbeats[0]?.time)}
+            </span>
+          ) : null}
         </span>
-        <span className='truncate text-right'>
-          {formatTimelineBoundary(heartbeats.at(-1)?.time)}
+        <span className='min-w-0 text-right'>
+          <span className='flex items-center justify-end gap-1'>
+            <ArrowRight aria-hidden='true' className='size-3' />
+            {t('Latest request')}
+          </span>
+          <span className='mt-0.5 block truncate'>
+            {formatTimelineBoundary(heartbeats.at(-1)?.time)}
+          </span>
         </span>
       </div>
     </>
   )
 })
 
-function MetricItem(props: { label: string; value: string }) {
+function MetricItem(props: {
+  label: string
+  value: string
+  primary?: boolean
+}) {
   return (
     <div className='min-w-0 py-1'>
       <div className='text-muted-foreground text-xs leading-5 [overflow-wrap:anywhere]'>
         {props.label}
       </div>
-      <div className='mt-1 truncate text-sm font-semibold tabular-nums'>
+      <div
+        className={cn(
+          'mt-1 truncate font-semibold tabular-nums',
+          props.primary
+            ? 'text-base tracking-tight @min-[23rem]:text-xl'
+            : 'text-sm'
+        )}
+      >
         {props.value}
       </div>
     </div>
@@ -333,13 +370,13 @@ const MonitorRow = memo(function MonitorRow(props: {
   const meta = getStatusMeta(props.monitor.status)
 
   return (
-    <article className='bg-card hover:border-foreground/20 @container min-w-0 overflow-hidden rounded-xl border shadow-xs transition-[box-shadow,border-color] duration-200 hover:shadow-md'>
+    <article className='bg-card hover:border-foreground/20 @container min-w-0 overflow-hidden rounded-xl border shadow-xs transition-colors duration-200'>
       <Button
         variant='ghost'
         type='button'
         data-press-animation='none'
         onClick={() => props.onSelect(props.monitorKey)}
-        className='block h-auto w-full min-w-0 rounded-none p-4 text-left whitespace-normal focus-visible:ring-inset'
+        className='block h-auto w-full min-w-0 rounded-none p-4 text-left whitespace-normal focus-visible:ring-inset sm:p-5'
       >
         <div className='flex min-w-0 items-start justify-between gap-3'>
           <div className='flex min-w-0 flex-1 items-center gap-3'>
@@ -348,12 +385,14 @@ const MonitorRow = memo(function MonitorRow(props: {
                 'size-2.5 shrink-0 rounded-full',
                 meta.dotClassName
               )}
+              aria-hidden='true'
             />
             <div className='min-w-0'>
-              <div className='truncate text-sm font-semibold'>
+              <h2 className='text-sm leading-5 font-semibold [overflow-wrap:anywhere]'>
                 {props.monitor.name || t('Unnamed monitor')}
-              </div>
-              {props.monitor.group ? (
+              </h2>
+              {props.monitor.group &&
+              props.monitor.group !== props.monitor.name ? (
                 <span className='bg-muted text-muted-foreground mt-1 inline-flex max-w-full rounded px-1.5 py-0.5 text-xs'>
                   <span className='truncate'>
                     {t('Group')}: {props.monitor.group}
@@ -364,12 +403,16 @@ const MonitorRow = memo(function MonitorRow(props: {
           </div>
           <div className='flex shrink-0 items-center gap-1'>
             <MonitorStatusBadge status={props.monitor.status} />
-            <ChevronRight className='text-muted-foreground size-4' />
+            <ChevronRight
+              aria-hidden='true'
+              className='text-muted-foreground size-3.5'
+            />
           </div>
         </div>
 
-        <div className='mt-4 grid min-w-0 grid-cols-2 gap-x-3 gap-y-2 border-t pt-3 @min-[23rem]:grid-cols-3'>
+        <div className='mt-4 grid min-w-0 grid-cols-3 items-end gap-3 border-t pt-3'>
           <MetricItem
+            primary
             label={t('5-minute success rate')}
             value={formatOptionalUptime(props.monitor.uptime5m)}
           />
@@ -381,6 +424,8 @@ const MonitorRow = memo(function MonitorRow(props: {
             label={t('1-hour success rate')}
             value={formatOptionalUptime(props.monitor.uptime1h)}
           />
+        </div>
+        <div className='bg-muted/40 mt-3 grid min-w-0 grid-cols-2 gap-3 rounded-lg px-3 py-2'>
           <MetricItem
             label={t('5-minute average latency')}
             value={formatPing(props.monitor.ping)}
@@ -392,7 +437,7 @@ const MonitorRow = memo(function MonitorRow(props: {
         </div>
       </Button>
 
-      <div className='px-4 pb-4'>
+      <div className='px-4 pb-4 sm:px-5 sm:pb-5'>
         <HeartbeatTimeline heartbeats={props.monitor.heartbeats} />
       </div>
     </article>
@@ -603,8 +648,8 @@ export function SiteStatus() {
           setActiveGroupKey(value || ALL_GROUP_KEY)
         }}
       >
-        <div className='flex shrink-0 flex-col gap-3 lg:flex-row lg:items-center'>
-          <InputGroup className='shrink-0 lg:w-64'>
+        <div className='bg-card flex min-w-0 shrink-0 flex-col gap-3 rounded-xl border p-3'>
+          <InputGroup className='w-full shrink-0 sm:max-w-72'>
             <InputGroupAddon>
               <Search aria-hidden='true' />
             </InputGroupAddon>
@@ -616,7 +661,7 @@ export function SiteStatus() {
               onChange={(event) => setSearch(event.target.value)}
             />
           </InputGroup>
-          <TabsList className='w-full max-w-full min-w-0 shrink-0 [scrollbar-width:none] flex-nowrap justify-start gap-1.5 overflow-x-auto rounded-none border-b bg-transparent p-1 pb-3 group-data-horizontal/tabs:h-auto lg:w-auto lg:flex-1 [&::-webkit-scrollbar]:hidden'>
+          <TabsList className='w-full max-w-full min-w-0 shrink-0 [scrollbar-width:none] flex-nowrap justify-start gap-1.5 overflow-x-auto rounded-none bg-transparent p-0 group-data-horizontal/tabs:h-auto [&::-webkit-scrollbar]:hidden'>
             {[
               { key: ALL_GROUP_KEY, label: t('All'), monitorItems },
               ...groupOptions,
@@ -649,7 +694,7 @@ export function SiteStatus() {
           className='min-h-0 min-w-0 overflow-x-hidden overflow-y-auto overscroll-contain pb-2'
         >
           {visibleMonitorItems.length > 0 ? (
-            <div className='grid min-w-0 gap-5 md:grid-cols-2 xl:grid-cols-3'>
+            <div className='grid min-w-0 items-start gap-4 md:grid-cols-2 xl:grid-cols-3'>
               {visibleMonitorItems.map((item) => (
                 <MonitorRow
                   key={item.key}
@@ -702,7 +747,7 @@ export function SiteStatus() {
           <main
             aria-label={t('Site status')}
             aria-busy={activeTab !== 'intelligence' && refreshLoading}
-            className='h-full min-h-0 overflow-hidden'
+            className='bg-muted/20 h-full min-h-0 overflow-hidden'
           >
             <Tabs
               value={activeTab}
@@ -711,7 +756,7 @@ export function SiteStatus() {
               }}
               className='mx-auto flex h-full min-h-0 w-full max-w-[1600px] flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8'
             >
-              <div className='flex shrink-0 flex-col justify-between gap-3 sm:flex-row sm:items-center'>
+              <div className='flex shrink-0 flex-col justify-between gap-3 border-b pb-4 sm:flex-row sm:items-center'>
                 <TabsList className='max-w-full shrink-0 gap-1 overflow-x-auto p-1 group-data-horizontal/tabs:h-auto'>
                   {visibleTabs.map((tab) => (
                     <TabsTrigger
@@ -739,7 +784,7 @@ export function SiteStatus() {
                   value='site-status'
                   className='flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden'
                 >
-                  <p className='text-muted-foreground shrink-0 text-xs'>
+                  <p className='text-muted-foreground shrink-0 text-xs leading-5'>
                     {t(
                       'Based on up to 5,000 recent request logs from the past hour. Model tests are excluded. Status uses the last 5 minutes; no recent requests means unknown.'
                     )}

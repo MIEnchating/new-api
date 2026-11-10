@@ -114,7 +114,6 @@ func RecordRelayErrorLog(c *gin.Context, channelID int, err *types.NewAPIError, 
 	other.SetPublic("error_code", err.GetErrorCode())
 	other.SetPublic("status_code", err.StatusCode)
 	AppendRelayLogAdminInfo(c, relayInfo, other)
-	AppendChannelExecutionTraceErrorAdminInfoToLogOther(c, other)
 	AppendStreamStatusForLog(relayInfo, other)
 	AppendResponseModelLogInfo(relayInfo, other)
 	AppendTaskPluginContextAuditInfo(c, other)

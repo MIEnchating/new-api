@@ -47,6 +47,22 @@ function renderProviders(providers: OfficialProviderStatus[]) {
 }
 
 describe('official status card layout', () => {
+  it('shows provider and incident totals in the compact public view', () => {
+    renderProviders([
+      provider,
+      { ...provider, provider: 'Claude', available: false },
+    ])
+    const summary = screen.getByRole('region', {
+      name: 'Official provider status',
+    })
+    expect(within(summary).getByText('1 / 2')).toBeVisible()
+    expect(within(summary).getByText('Affected providers')).toBeVisible()
+    expect(within(summary).getByText('Active incidents')).toBeVisible()
+    expect(
+      within(summary).getByText('Official status unavailable')
+    ).toBeVisible()
+  })
+
   it('keeps the last official status visible during a failed refresh and clears the warning on recovery', () => {
     const response = { success: true, data: { providers: [provider] } }
     const rendered = renderProviders([provider])
@@ -139,7 +155,8 @@ describe('official status card layout', () => {
     const link = within(card).getByRole('link', {
       name: 'Open official status page',
     })
-    expect(card.parentElement).toHaveClass('grid')
+    expect(card.parentElement).toHaveClass('grid', 'items-start')
+    expect(card).not.toHaveClass('h-full')
     expect(card.parentElement).not.toHaveClass(
       'md:grid-cols-2',
       'xl:grid-cols-3'
@@ -255,6 +272,11 @@ describe('official status card layout', () => {
       screen.getByRole('button', { name: 'Service components 1' })
     ).toBeVisible()
     expect(screen.getByText('Claude API (api.anthropic.com)')).toBeVisible()
+    expect(
+      screen
+        .getByText('Claude API (api.anthropic.com)')
+        .closest('[data-slot=collapsible-content]')?.firstElementChild
+    ).not.toHaveClass('@min-[22rem]:grid-cols-2')
     expect(screen.queryByText('claude.ai')).not.toBeInTheDocument()
     expect(
       screen.queryByText('Claude Console (platform.claude.com)')
@@ -411,7 +433,11 @@ describe('official status card layout', () => {
 
   it('unavailable providers show a single unavailable status and a useful error without a healthy message', () => {
     renderProviders([{ ...provider, available: false, error_code: 'timeout' }])
-    expect(screen.getAllByText('Official status unavailable')).toHaveLength(1)
+    expect(
+      within(screen.getByRole('article')).getAllByText(
+        'Official status unavailable'
+      )
+    ).toHaveLength(1)
     expect(screen.getByText('Official status request timed out')).toBeVisible()
     expect(screen.queryByText('No active incidents')).not.toBeInTheDocument()
     expect(
