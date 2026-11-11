@@ -194,6 +194,12 @@ func CriticalRateLimit() func(c *gin.Context) {
 	return defNext
 }
 
+// TokenUsageRateLimit gives periodic balance queries their own per-user budget.
+// Run after TokenAuthReadOnly so all of a user's keys share the same limit.
+func TokenUsageRateLimit() func(c *gin.Context) {
+	return userRateLimitFactory(60, 60, "TU")
+}
+
 // LotteryDrawRateLimit allows repeated draws without consuming the much smaller
 // critical-operation budget. Must run after UserAuth; limits are per user.
 func LotteryDrawRateLimit() func(c *gin.Context) {

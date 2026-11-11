@@ -203,9 +203,6 @@ func ShouldFreezeChannelRoute(err *types.NewAPIError) bool {
 	if types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err) {
 		return false
 	}
-	if types.IsStreamEventError(err) {
-		return true
-	}
 	if types.IsChannelError(err) {
 		return true
 	}
@@ -225,16 +222,10 @@ func ShouldSwitchChannelRouteForContext(c *gin.Context, err *types.NewAPIError) 
 }
 
 func ShouldCooldownChannelRoute(err *types.NewAPIError) bool {
-	if types.IsStreamEventError(err) {
-		return false
-	}
 	return ShouldFreezeChannelRoute(err)
 }
 
 func ShouldCooldownChannelRouteForContext(c *gin.Context, err *types.NewAPIError) bool {
-	if types.IsStreamEventError(err) {
-		return false
-	}
 	return ShouldFreezeChannelRoute(err)
 }
 

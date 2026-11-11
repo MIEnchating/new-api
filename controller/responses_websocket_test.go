@@ -627,18 +627,13 @@ func TestResponsesWebSocketReusesConnectionAndSettlesEachRequest(t *testing.T) {
 		require.Contains(t, other, "admin_info")
 		admin := other["admin_info"].(map[string]any)
 		assert.Equal(t, []any{"upstream-ws-handshake"}, admin["upstream_request_ids"])
-		chain := admin["upstream_request_chain"].([]any)
-		require.Len(t, chain, 1, "connection reuse must preserve the handshake without adding attempts")
-		nodes := chain[0].(map[string]any)["nodes"].([]any)
-		require.Len(t, nodes, 1)
-		assert.Equal(t, "upstream-ws-handshake", nodes[0].(map[string]any)["id"])
-		assert.Equal(t, "x-request-id", nodes[0].(map[string]any)["source"])
+		assert.NotContains(t, admin, "upstream_request_chain")
 		assert.NotContains(t, other, "use_channel")
 		assert.Equal(t, map[string]any{"status": "ok", "end_reason": "done", "response_status": "completed"}, other["stream_status"])
 	}
-	// Policy records retain request outcomes and the pin constraint on later
-	// creates, without duplicating channel selection from the execution trace.
-	for index, wantDecision := range []string{"success:request_completed", "select:pinned_channel"} {
+	// Routing decisions include channel selection and the pin constraint on
+	// later creates that reuse the established connection.
+	for index, wantDecision := range []string{"attempt:channel_selected", "select:pinned_channel"} {
 		var other struct {
 			AdminInfo struct {
 				RequestPolicy []struct {
@@ -657,7 +652,6 @@ func TestResponsesWebSocketReusesConnectionAndSettlesEachRequest(t *testing.T) {
 			decisions = append(decisions, event.Decision.Action+":"+event.Decision.Reason)
 		}
 		assert.Contains(t, decisions, wantDecision, "request %d policy events: %v", index, decisions)
-		assert.NotContains(t, decisions, "attempt:channel_selected")
 	}
 	require.NoError(t, model.DB.First(token, token.Id).Error)
 	require.NoError(t, model.DB.First(user, user.Id).Error)

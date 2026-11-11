@@ -16,14 +16,104 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export type CCSwitchAppType =
-  | 'claude'
-  | 'codex'
-  | 'gemini'
-  | 'grokbuild'
-  | 'opencode'
-  | 'openclaw'
-  | 'hermes'
+export type CCSwitchApiFormat =
+  | 'anthropic'
+  | 'openai_chat'
+  | 'openai_responses'
+  | 'gemini_native'
+
+const ALL_API_FORMATS = [
+  'anthropic',
+  'openai_chat',
+  'openai_responses',
+  'gemini_native',
+] as const
+const OPENAI_AND_ANTHROPIC_FORMATS = [
+  'openai_chat',
+  'openai_responses',
+  'anthropic',
+] as const
+const GEMINI_API_FORMATS = ['gemini_native'] as const
+
+export const CC_SWITCH_APP_CONFIGS = {
+  claude: {
+    label: 'Claude Code',
+    defaultApiFormat: 'anthropic',
+    apiFormats: ALL_API_FORMATS,
+  },
+  'claude-desktop': {
+    label: 'Claude Desktop',
+    defaultApiFormat: 'anthropic',
+    apiFormats: ALL_API_FORMATS,
+  },
+  codex: {
+    label: 'Codex',
+    defaultApiFormat: 'openai_responses',
+    apiFormats: OPENAI_AND_ANTHROPIC_FORMATS,
+  },
+  copilot: {
+    label: 'GitHub Copilot CLI',
+    defaultApiFormat: 'openai_chat',
+    apiFormats: OPENAI_AND_ANTHROPIC_FORMATS,
+  },
+  gemini: {
+    label: 'Gemini CLI',
+    defaultApiFormat: 'gemini_native',
+    apiFormats: GEMINI_API_FORMATS,
+  },
+  agy: {
+    label: 'Antigravity CLI',
+    defaultApiFormat: 'gemini_native',
+    apiFormats: GEMINI_API_FORMATS,
+  },
+  grokbuild: {
+    label: 'Grok Build',
+    defaultApiFormat: 'openai_responses',
+    apiFormats: OPENAI_AND_ANTHROPIC_FORMATS,
+  },
+  opencode: {
+    label: 'OpenCode',
+    defaultApiFormat: 'openai_chat',
+    apiFormats: ALL_API_FORMATS,
+  },
+  openclaw: {
+    label: 'OpenClaw',
+    defaultApiFormat: 'openai_chat',
+    apiFormats: ALL_API_FORMATS,
+  },
+  hermes: {
+    label: 'Hermes',
+    defaultApiFormat: 'openai_chat',
+    apiFormats: OPENAI_AND_ANTHROPIC_FORMATS,
+  },
+  pi: {
+    label: 'Pi',
+    defaultApiFormat: 'openai_chat',
+    apiFormats: ALL_API_FORMATS,
+  },
+  mcode: {
+    label: 'MiniMax Code',
+    defaultApiFormat: 'openai_chat',
+    apiFormats: OPENAI_AND_ANTHROPIC_FORMATS,
+  },
+  kimi: {
+    label: 'Kimi Code',
+    defaultApiFormat: 'openai_chat',
+    apiFormats: ALL_API_FORMATS,
+  },
+  dsh: {
+    label: 'DeepSeek Harness',
+    defaultApiFormat: 'openai_chat',
+    apiFormats: OPENAI_AND_ANTHROPIC_FORMATS,
+  },
+  omp: {
+    label: 'Oh My Pi',
+    defaultApiFormat: 'openai_chat',
+    apiFormats: ALL_API_FORMATS,
+  },
+} as const
+
+export type CCSwitchAppType = keyof typeof CC_SWITCH_APP_CONFIGS
 
 export const CC_SWITCH_USAGE_AUTO_INTERVAL = 5
 export const CC_SWITCH_LATEST_RELEASE_URL =
@@ -182,28 +272,38 @@ export function resolveCCSwitchEndpointInfo(
 
 interface BuildCCSwitchURLParams {
   app: CCSwitchAppType
+  apiFormat?: CCSwitchApiFormat
   name: string
   models: Record<string, string>
+  additionalModels?: string[]
   apiKey: string
   serverAddress: string
   endpoint: string
+  usageBaseUrl?: string
   iconUrl?: string
   language?: string
 }
 
 export function getDefaultCCSwitchEndpoint(
   app: CCSwitchAppType,
-  serverAddress: string
+  serverAddress: string,
+  apiFormat: CCSwitchApiFormat = CC_SWITCH_APP_CONFIGS[app].defaultApiFormat
 ): string {
-  const normalizedAddress = normalizeServerAddress(serverAddress)
-  const usesOpenAICompatibleEndpoint = app !== 'claude' && app !== 'gemini'
-  return usesOpenAICompatibleEndpoint && !/\/v1$/i.test(normalizedAddress)
-    ? `${normalizedAddress}/v1`
-    : normalizedAddress
+  const baseAddress = normalizeServerAddress(serverAddress).replace(
+    /\/v1(?:beta)?$/i,
+    ''
+  )
+  if (apiFormat === 'gemini_native') {
+    // OpenCode's Google AI SDK expects a versioned base URL. The other
+    // clients (and CC Switch's Gemini route) add the API version themselves.
+    return app === 'opencode' ? `${baseAddress}/v1beta` : baseAddress
+  }
+  if (apiFormat === 'anthropic' && app !== 'opencode') return baseAddress
+  return `${baseAddress}/v1`
 }
 
 export function getCCSwitchUsageBaseUrl(endpoint: string): string {
-  return normalizeServerAddress(endpoint).replace(/\/v1$/i, '')
+  return normalizeServerAddress(endpoint).replace(/\/v1(?:beta)?$/i, '')
 }
 
 export function isValidCCSwitchEndpoint(endpoint: string): boolean {
@@ -229,25 +329,53 @@ export function normalizeCCSwitchLanguage(language?: string): string {
 
 export function buildCCSwitchURL({
   app,
+  apiFormat = CC_SWITCH_APP_CONFIGS[app].defaultApiFormat,
   name,
   models,
+  additionalModels = [],
   apiKey,
   serverAddress: rawServerAddress,
   endpoint: rawEndpoint,
+  usageBaseUrl: rawUsageBaseUrl,
   iconUrl,
   language,
 }: BuildCCSwitchURLParams): string {
+  const supportedFormats: readonly CCSwitchApiFormat[] =
+    CC_SWITCH_APP_CONFIGS[app].apiFormats
+  if (!supportedFormats.includes(apiFormat)) {
+    throw new Error('Unsupported CC Switch API format')
+  }
   const serverAddress = normalizeServerAddress(rawServerAddress)
   const endpoint = normalizeServerAddress(rawEndpoint)
-  const usageBaseUrl = getCCSwitchUsageBaseUrl(endpoint)
+  const usageBaseUrl = getCCSwitchUsageBaseUrl(rawUsageBaseUrl ?? endpoint)
   const params = new URLSearchParams()
   params.set('resource', 'provider')
   params.set('app', app)
+  params.set('apiFormat', apiFormat)
   params.set('name', name)
   params.set('endpoint', endpoint)
   params.set('apiKey', apiKey)
   for (const [key, value] of Object.entries(models)) {
-    if (value) params.set(key, value)
+    if (value.trim()) params.set(key, value.trim())
+  }
+  if (app === 'copilot' && additionalModels.length > 0) {
+    const modelIds = [
+      ...new Set(
+        [models.model ?? '', ...additionalModels]
+          .map((model) => model.trim())
+          .filter(Boolean)
+      ),
+    ]
+    params.set('configFormat', 'json')
+    params.set(
+      'config',
+      encodeBase64Utf8(
+        JSON.stringify({
+          provider: { baseUrl: endpoint, apiKey },
+          models: modelIds.map((id) => ({ id })),
+        })
+      )
+    )
   }
   params.set('homepage', serverAddress)
   if (iconUrl) {

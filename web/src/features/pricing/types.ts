@@ -69,7 +69,6 @@ export type PricingModel = {
   model_ratio: number
   completion_ratio: number
   model_price?: number
-  model_second_price?: Record<string, number>
   cache_ratio?: number | null
   create_cache_ratio?: number | null
   image_ratio?: number | null
@@ -105,7 +104,7 @@ export type PricingModel = {
 }
 
 /** Input/output modalities supported by a model. */
-type Modality = 'text' | 'image' | 'audio' | 'video' | 'file'
+export type Modality = 'text' | 'image' | 'audio' | 'video' | 'file'
 
 /** Functional capabilities a model exposes. */
 export type ModelCapability =
@@ -128,7 +127,7 @@ export type PricingData = {
   data: PricingModel[]
   vendors: PricingVendor[]
   group_ratio: Record<string, number>
-  usable_group: Record<string, { desc: string; ratio?: number; order?: number }>
+  usable_group: Record<string, { desc: string; ratio: number }>
   supported_endpoint: Record<string, string>
   auto_groups: string[]
 }
@@ -142,3 +141,4 @@ export type PriceType =
   | 'image'
   | 'audio_input'
   | 'audio_output'
+export type QuotaType = 0 | 1 // 0: token-based, 1: per-request

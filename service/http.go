@@ -7,7 +7,6 @@ import (
 	"maps"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -92,62 +91,26 @@ func CaptureUpstreamRequestId(c *gin.Context, header http.Header) string {
 	return ""
 }
 
-// BeginUpstreamRequestAttempt records even attempts that never receive headers.
-// Its returned index belongs to this outbound request, independent of route retries.
-func BeginUpstreamRequestAttempt(c *gin.Context, channelID, channelType int) int {
+// CaptureUpstreamRequestIds records request IDs returned by an upstream response.
+func CaptureUpstreamRequestIds(c *gin.Context, header http.Header, channelType int) {
 	c.Set(common.UpstreamRequestIdKey, "")
-	value, _ := c.Get(common.UpstreamRequestChainKey)
-	chain, _ := value.([]common.UpstreamRequestAttempt)
-	kind := strconv.Itoa(channelType)
 	if channelType == constant.ChannelTypeSub2API {
-		kind = "sub2api"
-	}
-	attempt := common.UpstreamRequestAttempt{Attempt: len(chain) + 1, ChannelID: channelID, ChannelType: kind, Nodes: []common.UpstreamRequestNode{}}
-	c.Set(common.UpstreamRequestChainKey, append(slices.Clone(chain), attempt))
-	return len(chain)
-}
-
-// CaptureUpstreamRequestChain keeps Sub2API's client correlation and downstream
-// response IDs together. Other channels retain their existing primary-ID policy.
-func CaptureUpstreamRequestChain(c *gin.Context, header http.Header, attemptIndex int) {
-	value, _ := c.Get(common.UpstreamRequestChainKey)
-	chain, _ := value.([]common.UpstreamRequestAttempt)
-	if attemptIndex < 0 || attemptIndex >= len(chain) {
-		return
-	}
-	chain = slices.Clone(chain)
-	attempt := &chain[attemptIndex]
-	nodes := make([]common.UpstreamRequestNode, 0, 2)
-	c.Set(common.UpstreamRequestIdKey, "")
-	if attempt.ChannelType == "sub2api" {
 		for _, source := range []string{upstreamRequestIdSourceClientID, upstreamRequestIdSourceGenericID} {
 			id := upstreamRequestHeaderID(header, source)
-			if id == "" || slices.ContainsFunc(nodes, func(node common.UpstreamRequestNode) bool { return node.ID == id }) {
+			if id == "" {
 				continue
 			}
-			node := common.UpstreamRequestNode{ID: id, Source: source, Service: "upstream", Role: "upstream_request"}
-			if source == upstreamRequestIdSourceClientID {
-				node.Service, node.Role = "sub2api", "client_correlation"
-			} else if len(nodes) > 0 {
-				node.Service, node.Role = "sub2api-upstream", "provider_request"
-			}
-			if len(nodes) == 0 {
-				c.Set(common.UpstreamRequestIdKey, id)
-			}
-			nodes = append(nodes, node)
-			appendUpstreamRequestId(c, id)
-			recordUpstreamRequestIdSource(c, id, source)
-		}
-	} else if id := CaptureUpstreamRequestId(c, header); id != "" {
-		for _, source := range []string{upstreamRequestIdSourceOneAPI, upstreamRequestIdSourceGenericID, upstreamRequestIdSourceClientID} {
-			if upstreamRequestHeaderID(header, source) == id {
-				nodes = append(nodes, common.UpstreamRequestNode{ID: id, Source: source, Service: "upstream", Role: "upstream_request"})
-				break
+			if id != c.GetString(common.UpstreamRequestIdKey) {
+				if c.GetString(common.UpstreamRequestIdKey) == "" {
+					c.Set(common.UpstreamRequestIdKey, id)
+				}
+				appendUpstreamRequestId(c, id)
+				recordUpstreamRequestIdSource(c, id, source)
 			}
 		}
+	} else {
+		CaptureUpstreamRequestId(c, header)
 	}
-	attempt.Nodes = nodes
-	c.Set(common.UpstreamRequestChainKey, chain)
 }
 
 func CloseResponseBodyGracefully(httpResponse *http.Response) {

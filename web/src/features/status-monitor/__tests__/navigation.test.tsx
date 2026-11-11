@@ -1058,7 +1058,7 @@ describe('user channel monitor', () => {
     )
     expect(
       within(pulses).getByRole('img', { name: /Health score: 20/ })
-    ).toHaveAccessibleName(/Hits \/ Requests: 95 \/ 100/)
+    ).not.toHaveAccessibleName(/Hits \/ Requests/)
   })
 })
 

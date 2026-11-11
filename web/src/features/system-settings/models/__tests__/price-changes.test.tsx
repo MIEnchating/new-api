@@ -17,17 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { afterEach, assert, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 import { ROLE } from '@/lib/roles'
@@ -50,7 +44,6 @@ afterEach(() => {
 // per request.
 const saved = {
   ModelPrice: '{"gpt-image-2":0.04}',
-  ModelSecondPrice: '{}',
   ModelRatio: '{"deepseek-v4":0.135}',
   CacheRatio: '{"deepseek-v4":0.1}',
   CreateCacheRatio: '{}',
@@ -68,14 +61,12 @@ const saved = {
 const raisedDeepseek = { ModelRatio: '{"deepseek-v4":0.15}' }
 
 function PriceChangesFixture(props: {
-  savedValues?: typeof saved
   draft?: Partial<typeof saved>
   onSave: (values: typeof saved) => Promise<void>
 }) {
   const [actions, setActions] = useState<HTMLDivElement | null>(null)
   const [titleStatus, setTitleStatus] = useState<HTMLSpanElement | null>(null)
-  const savedValues = props.savedValues ?? saved
-  const form = useForm({ defaultValues: { ...savedValues, ...props.draft } })
+  const form = useForm({ defaultValues: { ...saved, ...props.draft } })
   return (
     <SettingsPageProvider
       actionsContainer={actions}
@@ -87,7 +78,7 @@ function PriceChangesFixture(props: {
       </header>
       <ModelRatioForm
         form={form}
-        savedValues={savedValues}
+        savedValues={saved}
         onSave={props.onSave}
         onReset={() => undefined}
         isSaving={false}
@@ -98,11 +89,7 @@ function PriceChangesFixture(props: {
 }
 
 async function renderForm(
-  fixture: {
-    savedValues?: typeof saved
-    draft?: Partial<typeof saved>
-    issues?: ModelPricingIssue[]
-  } = {}
+  fixture: { draft?: Partial<typeof saved>; issues?: ModelPricingIssue[] } = {}
 ) {
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/option/model_pricing/issues') {
@@ -131,11 +118,7 @@ async function renderForm(
   const queryClient = client
   render(
     <QueryClientProvider client={queryClient}>
-      <PriceChangesFixture
-        savedValues={fixture.savedValues}
-        draft={fixture.draft}
-        onSave={onSave}
-      />
+      <PriceChangesFixture draft={fixture.draft} onSave={onSave} />
     </QueryClientProvider>
   )
   await waitFor(() => expect(queryClient.isFetching()).toBe(0))
@@ -338,94 +321,4 @@ it('keeps save in the phone top bar and moves the other actions into a menu', as
       .getAllByRole('menuitem')
       .map((item) => item.textContent)
   ).toEqual(['Reset prices', 'Switch to JSON', 'Discard changes'])
-})
-
-const savedVideo = {
-  ...saved,
-  ModelPrice: '{"video-model":0.1}',
-  ModelSecondPrice: '{"video-model":{"prices":{"720p":0.1,"1080p":0.2}}}',
-  BillingMode: '{"video-model":"per_second"}',
-}
-
-it('keeps legacy prices readable without offering a per-second mode filter', async () => {
-  await renderForm({ savedValues: savedVideo })
-  expect(screen.getByRole('row', { name: /video-model/ })).toBeVisible()
-  const modeFilter = screen
-    .getAllByRole('button', { name: 'Mode' })
-    .find((button) => button.getAttribute('aria-haspopup') === 'dialog')
-  assert(modeFilter)
-  await userEvent.setup().click(modeFilter)
-  expect(
-    screen.queryByRole('option', { name: /Per-second/ })
-  ).not.toBeInTheDocument()
-  expect(
-    screen.getByRole('option', { name: /^Expression\s*\d*$/ })
-  ).toBeVisible()
-  expect(screen.getByRole('option', { name: /Per-request/ })).toBeVisible()
-  expect(screen.getByRole('option', { name: /Per-token/ })).toBeVisible()
-})
-
-it('shows and confirms resolution-specific per-second price changes', async () => {
-  const user = userEvent.setup()
-  const { onSave } = await renderForm({
-    savedValues: savedVideo,
-    draft: {
-      ModelSecondPrice: '{"video-model":{"prices":{"720p":0.1,"1080p":0.3}}}',
-    },
-  })
-  const row = screen.getByRole('row', { name: /video-model/ })
-  expect(within(row).getByText('Modified')).toBeVisible()
-  expect(
-    within(row).getByRole('list', { name: 'Unsaved price changes' })
-  ).toHaveTextContent('Per-second · 1080p $0.2 → $0.3')
-  await user.click(saveButton())
-  const dialog = await screen.findByRole('alertdialog', {
-    name: 'Confirm price changes',
-  })
-  const change = within(dialog).getByRole('row', { name: /video-model/ })
-  expect(within(change).getAllByText('Per-second · 1080p')).toHaveLength(2)
-  expect(within(change).queryByText('Per-request')).not.toBeInTheDocument()
-  expect(onSave).not.toHaveBeenCalled()
-  await user.click(
-    within(dialog).getByRole('button', { name: 'Confirm and save' })
-  )
-  await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
-  expect(JSON.parse(onSave.mock.calls[0][0].ModelSecondPrice)).toEqual({
-    'video-model': { prices: { '720p': 0.1, '1080p': 0.3 } },
-  })
-})
-
-it('removes the entire per-second price and restores it with undo', async () => {
-  const user = userEvent.setup()
-  const { onSave } = await renderForm({ savedValues: savedVideo })
-  await deleteRow(user, 'video-model')
-  const row = screen.getByRole('row', { name: /video-model/ })
-  expect(within(row).getByText('Pending deletion')).toBeVisible()
-  await user.click(within(row).getByRole('button', { name: 'Undo' }))
-  expect(saveButton()).toBeDisabled()
-  await deleteRow(user, 'video-model')
-  await user.click(saveButton())
-  const dialog = await screen.findByRole('alertdialog', {
-    name: 'Confirm price changes',
-  })
-  await user.click(
-    within(dialog).getByRole('button', { name: 'Confirm and save' })
-  )
-  await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
-  expect(JSON.parse(onSave.mock.calls[0][0].ModelSecondPrice)).toEqual({})
-  expect(JSON.parse(onSave.mock.calls[0][0].ModelPrice)).toEqual({})
-  expect(JSON.parse(onSave.mock.calls[0][0].BillingMode)).toEqual({})
-})
-
-it('requires price confirmation when the JSON form is submitted', async () => {
-  const user = userEvent.setup()
-  const { onSave } = await renderForm({ draft: raisedDeepseek })
-  await user.click(topBar().getByRole('button', { name: 'Switch to JSON' }))
-  const form = screen.getByText('Model fixed pricing').closest('form')
-  assert(form)
-  fireEvent.submit(form)
-  expect(
-    await screen.findByRole('alertdialog', { name: 'Confirm price changes' })
-  ).toBeVisible()
-  expect(onSave).not.toHaveBeenCalled()
 })

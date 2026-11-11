@@ -351,6 +351,42 @@ async function renderKeysPage(status = 1, overrides: Partial<ApiKey> = {}) {
   return { post, put }
 }
 
+it('copies selected key names and full keys through the upstream batch endpoint', async () => {
+  const user = userEvent.setup()
+  const writeText = vi
+    .spyOn(navigator.clipboard, 'writeText')
+    .mockResolvedValue()
+  const { post } = await renderKeysPage()
+  post.mockResolvedValue({
+    data: { success: true, data: { keys: { 7: 'batch-test-key' } } },
+  })
+  expect(
+    screen.queryByRole('button', { name: 'Copy selected keys' })
+  ).not.toBeInTheDocument()
+  await user.click(screen.getByRole('checkbox', { name: 'Select row' }))
+  await user.click(screen.getByRole('button', { name: 'Copy selected keys' }))
+  await waitFor(() =>
+    expect(writeText).toHaveBeenCalledWith('production\tsk-batch-test-key')
+  )
+  expect(post).toHaveBeenCalledWith('/api/token/batch/keys', { ids: [7] })
+})
+
+it('does not copy masked keys when batch key retrieval fails', async () => {
+  const user = userEvent.setup()
+  const writeText = vi
+    .spyOn(navigator.clipboard, 'writeText')
+    .mockResolvedValue()
+  const { post } = await renderKeysPage()
+  post.mockRejectedValue(new Error('Batch key retrieval unavailable'))
+  await user.click(screen.getByRole('checkbox', { name: 'Select row' }))
+  await user.click(screen.getByRole('button', { name: 'Copy selected keys' }))
+  await screen.findByText('Batch key retrieval unavailable')
+  expect(writeText).not.toHaveBeenCalled()
+  expect(
+    screen.getByRole('button', { name: 'Copy selected keys' })
+  ).toBeEnabled()
+})
+
 it('combines creation and last use while keeping expiry, models and IP restrictions separate', async () => {
   await renderKeysPage()
   for (const name of ['Name', 'API Key', 'Group', 'Models', 'IP Restriction']) {

@@ -29,7 +29,7 @@ func TestJimengResponsesProtocol(t *testing.T) {
 			"duration": float64(10),
 			"metadata": map[string]any{"aspect_ratio": "16:9"},
 		},
-		wantUsageKeys:  []string{"product", "resolution", "seconds"},
+		wantUsageKeys:  []string{"product", "seconds"},
 		wantVendorName: "jimeng",
 	})
 }
@@ -158,7 +158,7 @@ func TestJimengNativeBodiesAndReplies(t *testing.T) {
 		assert.Equal(t, "https://gw.example/jimeng/api/common/v3/submit_task_v2", descriptor["url"])
 		facts, err := call([]string{"extractUsage"}, driver)
 		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"resolution": "", "seconds": float64(5), "product": "s2_pro"}, facts)
+		assert.Equal(t, map[string]any{"seconds": float64(5), "product": "s2_pro"}, facts)
 
 		parsed, err := call([]string{"parseSubmitResponse"}, driver, map[string]any{"body": map[string]any{"code": 10000, "data": map[string]any{"task_id": "t1"}, "message": "Success"}})
 		require.NoError(t, err)
@@ -215,7 +215,7 @@ func TestJimengNativeBodiesAndReplies(t *testing.T) {
 		assert.Equal(t, client, sent)
 		facts, err := call([]string{"extractUsage"}, driver)
 		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"resolution": "", "seconds": float64(5), "product": "v30_720p"}, facts)
+		assert.Equal(t, map[string]any{"seconds": float64(5), "product": "v30_720p"}, facts)
 	})
 
 	// A /v1/videos client cannot pass a body off as a native one.
@@ -237,7 +237,7 @@ func TestJimengNativeBodiesAndReplies(t *testing.T) {
 		require.NoError(t, err)
 		facts, err := call([]string{"extractUsage"}, map[string]any{"upstreamModel": "jimeng_t2v_v30_1080p", "requestBody": intent["requestBody"]})
 		require.NoError(t, err)
-		assert.Equal(t, map[string]any{"resolution": "", "seconds": float64(10), "product": "v30_1080p"}, facts)
+		assert.Equal(t, map[string]any{"seconds": float64(10), "product": "v30_1080p"}, facts)
 		intent, err = call([]string{"native", "submitTask"}, jsonBody(map[string]any{"req_key": "jimeng_t2v_v30", "prompt": "a cat", "frames": 200}))
 		require.NoError(t, err)
 		_, err = call([]string{"extractUsage"}, map[string]any{"upstreamModel": "jimeng_t2v_v30", "requestBody": intent["requestBody"]})

@@ -285,10 +285,6 @@ func TestUpstreamRequestIDsHTTP(t *testing.T) {
 			wantIDs := append([]string{"previous-id"}, tc.ids...)
 			assert.Equal(t, wantIDs, c.GetStringSlice(common.UpstreamRequestIdsKey))
 			assert.Equal(t, "local-id", c.GetString(common.RequestIdKey))
-			chain := c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
-			require.Len(t, chain, 1)
-			assert.Equal(t, 177, chain[0].ChannelID)
-			assert.Equal(t, "sub2api", chain[0].ChannelType)
 
 			// A subsequent transport failure must clear the primary ID, retaining history.
 			cancelled, cancel := context.WithCancel(context.Background())
@@ -297,10 +293,6 @@ func TestUpstreamRequestIDsHTTP(t *testing.T) {
 			require.NoError(t, err)
 			_, err = DoRequest(c, retry, info)
 			require.Error(t, err)
-			chain = c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
-			require.Len(t, chain, 2)
-			assert.Equal(t, 2, chain[1].Attempt)
-			assert.Empty(t, chain[1].Nodes)
 			assert.Empty(t, c.GetString(common.UpstreamRequestIdKey))
 			assert.Equal(t, wantIDs, c.GetStringSlice(common.UpstreamRequestIdsKey))
 		})
@@ -341,20 +333,12 @@ func TestUpstreamRequestIDsWebSocket(t *testing.T) {
 			assert.Equal(t, "client-id", c.GetString(common.UpstreamRequestIdKey))
 			assert.Equal(t, []string{"client-id", "provider-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
 			assert.Equal(t, "local-id", c.GetString(common.RequestIdKey))
-			chain := c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
-			require.Len(t, chain, 1)
-			assert.Equal(t, 177, chain[0].ChannelID)
-			assert.Equal(t, "sub2api", chain[0].ChannelType)
 
 			cancelled, cancel := context.WithCancel(context.Background())
 			cancel()
 			c.Request = c.Request.WithContext(cancelled)
 			_, err = DoWssRequest(adaptor, c, info, nil)
 			require.Error(t, err)
-			chain = c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
-			require.Len(t, chain, 2)
-			assert.Equal(t, 2, chain[1].Attempt)
-			assert.Empty(t, chain[1].Nodes)
 			assert.Empty(t, c.GetString(common.UpstreamRequestIdKey))
 			assert.Equal(t, []string{"client-id", "provider-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
 		})
@@ -404,13 +388,13 @@ func TestUpstreamRequestIDsPersistLogs(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
 			c.Set(common.RequestIdKey, "local-id")
 			c.Set("username", "request-id-test")
-			service.CaptureUpstreamRequestChain(c, http.Header{"X-Client-Request-Id": {"first-client"}, "X-Request-Id": {"first-request"}}, service.BeginUpstreamRequestAttempt(c, 177, constant.ChannelTypeSub2API))
+			service.CaptureUpstreamRequestIds(c, http.Header{"X-Client-Request-Id": {"first-client"}, "X-Request-Id": {"first-request"}}, constant.ChannelTypeSub2API)
 			intermediate := model.NewLogOther()
 			intermediate.SetAdmin("retry_intermediate", true)
 			model.RecordErrorLog(c, 1, 1, "test-model", "", "", "upstream error", 0, 0, false, "default", intermediate)
-			service.CaptureUpstreamRequestChain(c, http.Header{"X-Client-Request-Id": {"second-client"}, "X-Request-Id": {"second-request"}}, service.BeginUpstreamRequestAttempt(c, 177, constant.ChannelTypeSub2API))
+			service.CaptureUpstreamRequestIds(c, http.Header{"X-Client-Request-Id": {"second-client"}, "X-Request-Id": {"second-request"}}, constant.ChannelTypeSub2API)
 			model.RecordConsumeLog(c, 1, model.RecordConsumeLogParams{ModelName: "test-model"})
-			service.BeginUpstreamRequestAttempt(c, 178, constant.ChannelTypeSub2API)
+			c.Set(common.UpstreamRequestIdKey, "")
 			model.RecordErrorLog(c, 1, 1, "test-model", "", "", "network error", 0, 0, false, "default", model.NewLogOther())
 			var logs []model.Log
 			require.NoError(t, db.Order("id ASC").Find(&logs).Error)
@@ -420,10 +404,9 @@ func TestUpstreamRequestIDsPersistLogs(t *testing.T) {
 				assert.Equal(t, primary, logs[i].UpstreamRequestId)
 				var other struct {
 					AdminInfo struct {
-						Chain        []common.UpstreamRequestAttempt `json:"upstream_request_chain"`
-						IDs          []string                        `json:"upstream_request_ids"`
-						Sources      map[string]string               `json:"upstream_request_id_sources"`
-						Intermediate bool                            `json:"retry_intermediate"`
+						IDs          []string          `json:"upstream_request_ids"`
+						Sources      map[string]string `json:"upstream_request_id_sources"`
+						Intermediate bool              `json:"retry_intermediate"`
 					} `json:"admin_info"`
 				}
 				require.NoError(t, common.UnmarshalJsonStr(logs[i].Other, &other))
@@ -433,21 +416,6 @@ func TestUpstreamRequestIDsPersistLogs(t *testing.T) {
 					expectedIDs = append(expectedIDs, "second-client", "second-request")
 					expectedSources["second-request"] = "x-request-id"
 					expectedSources["second-client"] = "x-client-request-id"
-				}
-				require.Len(t, other.AdminInfo.Chain, i+1)
-				for j, attempt := range other.AdminInfo.Chain {
-					assert.Equal(t, j+1, attempt.Attempt)
-					if j == 2 {
-						assert.Equal(t, 178, attempt.ChannelID)
-						assert.Empty(t, attempt.Nodes)
-						continue
-					}
-					assert.Equal(t, 177, attempt.ChannelID)
-					require.Len(t, attempt.Nodes, 2)
-					assert.Equal(t, expectedIDs[j*2], attempt.Nodes[0].ID)
-					assert.Equal(t, expectedIDs[j*2+1], attempt.Nodes[1].ID)
-					assert.Equal(t, "client_correlation", attempt.Nodes[0].Role)
-					assert.Equal(t, "provider_request", attempt.Nodes[1].Role)
 				}
 				assert.Equal(t, expectedIDs, other.AdminInfo.IDs)
 				assert.Equal(t, expectedSources, other.AdminInfo.Sources)

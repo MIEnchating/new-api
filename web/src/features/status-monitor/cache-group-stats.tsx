@@ -26,7 +26,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
@@ -75,7 +75,6 @@ function formatTime(timestamp: number) {
 export function CacheGroupStats(props: {
   groups: CacheMetricGroup[]
   summarySeries?: NonNullable<CacheMetricsResponse['data']['summary']>['series']
-  countsVisible: boolean
   bucketSeconds: number
   rangeStart?: number
   rangeEnd?: number
@@ -436,19 +435,35 @@ export function CacheGroupStats(props: {
                               health?.error_rate_percent == null
                                 ? null
                                 : 100 - health.error_rate_percent
+                            const metrics = [
+                              {
+                                label: t('Health score'),
+                                value: score == null ? '--' : score.toFixed(1),
+                              },
+                              {
+                                label: t('Success rate'),
+                                value: formatMonitorPercent(success),
+                              },
+                              {
+                                label: t('Average TTFT'),
+                                value: formatMonitorLatency(
+                                  health?.avg_ttft_ms
+                                ),
+                              },
+                              {
+                                label: t('Cache rate'),
+                                value: formatMonitorPercent(
+                                  point.has_data ? point.cache_hit_rate : null
+                                ),
+                              },
+                            ]
                             const details = [
                               formatTime(point.ts),
                               statusLabels[status],
-                              `${t('Health score')}: ${score == null ? '--' : score.toFixed(1)}`,
-                              `${t('Success rate')}: ${formatMonitorPercent(success)}`,
-                              `${t('Average TTFT')}: ${formatMonitorLatency(health?.avg_ttft_ms)}`,
-                              `${t('Cache rate')}: ${formatMonitorPercent(point.has_data ? point.cache_hit_rate : null)}`,
+                              ...metrics.map(
+                                (metric) => `${metric.label}: ${metric.value}`
+                              ),
                             ]
-                            if (props.countsVisible && !point.missing) {
-                              details.push(
-                                `${t('Hits / Requests')}: ${point.hit_count ?? 0} / ${point.request_count ?? 0}`
-                              )
-                            }
                             return (
                               <Tooltip key={point.ts}>
                                 <TooltipTrigger
@@ -459,8 +474,39 @@ export function CacheGroupStats(props: {
                                     backgroundColor: monitorScoreColor(score),
                                   }}
                                 />
-                                <TooltipContent className='whitespace-pre-line'>
-                                  {details.join('\n')}
+                                <TooltipContent
+                                  role='tooltip'
+                                  sideOffset={8}
+                                  className='block w-72 max-w-[calc(100vw-2rem)] rounded-xl p-3.5 leading-relaxed shadow-xl'
+                                >
+                                  <div className='border-background/15 mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b pb-3'>
+                                    <span className='tabular-nums opacity-70'>
+                                      {formatTime(point.ts)}
+                                    </span>
+                                    <span className='flex min-w-0 items-center gap-1.5 font-medium'>
+                                      <span
+                                        aria-hidden='true'
+                                        className='size-1.5 shrink-0 rounded-full'
+                                        style={{
+                                          backgroundColor:
+                                            monitorScoreColor(score),
+                                        }}
+                                      />
+                                      {statusLabels[status]}
+                                    </span>
+                                  </div>
+                                  <dl className='grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-5 gap-y-2.5'>
+                                    {metrics.map((metric) => (
+                                      <Fragment key={metric.label}>
+                                        <dt className='min-w-0 break-words opacity-70'>
+                                          {metric.label}
+                                        </dt>
+                                        <dd className='text-right font-medium whitespace-nowrap tabular-nums'>
+                                          {metric.value}
+                                        </dd>
+                                      </Fragment>
+                                    ))}
+                                  </dl>
                                 </TooltipContent>
                               </Tooltip>
                             )

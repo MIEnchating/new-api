@@ -145,10 +145,10 @@ func TestUpdateChannelNewAPIBalanceUsesTheSmallerRemainingQuota(t *testing.T) {
 		want    float64
 		wantErr string
 	}{
-		{name: "missing key quota", usage: `{"code":true,"data":{}}`, wantErr: "missing total_available"},
-		{name: "missing account quota", usage: `{"code":true,"data":{"total_available":100,"user_quota":{}}}`, wantErr: "missing user_quota.total_available"},
+		{name: "missing key quota follows upstream zero default", usage: `{"code":true,"data":{}}`, want: 0},
+		{name: "missing account quota follows upstream zero default", usage: `{"code":true,"data":{"total_available":100,"user_quota":{}}}`, want: 0},
 		{name: "zero quota is a valid balance", usage: `{"code":true,"data":{"total_available":0}}`, want: 0},
-		{name: "conversion overflow", usage: `{"code":true,"data":{"total_available":1e308}}`, status: `{"success":true,"data":{"quota_per_unit":1e-308}}`, wantErr: "finite balance"},
+		{name: "upstream quota conversion", usage: `{"code":true,"data":{"total_available":9000000}}`, status: `{"success":true,"data":{"quota_per_unit":3000000}}`, want: 3},
 		{name: "user quota below the key quota", usage: `{"code":true,"data":{"total_available":2000000,"unlimited_quota":false,"user_quota":{"total_available":500000}}}`, want: 0.5},
 		{name: "key quota below the user quota", usage: `{"code":true,"data":{"total_available":500000,"unlimited_quota":false,"user_quota":{"total_available":2000000}}}`, want: 0.5},
 		{name: "unlimited key uses the user quota", usage: `{"code":true,"data":{"total_available":0,"unlimited_quota":true,"user_quota":{"total_available":3000000}}}`, want: 3},

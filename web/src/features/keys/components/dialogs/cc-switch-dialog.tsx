@@ -21,6 +21,7 @@ import {
   Bot,
   Braces,
   Code2,
+  Monitor,
   Hammer,
   Send,
   Sparkles,
@@ -31,6 +32,7 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Dialog } from '@/components/dialog'
+import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
 import {
   Combobox,
@@ -40,6 +42,14 @@ import {
   ComboboxItem,
   ComboboxList,
 } from '@/components/ui/combobox'
+import {
+  Field,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
@@ -53,63 +63,46 @@ import { cn } from '@/lib/utils'
 import { getApiKeyModels } from '../../api'
 import {
   buildCCSwitchURL,
+  CC_SWITCH_APP_CONFIGS,
+  getCCSwitchUsageBaseUrl,
   getDefaultCCSwitchEndpoint,
   resolveCCSwitchEndpointInfo,
   resolveCCSwitchServerAddress,
   type CCSwitchAppType,
+  type CCSwitchApiFormat,
 } from '../../lib/cc-switch'
 
-const APP_CONFIGS = {
-  claude: {
-    label: 'Claude Code',
-    icon: SquareTerminal,
-    defaultName: 'Claude Code',
-    modelFields: [
-      { key: 'model', labelKey: 'Primary Model', required: true },
-      { key: 'haikuModel', labelKey: 'Haiku Model', required: false },
-      { key: 'sonnetModel', labelKey: 'Sonnet Model', required: false },
-      { key: 'opusModel', labelKey: 'Opus Model', required: false },
-    ],
-  },
-  codex: {
-    label: 'Codex',
-    icon: Code2,
-    defaultName: 'Codex',
-    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
-  },
-  gemini: {
-    label: 'Gemini CLI',
-    icon: Sparkles,
-    defaultName: 'Gemini CLI',
-    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
-  },
-  grokbuild: {
-    label: 'Grok Build',
-    icon: Hammer,
-    defaultName: 'Grok Build',
-    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
-  },
-  opencode: {
-    label: 'OpenCode',
-    icon: Braces,
-    defaultName: 'OpenCode',
-    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
-  },
-  openclaw: {
-    label: 'OpenClaw',
-    icon: Bot,
-    defaultName: 'OpenClaw',
-    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
-  },
-  hermes: {
-    label: 'Hermes',
-    icon: Send,
-    defaultName: 'Hermes',
-    modelFields: [{ key: 'model', labelKey: 'Primary Model', required: true }],
-  },
-} as const
+const APP_ICONS = {
+  claude: SquareTerminal,
+  'claude-desktop': Monitor,
+  codex: Code2,
+  copilot: Code2,
+  gemini: Sparkles,
+  agy: Sparkles,
+  grokbuild: Hammer,
+  opencode: Braces,
+  openclaw: Bot,
+  hermes: Send,
+  pi: SquareTerminal,
+  mcode: Code2,
+  kimi: SquareTerminal,
+  dsh: Code2,
+  omp: SquareTerminal,
+} satisfies Record<CCSwitchAppType, typeof SquareTerminal>
 
-type AppType = keyof typeof APP_CONFIGS & CCSwitchAppType
+const API_FORMAT_LABELS = {
+  anthropic: 'Anthropic Messages',
+  openai_chat: 'OpenAI Chat Completions',
+  openai_responses: 'OpenAI Responses',
+  gemini_native: 'Gemini Native',
+} satisfies Record<CCSwitchApiFormat, string>
+
+const CLAUDE_MODEL_FIELDS = [
+  { key: 'model', labelKey: 'Primary Model' },
+  { key: 'haikuModel', labelKey: 'Haiku Model' },
+  { key: 'sonnetModel', labelKey: 'Sonnet Model' },
+  { key: 'opusModel', labelKey: 'Opus Model' },
+]
 
 interface Props {
   open: boolean
@@ -254,15 +247,21 @@ export function CCSwitchDialog(props: Props) {
     () => resolveCCSwitchEndpointInfo(status, window.location.origin),
     [status]
   )
-  const [app, setApp] = useState<AppType>('claude')
+  const [app, setApp] = useState<CCSwitchAppType>('claude')
+  const [selectedApiFormat, setSelectedApiFormat] =
+    useState<CCSwitchApiFormat | null>(null)
+  const apiFormat =
+    selectedApiFormat ?? CC_SWITCH_APP_CONFIGS[app].defaultApiFormat
+  const [additionalModels, setAdditionalModels] = useState<string[]>([])
   const [customName, setCustomName] = useState<string | null>(null)
   const siteTitle = status?.system_name?.trim() || DEFAULT_SYSTEM_NAME
-  const defaultName = `${siteTitle} ${APP_CONFIGS[app].defaultName}`
+  const defaultName = `${siteTitle} ${CC_SWITCH_APP_CONFIGS[app].label}`
   const name = customName ?? defaultName
   const [models, setModels] = useState<Record<string, string>>({})
   const [endpointAddress, setEndpointAddress] = useState<string>(
     endpointInfo[0].url
   )
+  const [usageAddress, setUsageAddress] = useState<string | null>(null)
 
   const { data: modelsData, isFetching: modelsFetching } = useQuery({
     queryKey: ['api-key-models-ccswitch', props.tokenId],
@@ -283,14 +282,26 @@ export function CCSwitchDialog(props: Props) {
       setModels({})
 
       setApp('claude')
+      setSelectedApiFormat(null)
+      setAdditionalModels([])
 
       setCustomName(null)
 
       setEndpointAddress(endpointInfo[0].url)
+      setUsageAddress(null)
     }
   }, [endpointInfo, props.open])
 
-  const currentConfig = APP_CONFIGS[app]
+  const currentConfig = CC_SWITCH_APP_CONFIGS[app]
+  const isClaude = app === 'claude' || app === 'claude-desktop'
+  const modelRequired = !isClaude || apiFormat !== 'anthropic'
+  const modelFields = isClaude
+    ? CLAUDE_MODEL_FIELDS
+    : [{ key: 'model', labelKey: 'Primary Model' }]
+  const requiresRouting =
+    (isClaude && apiFormat !== 'anthropic') ||
+    ((app === 'codex' || app === 'grokbuild') &&
+      apiFormat !== 'openai_responses')
   const endpointOptions = endpointInfo.map((item) => ({
     value: item.url,
     label: item.route || item.url,
@@ -302,16 +313,25 @@ export function CCSwitchDialog(props: Props) {
       />
     ) : undefined,
   }))
+  const usageOptions = [
+    ...new Set(
+      [...endpointInfo.map((item) => item.url), serverAddress].map(
+        getCCSwitchUsageBaseUrl
+      )
+    ),
+  ].map((url) => ({ value: url, label: url }))
 
   const handleAppChange = (val: string) => {
-    const appVal = val as AppType
+    const appVal = val as CCSwitchAppType
     setApp(appVal)
+    setSelectedApiFormat(null)
+    setAdditionalModels([])
     setCustomName(null)
     setModels({})
   }
 
   const handleSubmit = () => {
-    if (!models.model) {
+    if (modelRequired && !models.model?.trim()) {
       toast.warning(t('Please select a primary model'))
       return
     }
@@ -320,12 +340,15 @@ export function CCSwitchDialog(props: Props) {
       : `sk-${props.tokenKey}`
     const url = buildCCSwitchURL({
       app,
+      apiFormat,
       name,
       models,
+      additionalModels,
       apiKey: key,
       serverAddress,
       iconUrl: normalizeSystemLogo(status?.logo),
-      endpoint: getDefaultCCSwitchEndpoint(app, endpointAddress),
+      endpoint: getDefaultCCSwitchEndpoint(app, endpointAddress, apiFormat),
+      usageBaseUrl: usageAddress ?? getCCSwitchUsageBaseUrl(endpointAddress),
       language: i18n.resolvedLanguage || i18n.language,
     })
     window.open(url, '_blank')
@@ -337,7 +360,8 @@ export function CCSwitchDialog(props: Props) {
       open={props.open}
       onOpenChange={props.onOpenChange}
       title={t('Import to CC Switch')}
-      contentClassName='sm:max-w-3xl'
+      description={t('Requires CC Switch v4.0.29 or later.')}
+      contentClassName='sm:max-w-4xl'
       contentHeight='auto'
       footer={
         <>
@@ -348,45 +372,55 @@ export function CCSwitchDialog(props: Props) {
         </>
       }
     >
-      <div className='grid gap-5 md:min-h-[21.25rem] md:grid-cols-[12rem_minmax(0,1fr)] md:items-stretch'>
-        <div className='md:h-full'>
+      <div className='grid gap-6 md:grid-cols-[14rem_minmax(0,1fr)] md:items-start'>
+        <div className='min-w-0 space-y-2'>
+          <p
+            id='cc-switch-app-label'
+            className='text-muted-foreground text-xs font-medium'
+          >
+            {t('Application')}
+          </p>
           <RadioGroup
+            aria-labelledby='cc-switch-app-label'
             value={app}
             onValueChange={handleAppChange}
-            className='bg-muted/60 grid grid-cols-2 gap-1 rounded-lg p-1 md:h-full md:grid-cols-1 md:content-between'
+            className='bg-muted/50 grid max-h-48 grid-cols-2 gap-1 overflow-y-auto rounded-xl p-1.5 md:max-h-[30rem] md:grid-cols-1'
           >
             {(
-              Object.entries(APP_CONFIGS) as [
-                AppType,
-                (typeof APP_CONFIGS)[AppType],
+              Object.entries(CC_SWITCH_APP_CONFIGS) as [
+                CCSwitchAppType,
+                (typeof CC_SWITCH_APP_CONFIGS)[CCSwitchAppType],
               ][]
-            ).map(([key, cfg]) => (
-              <Label
-                key={key}
-                htmlFor={`app-${key}`}
-                className={cn(
-                  'text-muted-foreground hover:text-foreground flex h-9 min-w-0 cursor-pointer items-center gap-2 rounded-md px-3 text-xs font-medium transition-[background-color,color,box-shadow] md:justify-start',
-                  app === key &&
-                    'bg-background text-foreground shadow-sm dark:bg-background/80'
-                )}
-              >
-                <RadioGroupItem
-                  value={key}
-                  id={`app-${key}`}
-                  className='sr-only'
-                />
-                <cfg.icon className='size-4 shrink-0' strokeWidth={1.8} />
-                <span className='min-w-0 truncate'>{cfg.label}</span>
-              </Label>
-            ))}
+            ).map(([key, cfg]) => {
+              const Icon = APP_ICONS[key]
+              return (
+                <Label
+                  key={key}
+                  htmlFor={`app-${key}`}
+                  className={cn(
+                    'text-muted-foreground hover:bg-background/60 hover:text-foreground focus-within:ring-ring flex min-h-9 min-w-0 cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-[background-color,color,box-shadow] focus-within:ring-2 focus-within:ring-inset',
+                    app === key &&
+                      'bg-background text-foreground shadow-sm dark:bg-background/80'
+                  )}
+                >
+                  <RadioGroupItem
+                    value={key}
+                    id={`app-${key}`}
+                    className='sr-only'
+                  />
+                  <Icon className='size-4 shrink-0' strokeWidth={1.8} />
+                  <span className='min-w-0 leading-4 break-words'>
+                    {cfg.label}
+                  </span>
+                </Label>
+              )
+            })}
           </RadioGroup>
         </div>
 
-        <div className='border-border divide-border min-w-0 divide-y overflow-hidden rounded-lg border md:h-full'>
-          <div className='grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 sm:grid-cols-[7rem_minmax(0,1fr)]'>
-            <Label htmlFor='cc-switch-name' className='text-muted-foreground'>
-              {t('Name')}
-            </Label>
+        <FieldGroup className='min-w-0 gap-5'>
+          <Field>
+            <FieldLabel htmlFor='cc-switch-name'>{t('Name')}</FieldLabel>
             <Input
               id='cc-switch-name'
               value={name}
@@ -394,52 +428,123 @@ export function CCSwitchDialog(props: Props) {
               placeholder={defaultName}
               className='bg-background h-9 min-w-0'
             />
-          </div>
+          </Field>
 
-          {endpointOptions.length > 1 && (
-            <div className='grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 sm:grid-cols-[7rem_minmax(0,1fr)]'>
-              <Label className='text-muted-foreground'>
+          <div className='grid gap-4 sm:grid-cols-2'>
+            <Field className='min-w-0'>
+              <FieldLabel htmlFor='cc-switch-endpoint'>
                 {t('API Endpoint')}
-              </Label>
+              </FieldLabel>
               <CCSwitchComboboxField
+                id='cc-switch-endpoint'
+                label={t('API Endpoint')}
                 options={endpointOptions}
                 value={endpointAddress}
                 onValueChange={setEndpointAddress}
                 placeholder={t('API Endpoint')}
                 emptyText={t('No matching items')}
               />
-            </div>
-          )}
+              <FieldDescription className='break-all text-xs'>
+                {getDefaultCCSwitchEndpoint(app, endpointAddress, apiFormat)}
+              </FieldDescription>
+            </Field>
 
-          {currentConfig.modelFields.map((field) => (
-            <div
-              key={field.key}
-              className='grid grid-cols-[5.5rem_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 sm:grid-cols-[7rem_minmax(0,1fr)]'
-            >
-              <Label
-                htmlFor={`cc-switch-${field.key}`}
-                className='text-muted-foreground'
-              >
-                {t(field.labelKey)}
-                {field.required && (
-                  <span className='text-destructive ml-0.5'>*</span>
-                )}
-              </Label>
+            <Field className='min-w-0'>
+              <FieldLabel htmlFor='cc-switch-api-format'>
+                {t('API Format')}
+              </FieldLabel>
               <CCSwitchComboboxField
-                id={`cc-switch-${field.key}`}
-                label={t(field.labelKey)}
-                options={modelOptions}
-                value={models[field.key] || ''}
-                onValueChange={(v) =>
-                  setModels((prev) => ({ ...prev, [field.key]: v ?? '' }))
+                id='cc-switch-api-format'
+                label={t('API Format')}
+                options={currentConfig.apiFormats.map((format) => ({
+                  value: format,
+                  label: t(API_FORMAT_LABELS[format]),
+                }))}
+                value={apiFormat}
+                onValueChange={(value) =>
+                  setSelectedApiFormat(value as CCSwitchApiFormat)
                 }
-                placeholder={t('Select or enter model name')}
-                emptyText={t('No models found')}
-                allowCustomValue
+                emptyText={t('No matching items')}
               />
+              {requiresRouting && (
+                <FieldDescription className='text-xs'>
+                  {t('This format requires CC Switch routing.')}
+                </FieldDescription>
+              )}
+            </Field>
+          </div>
+
+          <FieldSet className='min-w-0 gap-3 border-t pt-4'>
+            <FieldLegend variant='label'>{t('Models')}</FieldLegend>
+            <div className='grid gap-4 sm:grid-cols-2'>
+              {modelFields.map((field) => (
+                <Field
+                  key={field.key}
+                  className={cn('min-w-0', !isClaude && 'sm:col-span-2')}
+                >
+                  <FieldLabel htmlFor={`cc-switch-${field.key}`}>
+                    {t(field.labelKey)}
+                    {field.key === 'model' && modelRequired && (
+                      <span className='text-destructive ml-0.5'>*</span>
+                    )}
+                  </FieldLabel>
+                  <CCSwitchComboboxField
+                    id={`cc-switch-${field.key}`}
+                    label={t(field.labelKey)}
+                    options={modelOptions}
+                    value={models[field.key] || ''}
+                    onValueChange={(v) =>
+                      setModels((prev) => ({ ...prev, [field.key]: v ?? '' }))
+                    }
+                    placeholder={t('Select or enter model name')}
+                    emptyText={t('No models found')}
+                    allowCustomValue
+                  />
+                </Field>
+              ))}
             </div>
-          ))}
-        </div>
+            {!modelRequired && (
+              <FieldDescription className='text-xs'>
+                {t("Leave blank to use the client's default models.")}
+              </FieldDescription>
+            )}
+            {app === 'copilot' && (
+              <Field>
+                <FieldLabel htmlFor='cc-switch-additional-models'>
+                  {t('Additional Models')}
+                </FieldLabel>
+                <MultiSelect
+                  id='cc-switch-additional-models'
+                  options={modelOptions.filter(
+                    (option) => option.value !== models.model?.trim()
+                  )}
+                  selected={additionalModels}
+                  onChange={setAdditionalModels}
+                  placeholder={t('Select or enter additional models')}
+                  emptyText={t('No models found')}
+                  maxVisibleChips={3}
+                  allowCreate
+                />
+              </Field>
+            )}
+          </FieldSet>
+          <Field className='border-t pt-4'>
+            <FieldLabel htmlFor='cc-switch-usage-address'>
+              {t('Balance Query Address')}
+            </FieldLabel>
+            <CCSwitchComboboxField
+              id='cc-switch-usage-address'
+              label={t('Balance Query Address')}
+              options={usageOptions}
+              value={usageAddress ?? getCCSwitchUsageBaseUrl(endpointAddress)}
+              onValueChange={setUsageAddress}
+              emptyText={t('No matching items')}
+            />
+            <FieldDescription className='text-xs'>
+              {t('This address must serve /api/usage/token/.')}
+            </FieldDescription>
+          </Field>
+        </FieldGroup>
       </div>
     </Dialog>
   )

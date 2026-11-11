@@ -247,35 +247,6 @@ it('previews legacy conversion in the selected currency and applies only after c
   ).toBeDisabled()
 })
 
-it('opens legacy per-second drafts as expressions and preserves resolution prices', async () => {
-  const editor = renderEditor({
-    billingMode: 'per-second',
-    price: '0.35',
-    secondPriceConfig: { prices: { '1080p': 0.5 } },
-    pluginBillingExpr: { provider: 'tier("provider", u("seconds") * 0.8)' },
-  })
-  expect(screen.getByRole('tab', { name: 'Expression' })).toHaveAttribute(
-    'aria-selected',
-    'true'
-  )
-  expect(
-    screen.queryByRole('tab', { name: 'Per-second' })
-  ).not.toBeInTheDocument()
-  expect(
-    screen.queryByRole('textbox', { name: 'Price per second' })
-  ).not.toBeInTheDocument()
-  expect(editor.dirty).toHaveBeenLastCalledWith(false)
-  const expected = {
-    billingMode: 'tiered_expr',
-    billingExpr:
-      'lower(trim(u("resolution") ?? "")) == "1080p" ? tier("1080p", u("seconds") * 0.5) : (tier("base", u("seconds") * 0.35))',
-    pluginBillingExpr: { provider: 'tier("provider", u("seconds") * 0.8)' },
-  }
-  expect(await commit(editor.ref)).toMatchObject(expected)
-  await selectCurrency('Site currency (CNY)')
-  expect(await commit(editor.ref)).toMatchObject(expected)
-})
-
 it.each([
   {
     name: 'custom-cache',
@@ -1080,30 +1051,3 @@ it('preserves time billing on direct save and blocks incomplete local conditions
     requestRuleExpr,
   })
 })
-
-it('preserves explicit zero prices when migrating a legacy per-second draft', async () => {
-  const editor = renderEditor({
-    billingMode: 'per-second',
-    price: '0',
-    secondPriceConfig: { prices: { '1080p': 0 } },
-  })
-  expect((await commit(editor.ref))?.billingExpr).toBe(
-    'lower(trim(u("resolution") ?? "")) == "1080p" ? tier("1080p", u("seconds") * 0) : (tier("base", u("seconds") * 0))'
-  )
-})
-
-it.each<Partial<ModelRatioData>>([
-  {
-    price: '0.2',
-    secondPriceConfig: { prices: { '1080p': 0.5, '1080P': 0.7 } },
-  },
-  { price: '0.2', secondPriceConfig: { prices: { '1080p': Infinity } } },
-  { price: '-1' },
-])(
-  'blocks invalid legacy per-second configuration instead of saving a fallback price: %j',
-  async (data) => {
-    const editor = renderEditor({ billingMode: 'per-second', ...data })
-    expect(await commit(editor.ref)).toBeNull()
-    expect(screen.getByRole('alert')).toBeVisible()
-  }
-)

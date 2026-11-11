@@ -24,6 +24,7 @@ import {
   Pencil,
   PlugZap,
   Gauge,
+  DollarSign,
   Download,
   Copy,
   Power,
@@ -32,7 +33,6 @@ import {
   Trash2,
   RefreshCw,
   Loader2,
-  LoaderCircle,
 } from 'lucide-react'
 import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -94,6 +94,7 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     ADMIN_PERMISSION_RESOURCES.CHANNEL,
     ADMIN_PERMISSION_ACTIONS.SENSITIVE_WRITE
   )
+
   const handleEdit = () => {
     setCurrentRow(channel)
     setOpen('update-channel')
@@ -114,6 +115,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     } finally {
       setIsTesting(false)
     }
+  }
+
+  const handleQueryBalance = () => {
+    setCurrentRow(channel)
+    setOpen('balance-query')
   }
 
   const handleFetchModels = () => {
@@ -155,30 +161,28 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
     statusIcon = <PowerOff className='size-4' />
   }
 
-  const editAction = (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant='ghost'
-            size='icon-sm'
-            onClick={(e) => {
-              e.stopPropagation()
-              handleEdit()
-            }}
-            aria-label={t('Edit')}
-          />
-        }
-      >
-        <Pencil className='size-4' />
-      </TooltipTrigger>
-      <TooltipContent>{t('Edit')}</TooltipContent>
-    </Tooltip>
-  )
-
   return (
     <div className='-ml-1.5 flex items-center gap-1'>
-      {layout !== 'card' && editAction}
+      {layout !== 'card' && (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant='ghost'
+                size='icon-sm'
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleEdit()
+                }}
+                aria-label={t('Edit')}
+              />
+            }
+          >
+            <Pencil className='size-4' />
+          </TooltipTrigger>
+          <TooltipContent>{t('Edit')}</TooltipContent>
+        </Tooltip>
+      )}
 
       <Tooltip>
         <TooltipTrigger
@@ -192,14 +196,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
             />
           }
         >
-          <span className='relative block size-4 shrink-0'>
-            <Gauge
-              className={`absolute inset-0 size-4 transition-opacity ${isTesting ? 'opacity-0' : 'opacity-100'}`}
-            />
-            <LoaderCircle
-              className={`absolute inset-0 size-4 animate-spin transition-opacity ${isTesting ? 'opacity-100' : 'opacity-0'}`}
-            />
-          </span>
+          {isTesting ? (
+            <Loader2 className='size-4 animate-spin' />
+          ) : (
+            <Gauge className='size-4' />
+          )}
         </TooltipTrigger>
         <TooltipContent>{t('Test Connection')}</TooltipContent>
       </Tooltip>
@@ -249,8 +250,6 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         </TooltipContent>
       </Tooltip>
 
-      {layout === 'card' && editAction}
-
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -264,11 +263,28 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           <span className='sr-only'>{t('Open menu')}</span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align='end' className='w-48'>
+          {layout === 'card' && (
+            <DropdownMenuItem onClick={handleEdit}>
+              {t('Edit')}
+              <DropdownMenuShortcut>
+                <Pencil size={16} />
+              </DropdownMenuShortcut>
+            </DropdownMenuItem>
+          )}
+
           {/* Test Connection */}
           <DropdownMenuItem onClick={handleTest}>
             {t('Test Connection')}
             <DropdownMenuShortcut>
               <PlugZap size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+
+          {/* Query Balance */}
+          <DropdownMenuItem onClick={handleQueryBalance}>
+            {t('Query Balance')}
+            <DropdownMenuShortcut>
+              <DollarSign size={16} />
             </DropdownMenuShortcut>
           </DropdownMenuItem>
 

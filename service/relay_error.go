@@ -70,10 +70,7 @@ func HandleChannelFailure(c *gin.Context, channelError types.ChannelError, err *
 	}
 	upstreamURLs := common.UpstreamAddresses(c)
 	logger.LogError(c, common.LogText("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode(upstreamURLs...))))
-	if types.IsStreamEventError(err) &&
-		(types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err)) {
-		return false
-	}
+
 	nextChannelExcluded := IsNextChannelRouteExcluded(c)
 	if IsChannelRouteEnabled() || HasTokenGroupRoutes(c) {
 		ClearChannelAffinityForRetryableFailure(c, channelError.ChannelId, err)

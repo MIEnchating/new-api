@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -25,6 +26,8 @@ import {
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 import { CacheMonitor } from '../cache-monitor'
 import { ChannelTrend } from '../channel-trend'
@@ -83,12 +86,14 @@ function cacheResponse(): CacheMetricsResponse {
 
 function renderMonitor(response = cacheResponse(), failed = false) {
   return render(
-    <CacheMonitor
-      response={response}
-      loading={false}
-      failed={failed}
-      onRefresh={vi.fn()}
-    />
+    <TooltipProvider>
+      <CacheMonitor
+        response={response}
+        loading={false}
+        failed={failed}
+        onRefresh={vi.fn()}
+      />
+    </TooltipProvider>
   )
 }
 
@@ -200,6 +205,96 @@ describe('channel monitoring overview', () => {
       within(row).getByRole('img', { name: /Health score: 100/ })
     ).toHaveAccessibleName(/Success rate: 100.0%/)
   })
+
+  it('hovering an interval shows aligned health metrics without request or hit counts', async () => {
+    const response = cacheResponse()
+    response.data.counts_visible = true
+    const point = response.data.groups[0].series[0]
+    point.has_data = true
+    point.cache_hit_rate = 89.5
+    point.hit_count = 238
+    point.request_count = 242
+    if (!point.health) throw new Error('Interval health fixture is missing')
+    point.health = {
+      ...point.health,
+      score: 91,
+      error_rate_percent: 1.2,
+      avg_ttft_ms: 5700,
+    }
+    renderMonitor(response)
+    const pulse = screen.getByRole('img', { name: /Health score: 91/ })
+
+    await userEvent.setup().hover(pulse)
+
+    const tooltip = await screen.findByRole('tooltip')
+    expect(within(tooltip).getByText('Healthy')).toBeVisible()
+    const metrics = within(tooltip).getAllByRole('term')
+    expect(metrics.map((metric) => metric.textContent)).toEqual([
+      'Health score',
+      'Success rate',
+      'Average TTFT',
+      'Cache rate',
+    ])
+    expect(metrics[0].closest('dl')).toHaveClass(
+      'grid',
+      'grid-cols-[minmax(0,1fr)_auto]'
+    )
+    expect(
+      within(tooltip)
+        .getAllByRole('definition')
+        .map((metric) => metric.textContent)
+    ).toEqual(['91.0', '98.8%', '5.7 s', '89.5%'])
+    expect(tooltip).toHaveClass('max-w-[calc(100vw-2rem)]')
+    expect(tooltip).not.toHaveTextContent(/Hits|Requests|238|242/)
+    expect(pulse).not.toHaveAccessibleName(/Hits|Requests|238|242/)
+  })
+
+  it.each([
+    { missing: true, values: ['--', '--', '--', '--'] },
+    { missing: false, values: ['0.0', '0.0%', '0.0 s', '0.0%'] },
+  ])(
+    'focusing an interval preserves missing=$missing metric values and Escape dismisses details',
+    async ({ missing, values }) => {
+      const response = cacheResponse()
+      const point = response.data.groups[0].series[0]
+      point.has_data = !missing
+      if (!point.health) throw new Error('Interval health fixture is missing')
+      point.health = {
+        ...point.health,
+        overall: missing ? 'unknown' : 'critical',
+        score: missing ? null : 0,
+        error_rate_percent: missing ? null : 100,
+        avg_ttft_ms: missing ? null : 0,
+      }
+      renderMonitor(response)
+      const row = screen
+        .getByRole('cell', { name: /Primary/ })
+        .closest<HTMLElement>('[role=row]')
+      if (!row) throw new Error('Primary group row is missing')
+      const pulse = within(row).getAllByRole('img', {
+        name: /Health score: /,
+      })[1]
+      const user = userEvent.setup()
+
+      act(() => pulse.focus())
+
+      const tooltip = await screen.findByRole('tooltip')
+      expect(
+        within(tooltip).getByText(
+          missing ? 'No data or insufficient samples' : 'Critical'
+        )
+      ).toBeVisible()
+      expect(
+        within(tooltip)
+          .getAllByRole('definition')
+          .map((metric) => metric.textContent)
+      ).toEqual(values)
+      await user.keyboard('{Escape}')
+      await waitFor(() =>
+        expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+      )
+    }
+  )
 
   it('search filters group names and clearing an unmatched search restores configured empty groups', async () => {
     renderMonitor()

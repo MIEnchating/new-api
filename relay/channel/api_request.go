@@ -324,7 +324,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 		return nil, fmt.Errorf("get request url failed: %w", err)
 	}
 	logger.LogDebug(c, "fullRequestURL: %s", common.SanitizeURLForLog(fullRequestURL))
-	req, err := http.NewRequestWithContext(c.Request.Context(), c.Request.Method, fullRequestURL, requestBody)
+	req, err := http.NewRequest(c.Request.Method, fullRequestURL, requestBody)
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
@@ -382,7 +382,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 // request context, and reports a rejected handshake as a *types.NewAPIError
 // carrying the upstream status code (types.NewError preserves it).
 func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody io.Reader) (*websocket.Conn, error) {
-	attempt := service.BeginUpstreamRequestAttempt(c, info.ChannelId, info.ChannelType)
+	c.Set(common2.UpstreamRequestIdKey, "")
 	fullRequestURL, err := a.GetRequestURL(info)
 	if err != nil {
 		return nil, fmt.Errorf("get request url failed: %w", err)
@@ -419,7 +419,7 @@ func DoWssRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	}
 	targetConn, resp, err := dialer.DialContext(c.Request.Context(), fullRequestURL, targetHeader)
 	if resp != nil {
-		service.CaptureUpstreamRequestChain(c, resp.Header, attempt)
+		service.CaptureUpstreamRequestIds(c, resp.Header, info.ChannelType)
 	}
 	if err != nil {
 		statusCode := http.StatusInternalServerError
@@ -458,7 +458,7 @@ func keepUpstreamRedirectResponse(_ *http.Request, _ []*http.Request) error {
 }
 
 func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http.Response, error) {
-	attempt := service.BeginUpstreamRequestAttempt(c, info.ChannelId, info.ChannelType)
+	c.Set(common2.UpstreamRequestIdKey, "")
 	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
 	if err != nil {
 		return nil, fmt.Errorf("new proxy http client failed: %w", err)
@@ -492,12 +492,6 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 	common2.SetContextKey(c, appconstant.ContextKeyUpstreamRequestOrigin, req.URL.Scheme+"://"+req.URL.Host)
 	resp, err := relayClient.Do(req)
 	if err != nil {
-		if ctxErr := c.Request.Context().Err(); info.IsStream && ctxErr != nil {
-			logger.LogError(c, fmt.Sprintf(
-				"stream trace: stage=request_context_cancel phase=awaiting_upstream_headers elapsed_ms=%d error=%q",
-				info.ElapsedMilliseconds(), ctxErr.Error(),
-			))
-		}
 		logger.LogError(c, common2.LogText("do request failed: %s", err.Error()))
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}
@@ -514,15 +508,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 			resp.Proto)
 	}
 
-	service.CaptureUpstreamRequestChain(c, resp.Header, attempt)
-	if info.IsStream && info.RelayMode == constant.RelayModeResponses {
-		logger.LogInfo(c, fmt.Sprintf(
-			"stream trace: stage=upstream_headers elapsed_ms=%d status=%d proto=%q content_type=%q content_length=%d transfer_encoding=%q content_encoding=%q server=%q via=%q cf_ray=%q upstream_request_id=%q provider_request_id=%q",
-			info.ElapsedMilliseconds(), resp.StatusCode, resp.Proto, resp.Header.Get("Content-Type"), resp.ContentLength,
-			strings.Join(resp.TransferEncoding, ","), resp.Header.Get("Content-Encoding"), resp.Header.Get("Server"),
-			resp.Header.Get("Via"), resp.Header.Get("CF-Ray"), resp.Header.Get(common2.RequestIdKey), resp.Header.Get("X-Request-Id"),
-		))
-	}
+	service.CaptureUpstreamRequestIds(c, resp.Header, info.ChannelType)
 
 	_ = req.Body.Close()
 	_ = c.Request.Body.Close()

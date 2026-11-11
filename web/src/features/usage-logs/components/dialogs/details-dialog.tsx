@@ -16,10 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { TFunction } from 'i18next'
 import {
   Copy,
   Check,
-  ChevronRight,
   Route,
   Settings2,
   AlertTriangle,
@@ -91,10 +91,7 @@ import {
 } from '../../types'
 import { ResponseModelDetails } from '../model-badge'
 import { PluginAuthorLink } from '../plugin-author-link'
-import {
-  UpstreamRequestChain,
-  UpstreamRequestIdChain,
-} from './execution-trace-dialog'
+import { UpstreamRequestIdChain } from './upstream-request-id-chain'
 
 function timingTextColorClass(
   variant: 'success' | 'warning' | 'danger'
@@ -179,50 +176,6 @@ function upstreamRequestIdSourceLabel(t: TFunction, source?: string) {
   }
 }
 
-type ChannelChainRun = {
-  channelId: string
-  count: number
-}
-
-function compactChannelChain(
-  channelIds: Array<number | string>
-): ChannelChainRun[] {
-  const runs: Array<{ channelId: string; count: number }> = []
-
-  for (const channelId of channelIds) {
-    const normalizedId = String(channelId)
-    const lastRun = runs.at(-1)
-    if (lastRun?.channelId === normalizedId) {
-      lastRun.count += 1
-      continue
-    }
-    runs.push({ channelId: normalizedId, count: 1 })
-  }
-
-  return runs
-}
-
-function CompactChannelChain(props: { runs: ChannelChainRun[] }) {
-  return (
-    <span className='inline-flex min-w-0 flex-wrap items-center gap-1'>
-      {props.runs.map((run, index) => (
-        <span key={`${run.channelId}-${index}`} className='contents'>
-          {index > 0 ? (
-            <ChevronRight className='text-muted-foreground size-3 shrink-0' />
-          ) : null}
-          <span className='border-border/70 bg-muted/50 inline-flex h-6 items-center gap-1 rounded-md border px-2 font-mono text-xs'>
-            <span className='font-medium'>{run.channelId}</span>
-            {run.count > 1 ? (
-              <span className='text-muted-foreground border-border/70 border-l pl-1 tabular-nums'>
-                ×{run.count}
-              </span>
-            ) : null}
-          </span>
-        </span>
-      ))}
-    </span>
-  )
-}
 function formatRatio(ratio: number | undefined): string {
   if (ratio == null) return '-'
   return ratio.toFixed(4)
@@ -315,28 +268,6 @@ function BillingBreakdown(props: {
       rows.push({
         label: t('Matched Tier'),
         value: other.matched_tier || t('No matching results'),
-      })
-    }
-  } else if (other.billing_mode === 'per_second') {
-    rows.push({ label: t('Billing Mode'), value: t('Per-second') })
-    if (
-      other.model_price != null &&
-      Number.isFinite(other.model_price) &&
-      other.model_price >= 0
-    ) {
-      rows.push({
-        label: t('Price per second'),
-        value: `${fmtPrice(other.model_price)}/${t('second')}`,
-      })
-    }
-    if (
-      other.seconds != null &&
-      Number.isFinite(other.seconds) &&
-      other.seconds > 0
-    ) {
-      rows.push({
-        label: t('Billable duration'),
-        value: `${other.seconds} ${t('second')}`,
       })
     }
   } else if (isPerCall) {
@@ -861,17 +792,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
     props.log.type !== 6 &&
     (other?.request_path || conversionChain.length > 0)
 
-  const useChannel = other?.admin_info?.use_channel
-  const channelChain =
-    useChannel && useChannel.length > 0 ? compactChannelChain(useChannel) : []
-  const showChannelChain =
-    channelChain.length > 0 &&
-    !(
-      useChannel?.length === 1 &&
-      String(useChannel[0]) === String(props.log.channel)
-    )
-  const upstreamRequestChain = other?.admin_info?.upstream_request_chain
-  const hasUpstreamRequestChain = Boolean(upstreamRequestChain?.length)
   const upstreamRequestIds = getUpstreamRequestIds(
     other?.admin_info?.upstream_request_ids,
     props.log.upstream_request_id,
@@ -959,20 +879,7 @@ export function DetailsDialog(props: DetailsDialogProps) {
               mono
             />
           )}
-          {props.isAdmin && hasUpstreamRequestChain && (
-            <DetailRow
-              label={t('Upstream Request ID Chain')}
-              value={
-                <UpstreamRequestChain
-                  attempts={upstreamRequestChain}
-                  requestIds={upstreamRequestIds}
-                  inline
-                />
-              }
-            />
-          )}
           {props.isAdmin &&
-            !hasUpstreamRequestChain &&
             upstreamRequestIds.length === 1 && (
               <DetailRow
                 label={t('Upstream Request ID')}
@@ -999,7 +906,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
               />
             )}
           {props.isAdmin &&
-            !hasUpstreamRequestChain &&
             upstreamRequestIds.length > 1 && (
               <DetailRow
                 label={t('Upstream Request ID Chain')}
@@ -1044,15 +950,6 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 </span>
               }
               mono
-            />
-          )}
-
-          {showChannelChain && props.isAdmin && (
-            <DetailRow
-              label={t(
-                isRetryIntermediate ? 'Retry Chain at This Log' : 'Retry Chain'
-              )}
-              value={<CompactChannelChain runs={channelChain} />}
             />
           )}
 

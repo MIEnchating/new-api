@@ -22,13 +22,8 @@ import { splitPluginBillingExprKey } from '@/features/pricing/lib/plugin-pricing
 import { safeJsonParse } from '../utils/json-parser'
 import { formatPricingNumber } from './pricing-format'
 
-type SecondPriceConfig = {
-  prices: Record<string, number>
-}
-
 export type ModelPricingSnapshotInput = {
   modelPrice: string
-  modelSecondPrice?: string
   modelRatio: string
   cacheRatio: string
   createCacheRatio: string
@@ -55,12 +50,10 @@ export type ModelPricingSnapshot = {
   billingMode?: string
   billingExpr?: string
   requestRuleExpr?: string
-  secondPriceConfig?: SecondPriceConfig
   hasConflict: boolean
 }
 
 export type ModelRow = ModelPricingSnapshot & {
-  hasBuiltinPricing?: boolean
   saved?: ModelPricingSnapshot
   draft?: ModelPricingSnapshot
   isDraftChanged: boolean
@@ -91,8 +84,7 @@ const ratioToPrice = (ratio?: string, denominator?: string) => {
 }
 
 export const getModeLabel = (mode?: string) => {
-  if (mode === 'per-request') return 'Per-request'
-  if (mode === 'per-second') return 'Per-second'
+  if (mode === 'per-request') return 'Per-request (deprecated)'
   if (mode === 'tiered_expr') return 'Expression'
   return 'Per-token (deprecated)'
 }
@@ -118,9 +110,6 @@ export const getPriceSummary = (
   if (row.billingMode === 'per-request') {
     return row.price ? `$${row.price} / ${t('request')}` : t('Unset price')
   }
-  if (row.billingMode === 'per-second') {
-    return row.price ? `$${row.price} / ${t('second')}` : t('Unset price')
-  }
 
   const inputPrice = ratioToPrice(row.ratio)
   if (!inputPrice) return t('Unset price')
@@ -139,9 +128,6 @@ export const getPriceDetail = (
   }
   if (row.billingMode === 'per-request') {
     return t('Fixed request price')
-  }
-  if (row.billingMode === 'per-second') {
-    return t('Fixed price per second')
   }
 
   const inputPrice = ratioToPrice(row.ratio)
@@ -163,7 +149,6 @@ export const getPriceDetail = (
 
 export const buildModelSnapshots = ({
   modelPrice,
-  modelSecondPrice = '{}',
   modelRatio,
   cacheRatio,
   createCacheRatio,
@@ -179,10 +164,6 @@ export const buildModelSnapshots = ({
     fallback: {},
     context: 'model prices',
   })
-  const secondPriceMap = safeJsonParse<Record<string, SecondPriceConfig>>(
-    modelSecondPrice,
-    { fallback: {}, context: 'model second prices' }
-  )
   const ratioMap = safeJsonParse<Record<string, number>>(modelRatio, {
     fallback: {},
     context: 'model ratios',
@@ -237,7 +218,6 @@ export const buildModelSnapshots = ({
   const modelNames = new Set([
     ...pluginExpressionsByModel.keys(),
     ...Object.keys(priceMap),
-    ...Object.keys(secondPriceMap),
     ...Object.keys(ratioMap),
     ...Object.keys(cacheMap),
     ...Object.keys(createCacheMap),
@@ -271,7 +251,6 @@ export const buildModelSnapshots = ({
         billingExpr: pureExpr,
         requestRuleExpr,
         price,
-        secondPriceConfig: secondPriceMap[name],
         ratio,
         cacheRatio: cache,
         createCacheRatio: createCache,
@@ -279,30 +258,12 @@ export const buildModelSnapshots = ({
         imageRatio: image,
         audioRatio: audio,
         audioCompletionRatio: audioCompletion,
-        hasConflict: false,
-      }
-    }
-
-    if (modeForModel === 'per_second') {
-      return {
-        name,
-        secondPriceConfig: secondPriceMap[name],
-        price,
-        ratio,
-        cacheRatio: cache,
-        createCacheRatio: createCache,
-        completionRatio: completion,
-        imageRatio: image,
-        audioRatio: audio,
-        audioCompletionRatio: audioCompletion,
-        billingMode: 'per-second',
         hasConflict: false,
       }
     }
 
     return {
       name,
-      secondPriceConfig: secondPriceMap[name],
       pluginBillingExpr: pluginExpressionsByModel.get(name),
       price,
       ratio,
@@ -329,7 +290,6 @@ export const buildModelSnapshots = ({
 export const getSnapshotSignature = (snapshot?: ModelPricingSnapshot) => {
   if (!snapshot) return ''
   return JSON.stringify({
-    secondPriceConfig: snapshot.secondPriceConfig || null,
     price: snapshot.price || '',
     ratio: snapshot.ratio || '',
     cacheRatio: snapshot.cacheRatio || '',

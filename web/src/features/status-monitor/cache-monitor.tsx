@@ -204,7 +204,6 @@ export function CacheMonitor(props: {
       <CacheGroupStats
         groups={groups}
         summarySeries={summary?.series}
-        countsVisible={props.response?.data.counts_visible ?? false}
         bucketSeconds={props.response?.data.bucket_seconds ?? 3600}
         rangeStart={props.response?.data.start_ts}
         rangeEnd={props.response?.data.end_ts}

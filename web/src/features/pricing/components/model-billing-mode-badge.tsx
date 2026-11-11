@@ -34,14 +34,11 @@ interface ModelBillingModeBadgeProps {
 export function ModelBillingModeBadge(props: ModelBillingModeBadgeProps) {
   const { t } = useTranslation()
   const labelKey = getBillingModeLabelKey(props.model)
-  let label = t(labelKey)
+  const label = t(labelKey)
   const isCaption = props.appearance === 'caption'
   let variant: StatusVariant = 'purple'
 
-  if (props.model.billing_mode === 'per_second') {
-    label = t('Per-second')
-    variant = 'warning'
-  } else if (isDynamicPricingModel(props.model)) {
+  if (isDynamicPricingModel(props.model)) {
     variant = 'warning'
   } else if (labelKey === 'Token-based') {
     variant = 'info'

@@ -341,5 +341,3 @@ invoice.ready_subject: "Your invoice is ready to download"
 invoice.ready_body: "Your invoice has been issued. Title: {{.Title}}; Invoice number: {{.Number}}. Open your invoice application details to download it: {{.URL}}"
 invoice.ready_intro: "Your invoice has been issued. Open your invoice application details and select Download invoice."
 invoice.ready_hint: "This notification has no invoice attachment. Sign in to your account to download it."
-
-relay.legacy_second_price_needs_migration: "Legacy per-second pricing requires migration. Please contact the site administrator."

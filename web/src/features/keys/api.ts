@@ -162,3 +162,13 @@ export async function fetchTokenKey(
   const res = await api.post(`/api/token/${id}/key`)
   return res.data
 }
+
+// Batch fetch real (unmasked) keys for multiple tokens
+export async function fetchTokenKeysBatch(ids: number[]): Promise<{
+  success: boolean
+  message?: string
+  data?: { keys: Record<number, string> }
+}> {
+  const res = await api.post('/api/token/batch/keys', { ids })
+  return res.data
+}

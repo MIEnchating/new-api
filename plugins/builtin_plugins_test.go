@@ -39,7 +39,6 @@ func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing
 		{"POST", "/api/common/v3/submit_task_v2", "jimeng", jsplugin.RouteTypeSubmit, "", "taskSubmitted", false, false},
 		{"POST", "/api/common/v3/get_result_v2", "jimeng", jsplugin.RouteTypeDynamic, "", "taskResult", false, false},
 		{"POST", "/jimeng/api/common/v3/submit_task_v2", "jimeng", jsplugin.RouteTypeSubmit, "", "taskSubmitted", true, false},
-		{"POST", "/jimeng/", "jimeng", jsplugin.RouteTypeDynamic, "", "legacyTask", false, true},
 		{"POST", "/suno/submit/:action", "sunoapi", jsplugin.RouteTypeSubmit, "", "renderSubmit", false, true},
 		{"POST", "/suno/fetch", "sunoapi", jsplugin.RouteTypeDynamic, "", "renderTasks", false, true},
 		{"GET", "/suno/fetch/:task_id", "sunoapi", jsplugin.RouteTypeQuery, "", "renderTask", false, true},
@@ -91,6 +90,7 @@ func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing
 		})
 	}
 	for _, missing := range []struct{ method, path string }{
+		{"POST", "/jimeng/"},
 		{"POST", "/sunoapi/suno/fetch"},
 		{"POST", "/alibaba/ali/api/v1/services/aigc/video-generation/video-synthesis"},
 		{"GET", "/v1/query/video_generation/:task_id"},

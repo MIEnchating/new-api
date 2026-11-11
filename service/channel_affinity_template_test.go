@@ -374,9 +374,10 @@ func TestMidjourneyPolicyAcceptance(t *testing.T) {
 				return
 			}
 			events := state.Events()
-			require.Len(t, events, 1)
-			assert.Equal(t, PolicyDecision{Action: "stop", Reason: tc.reason, Source: "system"}, events[0].Decision, "submissions are never replayed")
-			assert.Equal(t, tc.status, events[0].Status)
+			require.Len(t, events, 3)
+			assert.Equal(t, PolicyDecision{Action: "failure", Reason: "upstream_failure", Source: "upstream"}, events[1].Decision)
+			assert.Equal(t, tc.status, events[1].Status)
+			assert.Equal(t, PolicyDecision{Action: "stop", Reason: tc.reason, Source: "system"}, events[2].Decision, "submissions are never replayed")
 		})
 	}
 }

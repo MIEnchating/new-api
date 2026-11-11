@@ -410,9 +410,6 @@ func ShouldFreezeTokenGroupRoute(err *types.NewAPIError) bool {
 	if types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err) {
 		return false
 	}
-	if types.IsStreamEventError(err) {
-		return true
-	}
 	if types.IsChannelError(err) {
 		return true
 	}
@@ -432,16 +429,10 @@ func ShouldSwitchTokenGroupRouteForContext(c *gin.Context, err *types.NewAPIErro
 }
 
 func ShouldCooldownTokenGroupRoute(err *types.NewAPIError) bool {
-	if types.IsStreamEventError(err) {
-		return false
-	}
 	return ShouldFreezeTokenGroupRoute(err)
 }
 
 func ShouldCooldownTokenGroupRouteForContext(c *gin.Context, err *types.NewAPIError) bool {
-	if types.IsStreamEventError(err) {
-		return false
-	}
 	return ShouldFreezeTokenGroupRoute(err)
 }
 

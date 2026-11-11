@@ -48,8 +48,18 @@ test('Sora form excludes model discovery and upstream detection settings', () =>
   expect(settings).not.toHaveProperty('upstream_model_update_ignored_models')
 })
 
-test('Task Plugin channels support model discovery', () => {
-  expect(MODEL_FETCHABLE_TYPES.has(CHANNEL_TYPE_TASK_PLUGIN)).toBe(true)
+test('Task Plugin channels omit upstream discovery settings', () => {
+  expect(MODEL_FETCHABLE_TYPES.has(CHANNEL_TYPE_TASK_PLUGIN)).toBe(false)
+  const payload = transformFormDataToCreatePayload({
+    ...CHANNEL_FORM_DEFAULT_VALUES,
+    name: 'Plugin channel',
+    type: CHANNEL_TYPE_TASK_PLUGIN,
+    task_plugin_key: 'video-a',
+    upstream_model_update_check_enabled: true,
+  })
+  expect(JSON.parse(payload.channel.settings || '{}')).not.toHaveProperty(
+    'upstream_model_update_check_enabled'
+  )
 })
 
 describe('channel type options for task plugin bind', () => {

@@ -171,7 +171,7 @@ func TestGoogleThroughNewAPIGateway(t *testing.T) {
 			wantErr string
 		}{
 			{veo + ":generateVideos", map[string]any{"instances": []any{map[string]any{"prompt": "p"}}}, "models/{model}:predictLongRunning"},
-			{veo + ":predictLongRunning", map[string]any{"instances": []any{map[string]any{"prompt": "p", "lastFrame": map[string]any{}}}}, "Veo image must carry base64 data"},
+			{veo + ":predictLongRunning", map[string]any{"instances": []any{map[string]any{"prompt": "p", "lastFrame": map[string]any{}}}}, "instances[0].lastFrame is not supported"},
 			{veo + ":predictLongRunning", map[string]any{"instances": []any{map[string]any{"prompt": "p"}}, "parameters": map[string]any{"durationSeconds": 5}}, "durationSeconds must be one of 4, 6, or 8"},
 		} {
 			_, err := plugin.Engine.CallPath(t.Context(), "native", []string{"predictLongRunning"}, map[string]any{
@@ -180,84 +180,4 @@ func TestGoogleThroughNewAPIGateway(t *testing.T) {
 			require.ErrorContains(t, err, tc.wantErr)
 		}
 	})
-}
-
-// Veo 3.1 inputs must survive a New API hop for both providers, including
-// validation of combinations that would otherwise silently lose images.
-func TestVeo31InputsThroughNewAPIGateway(t *testing.T) {
-	const veo = "veo-3.1-fast-generate-preview"
-	const image = "data:image/png;base64,aGVsbG8="
-	for _, key := range []string{"google", "vertex-ai"} {
-		t.Run(key, func(t *testing.T) {
-			source, err := builtinplugins.Source(key)
-			require.NoError(t, err)
-			plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: key})
-			require.NoError(t, err)
-			hook := "predictLongRunning"
-			if key == "vertex-ai" {
-				hook = "modelMethod"
-			}
-			for _, tc := range []struct {
-				name     string
-				metadata map[string]any
-			}{
-				{"first frame", map[string]any{"firstFrame": image}},
-				{"first and last frames", map[string]any{"firstFrame": image, "lastFrame": image}},
-				{"reference images", map[string]any{"referenceImages": []any{image, image, image}}},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					tc.metadata["resolution"] = "1080p"
-					tc.metadata["generateAudio"] = false
-					downstream := map[string]any{
-						"requestBody": map[string]any{"model": veo, "prompt": "p", "duration": 8, "metadata": tc.metadata},
-						"model":       veo, "upstreamModel": veo, "baseUrl": "https://gateway.example", "apiKey": "gateway-token",
-						"authHeader": "Bearer gateway-token", "upstream": map[string]any{"kind": "new_api"},
-					}
-					value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", downstream)
-					require.NoError(t, err)
-					sent := decodePluginValue(t, value)
-					value, err = plugin.Engine.CallPath(t.Context(), "native", []string{hook}, map[string]any{
-						"params": map[string]any{"model": veo + ":predictLongRunning"},
-						"body":   map[string]any{"kind": "json", "value": sent["body"]},
-					})
-					require.NoError(t, err)
-					intent := decodePluginValue(t, value)
-					assert.Equal(t, "image_to_video", intent["action"])
-					upstream := map[string]any{
-						"requestBody": intent["requestBody"], "model": veo, "upstreamModel": veo,
-						"baseUrl": "https://vendor.example", "apiKey": "vendor-token", "authHeader": "Bearer vendor-token",
-						"auth": map[string]any{"projectId": "project"}, "upstream": map[string]any{"kind": "vendor"},
-					}
-					value, err = plugin.Engine.Call(t.Context(), "buildSubmitRequest", upstream)
-					require.NoError(t, err)
-					assert.Equal(t, sent["body"], decodePluginValue(t, value)["body"])
-					reserved, err := plugin.Engine.Call(t.Context(), "extractUsage", downstream)
-					require.NoError(t, err)
-					forwarded, err := plugin.Engine.Call(t.Context(), "extractUsage", upstream)
-					require.NoError(t, err)
-					assert.Equal(t, decodePluginValue(t, reserved), decodePluginValue(t, forwarded))
-				})
-			}
-			frame := map[string]any{"bytesBase64Encoded": "aGVsbG8=", "mimeType": "image/png"}
-			reference := map[string]any{"image": frame, "referenceType": "asset"}
-			for _, tc := range []struct {
-				name, wantErr string
-				instance      map[string]any
-			}{
-				{"last frame without first", "lastFrame requires firstFrame", map[string]any{"lastFrame": frame}},
-				{"mixed frames and references", "cannot be combined", map[string]any{"image": frame, "referenceImages": []any{reference}}},
-				{"too many references", "at most 3", map[string]any{"referenceImages": []any{reference, reference, reference, reference}}},
-				{"unsupported reference type", "asset reference type", map[string]any{"referenceImages": []any{map[string]any{"image": frame, "referenceType": "style"}}}},
-				{"empty image", "base64 data", map[string]any{"image": map[string]any{"bytesBase64Encoded": "", "mimeType": "image/png"}}},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					_, err := plugin.Engine.CallPath(t.Context(), "native", []string{hook}, map[string]any{
-						"params": map[string]any{"model": veo + ":predictLongRunning"},
-						"body":   map[string]any{"kind": "json", "value": map[string]any{"instances": []any{tc.instance}}},
-					})
-					require.ErrorContains(t, err, tc.wantErr)
-				})
-			}
-		})
-	}
 }

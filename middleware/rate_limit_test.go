@@ -98,6 +98,62 @@ func TestRedisUserRateLimiterUsesSharedFixedWindow(t *testing.T) {
 
 var lotteryRateLimitTestUsers atomic.Int64
 
+var tokenUsageRateLimitTestUsers atomic.Int64
+
+func TestTokenUsageRateLimit(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousRedisEnabled := common.RedisEnabled
+	previousEnable, previousNum, previousDuration := common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration
+	common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration = true, 1, 1200
+	t.Cleanup(func() {
+		common.RedisEnabled = previousRedisEnabled
+		common.CriticalRateLimitEnable, common.CriticalRateLimitNum, common.CriticalRateLimitDuration = previousEnable, previousNum, previousDuration
+	})
+	for _, backend := range []string{"memory", "redis"} {
+		t.Run(backend, func(t *testing.T) {
+			common.RedisEnabled = false
+			var redisServer *miniredis.Miniredis
+			if backend == "redis" {
+				redisServer, _ = useRateLimitMiniRedis(t)
+			}
+			userID := 8400000 + int(tokenUsageRateLimitTestUsers.Add(2))
+			router := gin.New()
+			require.NoError(t, router.SetTrustedProxies(nil))
+			completed := 0
+			router.GET("/usage", func(c *gin.Context) { c.Set("id", userID) }, TokenUsageRateLimit(), func(c *gin.Context) {
+				completed++
+				c.Status(http.StatusNoContent)
+			})
+			router.GET("/unauthenticated", TokenUsageRateLimit(), func(c *gin.Context) {
+				t.Error("unauthenticated requests must not reach the handler")
+			})
+			router.GET("/sensitive", func(c *gin.Context) { c.Set("id", userID) }, UserCriticalRateLimit("usage"), func(c *gin.Context) {
+				c.Status(http.StatusNoContent)
+			})
+
+			const remoteAddr = "192.0.2.85:12345"
+			assert.Equal(t, http.StatusUnauthorized, performRateLimitRequest(router, "/unauthenticated", remoteAddr).Code)
+			assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/sensitive", remoteAddr).Code)
+			assert.Equal(t, http.StatusTooManyRequests, performRateLimitRequest(router, "/sensitive", remoteAddr).Code)
+			for i := range 60 {
+				require.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/usage", remoteAddr).Code, "query %d", i+1)
+			}
+			limited := performRateLimitRequest(router, "/usage", "198.51.100.85:12345")
+			assert.Equal(t, http.StatusTooManyRequests, limited.Code, "IP rotation must not bypass the limit")
+			assert.Equal(t, "60", limited.Header().Get("Retry-After"))
+			assert.Equal(t, 60, completed, "rejected requests must not reach the handler")
+			userID++
+			assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/usage", remoteAddr).Code, "users sharing an IP must have independent budgets")
+			assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/sensitive", remoteAddr).Code, "balance polling must not consume the sensitive-operation budget")
+			userID--
+			if redisServer != nil {
+				redisServer.FastForward(time.Minute)
+				assert.Equal(t, http.StatusNoContent, performRateLimitRequest(router, "/usage", remoteAddr).Code, "polling must resume after the window expires")
+			}
+		})
+	}
+}
+
 func TestLotteryDrawRateLimit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	previousEnable, previousNum, previousDuration := common.LotteryDrawRateLimitEnable, common.LotteryDrawRateLimitNum, common.LotteryDrawRateLimitDuration

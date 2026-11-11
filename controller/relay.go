@@ -23,6 +23,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -217,13 +218,6 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 			return
 		}
-		if c.Request.Context().Err() != nil {
-			if relayInfo.StreamStatus == nil {
-				relayInfo.StreamStatus = relaycommon.NewStreamStatus()
-				relayInfo.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, c.Request.Context().Err())
-			}
-			return
-		}
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
@@ -278,10 +272,8 @@ func writeRelayErrorResponse(c *gin.Context, ws *websocket.Conn, relayFormat typ
 		helper.WssError(c, ws, err.ToOpenAIError(common.UpstreamAddresses(c)...))
 		return
 	}
-	if c.Writer.Written() {
-		if strings.HasPrefix(strings.ToLower(c.Writer.Header().Get("Content-Type")), "text/event-stream") {
-			writeRelayStreamError(c, relayFormat, err)
-		}
+	if c.Writer.Written() && strings.HasPrefix(c.Writer.Header().Get("Content-Type"), "text/event-stream") {
+		writeRelayStreamError(c, relayFormat, err)
 		return
 	}
 
@@ -299,45 +291,21 @@ func writeRelayErrorResponse(c *gin.Context, ws *websocket.Conn, relayFormat typ
 	})
 }
 
-func writeRelayStreamError(c *gin.Context, relayFormat types.RelayFormat, err *types.NewAPIError) {
-	if c == nil || c.Writer == nil || c.Request == nil || c.Request.Context().Err() != nil {
-		return
-	}
-
+func writeRelayStreamError(c *gin.Context, format types.RelayFormat, apiError *types.NewAPIError) {
+	// 心跳提交响应头后，最终错误继续通过同一个流返回。
 	status, _ := common.GetContextKeyType[*relaycommon.StreamStatus](c, constant.ContextKeyResponseStreamStatus)
 	if status == nil {
 		status = relaycommon.NewStreamStatus()
 		common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, status)
 	}
-	status.MarkFailed(string(err.GetErrorCode()), string(err.GetErrorType()), err.StatusCode)
-
-	var event string
-	var payload any
-	switch relayFormat {
-	case types.RelayFormatClaude:
-		event = "error"
-		payload = gin.H{"type": "error", "error": err.ToClaudeError(common.UpstreamAddresses(c)...)}
-	case types.RelayFormatOpenAIResponses, types.RelayFormatOpenAIResponsesCompaction:
-		event = "error"
-		payload = gin.H{"type": "error", "error": err.ToOpenAIError(common.UpstreamAddresses(c)...)}
-	default:
-		payload = gin.H{"error": err.ToOpenAIError(common.UpstreamAddresses(c)...)}
-	}
-
-	data, marshalErr := common.Marshal(payload)
-	if marshalErr != nil {
-		logger.LogError(c, "failed to marshal stream error: "+marshalErr.Error())
+	status.MarkFailed(string(apiError.GetErrorCode()), string(apiError.GetErrorType()), apiError.StatusCode)
+	upstreamURLs := common.UpstreamAddresses(c)
+	if format == types.RelayFormatClaude {
+		_ = helper.ClaudeData(c, dto.ClaudeResponse{Type: "error", Error: apiError.ToClaudeError(upstreamURLs...)})
 		return
 	}
-	if event != "" {
-		_, _ = fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, data)
-	} else {
-		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", data)
-	}
-	_ = helper.FlushWriter(c)
-	if event == "" {
-		helper.Done(c)
-	}
+	_ = helper.ObjectData(c, gin.H{"error": apiError.ToOpenAIError(upstreamURLs...)})
+	helper.Done(c)
 }
 
 // CountClaudeTokens implements Anthropic's token-counting utility endpoint.
@@ -441,13 +409,10 @@ func reloadChannelForRetry(channel *model.Channel) (*model.Channel, *types.NewAP
 }
 
 func shouldRetry(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int) bool {
-	return retryTimes > 0 && !operation_setting.IsAlwaysSkipRetryError(openaiErr) && !helper.StreamOutputStarted(c) && service.ShouldRetryRelayError(c, openaiErr, retryTimes)
+	return retryTimes > 0 && !operation_setting.IsAlwaysSkipRetryError(openaiErr) && service.ShouldRetryRelayError(c, openaiErr, retryTimes)
 }
 
 func shouldAttemptNextChannel(c *gin.Context, openaiErr *types.NewAPIError, retryTimes int, routeAdvanced bool) bool {
-	if helper.StreamOutputStarted(c) {
-		return false
-	}
 	if hasManagedRouting(c) {
 		return routeAdvanced
 	}
@@ -459,7 +424,7 @@ func hasManagedRouting(c *gin.Context) bool {
 }
 
 func shouldRetrySameChannel(c *gin.Context, err *types.NewAPIError, retriesUsed int) bool {
-	return !helper.StreamOutputStarted(c) && service.ShouldRetrySameChannelRouteForContext(c, err, retriesUsed)
+	return service.ShouldRetrySameChannelRouteForContext(c, err, retriesUsed)
 }
 
 func processChannelError(c *gin.Context, channelError types.ChannelError, err *types.NewAPIError, relayInfos ...*relaycommon.RelayInfo) bool {
@@ -969,15 +934,13 @@ func executeTaskSubmissionWith(
 	task.PrivateData.TokenId = relayInfo.TokenId
 	task.PrivateData.NodeName = common.NodeName
 	task.PrivateData.BillingContext = &model.TaskBillingContext{
-		ModelPrice:          relayInfo.PriceData.ModelPrice,
-		GroupRatio:          relayInfo.PriceData.GroupRatioInfo.GroupRatio,
-		ModelRatio:          relayInfo.PriceData.ModelRatio,
-		OtherRatios:         relayInfo.PriceData.OtherRatios(),
-		OriginModelName:     relayInfo.OriginModelName,
-		BillingMode:         billing_setting.GetBillingMode(relayInfo.OriginModelName),
-		PerCallBilling:      common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || billing_setting.GetBillingMode(relayInfo.OriginModelName) == billing_setting.BillingModePerRequest || (billing_setting.GetBillingMode(relayInfo.OriginModelName) == billing_setting.BillingModeRatio && relayInfo.PriceData.UsePrice),
-		TieredSnapshot:      relayInfo.TieredBillingSnapshot,
-		SecondPriceSnapshot: relayInfo.PriceData.SecondPriceSnapshot,
+		ModelPrice:      relayInfo.PriceData.ModelPrice,
+		GroupRatio:      relayInfo.PriceData.GroupRatioInfo.GroupRatio,
+		ModelRatio:      relayInfo.PriceData.ModelRatio,
+		OtherRatios:     relayInfo.PriceData.OtherRatios(),
+		OriginModelName: relayInfo.OriginModelName,
+		PerCallBilling:  common.StringsContains(constant.TaskPricePatches, relayInfo.OriginModelName) || billing_setting.GetBillingMode(relayInfo.OriginModelName) == "per-request" || (billing_setting.GetBillingMode(relayInfo.OriginModelName) == billing_setting.BillingModeRatio && relayInfo.PriceData.UsePrice),
+		TieredSnapshot:  relayInfo.TieredBillingSnapshot,
 	}
 	task.Quota = result.Quota
 	task.Data = result.TaskData

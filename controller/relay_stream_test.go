@@ -295,36 +295,14 @@ func TestRelayStreamErrorAfterKeepAlive(t *testing.T) {
 			require.True(t, ok)
 			require.True(t, status.ResponseFailed(), "stream errors must not consume the successful-request rate limit")
 			require.Equal(t, http.StatusBadRequest, status.OutcomeSnapshot().ErrorStatus)
-			if format != types.RelayFormatOpenAI {
+			if format == types.RelayFormatClaude {
 				require.Contains(t, recorder.Body.String(), "event: error\n")
-				require.Contains(t, recorder.Body.String(), `"type":"error"`)
-				require.NotContains(t, recorder.Body.String(), "data: [DONE]")
 			} else {
+				require.NotContains(t, recorder.Body.String(), "event: error\n")
 				require.Contains(t, recorder.Body.String(), "data: [DONE]")
 			}
 		})
 	}
-}
-
-func TestRelayKeepAlivePreservesManagedRouting(t *testing.T) {
-	previousEnabled, previousRetries := common.ChannelRouteCooldownEnabled, common.ChannelRouteSameChannelRetries
-	common.ChannelRouteCooldownEnabled, common.ChannelRouteSameChannelRetries = true, 1
-	t.Cleanup(func() {
-		common.ChannelRouteCooldownEnabled, common.ChannelRouteSameChannelRetries = previousEnabled, previousRetries
-	})
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
-	stop := helper.StartStreamKeepAlive(c, time.Hour)
-	defer stop()
-	require.NoError(t, helper.PingData(c))
-	apiError := types.NewOpenAIError(errors.New("upstream unavailable"), types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
-	assert.False(t, helper.StreamOutputStarted(c))
-	assert.True(t, shouldAttemptNextChannel(c, apiError, 0, true))
-	assert.True(t, shouldRetrySameChannel(c, apiError, 0))
-	require.NoError(t, helper.StringData(c, `{"type":"message_start"}`))
-	assert.False(t, shouldAttemptNextChannel(c, apiError, 10, true))
-	assert.False(t, shouldRetrySameChannel(c, apiError, 0))
 }
 
 func TestStreamKeepAliveCancellation(t *testing.T) {

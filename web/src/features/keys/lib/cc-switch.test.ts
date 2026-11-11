@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { runInNewContext } from 'node:vm'
 
-import { describe, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 
 import {
   buildCCSwitchURL,
@@ -57,6 +57,28 @@ function getUsageConfig() {
 }
 
 describe('CC Switch provider import', () => {
+  test('queries balances on a separate management address without changing the API endpoint', () => {
+    const params = new URL(
+      buildCCSwitchURL({
+        app: 'codex',
+        name: 'Example',
+        models: { model: 'gpt-5.4' },
+        apiKey: 'sk-test-key',
+        serverAddress: 'https://console.example.com',
+        endpoint: 'https://relay.example.com/v1',
+        usageBaseUrl: 'https://console.example.com/gateway/',
+      })
+    ).searchParams
+    expect(params.get('endpoint')).toBe('https://relay.example.com/v1')
+    expect(params.get('usageBaseUrl')).toBe(
+      'https://console.example.com/gateway'
+    )
+    const script = runInNewContext(
+      Buffer.from(params.get('usageScript') ?? '', 'base64').toString('utf8')
+    )
+    expect(script.request.url).toBe('{{baseUrl}}/api/usage/token/')
+    expect(script.request.headers.Authorization).toBe('Bearer {{apiKey}}')
+  })
   test.each([
     [
       'https://cdn.example.com/logo.svg?v=2',
@@ -202,17 +224,28 @@ describe('CC Switch provider import', () => {
       getCCSwitchUsageBaseUrl('https://api.yunmian.tech/v1/'),
       'https://api.yunmian.tech'
     )
+    expect(getCCSwitchUsageBaseUrl('https://example.com/gateway/v1beta/')).toBe(
+      'https://example.com/gateway'
+    )
   })
 
   test('maps application choices to identifiers supported by CC Switch', () => {
     const apps = [
       'claude',
+      'claude-desktop',
       'codex',
+      'copilot',
       'gemini',
+      'agy',
       'grokbuild',
       'opencode',
       'openclaw',
       'hermes',
+      'pi',
+      'mcode',
+      'kimi',
+      'dsh',
+      'omp',
     ] as const
 
     for (const app of apps) {
@@ -230,6 +263,93 @@ describe('CC Switch provider import', () => {
       assert.equal(url.searchParams.get('app'), app)
       assert.equal(url.searchParams.get('model'), 'test-model')
     }
+  })
+
+  test.each([
+    ['claude-desktop', 'anthropic', 'https://example.com/gateway'],
+    ['claude', 'openai_chat', 'https://example.com/gateway/v1'],
+    ['codex', 'anthropic', 'https://example.com/gateway'],
+    ['opencode', 'anthropic', 'https://example.com/gateway/v1'],
+    ['opencode', 'gemini_native', 'https://example.com/gateway/v1beta'],
+    ['openclaw', 'anthropic', 'https://example.com/gateway'],
+    ['pi', 'gemini_native', 'https://example.com/gateway'],
+    ['agy', 'gemini_native', 'https://example.com/gateway'],
+    ['copilot', 'openai_responses', 'https://example.com/gateway/v1'],
+    ['hermes', 'anthropic', 'https://example.com/gateway'],
+  ] as const)('builds the %s endpoint for %s', (app, format, endpoint) => {
+    expect(
+      getDefaultCCSwitchEndpoint(app, 'https://example.com/gateway/v1/', format)
+    ).toBe(endpoint)
+  })
+
+  test('imports Copilot model IDs once in order using its native config', () => {
+    const url = new URL(
+      buildCCSwitchURL({
+        app: 'copilot',
+        name: 'Example Copilot',
+        apiFormat: 'openai_responses',
+        models: { model: ' gpt-5.4 ' },
+        additionalModels: [
+          'claude-sonnet-4-6',
+          'gpt-5.4',
+          '',
+          ' claude-sonnet-4-6 ',
+          '自定义模型',
+        ],
+        apiKey: 'sk-test-key',
+        serverAddress: 'https://example.com',
+        endpoint: 'https://example.com/v1',
+      })
+    )
+    expect(url.searchParams.get('apiFormat')).toBe('openai_responses')
+    expect(url.searchParams.get('model')).toBe('gpt-5.4')
+    expect(url.searchParams.get('configFormat')).toBe('json')
+    expect(
+      JSON.parse(
+        Buffer.from(url.searchParams.get('config') ?? '', 'base64').toString(
+          'utf8'
+        )
+      )
+    ).toEqual({
+      provider: { baseUrl: 'https://example.com/v1', apiKey: 'sk-test-key' },
+      models: [
+        { id: 'gpt-5.4' },
+        { id: 'claude-sonnet-4-6' },
+        { id: '自定义模型' },
+      ],
+    })
+    expect(url.searchParams.get('usageBaseUrl')).toBe('https://example.com')
+  })
+
+  test('omits blank Claude models and keeps its native format', () => {
+    const url = new URL(
+      buildCCSwitchURL({
+        app: 'claude',
+        name: 'Example Claude',
+        models: { model: '   ', haikuModel: '' },
+        apiKey: 'sk-test-key',
+        serverAddress: 'https://example.com',
+        endpoint: 'https://example.com',
+      })
+    )
+    expect(url.searchParams.get('model')).toBeNull()
+    expect(url.searchParams.get('haikuModel')).toBeNull()
+    expect(url.searchParams.get('apiFormat')).toBe('anthropic')
+    expect(url.searchParams.get('config')).toBeNull()
+  })
+
+  test('rejects a protocol the selected client does not support', () => {
+    expect(() =>
+      buildCCSwitchURL({
+        app: 'gemini',
+        name: 'Example Gemini',
+        models: { model: 'gemini-test' },
+        apiFormat: 'anthropic',
+        apiKey: 'sk-test-key',
+        serverAddress: 'https://example.com',
+        endpoint: 'https://example.com',
+      })
+    ).toThrow('Unsupported CC Switch API format')
   })
 
   test('imports the selected API endpoint instead of forcing the default', () => {

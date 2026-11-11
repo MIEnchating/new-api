@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Clock3, Tag as TagIcon } from 'lucide-react'
+import { Tag as TagIcon } from 'lucide-react'
 import { useMemo, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -28,9 +28,12 @@ import { useSystemConfigStore } from '@/stores/system-config-store'
 import {
   BILLING_PRICING_VARS,
   MATCH_CONTAINS,
+  MATCH_EQ,
   MATCH_EXISTS,
+  MATCH_GTE,
+  MATCH_LT,
+  MATCH_RANGE,
   SOURCE_TIME,
-  buildRequestConditionExpr,
   parseTiersFromExpr,
   requestRuleGroupsFromTrace,
   splitBillingExprAndRequestRules,
@@ -42,17 +45,9 @@ import {
   type RequestRuleTrace,
   type TierCondition,
 } from '../lib/billing-expr'
-import {
-  describeBillingCondition,
-  formatBillingCondition,
-} from '../lib/billing-expression/condition-display'
+import { formatBillingCondition } from '../lib/billing-expression/condition-display'
 import { compileBillingExpression } from '../lib/billing-expression/parser'
 import { isBreakdownTierMatched } from '../lib/breakdown-tier-match'
-import {
-  getDailyTimePricingTiers,
-  formatDailyTimePriceLabel,
-  type DailyTimePrice,
-} from '../lib/daily-time-pricing'
 import {
   formatTaskUsageUnitPrice,
   type DynamicPriceLabelKind,
@@ -104,10 +99,7 @@ type DynamicPricingBreakdownProps = {
   usageFacts?: Record<string, string | number>
 }
 
-type BreakdownTier = (ParsedTier | ParsedTaskTier) & {
-  timePrice?: DailyTimePrice
-  otherTimes?: boolean
-}
+type BreakdownTier = ParsedTier | ParsedTaskTier
 
 type BreakdownPriceField = {
   id: string
@@ -141,6 +133,13 @@ const OP_LABELS: Record<string, string> = {
   '<=': '≤',
   '>': '>',
   '>=': '≥',
+}
+const TIME_FUNC_LABELS: Record<string, string> = {
+  hour: 'Hour',
+  minute: 'Minute',
+  weekday: 'Weekday',
+  month: 'Month',
+  day: 'Day',
 }
 
 function formatTokenHint(value: string | number): string {
@@ -227,7 +226,19 @@ function describeCondition(
   cond: RequestCondition,
   t: (key: string) => string
 ): string {
-  if (cond.source === SOURCE_TIME) return buildRequestConditionExpr(cond)
+  if (cond.source === SOURCE_TIME) {
+    const fn = t(TIME_FUNC_LABELS[cond.timeFunc] || cond.timeFunc)
+    const tz = cond.timezone || 'UTC'
+    if (cond.mode === MATCH_RANGE) {
+      return `${fn} ${cond.rangeStart}:00~${cond.rangeEnd}:00 (${tz})`
+    }
+    const opMap: Record<string, string> = {
+      [MATCH_EQ]: '=',
+      [MATCH_GTE]: '≥',
+      [MATCH_LT]: '<',
+    }
+    return `${fn} ${opMap[cond.mode] || '='} ${cond.value} (${tz})`
+  }
   const src = cond.source === 'header' ? t('Header') : t('Body param')
   const path = cond.path || ''
   if (cond.mode === MATCH_EXISTS) return `${src} ${path} ${t('Exists')}`
@@ -246,58 +257,17 @@ function describeCondition(
 
 function describeGroup(
   group: RequestRuleGroup,
-  t: ReturnType<typeof useTranslation>['t'],
+  t: (key: string) => string,
   locale: string
-): { text: string; timezone: string } {
+): string {
   if (group.conditionText) {
-    const description = describeBillingCondition(group.conditionText, t, locale)
-    if (description) return description
+    const formatted = formatBillingCondition(group.conditionText, t, locale)
+    if (formatted) return formatted
   }
-  if (group.conditions.length === 0) {
-    return { text: group.conditionText || '', timezone: '' }
-  }
-  const parts = group.conditions.map((condition) => {
-    if (condition.source === SOURCE_TIME) {
-      const description = describeBillingCondition(
-        buildRequestConditionExpr(condition),
-        t,
-        locale
-      )
-      if (description) return description
-    }
-    return { text: describeCondition(condition, t), timezone: '' }
-  })
-  const timezones = [
-    ...new Set(parts.map((part) => part.timezone).filter(Boolean)),
-  ]
-  const timezone = timezones.length === 1 ? timezones[0] : ''
-  const text = parts
-    .map((part) => {
-      let text = part.text
-      if ('disjunction' in part && part.disjunction && parts.length > 1) {
-        text = `(${text})`
-      }
-      if (part.timezone && !timezone) {
-        return t('{{condition}} ({{timezone}})', {
-          condition: text,
-          timezone: part.timezone,
-          interpolation: { escapeValue: false },
-        })
-      }
-      return text
-    })
-    .reduce(
-      (first, second) =>
-        first
-          ? t('{{first}} and {{second}}', {
-              first,
-              second,
-              interpolation: { escapeValue: false },
-            })
-          : second,
-      ''
-    )
-  return { text, timezone }
+  const description = (group.conditions || [])
+    .map((condition) => describeCondition(condition, t))
+    .join(' && ')
+  return description || group.conditionText || ''
 }
 
 function nextOccurrenceKey(
@@ -338,7 +308,7 @@ export function DynamicPricingBreakdown({
     return { symbol: '$', rate: 1 }
   }, [currency])
 
-  const { tiers, ruleGroups, timePrices } = useMemo(() => {
+  const { tiers, ruleGroups } = useMemo(() => {
     const split = splitBillingExprAndRequestRules(expr)
     const parsedTiers = usageSchema
       ? getTaskPricingDisplayTiers(split.billingExpr, usageSchema)
@@ -347,11 +317,6 @@ export function DynamicPricingBreakdown({
       requestRules != null
         ? requestRuleGroupsFromTrace(requestRules)
         : tryParseRequestRuleExpr(split.requestRuleExpr || '')
-    const timePrices =
-      !compact && requestRules == null && !usageSchema
-        ? getDailyTimePricingTiers(expr)
-        : null
-    const tiers: BreakdownTier[] = timePrices?.tiers ?? parsedTiers
     if (!parsedRules && requestRules == null) {
       const compiled = compileBillingExpression(expr)
       if (compiled.status === 'ready') {
@@ -365,14 +330,13 @@ export function DynamicPricingBreakdown({
       }
     }
     return {
-      tiers,
+      tiers: parsedTiers,
       ruleGroups: parsedRules || [],
-      timePrices,
     }
-  }, [expr, usageSchema, requestRules, compact])
+  }, [expr, usageSchema, requestRules])
 
   const hasTiers = tiers.length > 0
-  const hasRules = !timePrices && ruleGroups.length > 0
+  const hasRules = ruleGroups.length > 0
 
   if (!expr) return null
 
@@ -448,11 +412,7 @@ export function DynamicPricingBreakdown({
         return tiers.some(
           (tier) =>
             !isTaskBreakdownTier(tier) &&
-            (timePrices
-              ? Object.hasOwn(tier, variable.field as string)
-              : Number(
-                  tier[variable.field as string as keyof ParsedTier] || 0
-                ) > 0)
+            Number(tier[variable.field as string as keyof ParsedTier] || 0) > 0
         )
       }
     ).map((variable, index) => ({
@@ -460,14 +420,10 @@ export function DynamicPricingBreakdown({
       label: variable.shortLabel,
       labelKind: 'i18n' as const,
       unit: 'token',
-      showTokenUnit: Boolean(timePrices),
       value: (tier: BreakdownTier) =>
         isTaskBreakdownTier(tier)
           ? 0
-          : Number(
-              tier[variable.field as string as keyof ParsedTier] ??
-                (timePrices ? Number.NaN : 0)
-            ),
+          : Number(tier[variable.field as string as keyof ParsedTier] || 0),
     }))
     if (
       tiers.some(
@@ -527,19 +483,7 @@ export function DynamicPricingBreakdown({
                   : 'text-foreground mb-2 text-sm font-semibold'
               }
             >
-              {t(timePrices ? 'Prices by time' : 'Tiered price table')}
-            </div>
-          )}
-          {timePrices && (
-            <div className='text-muted-foreground mb-3 space-y-1 text-xs'>
-              <p>
-                {t('Timezone')}: {timePrices.timezone}
-              </p>
-              <p>
-                {t(
-                  'Time multipliers are included. Group ratios apply separately.'
-                )}
-              </p>
+              {t('Tiered price table')}
             </div>
           )}
           <div className='space-y-1.5 sm:hidden'>
@@ -572,19 +516,14 @@ export function DynamicPricingBreakdown({
                   )}
                 >
                   <div className='mb-1.5 flex flex-wrap items-center gap-1.5'>
-                    {!usageSchema &&
-                      (tier.timePrice ? (
-                        <span className='text-foreground text-sm font-medium tabular-nums'>
-                          {formatDailyTimePriceLabel(tier, t)}
-                        </span>
-                      ) : (
-                        <Badge
-                          variant='secondary'
-                          className='bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300'
-                        >
-                          {tier.label || t('Default')}
-                        </Badge>
-                      ))}
+                    {!usageSchema && (
+                      <Badge
+                        variant='secondary'
+                        className='bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300'
+                      >
+                        {tier.label || t('Default')}
+                      </Badge>
+                    )}
                     {isMatched && (
                       <Badge
                         variant='secondary'
@@ -619,7 +558,6 @@ export function DynamicPricingBreakdown({
                             )}
                           >
                             {value > 0 ||
-                            (tier.timePrice && Number.isFinite(value)) ||
                             ((field.unit === 'request' ||
                               field.unit === 'image') &&
                               Number.isFinite(value))
@@ -669,11 +607,7 @@ export function DynamicPricingBreakdown({
             columns={[
               {
                 id: 'tier',
-                header: timePrices
-                  ? t('Time period')
-                  : usageSchema
-                    ? t('Applicable conditions')
-                    : t('Tier'),
+                header: usageSchema ? t('Applicable conditions') : t('Tier'),
                 className: cn(
                   'text-muted-foreground py-2 font-medium',
                   compact && 'h-8'
@@ -701,19 +635,14 @@ export function DynamicPricingBreakdown({
                   return (
                     <>
                       <div className='flex flex-wrap items-center gap-1.5'>
-                        {!usageSchema &&
-                          (tier.timePrice ? (
-                            <span className='text-foreground font-medium tabular-nums'>
-                              {formatDailyTimePriceLabel(tier, t)}
-                            </span>
-                          ) : (
-                            <Badge
-                              variant='secondary'
-                              className='bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300'
-                            >
-                              {tier.label || t('Default')}
-                            </Badge>
-                          ))}
+                        {!usageSchema && (
+                          <Badge
+                            variant='secondary'
+                            className='bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-300'
+                          >
+                            {tier.label || t('Default')}
+                          </Badge>
+                        )}
                         {isMatched && (
                           <Badge
                             variant='secondary'
@@ -746,7 +675,6 @@ export function DynamicPricingBreakdown({
                 cell: (tier: BreakdownTier) => {
                   const value = field.value(tier)
                   return value > 0 ||
-                    (tier.timePrice && Number.isFinite(value)) ||
                     ((field.unit === 'request' || field.unit === 'image') &&
                       Number.isFinite(value)) ? (
                     <span className={cn(!compact && 'font-semibold')}>
@@ -784,8 +712,6 @@ export function DynamicPricingBreakdown({
           <ul className='space-y-1.5'>
             {ruleGroups.map((group) => {
               const isMatched = group.matched === true
-              const description = describeGroup(group, t, i18n.language)
-              const unchanged = Number(group.multiplier) === 1
               const rowKey = nextOccurrenceKey(
                 `${group.conditionText || JSON.stringify(group.conditions)}:${group.multiplier}`,
                 requestRuleKeyOccurrences
@@ -794,45 +720,27 @@ export function DynamicPricingBreakdown({
                 <li
                   key={`group-${rowKey}`}
                   className={cn(
-                    'bg-muted/50 flex items-start justify-between gap-3 rounded-lg border border-transparent px-3 py-2.5',
+                    'bg-muted/50 flex items-center justify-between gap-3 rounded-md border border-transparent px-3 py-2',
                     isMatched && 'border-emerald-500/40 bg-emerald-500/10'
                   )}
                 >
-                  <div className='flex min-w-0 items-start gap-2.5'>
-                    {description.timezone && (
-                      <Clock3
-                        aria-hidden='true'
-                        className='text-muted-foreground mt-0.5 size-4 shrink-0'
-                      />
+                  <span
+                    className={cn(
+                      'text-foreground break-all',
+                      compact ? 'text-xs' : 'text-sm'
                     )}
-                    <div className='min-w-0 space-y-1'>
-                      <p
-                        className={cn(
-                          'text-foreground leading-relaxed break-words tabular-nums',
-                          compact ? 'text-xs' : 'text-sm'
-                        )}
-                      >
-                        {description.text}
-                      </p>
-                      {description.timezone && (
-                        <p className='text-muted-foreground text-xs break-words'>
-                          {t('Timezone')}: {description.timezone}
-                        </p>
-                      )}
-                    </div>
-                  </div>
+                  >
+                    {describeGroup(group, t, i18n.language)}
+                  </span>
                   <Badge
                     variant='secondary'
                     className={cn(
-                      'mt-0.5 shrink-0',
-                      !unchanged &&
-                        'bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300',
+                      'shrink-0 bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300',
                       isMatched &&
                         'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300'
                     )}
                   >
-                    {unchanged ? t('No price change') : `${group.multiplier}×`}
-                    {isMatched && ` · ${t('Matched')}`}
+                    {group.multiplier}x{isMatched && ` · ${t('Matched')}`}
                   </Badge>
                 </li>
               )

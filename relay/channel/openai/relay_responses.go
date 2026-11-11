@@ -1,12 +1,9 @@
 package openai
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -121,81 +118,4 @@ func rewriteSGLangResponsesCreatedAt(info *relaycommon.RelayInfo, payload []byte
 		return payload
 	}
 	return patched
-}
-
-func newResponsesStreamError(response dto.ResponsesStreamResponse) *types.NewAPIError {
-	if response.Type != "response.failed" && response.Type != "response.error" && response.Type != "error" {
-		return nil
-	}
-
-	var openAIError *types.OpenAIError
-	if response.Response != nil {
-		openAIError = response.Response.GetOpenAIError()
-	}
-	if openAIError == nil {
-		openAIError = dto.GetOpenAIError(response.Error)
-	}
-	if openAIError == nil || strings.TrimSpace(openAIError.Message) == "" {
-		return types.NewOpenAIError(
-			errors.New("upstream response stream failed"),
-			types.ErrorCodeBadResponse,
-			http.StatusBadGateway,
-			types.ErrOptionWithStreamEvent(),
-		)
-	}
-	options := []types.NewAPIErrorOptions{types.ErrOptionWithStreamEvent()}
-	if isDeterministicResponsesStreamError(*openAIError) {
-		options = append(options, types.ErrOptionWithSkipRetry())
-	}
-	return types.WithOpenAIError(
-		*openAIError,
-		responsesStreamErrorStatus(openAIError.Code),
-		options...,
-	)
-}
-
-func isDeterministicResponsesStreamError(openAIError types.OpenAIError) bool {
-	combined := strings.ToLower(strings.TrimSpace(strings.Join([]string{
-		openAIError.Message,
-		openAIError.Type,
-		fmt.Sprint(openAIError.Code),
-	}, " ")))
-	for _, marker := range []string{
-		"invalid_request",
-		"context_length_exceeded",
-		"exceeds the context window",
-		"exceed the context window",
-		"maximum context length",
-		"context window exceeded",
-		"content_policy",
-		"high-risk cyber",
-		"not allowed",
-		"safety",
-		"violat",
-	} {
-		if strings.Contains(combined, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-func responsesStreamErrorStatus(code any) int {
-	var status int
-	switch value := code.(type) {
-	case int:
-		status = value
-	case int32:
-		status = int(value)
-	case int64:
-		status = int(value)
-	case float64:
-		status = int(value)
-	case string:
-		status, _ = strconv.Atoi(strings.TrimSpace(value))
-	}
-	if status >= 400 && status <= 599 {
-		return status
-	}
-	return http.StatusBadGateway
 }

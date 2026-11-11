@@ -27,7 +27,6 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Field, FieldError } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { useUpdateOption } from '../hooks/use-update-option'
 
@@ -49,15 +48,6 @@ const DEFAULT_PRICES: Record<string, number> = {
   'google_search_grounded_prompt:gemini-2.0*': 35.0,
   'google_search_grounded_prompt:gemini-1.5*': 35.0,
   image_generation: 150.0,
-  bing_web_search: 14.0,
-  'web_search:grok*': 5.0,
-  x_search_posts: 5.0,
-  x_search_profiles: 10.0,
-  deepseek_search: 0.75,
-  deepseek_fetch: 0.75,
-}
-
-const VENDOR_CNY_PRICES: Record<string, number> = {
   search_std: 10.0,
   search_pro: 30.0,
   search_pro_sogou: 50.0,
@@ -66,17 +56,12 @@ const VENDOR_CNY_PRICES: Record<string, number> = {
   search_strategy_max: 4.0,
   search_strategy_agent: 4.0,
   search_strategy_agent_max: 4.0,
-}
-
-function buildDefaultPrices(usdExchangeRate: number) {
-  const rate =
-    Number.isFinite(usdExchangeRate) && usdExchangeRate > 0
-      ? usdExchangeRate
-      : 1
-  const convertedVendorPrices = Object.fromEntries(
-    Object.entries(VENDOR_CNY_PRICES).map(([key, price]) => [key, price / rate])
-  )
-  return { ...DEFAULT_PRICES, ...convertedVendorPrices }
+  bing_web_search: 14.0,
+  'web_search:grok*': 5.0,
+  x_search_posts: 5.0,
+  x_search_profiles: 10.0,
+  deepseek_search: 0.75,
+  deepseek_fetch: 0.75,
 }
 
 type ToolPriceRow = {
@@ -113,10 +98,9 @@ function objectToRows(prices: Record<string, number>): ToolPriceRow[] {
 }
 
 function parseInitialPrices(
-  rawValue: string | undefined,
-  defaults: Record<string, number>
+  rawValue: string | undefined
 ): Record<string, number> {
-  if (!rawValue) return { ...defaults }
+  if (!rawValue) return { ...DEFAULT_PRICES }
   try {
     const parsed = JSON.parse(rawValue) as unknown
     if (
@@ -134,14 +118,14 @@ function parseInitialPrices(
       // Merge defaults first so newly introduced tools appear for old stored
       // configs, while explicit stored values (including 0) still win.
       return {
-        ...defaults,
+        ...DEFAULT_PRICES,
         ...validPrices,
       }
     }
   } catch {
     // fall through to defaults
   }
-  return { ...defaults }
+  return { ...DEFAULT_PRICES }
 }
 
 type ToolPriceSettingsProps = {
@@ -153,13 +137,6 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
 }: ToolPriceSettingsProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
-  const usdExchangeRate = useSystemConfigStore(
-    (state) => state.config.currency.usdExchangeRate
-  )
-  const defaultPrices = useMemo(
-    () => buildDefaultPrices(usdExchangeRate),
-    [usdExchangeRate]
-  )
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
   const [rows, setRows] = useState<ToolPriceRow[]>([])
   const [jsonText, setJsonText] = useState('')
@@ -167,13 +144,13 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
   const [nextRowId, setNextRowId] = useState(1)
 
   useEffect(() => {
-    const prices = parseInitialPrices(defaultValue, defaultPrices)
+    const prices = parseInitialPrices(defaultValue)
     const initialRows = objectToRows(prices)
     setRows(initialRows)
     setJsonText(JSON.stringify(prices, null, 2))
     setJsonError('')
     setNextRowId(initialRows.length + 1)
-  }, [defaultPrices, defaultValue])
+  }, [defaultValue])
 
   const currentPrices = useMemo(() => rowsToObject(rows), [rows])
   const invalidRowIds = useMemo(
@@ -247,12 +224,12 @@ export const ToolPriceSettings = memo(function ToolPriceSettings({
   )
 
   const resetToDefault = useCallback(() => {
-    const initialRows = objectToRows(defaultPrices)
+    const initialRows = objectToRows(DEFAULT_PRICES)
     setRows(initialRows)
-    setJsonText(JSON.stringify(defaultPrices, null, 2))
+    setJsonText(JSON.stringify(DEFAULT_PRICES, null, 2))
     setJsonError('')
     setNextRowId(initialRows.length + 1)
-  }, [defaultPrices])
+  }, [])
 
   const handleCopyJson = useCallback(async () => {
     try {

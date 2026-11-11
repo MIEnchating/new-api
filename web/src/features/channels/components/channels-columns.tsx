@@ -59,7 +59,7 @@ import {
   createServerError,
   translateServerText,
 } from '@/lib/server-error-message'
-import { cn, truncateText } from '@/lib/utils'
+import { truncateText } from '@/lib/utils'
 
 import { getCodexUsage, updateChannelBalance } from '../api'
 import {
@@ -347,8 +347,6 @@ export function BalanceCell({ channel }: { channel: Channel }) {
   const layout = useContext(ChannelRowActionsLayoutContext)
   const { sensitiveVisible, setCurrentRow, setOpen } = useChannels()
   const isTagRow = isTagAggregateRow(channel)
-  const isInferenceChannel =
-    channel.type === CHANNEL_TYPE_VLLM || channel.type === CHANNEL_TYPE_SGLANG
   const balance = channel.balance || 0
   const usedQuota = channel.used_quota || 0
   const [isUpdating, setIsUpdating] = useState(false)
@@ -407,22 +405,19 @@ export function BalanceCell({ channel }: { channel: Channel }) {
   const maskedUsedLabel = `${t('Used:')} ${SENSITIVE_MASK}`
   const maskedRemainingLabel = `${t('Remaining:')} ${SENSITIVE_MASK}`
 
-  // Inference cards also expose their status dialog.
-  if (isTagRow || (layout === 'card' && !isInferenceChannel)) {
-    const showUsedPrefix = isTagRow && layout !== 'card'
-    let usedBadgeLabel = sensitiveVisible ? usedDisplay : SENSITIVE_MASK
-    if (showUsedPrefix) {
-      usedBadgeLabel = sensitiveVisible
-        ? `${t('Used:')} ${usedDisplay}`
-        : maskedUsedLabel
-    }
+  // Tag row: only show cumulative used quota
+  if (isTagRow) {
     return (
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger
             render={
               <StatusBadge
-                label={usedBadgeLabel}
+                label={
+                  sensitiveVisible
+                    ? `${t('Used:')} ${usedDisplay}`
+                    : maskedUsedLabel
+                }
                 variant='neutral'
                 size='sm'
                 copyable={false}
@@ -441,6 +436,8 @@ export function BalanceCell({ channel }: { channel: Channel }) {
 
   // Regular channel row: show used and remaining with click to update
   const variant = getBalanceVariant(balance)
+  const isInferenceChannel =
+    channel.type === CHANNEL_TYPE_VLLM || channel.type === CHANNEL_TYPE_SGLANG
   const inferenceStatusLabel =
     channel.type === CHANNEL_TYPE_SGLANG ? t('SGLang status') : t('vLLM status')
 
@@ -534,12 +531,7 @@ export function BalanceCell({ channel }: { channel: Channel }) {
 
   return (
     <TooltipProvider>
-      <div
-        className={cn(
-          '-ml-1.5 flex items-center gap-1',
-          layout === 'card' && 'flex-wrap'
-        )}
-      >
+      <div className='-ml-1.5 flex items-center gap-1'>
         <Tooltip>
           <TooltipTrigger
             render={

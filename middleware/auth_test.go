@@ -593,6 +593,7 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 	expired, _ := createMiddlewareScopedToken(t, admin.Id, time.Now().Unix()-1, "profile:read")
 	keyReader, _ := createMiddlewareScopedToken(t, admin.Id, 0, "api_key:read")
 	keyWriter, _ := createMiddlewareScopedToken(t, admin.Id, 0, "api_key:write")
+	keyRevealer, _ := createMiddlewareScopedToken(t, admin.Id, 0, "api_key:reveal")
 	monitor, _ := createMiddlewareScopedToken(t, admin.Id, 0, "monitor:write")
 	wallet, _ := createMiddlewareScopedToken(t, admin.Id, 0, "wallet:read")
 	walletWriter, _ := createMiddlewareScopedToken(t, admin.Id, 0, "wallet:write")
@@ -612,6 +613,7 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 	router.GET("/api/pricing", TryUserAuth(), ok)
 	router.GET("/api/token/:id/route/status", UserAuth(), ok)
 	router.PUT("/api/token/:id/route", UserAuth(), ok)
+	router.POST("/api/token/batch/keys", UserAuth(), ok)
 	router.PUT("/api/status-monitor/cache/baseline", AdminAuth(), ok)
 	router.GET("/api/user/billing/self", UserAuth(), ok)
 	router.GET("/api/user/invoices/settings", UserAuth(), ok)
@@ -649,6 +651,9 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 		{name: "read token routing status", path: "/api/token/1/route/status", token: keyReader, status: http.StatusOK},
 		{name: "read scope cannot change routing", method: http.MethodPut, path: "/api/token/1/route", token: keyReader, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "write token routing", method: http.MethodPut, path: "/api/token/1/route", token: keyWriter, status: http.StatusOK},
+		{name: "read scope cannot reveal batch keys", method: http.MethodPost, path: "/api/token/batch/keys", token: keyReader, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "write scope cannot reveal batch keys", method: http.MethodPost, path: "/api/token/batch/keys", token: keyWriter, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
+		{name: "reveal scope can reveal batch keys", method: http.MethodPost, path: "/api/token/batch/keys", token: keyRevealer, status: http.StatusOK},
 		{name: "admin changes monitoring baseline", method: http.MethodPut, path: "/api/status-monitor/cache/baseline", token: monitor, status: http.StatusOK},
 		{name: "unrelated scope cannot change monitoring", method: http.MethodPut, path: "/api/status-monitor/cache/baseline", token: profile, status: http.StatusForbidden, code: "ACCESS_TOKEN_SCOPE_DENIED", reason: "scope_denied"},
 		{name: "read personal billing", path: "/api/user/billing/self", token: wallet, status: http.StatusOK},

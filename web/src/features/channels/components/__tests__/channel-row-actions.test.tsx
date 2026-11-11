@@ -18,15 +18,18 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { getCoreRowModel, useReactTable } from '@tanstack/react-table'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { api } from '@/lib/api'
 
 import type { Channel } from '../../types'
 import {
   ChannelRowActionsLayoutContext,
   type ChannelRowActionsLayout,
 } from '../channel-row-actions-context'
+import { BalanceCell } from '../channels-columns'
 import { ChannelsProvider, useChannels } from '../channels-provider'
 import { DataTableRowActions } from '../data-table-row-actions'
 
@@ -74,6 +77,9 @@ function RowActionsFixture(props: {
       <DataTableRowActions row={table.getRowModel().rows[0]} />
       {channels.open === 'update-channel' && (
         <div role='status'>Editing {channels.currentRow?.name}</div>
+      )}
+      {channels.open === 'balance-query' && (
+        <div role='status'>Balance {channels.currentRow?.name}</div>
       )}
     </ChannelRowActionsLayoutContext.Provider>
   )
@@ -128,7 +134,7 @@ describe('channel row actions', () => {
     { layout: 'card', interaction: 'keyboard' },
     { layout: 'table', interaction: 'pointer' },
   ] as const)(
-    'opens the selected channel editor directly from the $layout actions using the $interaction',
+    'opens the selected channel editor from the $layout actions using the $interaction',
     async ({ layout, interaction }) => {
       const user = userEvent.setup()
       render(
@@ -138,27 +144,71 @@ describe('channel row actions', () => {
           </ChannelsProvider>
         </QueryClientProvider>
       )
-      const edit = screen.getByRole('button', { name: 'Edit' })
-      const buttons = screen.getAllByRole('button')
       if (layout === 'card') {
-        expect(buttons[2]).toHaveAccessibleName('Disable')
-        expect(buttons[3]).toBe(edit)
-        expect(buttons[4]).toHaveAccessibleName('Open menu')
-      }
-      if (interaction === 'pointer') {
-        await user.click(edit)
-      } else {
-        for (const button of buttons.slice(0, buttons.indexOf(edit) + 1)) {
-          await user.tab()
-          expect(button).toHaveFocus()
+        expect(
+          screen.queryByRole('button', { name: 'Edit' })
+        ).not.toBeInTheDocument()
+        const menuButton = screen.getByRole('button', { name: 'Open menu' })
+        if (interaction === 'keyboard') {
+          for (const _button of screen.getAllByRole('button')) {
+            await user.tab()
+            if (menuButton === document.activeElement) break
+          }
+          expect(menuButton).toHaveFocus()
+          await user.keyboard('{Enter}')
+          await screen.findByRole('menuitem', { name: 'Edit' })
+          await user.keyboard('{Home}{Enter}')
+        } else {
+          await user.click(menuButton)
+          await user.click(screen.getByRole('menuitem', { name: 'Edit' }))
         }
-        expect(edit).toHaveFocus()
-        await user.keyboard('{Enter}')
+      } else {
+        await user.click(screen.getByRole('button', { name: 'Edit' }))
       }
       expect(screen.getByRole('status')).toHaveTextContent(
         'Editing Test channel'
       )
-      expect(screen.queryByRole('menu')).not.toBeInTheDocument()
     }
   )
+  it.each(['card', 'table'] as const)(
+    'opens balance querying for the selected channel from the %s menu',
+    async (layout) => {
+      const user = userEvent.setup()
+      render(
+        <QueryClientProvider client={queryClient}>
+          <ChannelsProvider>
+            <RowActionsFixture layout={layout} />
+          </ChannelsProvider>
+        </QueryClientProvider>
+      )
+      await user.click(screen.getByRole('button', { name: 'Open menu' }))
+      await user.click(screen.getByRole('menuitem', { name: 'Query Balance' }))
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Balance Test channel'
+      )
+    }
+  )
+
+  it('shows the remaining balance on a regular channel card and allows refreshing it', async () => {
+    const get = vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, balance: 10 },
+    })
+    const user = userEvent.setup()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ChannelsProvider>
+          <ChannelRowActionsLayoutContext.Provider value='card'>
+            <BalanceCell channel={{ ...channel, balance: 12.5 }} />
+          </ChannelRowActionsLayoutContext.Provider>
+        </ChannelsProvider>
+      </QueryClientProvider>
+    )
+    await user.click(screen.getByText(/12\.5/))
+    await waitFor(() =>
+      expect(get).toHaveBeenCalledWith(
+        '/api/channel/update_balance/1',
+        expect.any(Object)
+      )
+    )
+  })
 })
