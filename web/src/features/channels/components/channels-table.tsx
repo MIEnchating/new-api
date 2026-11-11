@@ -218,7 +218,7 @@ export function ChannelsTable() {
       !activeSort ||
       !CHANNEL_SORTABLE_COLUMNS.has(activeSort.id as ChannelSortBy)
     ) {
-      return {}
+      return { sort_by: 'priority', sort_order: 'desc' } as const
     }
 
     return {

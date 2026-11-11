@@ -19,6 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 import { api, type ApiRequestConfig } from '@/lib/api'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
+import {
+  normalizeChannelExecutionOptions,
+  type RawChannelExecutionOptions,
+} from './lib/channel-execution-options'
 import type { PriorityMove, PriorityOrder } from './lib/channel-priority-order'
 import type { InferenceStatus } from './lib/inference-status'
 import type {
@@ -125,6 +129,96 @@ export type CodexCredentialRefreshResponse = {
     channel_type?: number
     channel_name?: string
   }
+}
+
+type ChannelExecutionCandidate = {
+  channel_id: number
+  channel_name: string
+  priority: number
+  weight: number
+  state: 'candidate' | 'cooling'
+  cooldown_until?: number
+}
+
+export type ChannelExecutionPlan = {
+  mode: 'route' | 'retry'
+  group: string
+  model: string
+  request_path: string
+  max_attempts: number
+  pools: Array<{
+    priority: number
+    candidates: ChannelExecutionCandidate[]
+  }>
+}
+
+type ChannelExecutionEvent = {
+  sequence: number
+  timestamp: number
+  group?: string
+  channel_id?: number
+  channel_name?: string
+  priority?: number
+  state:
+    | 'active'
+    | 'affinity_hit'
+    | 'same_channel_retry'
+    | 'success'
+    | 'failed'
+    | 'cancelled'
+    | 'cooling'
+    | 'skipped'
+    | 'finished'
+  reason?: string
+  retry_index?: number
+  next_ids?: number[]
+  cooldown_until?: number
+}
+
+type ChannelExecutionRouteGroupStatus = {
+  group: string
+  status: 'pending' | 'active' | 'cooling' | 'skipped' | 'success' | 'failed'
+  cooldown_until?: number
+}
+
+type ChannelExecutionFinalError = {
+  status_code?: number
+  message?: string
+}
+
+export type ChannelExecutionTrace = {
+  request_id: string
+  mode: 'route' | 'retry'
+  group: string
+  route_groups?: string[]
+  route_group_statuses?: ChannelExecutionRouteGroupStatus[]
+  model: string
+  request_path: string
+  status: 'running' | 'success' | 'failed' | 'cancelled'
+  started_at: number
+  updated_at: number
+  compact?: boolean
+  channel_ids?: number[]
+  channel_name?: string
+  priority?: number
+  affinity_hit?: boolean
+  original_final_error?: ChannelExecutionFinalError
+  user_visible_final_error?: ChannelExecutionFinalError
+  custom_error_applied?: boolean
+  events?: ChannelExecutionEvent[]
+}
+
+export type ChannelExecutionOption = {
+  id: number
+  name: string
+  group: string
+  models: string
+  status: number
+}
+
+export type ChannelExecutionGroupOption = {
+  name: string
+  models: string[]
 }
 
 // ============================================================================
@@ -235,6 +329,73 @@ export async function clearChannelRouteCooldown(
     channelActionConfig({ params: group ? { group } : undefined })
   )
   return res.data
+}
+
+export async function getChannelExecutionPlan(params: {
+  group: string
+  model: string
+  path?: string
+  mode: 'route' | 'retry'
+}): Promise<{
+  success: boolean
+  message?: string
+  data?: ChannelExecutionPlan
+}> {
+  const res = await api.get(
+    '/api/channel/route/plan',
+    channelActionConfig({ params })
+  )
+  return requireServerSuccess(res.data)
+}
+
+export async function getChannelExecutionOptions(): Promise<{
+  success: boolean
+  message?: string
+  data?: {
+    channels: ChannelExecutionOption[]
+    groups: ChannelExecutionGroupOption[]
+  }
+}> {
+  const res = await api.get<{
+    success: boolean
+    message?: string
+    data?: RawChannelExecutionOptions
+  }>('/api/channel/route/channels', channelActionConfig())
+  const response = requireServerSuccess(res.data)
+  return {
+    ...response,
+    data: response.success
+      ? normalizeChannelExecutionOptions(response.data)
+      : undefined,
+  }
+}
+
+export async function getChannelExecutionTrace(requestId: string): Promise<{
+  success: boolean
+  message?: string
+  data?: ChannelExecutionTrace
+}> {
+  const res = await api.get(
+    `/api/channel/route/trace/${encodeURIComponent(requestId)}`,
+    channelActionConfig()
+  )
+  return requireServerSuccess(res.data)
+}
+
+export async function getRecentChannelExecutionTraces(params: {
+  channel_id?: number
+  group: string
+  limit?: number
+}): Promise<{
+  success: boolean
+  message?: string
+  data?: ChannelExecutionTrace[]
+}> {
+  const res = await api.get(
+    '/api/channel/route/traces',
+    channelActionConfig({ params })
+  )
+  return requireServerSuccess(res.data)
 }
 
 /**

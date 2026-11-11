@@ -77,6 +77,9 @@ func shouldDisableChannel(c *gin.Context, err *types.NewAPIError) bool {
 	if types.IsChannelError(err) {
 		return true
 	}
+	if types.IsStreamEventError(err) {
+		return false
+	}
 	if types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err) {
 		return false
 	}

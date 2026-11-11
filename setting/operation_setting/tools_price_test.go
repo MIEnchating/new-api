@@ -13,14 +13,17 @@ func preserveToolPrices(t *testing.T) {
 	t.Helper()
 	original := make(map[string]float64, len(toolPriceSetting.Prices))
 	maps.Copy(original, toolPriceSetting.Prices)
+	originalExchangeRate := USDExchangeRate
 	t.Cleanup(func() {
 		toolPriceSetting.Prices = original
+		USDExchangeRate = originalExchangeRate
 		RebuildToolPriceIndex()
 	})
 }
 
 func TestToolPriceHardcodedFallbacksSurviveMissingOperatorConfig(t *testing.T) {
 	preserveToolPrices(t)
+	USDExchangeRate = 7.3
 	toolPriceSetting.Prices = map[string]float64{}
 	RebuildToolPriceIndex()
 
@@ -41,15 +44,15 @@ func TestToolPriceHardcodedFallbacksSurviveMissingOperatorConfig(t *testing.T) {
 		{"google_search_grounded_prompt", "gemini-3.7-flash", 0},
 		{"google_search", "gemini-2.5-flash", 0},
 		{"google_search_grounded_prompt", "gemini-2.5-flash", 35},
-		// Vendor search tiers in the vendor's list currency.
-		{"search_std", "", 10},
-		{"search_pro", "", 30},
-		{"search_pro_sogou", "", 50},
-		{"search_pro_quark", "", 50},
-		{"search_strategy_turbo", "", 3},
-		{"search_strategy_max", "", 4},
-		{"search_strategy_agent", "", 4},
-		{"search_strategy_agent_max", "", 4},
+		// Vendor search tiers are listed in CNY and converted to USD for billing.
+		{"search_std", "", 10 / 7.3},
+		{"search_pro", "", 30 / 7.3},
+		{"search_pro_sogou", "", 50 / 7.3},
+		{"search_pro_quark", "", 50 / 7.3},
+		{"search_strategy_turbo", "", 3 / 7.3},
+		{"search_strategy_max", "", 4 / 7.3},
+		{"search_strategy_agent", "", 4 / 7.3},
+		{"search_strategy_agent_max", "", 4 / 7.3},
 		{"bing_web_search", "", 14},
 		{"web_search", "grok-4", 5},
 		{"x_search_posts", "", 5},
@@ -59,11 +62,29 @@ func TestToolPriceHardcodedFallbacksSurviveMissingOperatorConfig(t *testing.T) {
 		{"deepseek_search", "claude-sonnet-4-5", 0.75},
 	}
 	for _, tt := range tests {
-		assert.Equal(t, tt.want, GetToolPriceForModel(tt.tool, tt.model), "%s for %q", tt.tool, tt.model)
+		assert.InDelta(t, tt.want, GetToolPriceForModel(tt.tool, tt.model), 1e-12, "%s for %q", tt.tool, tt.model)
 	}
 	assert.True(t, IsBuiltInToolPriceKey("bing_web_search"))
 	assert.True(t, IsBuiltInToolPriceKey("deepseek_fetch"))
 	assert.True(t, IsBuiltInToolPriceKey("google_search_grounded_prompt"), "seeded only for model prefixes")
+}
+
+func TestToolPriceCurrencyConversionAndOverrides(t *testing.T) {
+	preserveToolPrices(t)
+	USDExchangeRate = 5
+	toolPriceSetting.Prices = map[string]float64{
+		"search_std":            2,
+		"search_strategy_turbo": 0,
+	}
+	RebuildToolPriceIndex()
+
+	assert.Equal(t, 2.0, GetToolPrice("search_std"), "operator values are already USD")
+	assert.Equal(t, 0.0, GetToolPrice("search_strategy_turbo"), "explicit zero disables a built-in price")
+	assert.Equal(t, 6.0, GetToolPrice("search_pro"), "built-in CNY prices use the configured exchange rate")
+	assert.Equal(t, 14.0, GetToolPrice("bing_web_search"), "USD built-ins are not converted")
+
+	USDExchangeRate = 0
+	assert.Equal(t, 0.0, GetToolPrice("search_pro"), "invalid exchange rates must not charge CNY built-ins")
 }
 
 func TestToolPriceOperatorOverridePrecedenceAndExplicitZero(t *testing.T) {

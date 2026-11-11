@@ -59,7 +59,6 @@ import { splitPluginBillingExprKey } from '@/features/pricing/lib/plugin-pricing
 import { useMediaQuery } from '@/hooks'
 
 import { safeJsonParse } from '../utils/json-parser'
-import type { PricingMode } from './model-pricing-core'
 import {
   ModelPricingIssueDetails,
   ModelPricingIssueSummary,
@@ -85,6 +84,7 @@ import { type ModelPricingIssue, useModelPricingIssues } from './pricing-issues'
 
 type ModelRatioVisualEditorProps = {
   savedModelPrice: string
+  savedModelSecondPrice?: string
   savedModelRatio: string
   savedCacheRatio: string
   savedCreateCacheRatio: string
@@ -96,6 +96,7 @@ type ModelRatioVisualEditorProps = {
   savedBillingExpr: string
   savedPluginBillingExpr?: string
   modelPrice: string
+  modelSecondPrice?: string
   modelRatio: string
   cacheRatio: string
   createCacheRatio: string
@@ -136,6 +137,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
 >(function ModelRatioVisualEditor(
   {
     savedModelPrice,
+    savedModelSecondPrice = '{}',
     savedModelRatio,
     savedCacheRatio,
     savedCreateCacheRatio,
@@ -147,6 +149,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedBillingExpr,
     savedPluginBillingExpr = '{}',
     modelPrice,
+    modelSecondPrice = '{}',
     modelRatio,
     cacheRatio,
     createCacheRatio,
@@ -169,6 +172,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
 ) {
   const { t } = useTranslation()
   const { models: pricingModels } = usePricingData()
+  const allPricingConfig = useModelPricing()
   const isMobile = useMediaQuery('(max-width: 767px)')
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
@@ -250,6 +254,17 @@ const ModelRatioVisualEditorComponent = forwardRef<
     [pricingModels]
   )
 
+  const builtinPricingByName = useMemo(
+    () =>
+      new Map(
+        allPricingConfig.data?.entries?.map((entry) => [
+          entry.model_name,
+          entry.has_builtin_pricing,
+        ])
+      ),
+    [allPricingConfig.data?.entries]
+  )
+
   const pricingIssues = useMemo(() => {
     const byModel = new Map<string, ModelPricingIssue[]>()
     for (const issue of pricingIssuesQuery.data ?? []) {
@@ -265,6 +280,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     () =>
       pricingOptions({
         ModelPrice: savedModelPrice,
+        ModelSecondPrice: savedModelSecondPrice,
         ModelRatio: savedModelRatio,
         CompletionRatio: savedCompletionRatio,
         CacheRatio: savedCacheRatio,
@@ -278,6 +294,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       }),
     [
       savedModelPrice,
+      savedModelSecondPrice,
       savedModelRatio,
       savedCompletionRatio,
       savedCacheRatio,
@@ -294,6 +311,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     () =>
       pricingOptions({
         ModelPrice: modelPrice,
+        ModelSecondPrice: modelSecondPrice,
         ModelRatio: modelRatio,
         CompletionRatio: completionRatio,
         CacheRatio: cacheRatio,
@@ -307,6 +325,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       }),
     [
       modelPrice,
+      modelSecondPrice,
       modelRatio,
       completionRatio,
       cacheRatio,
@@ -340,9 +359,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
 
     return (
       [...modelNames]
-        .map((name) =>
-          buildModelRow(name, savedByName.get(name), draftByName.get(name))
-        )
+        .map((name) => ({
+          ...buildModelRow(name, savedByName.get(name), draftByName.get(name)),
+          hasBuiltinPricing: builtinPricingByName.get(name),
+        }))
         // A pending deletion stays listed with its undo action until saved.
         .filter(
           (row) =>
@@ -353,6 +373,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     )
   }, [
     candidateModelNames,
+    builtinPricingByName,
     filterMode,
     pricingIssues,
     savedOptions,
@@ -372,7 +393,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         model.billingMode === 'tiered_expr'
           ? model.billingMode
           : 'per-token'
-      counts[mode] += 1
+      if (model.billingMode !== 'per-second') counts[mode] += 1
       if (
         taskModelNames.has(model.name) &&
         model.billingMode === 'tiered_expr' &&
@@ -418,11 +439,14 @@ const ModelRatioVisualEditorComponent = forwardRef<
       // A pending deletion has no draft to edit; it offers undo instead.
       if (model.isDraftDeleted) return
       const editableModel = model.draft ?? model.saved ?? model
-      let editBillingMode: PricingMode = 'per-token'
+      let editBillingMode: ModelRatioData['billingMode'] = 'per-token'
       if (editableModel.billingMode === 'tiered_expr') {
         editBillingMode = 'tiered_expr'
       } else if (editableModel.price && editableModel.price !== '') {
         editBillingMode = 'per-request'
+      }
+      if (editableModel.billingMode === 'per-second') {
+        editBillingMode = 'per-second'
       }
       setEditData({
         name: editableModel.name,
@@ -438,6 +462,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         billingExpr: editableModel.billingExpr,
         pluginBillingExpr: editableModel.pluginBillingExpr,
         requestRuleExpr: editableModel.requestRuleExpr,
+        secondPriceConfig: editableModel.secondPriceConfig,
       })
       setEditorOpen(true)
       if (isMobile) setSheetOpen(true)
@@ -484,6 +509,10 @@ const ModelRatioVisualEditorComponent = forwardRef<
         fallback: {},
         silent: true,
       })
+      const secondPriceMap = safeJsonParse<Record<string, unknown>>(
+        modelSecondPrice,
+        { fallback: {}, silent: true }
+      )
       const ratioMap = safeJsonParse<Record<string, number>>(modelRatio, {
         fallback: {},
         silent: true,
@@ -521,6 +550,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         { fallback: {}, silent: true }
       )
 
+      delete secondPriceMap[name]
       delete priceMap[name]
       delete ratioMap[name]
       delete cacheMap[name]
@@ -545,6 +575,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         JSON.stringify(pluginExprMap)
       )
 
+      onChange('ModelSecondPrice', JSON.stringify(secondPriceMap, null, 2))
       onChange('ModelPrice', JSON.stringify(priceMap, null, 2))
       onChange('ModelRatio', JSON.stringify(ratioMap, null, 2))
       onChange('CacheRatio', JSON.stringify(cacheMap, null, 2))
@@ -570,6 +601,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     [
       closeEditor,
       modelPrice,
+      modelSecondPrice,
       modelRatio,
       cacheRatio,
       createCacheRatio,
@@ -736,6 +768,21 @@ const ModelRatioVisualEditorComponent = forwardRef<
   )
 
   const hasRows = table.getRowModel().rows.length > 0
+  const hasBuiltinPricing = editData
+    ? builtinPricingByName.get(editData.name)
+    : undefined
+  const pricingSourceNotice =
+    hasBuiltinPricing === undefined ? undefined : (
+      <p className='text-muted-foreground text-sm'>
+        {hasBuiltinPricing
+          ? t(
+              'This model has built-in default pricing and may have custom overrides. Built-in expressions take effect again when custom pricing is removed.'
+            )
+          : t(
+              'This model has no built-in default price. Removing its custom pricing may leave it unpriced.'
+            )}
+      </p>
+    )
 
   let emptyStateText = t('No models configured. Use Add model to get started.')
   if (table.getState().globalFilter) {
@@ -754,8 +801,9 @@ const ModelRatioVisualEditorComponent = forwardRef<
     : undefined
   const changedEditRow = editRow?.isDraftChanged ? editRow : undefined
   const scrollHeader =
-    changedEditRow || editIssues ? (
+    pricingSourceNotice || changedEditRow || editIssues ? (
       <>
+        {pricingSourceNotice}
         {changedEditRow && (
           <PriceChangeCard
             row={changedEditRow}
@@ -995,6 +1043,7 @@ export const ModelRatioVisualEditor = memo(
   (prevProps, nextProps) => {
     return (
       prevProps.savedModelPrice === nextProps.savedModelPrice &&
+      prevProps.savedModelSecondPrice === nextProps.savedModelSecondPrice &&
       prevProps.savedModelRatio === nextProps.savedModelRatio &&
       prevProps.savedCacheRatio === nextProps.savedCacheRatio &&
       prevProps.savedCreateCacheRatio === nextProps.savedCreateCacheRatio &&
@@ -1007,6 +1056,7 @@ export const ModelRatioVisualEditor = memo(
       prevProps.savedBillingExpr === nextProps.savedBillingExpr &&
       prevProps.savedPluginBillingExpr === nextProps.savedPluginBillingExpr &&
       prevProps.modelPrice === nextProps.modelPrice &&
+      prevProps.modelSecondPrice === nextProps.modelSecondPrice &&
       prevProps.modelRatio === nextProps.modelRatio &&
       prevProps.cacheRatio === nextProps.cacheRatio &&
       prevProps.createCacheRatio === nextProps.createCacheRatio &&

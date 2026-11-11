@@ -32,6 +32,17 @@ export const meta = {
       },
       description: { en: "Output video dimensions", zh: "输出视频尺寸" },
     },
+    // Requested output video dimensions.
+    resolution: {
+      enum: ["720x1280", "1280x720", "1792x1024", "1024x1792"],
+      enumLabels: {
+        "720x1280": { en: "720x1280", zh: "720x1280" },
+        "1280x720": { en: "1280x720", zh: "1280x720" },
+        "1792x1024": { en: "1792x1024", zh: "1792x1024" },
+        "1024x1792": { en: "1024x1792", zh: "1024x1792" },
+      },
+      description: { en: "Output video dimensions", zh: "输出视频尺寸" },
+    },
   },
   protocols: [{ name: "openai_responses", supports: ["stream", "sync", "background"] }, "openai_video"],
 };
@@ -89,6 +100,10 @@ function responsesVideoText(ctx) {
 function requestValues(req, model) {
   const values = Object.assign({}, req || {});
   values.model = model;
+  const normalizedModel = trimmed(model).toLowerCase();
+  if (normalizedModel.includes("sora-2") || normalizedModel.includes("sora_2")) {
+    for (const key of ["resolution", "duration", "generate_audio", "watermark", "quality"]) delete values[key];
+  }
   return values;
 }
 
@@ -119,7 +134,7 @@ export function buildSubmitRequest(ctx) {
 
 export function parseSubmitResponse(ctx, resp) {
   const body = resp.body || {};
-  const taskId = body.id || body.task_id;
+  const taskId = body.id || body.task_id || body.video_id;
   if (!taskId) throw new Error("task_id is empty");
   return { taskId, taskData: body };
 }
@@ -127,17 +142,24 @@ export function parseSubmitResponse(ctx, resp) {
 export function extractUsage(ctx) {
   if (ctx.action === "remix") return {};
   const req = ctx.requestBody || {};
-  let seconds = Number(req.seconds || req.duration || 4);
-  if (!Number.isFinite(seconds) || seconds <= 0) seconds = 4;
-  return { seconds: Math.min(seconds, 3600), size: req.size || "720x1280" };
+  const model = trimmed(ctx.upstreamModel || req.model).toLowerCase();
+  const defaultSeconds = model.startsWith("minimax-h3") ? 5 : 4;
+  let seconds = Number(req.seconds || req.duration || defaultSeconds);
+  if (!Number.isFinite(seconds) || seconds <= 0) seconds = defaultSeconds;
+  const size = req.size || "720x1280";
+  return { seconds: Math.min(seconds, 3600), size: size, resolution: size };
 }
 
 export function extractUsageOnComplete(task, taskResult, body) {
   const facts = {};
-  const seconds = Number((body || {}).seconds || (body || {}).duration || 0);
-  if (Number.isFinite(seconds) && seconds > 0) facts.seconds = Math.min(seconds, 3600);
+  const measured = (body || {}).seconds ?? (body || {}).duration;
+  const seconds = typeof measured === "number" || (typeof measured === "string" && measured.trim() !== "") ? Number(measured) : NaN;
+  if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 3600) facts.seconds = seconds;
   const size = trimmed((body || {}).size);
-  if (["720x1280", "1280x720", "1792x1024", "1024x1792"].includes(size)) facts.size = size;
+  if (["720x1280", "1280x720", "1792x1024", "1024x1792"].includes(size)) {
+    facts.size = size;
+    facts.resolution = size;
+  }
   return facts;
 }
 
@@ -151,6 +173,8 @@ export function parseTaskResult(ctx, body) {
     pending: "QUEUED",
     processing: "IN_PROGRESS",
     in_progress: "IN_PROGRESS",
+    running: "IN_PROGRESS",
+    generating: "IN_PROGRESS",
     completed: "SUCCESS",
     failed: "FAILURE",
     cancelled: "FAILURE",
@@ -158,17 +182,54 @@ export function parseTaskResult(ctx, body) {
   const mapped = statuses[body.status];
   const result = { status: mapped || "UNKNOWN" };
   if (!mapped) result.reason = "unrecognized status: " + String(body.status || "");
-  if (body.progress > 0 && body.progress < 100) result.progress = body.progress + "%";
+  const progress = Number(body.progress);
+  if (Number.isFinite(progress) && progress >= 0 && progress <= 100) result.progress = progress + "%";
+  const url = videoURL(body);
+  if (url) result.url = url;
   if (result.status === "FAILURE") result.reason = body.error && body.error.message ? body.error.message : "task failed";
   return result;
 }
 
+function videoURL(value) {
+  const seen = [];
+  function visit(node, depth) {
+    if (!node || depth > 5) return "";
+    if (typeof node === "string") return /^https?:\/\//i.test(node.trim()) ? node.trim() : "";
+    if (typeof node !== "object" || seen.includes(node)) return "";
+    seen.push(node);
+    for (const key of ["video_url", "url", "output_url", "download_url"]) {
+      const found = visit(node[key], depth + 1);
+      if (found) return found;
+    }
+    for (const key of ["data", "result", "output", "results"]) {
+      const found = visit(node[key], depth + 1);
+      if (found) return found;
+    }
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found = visit(item, depth + 1);
+        if (found) return found;
+      }
+    }
+    return "";
+  }
+  return visit(value, 0);
+}
+
+function artifactData(value) {
+  const data = (value && value.data) || {};
+  if (data.data && typeof data.data === "object" && data.task_id && Object.prototype.hasOwnProperty.call(data, "data")) return data.data;
+  return data;
+}
+
 export function listArtifacts(task) {
-  return task.status === "SUCCESS" ? [{ key: "video", type: "video" }] : [];
+  return task.status === "SUCCESS" && videoURL(artifactData(task)) ? [{ key: "video", type: "video", mimeType: "video/mp4" }] : [];
 }
 
 export function buildContentRequest(ctx) {
   if (ctx.artifactKey !== "video") throw new Error("artifact_not_found");
+  const url = videoURL(artifactData(ctx));
+  if (url) return { url: url, method: ctx.clientRequest.method, credentialless: true };
   return {
     url: ctx.baseUrl + "/v1/videos/" + encodeURIComponent(ctx.upstreamTaskId) + "/content",
     method: ctx.clientRequest.method,

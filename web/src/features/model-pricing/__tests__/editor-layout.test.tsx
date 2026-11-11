@@ -315,6 +315,7 @@ function PricingFormFixture(props: {
             )
           )
         : '{}',
+    ModelSecondPrice: '{}',
     ModelRatio: '{}',
     CacheRatio: '{}',
     CreateCacheRatio: '{}',

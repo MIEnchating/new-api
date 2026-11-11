@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	builtinplugins "github.com/QuantumNous/new-api/plugins"
 	"github.com/QuantumNous/new-api/relay"
@@ -481,11 +482,26 @@ func TestVertexAIOmniUsageAndVideoDecoder(t *testing.T) {
 	const omni = "gemini-omni-1.1-flash-preview"
 	usage, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{"upstreamModel": omni, "requestBody": map[string]any{"prompt": "x", "size": "1920x1080"}})
 	require.NoError(t, err)
-	assert.Equal(t, map[string]any{"input_tokens": float64(0), "output_tokens": float64(0), "video_tokens": float64(8 * 8688)}, decodePluginValue(t, usage))
+	facts := decodePluginValue(t, usage)
+	assert.Equal(t, map[string]any{"seconds": float64(8), "resolution": "1080p", "generate_audio": true, "input_tokens": float64(0), "output_tokens": float64(0), "video_tokens": float64(8 * 8688)}, facts)
+	ratios, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{"upstreamModel": omni, "usagePurpose": "billing_ratios", "requestBody": map[string]any{"size": "1920x1080"}})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]any{"seconds": float64(8), "resolution": "1080p", "generate_audio": true}, decodePluginValue(t, ratios), "token quantities must not multiply existing legacy prices")
 	schema, _ := plugin.Meta.UsageForModel(omni)
-	assert.ElementsMatch(t, []string{"input_tokens", "output_tokens", "video_tokens"}, slices.Collect(maps.Keys(schema)))
+	assert.ElementsMatch(t, []string{"input_tokens", "output_tokens", "resolution", "seconds", "video_tokens"}, slices.Collect(maps.Keys(schema)))
 	schema12, _ := plugin.Meta.UsageForModel("gemini-omni-1.2-flash")
 	assert.Equal(t, schema, schema12)
+	t.Run("omni 1.2 reserves its full fifteen seconds", func(t *testing.T) {
+		ctx := map[string]any{"upstreamModel": "gemini-omni-1.2-flash", "requestBody": map[string]any{"duration": 15, "resolution": "4k"}}
+		value, err := plugin.Engine.Call(t.Context(), "extractUsage", ctx)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"seconds": float64(15), "resolution": "4k", "generate_audio": true, "input_tokens": float64(0), "output_tokens": float64(0), "video_tokens": float64(15 * 17376)}, decodePluginValue(t, value))
+		ratioContext := maps.Clone(ctx)
+		ratioContext["usagePurpose"] = "billing_ratios"
+		value, err = plugin.Engine.Call(t.Context(), "extractUsage", ratioContext)
+		require.NoError(t, err)
+		assert.Equal(t, map[string]any{"seconds": float64(15), "resolution": "4k", "generate_audio": true}, decodePluginValue(t, value), "new model tokens must not multiply legacy per-call prices")
+	})
 
 	// Thinking is billed as text output.
 	completed, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": omni}, map[string]any{}, map[string]any{
@@ -496,6 +512,48 @@ func TestVertexAIOmniUsageAndVideoDecoder(t *testing.T) {
 	})
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{"input_tokens": float64(12), "output_tokens": float64(47), "video_tokens": float64(5793)}, decodePluginValue(t, completed))
+	settled := maps.Clone(facts)
+	maps.Copy(settled, decodePluginValue(t, completed))
+	for _, tc := range []struct {
+		name, expression  string
+		reserved, settled float64
+	}{
+		{"legacy duration and resolution", `u("resolution") == "1080p" && u("generate_audio") ? tier("audio", u("seconds") * 0.5) : tier("other", u("seconds") * 0.25)`, 4, 4},
+		{"reported tokens", `tier("tokens", (u("input_tokens") * 2 + u("output_tokens") * 3 + u("video_tokens") * 4) / 1000000)`, 0.278016, 0.023337},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reserved, _, err := billingexpr.RunExprWithRequest(tc.expression, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
+			require.NoError(t, err)
+			assert.InDelta(t, tc.reserved, reserved, 1e-9)
+			actual, _, err := billingexpr.RunExprWithRequest(tc.expression, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: settled})
+			require.NoError(t, err)
+			assert.InDelta(t, tc.settled, actual, 1e-9)
+		})
+	}
+	for _, tc := range []struct {
+		name    string
+		usage   map[string]any
+		want    map[string]any
+		invalid bool
+	}{
+		{name: "null totals are unreported", usage: map[string]any{"total_input_tokens": nil, "total_thought_tokens": nil}, want: map[string]any{}},
+		{name: "explicit zero remains measured", usage: map[string]any{"total_input_tokens": 0, "total_thought_tokens": 0, "output_tokens_by_modality": []any{map[string]any{"modality": "video", "tokens": 0}}}, want: map[string]any{"input_tokens": float64(0), "output_tokens": float64(0), "video_tokens": float64(0)}},
+		{name: "audio and video share the video rate", usage: map[string]any{"output_tokens_by_modality": []any{map[string]any{"modality": "video", "tokens": 10}, map[string]any{"modality": "audio", "tokens": 4}}}, want: map[string]any{"video_tokens": float64(14)}},
+		{name: "null video count cannot refund reservation", usage: map[string]any{"output_tokens_by_modality": []any{map[string]any{"modality": "video", "tokens": nil}}}, invalid: true},
+		{name: "missing video count cannot refund reservation", usage: map[string]any{"output_tokens_by_modality": []any{map[string]any{"modality": "video"}}}, invalid: true},
+		{name: "negative counts cannot cancel valid counts", usage: map[string]any{"output_tokens_by_modality": []any{map[string]any{"modality": "video", "tokens": 10}, map[string]any{"modality": "audio", "tokens": -10}}}, invalid: true},
+		{name: "malformed total", usage: map[string]any{"total_input_tokens": "invalid"}, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": omni}, map[string]any{}, map[string]any{"usage": tc.usage})
+			if tc.invalid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.want, decodePluginValue(t, value))
+		})
+	}
 	// Unreported facts are omitted so the host keeps the submit estimate.
 	partial, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": omni}, map[string]any{}, map[string]any{"usage": map[string]any{"total_input_tokens": 12}})
 	require.NoError(t, err)
@@ -522,4 +580,40 @@ func loadVertexAIPlugin(t *testing.T) *jsplugin.LoadedPlugin {
 	plugin, err := jsplugin.NewRegistry().RegisterFactory(source, jsplugin.Options{Key: "vertex-ai"})
 	require.NoError(t, err)
 	return plugin
+}
+
+func TestVertexAIVeoDurationMatchesForwardedMetadata(t *testing.T) {
+	plugin := loadVertexAIPlugin(t)
+	for _, tc := range []struct {
+		name    string
+		request map[string]any
+		seconds float64
+		wantErr bool
+	}{
+		{name: "metadata duration", request: map[string]any{"metadata": map[string]any{"durationSeconds": 4}}, seconds: 4},
+		{name: "explicit duration wins", request: map[string]any{"duration": 6, "metadata": map[string]any{"durationSeconds": 8}}, seconds: 6},
+		{name: "oversized metadata", request: map[string]any{"metadata": map[string]any{"durationSeconds": 3601}}, wantErr: true},
+		{name: "fractional metadata", request: map[string]any{"metadata": map[string]any{"durationSeconds": 4.5}}, wantErr: true},
+		{name: "negative duration", request: map[string]any{"duration": -1}, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := map[string]any{
+				"model": "veo-alias", "upstreamModel": "veo-3.1-fast-generate-preview",
+				"authHeader": "Bearer fixture", "auth": map[string]any{"projectId": "fixture"},
+				"requestBody": tc.request,
+			}
+			usage, usageErr := plugin.Engine.Call(t.Context(), "extractUsage", ctx)
+			descriptor, buildErr := plugin.Engine.Call(t.Context(), "buildSubmitRequest", ctx)
+			if tc.wantErr {
+				require.ErrorContains(t, usageErr, "durationSeconds must be one of 4, 6, or 8")
+				require.ErrorContains(t, buildErr, "durationSeconds must be one of 4, 6, or 8")
+				return
+			}
+			require.NoError(t, usageErr)
+			require.NoError(t, buildErr)
+			assert.Equal(t, tc.seconds, decodePluginValue(t, usage)["seconds"])
+			body := decodePluginValue(t, descriptor)["body"].(map[string]any)
+			assert.Equal(t, tc.seconds, body["parameters"].(map[string]any)["durationSeconds"])
+		})
+	}
 }

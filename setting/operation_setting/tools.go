@@ -63,8 +63,9 @@ func seedHardcodedToolPrices(prices map[string]float64) {
 	prices["google_search_grounded_prompt:gemini-2.0*"] = 35
 	prices["google_search_grounded_prompt:gemini-1.5*"] = 35
 
-	// Vendor search tiers, verbatim in the vendor's list currency per 1K
-	// calls. CNY: Zhipu search engines, 0.01/0.03/0.05 CNY per call
+	// Vendor search tiers, expressed per 1K calls. CNY defaults are converted
+	// to USD at lookup using USDExchangeRate. CNY: Zhipu search engines,
+	// 0.01/0.03/0.05 CNY per call
 	// (https://docs.bigmodel.cn/cn/guide/tools/web-search), and Alibaba Model
 	// Studio search strategies at Beijing prices
 	// (https://help.aliyun.com/zh/model-studio/web-search); the Singapore
@@ -134,12 +135,28 @@ func IsBuiltInToolPriceKey(name string) bool {
 
 type prefixEntry struct {
 	prefix string
-	price  float64
+	value  toolPriceValue
+}
+
+type toolPriceValue struct {
+	price    float64
+	currency string
 }
 
 type toolPriceIndex struct {
-	defaults map[string]float64
+	defaults map[string]toolPriceValue
 	prefixes map[string][]prefixEntry
+}
+
+var vendorCNYToolPriceKeys = map[string]struct{}{
+	"search_std":                {},
+	"search_pro":                {},
+	"search_pro_sogou":          {},
+	"search_pro_quark":          {},
+	"search_strategy_turbo":     {},
+	"search_strategy_max":       {},
+	"search_strategy_agent":     {},
+	"search_strategy_agent_max": {},
 }
 
 var currentIndex atomic.Pointer[toolPriceIndex]
@@ -209,30 +226,40 @@ func LoadToolPricesFromJSONString(value string) {
 // RebuildToolPriceIndex rebuilds the lookup index from the current config.
 // Called on init and after config updates. Not on the billing hot path.
 func RebuildToolPriceIndex() {
-	merged := make(map[string]float64, 9+len(toolPriceSetting.Prices))
-	seedHardcodedToolPrices(merged)
+	seeded := make(map[string]float64, 9)
+	seedHardcodedToolPrices(seeded)
+	merged := make(map[string]toolPriceValue, len(seeded)+len(toolPriceSetting.Prices))
+	for k, v := range seeded {
+		currency := ""
+		if _, ok := vendorCNYToolPriceKeys[k]; ok {
+			currency = "CNY"
+		}
+		merged[k] = toolPriceValue{price: v, currency: currency}
+	}
 	for k, v := range toolPriceSetting.Prices {
 		if !isValidToolPrice(v) {
 			continue
 		}
-		merged[k] = v
+		// Operator overrides are expressed in the same USD/1K unit shown by
+		// the settings UI, even when the built-in fallback uses vendor CNY.
+		merged[k] = toolPriceValue{price: v}
 	}
 
 	idx := &toolPriceIndex{
-		defaults: make(map[string]float64),
+		defaults: make(map[string]toolPriceValue),
 		prefixes: make(map[string][]prefixEntry),
 	}
 
-	for key, price := range merged {
+	for key, value := range merged {
 		before, after, ok := strings.Cut(key, ":")
 		if !ok {
-			idx.defaults[key] = price
+			idx.defaults[key] = value
 			continue
 		}
 		toolName := before
 		modelPart := after
 		prefix := strings.TrimSuffix(modelPart, "*")
-		idx.prefixes[toolName] = append(idx.prefixes[toolName], prefixEntry{prefix: prefix, price: price})
+		idx.prefixes[toolName] = append(idx.prefixes[toolName], prefixEntry{prefix: prefix, value: value})
 	}
 
 	for tool := range idx.prefixes {
@@ -247,6 +274,19 @@ func RebuildToolPriceIndex() {
 	}
 
 	currentIndex.Store(idx)
+}
+
+func toolPriceInUSD(value toolPriceValue) float64 {
+	if value.currency != "CNY" {
+		return value.price
+	}
+	rate := USDExchangeRate
+	if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) ||
+		math.IsInf(value.price/rate, 0) {
+		common.SysError("USDExchangeRate 无效，跳过人民币内置工具收费")
+		return 0
+	}
+	return value.price / rate
 }
 
 // GetToolPriceForModel returns the price ($/1K calls) for a tool given a model name.
@@ -264,13 +304,13 @@ func GetToolPriceForModel(toolName, modelName string) float64 {
 	if entries, ok := idx.prefixes[toolName]; ok && modelName != "" {
 		for _, e := range entries {
 			if strings.HasPrefix(modelName, e.prefix) {
-				return e.price
+				return toolPriceInUSD(e.value)
 			}
 		}
 	}
 
-	if p, ok := idx.defaults[toolName]; ok {
-		return p
+	if value, ok := idx.defaults[toolName]; ok {
+		return toolPriceInUSD(value)
 	}
 	return 0
 }

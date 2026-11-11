@@ -22,6 +22,18 @@ func SetVideoRouter(router *gin.Engine) {
 			controller.RelayTaskPluginEndpoint(c, controller.RelayTask)
 		},
 	)
+	// Keep the documented OpenAI-compatible plural path supported alongside
+	// the legacy singular path used by older clients.
+	videoSharedRouter.POST(
+		"/videos/generations",
+		middleware.PinTaskPluginEndpoint(),
+		middleware.TaskPluginEndpointOnly(middleware.ModelRequestRateLimit()),
+		middleware.PrepareTaskPluginEndpoint(),
+		middleware.Distribute(),
+		func(c *gin.Context) {
+			controller.RelayTaskPluginEndpoint(c, controller.RelayTask)
+		},
+	)
 
 	videoV1Router := router.Group("/v1")
 	videoV1Router.Use(middleware.RouteTag("relay"))

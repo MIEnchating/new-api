@@ -75,6 +75,50 @@ describe('shared model pricing', () => {
     }
   })
 
+  it('converts per-second drafts and synced prices to task expressions', () => {
+    const options = pricingOptions({
+      ModelPrice: '{"example":1}',
+      ModelRatio: '{"example":2}',
+      BillingMode: '{}',
+    })
+    const after = applyPricingDraft(options, {
+      name: 'example',
+      billingMode: 'per-second',
+      price: '0.4',
+    })
+
+    expect(JSON.parse(after.ModelPrice)).toEqual({ example: 0.4 })
+    expect(JSON.parse(after.ModelRatio)).toEqual({})
+    expect(JSON.parse(after['billing_setting.billing_expr'])).toEqual({
+      example: 'tier("base", u("seconds") * 0.4)',
+    })
+    expect(JSON.parse(after.ModelSecondPrice)).toEqual({})
+    expect(JSON.parse(after['billing_setting.billing_mode'])).toEqual({
+      example: 'tiered_expr',
+    })
+    expect(
+      pricingRow(
+        'example',
+        pricingFromDraft({
+          name: 'example',
+          billingMode: 'per-second',
+          price: '0.4',
+        })
+      ).billingMode
+    ).toBe('tiered_expr')
+
+    const synced = applyPriceSyncSelections(options, {
+      example: {
+        model_price: 0.5,
+        billing_mode: 'per_second',
+      },
+    })
+    expect(JSON.parse(synced.ModelPrice)).toEqual({ example: 0.5 })
+    expect(JSON.parse(synced['billing_setting.billing_mode'])).toEqual({
+      example: 'tiered_expr',
+    })
+  })
+
   it('does not persist another model’s built-in display expression when editing one price', () => {
     const options = pricingOptions({
       ModelPrice: '{"edited":1}',

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	pluginruntime "github.com/QuantumNous/new-api/pkg/jsplugin"
 	_ "github.com/QuantumNous/new-api/plugins"
@@ -37,6 +38,7 @@ import (
 	"github.com/QuantumNous/new-api/relay/channel/sub2api"
 	"github.com/QuantumNous/new-api/relay/channel/submodel"
 	jspluginadaptor "github.com/QuantumNous/new-api/relay/channel/task/jsplugin"
+	soracompat "github.com/QuantumNous/new-api/relay/channel/task/sora"
 	"github.com/QuantumNous/new-api/relay/channel/tencent"
 	"github.com/QuantumNous/new-api/relay/channel/vertex"
 	"github.com/QuantumNous/new-api/relay/channel/volcengine"
@@ -186,6 +188,12 @@ func TaskPlatformUnavailableError(platform constant.TaskPlatform) (string, strin
 }
 
 func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
+	if platform == constant.TaskPlatformSoraCompat {
+		if !pluginruntime.DefaultRegistry.Enabled() {
+			return nil
+		}
+		return soracompat.PollingTaskAdaptor{TaskAdaptor: &soracompat.TaskAdaptor{}}
+	}
 	plugin, ok := ResolveTaskPluginForPlatform(pluginruntime.DefaultRegistry.Generation(), platform)
 	if !ok {
 		return nil
@@ -198,6 +206,15 @@ func GetTaskAdaptor(platform constant.TaskPlatform) channel.TaskAdaptor {
 // from one registry generation before the adaptor is returned.
 func getTaskAdaptorForRequest(c *gin.Context, platform constant.TaskPlatform) (constant.TaskPlatform, channel.TaskAdaptor) {
 	if c != nil {
+		if value, exists := c.Get(pluginruntime.ContextKeyPinnedEndpoint); exists {
+			if pinned, ok := value.(pluginruntime.PinnedEndpoint); ok && pinned.Protocol == "openai_video" {
+				baseURL := common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl)
+				modelName := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
+				if pluginruntime.DefaultRegistry.Enabled() && soracompat.UsesProviderCompatibility(baseURL, modelName) {
+					return constant.TaskPlatformSoraCompat, soracompat.PollingTaskAdaptor{TaskAdaptor: &soracompat.TaskAdaptor{}}
+				}
+			}
+		}
 		if value, exists := c.Get(pluginruntime.ContextKeyPinnedPlugin); exists {
 			if pinned, ok := value.(pluginruntime.PinnedPlugin); ok && pinned.Plugin != nil {
 				platform = constant.TaskPlatform(pinned.Plugin.Meta.Key)
@@ -218,6 +235,13 @@ func getTaskAdaptorForRequest(c *gin.Context, platform constant.TaskPlatform) (c
 				return platform, jspluginadaptor.New(pinned.Plugin)
 			}
 			return platform, nil
+		}
+	}
+	if c != nil && platform == constant.TaskPlatform(strconv.Itoa(constant.ChannelTypeSora)) {
+		baseURL := common.GetContextKeyString(c, constant.ContextKeyChannelBaseUrl)
+		modelName := common.GetContextKeyString(c, constant.ContextKeyOriginalModel)
+		if pluginruntime.DefaultRegistry.Enabled() && soracompat.UsesProviderCompatibility(baseURL, modelName) {
+			return constant.TaskPlatformSoraCompat, soracompat.PollingTaskAdaptor{TaskAdaptor: &soracompat.TaskAdaptor{}}
 		}
 	}
 	generation := pluginruntime.DefaultRegistry.Generation()

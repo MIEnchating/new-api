@@ -410,6 +410,9 @@ func ShouldFreezeTokenGroupRoute(err *types.NewAPIError) bool {
 	if types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err) {
 		return false
 	}
+	if types.IsStreamEventError(err) {
+		return true
+	}
 	if types.IsChannelError(err) {
 		return true
 	}
@@ -429,10 +432,16 @@ func ShouldSwitchTokenGroupRouteForContext(c *gin.Context, err *types.NewAPIErro
 }
 
 func ShouldCooldownTokenGroupRoute(err *types.NewAPIError) bool {
+	if types.IsStreamEventError(err) {
+		return false
+	}
 	return ShouldFreezeTokenGroupRoute(err)
 }
 
 func ShouldCooldownTokenGroupRouteForContext(c *gin.Context, err *types.NewAPIError) bool {
+	if types.IsStreamEventError(err) {
+		return false
+	}
 	return ShouldFreezeTokenGroupRoute(err)
 }
 
@@ -469,6 +478,9 @@ func MarkTokenGroupRouteFailure(c *gin.Context, err *types.NewAPIError) bool {
 	until := int64(0)
 	if cooldown && cooldownSeconds > 0 {
 		until = FreezeTokenGroupRoute(tokenID, group, modelName, requestPath, cooldownSeconds)
+		TrackChannelExecutionGroupEvent(c, group, modelName, requestPath, "cooling", "group_route_failure", until)
+	} else if switchGroup {
+		TrackChannelExecutionGroupEvent(c, group, modelName, requestPath, "failed", "group_route_failure", 0)
 	}
 	stickyHit := common.GetContextKeyBool(c, constant.ContextKeyTokenGroupRouteStickyHit)
 	if (switchGroup || cooldown) && IsTokenGroupRouteStickyEnabled(c) {
@@ -577,6 +589,7 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 					}
 					if channel != nil {
 						common.SetContextKey(param.Ctx, constant.ContextKeyTokenGroupRouteStickyHit, true)
+						TrackChannelExecutionGroupAffinityHit(param.Ctx, group, param.ModelName, param.RequestPath, channel.Id)
 						return channel, group, nil
 					}
 					clearTokenGroupRouteStickyScope(tokenID, param.ModelName, param.RequestPath)
@@ -592,6 +605,7 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 		selectGroup = route.Group
 		if until := cooldowns[route.Group]; until > now {
 			skippedCooldown = true
+			TrackChannelExecutionGroupEvent(param.Ctx, route.Group, param.ModelName, param.RequestPath, "skipped", "group_cooling", until)
 			logger.LogDebug(param.Ctx, "Token group route skipped cooldown group: %s", route.Group)
 			continue
 		}
@@ -602,6 +616,7 @@ func selectTokenGroupRoute(param *RetryParam, routes []model.TokenGroupRoute) (*
 		}
 		if channel == nil {
 			common.SetContextKey(param.Ctx, constant.ContextKeyTokenGroupRouteIndex, i+1)
+			TrackChannelExecutionGroupEvent(param.Ctx, route.Group, param.ModelName, param.RequestPath, "skipped", "group_unsupported", 0)
 			logger.LogDebug(param.Ctx, "Token group route group does not support request, skipped: group=%s model=%s path=%s",
 				route.Group, param.ModelName, param.RequestPath)
 			continue

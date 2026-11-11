@@ -219,7 +219,11 @@ export function ModelPriceCell(props: {
     } else {
       metrics = [
         {
-          label: t('Per-request'),
+          label: t(
+            props.model.billing_mode === 'per_second'
+              ? 'Per-second'
+              : 'Per-request'
+          ),
           value: formatRequestPrice(
             props.model,
             options.showRechargePrice,
@@ -230,7 +234,7 @@ export function ModelPriceCell(props: {
           ),
         },
       ]
-      caption = `${currencyLabel} / ${t('request')}`
+      caption = `${currencyLabel} / ${t(props.model.billing_mode === 'per_second' ? 'second' : 'request')}`
     }
   }
   return (

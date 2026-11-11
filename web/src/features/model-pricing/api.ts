@@ -62,6 +62,7 @@ export type ModelPricingPluginVariant = {
 }
 
 export type ModelPricingEntry = ModelPricingDescription & {
+  has_builtin_pricing?: boolean
   plugin_variants?: ModelPricingPluginVariant[]
   model_name: string
   version: string

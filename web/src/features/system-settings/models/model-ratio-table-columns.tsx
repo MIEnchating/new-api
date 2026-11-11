@@ -134,6 +134,18 @@ export function buildModelRatioColumns({
               >
                 {row.original.name}
               </TruncatedCell>
+              {row.original.hasBuiltinPricing !== undefined && (
+                <StatusBadge
+                  label={
+                    row.original.hasBuiltinPricing
+                      ? t('Has built-in pricing')
+                      : t('No built-in pricing')
+                  }
+                  variant={row.original.hasBuiltinPricing ? 'info' : 'neutral'}
+                  copyable={false}
+                  className='shrink-0'
+                />
+              )}
               {changeKind && <PriceChangeBadge kind={changeKind} />}
               {showTieredBadge && !row.original.isDraftDeleted ? (
                 <StatusBadge

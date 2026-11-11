@@ -530,6 +530,9 @@ export const STATIC_I18N_KEYS = [
   'Finished',
   'Running',
   'Cancelled',
+  'Intermediate retry error',
+  'This entry records an intermediate channel failure. The execution trace may include later attempts and the final state of the same request.',
+  'Retry Chain at This Log',
   'Elapsed Time at This Log',
   'Request cancelled before this channel returned a result',
   'Unknown',
@@ -546,6 +549,7 @@ export const STATIC_I18N_KEYS = [
   'Attempts',
   'Current selection',
   'Backup candidate',
+  'Channel execution',
 
   // Models constants
   'Exact Match',

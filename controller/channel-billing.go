@@ -491,10 +491,10 @@ func updateChannelNewAPIBalance(channel *model.Channel) (float64, error) {
 		Code    bool   `json:"code"`
 		Message string `json:"message"`
 		Data    struct {
-			TotalAvailable float64 `json:"total_available"`
-			UnlimitedQuota bool    `json:"unlimited_quota"`
+			TotalAvailable *float64 `json:"total_available"`
+			UnlimitedQuota bool     `json:"unlimited_quota"`
 			UserQuota      *struct {
-				TotalAvailable float64 `json:"total_available"`
+				TotalAvailable *float64 `json:"total_available"`
 			} `json:"user_quota"`
 		} `json:"data"`
 	}
@@ -504,12 +504,18 @@ func updateChannelNewAPIBalance(channel *model.Channel) (float64, error) {
 	if !usage.Code {
 		return 0, fmt.Errorf("New API usage query failed: %s", usage.Message)
 	}
-	remaining := usage.Data.TotalAvailable
-	if usage.Data.UnlimitedQuota {
-		remaining = math.Inf(1)
+	remaining := math.Inf(1)
+	if !usage.Data.UnlimitedQuota {
+		if usage.Data.TotalAvailable == nil {
+			return 0, errors.New("New API usage response is missing total_available")
+		}
+		remaining = *usage.Data.TotalAvailable
 	}
 	if userQuota := usage.Data.UserQuota; userQuota != nil {
-		remaining = min(remaining, userQuota.TotalAvailable)
+		if userQuota.TotalAvailable == nil {
+			return 0, errors.New("New API usage response is missing user_quota.total_available")
+		}
+		remaining = min(remaining, *userQuota.TotalAvailable)
 	}
 	if math.IsInf(remaining, 1) {
 		return 0, common.NewMessage(`The upstream key has unlimited quota. Turn on "Allow querying user quota" for this key on the upstream to see the real balance.`)
@@ -531,6 +537,9 @@ func updateChannelNewAPIBalance(channel *model.Channel) (float64, error) {
 		return 0, errors.New("New API /api/status response is missing quota_per_unit")
 	}
 	balance := remaining / status.Data.QuotaPerUnit
+	if math.IsNaN(balance) || math.IsInf(balance, 0) {
+		return 0, errors.New("New API usage response does not yield a finite balance")
+	}
 	channel.UpdateBalance(balance)
 	return balance, nil
 }

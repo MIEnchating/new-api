@@ -94,7 +94,10 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
   const [sorting, setSorting] = useState<SortingState>(() => [
     {
       id:
-        localStorage.getItem('channels-id-sort') === 'true' ? 'id' : 'priority',
+        localStorage.getItem('channels-priority-sort') !== 'true' &&
+        localStorage.getItem('channels-id-sort') === 'true'
+          ? 'id'
+          : 'priority',
       desc: true,
     },
   ])
@@ -102,7 +105,11 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     // Retain the existing ID-sort preference for returning users.
     localStorage.setItem('channels-id-sort', String(idSort))
-  }, [idSort])
+    localStorage.setItem(
+      'channels-priority-sort',
+      String(sorting[0]?.id === 'priority')
+    )
+  }, [idSort, sorting])
   const [batchMode, setBatchMode] = useState(false)
   const [sensitiveVisible, setSensitiveVisible] = useState(true)
   const [priorityActionContainer, setPriorityActionContainer] =

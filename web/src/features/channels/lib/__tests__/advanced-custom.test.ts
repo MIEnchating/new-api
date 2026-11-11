@@ -81,9 +81,20 @@ describe('advanced custom pass-through compatibility', () => {
     expect(
       getChannelConfigurationState(form, {}, true).blocks.requestProcessing
     ).toBe('configured')
+    expect(getChannelConfigurationState(form, {}, true).sections.request).toBe(
+      'configured'
+    )
     expect(JSON.parse(payload.settings || '{}').advanced_custom).toEqual(
       JSON.parse(channel.settings).advanced_custom
     )
+  })
+
+  test('a legacy channel with pass-through disabled has no request processing indicator', () => {
+    const form = transformChannelToFormDefaults(advancedCustomChannel(false))
+    const configuration = getChannelConfigurationState(form, {}, true)
+
+    expect(configuration.blocks.requestProcessing).toBe('idle')
+    expect(configuration.sections.request).toBe('idle')
   })
 
   test('disabling legacy channel-level pass-through preserves enabled route flags', () => {

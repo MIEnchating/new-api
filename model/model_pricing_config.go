@@ -33,6 +33,8 @@ type ModelPricingChange struct {
 }
 
 type ModelPricingEntry struct {
+	// Reports whether the engine ships a default base price, even if overridden.
+	HasBuiltinPricing bool `json:"has_builtin_pricing"`
 	ModelPricingDescription
 	PluginVariants []ModelPricingPluginVariant          `json:"plugin_variants,omitempty"`
 	ModelName      string                               `json:"model_name"`
@@ -66,6 +68,7 @@ var ErrModelPricingConflict = errors.New("model pricing changed; reload before s
 var modelPricingOptionKeys = []string{
 	"AudioCompletionRatio", "AudioRatio", "CacheRatio", "CompletionRatio",
 	"CreateCacheRatio", "ImageRatio", "ModelPrice", "ModelRatio",
+	"ModelSecondPrice",
 	"billing_setting.billing_expr", "billing_setting.billing_mode", billing_setting.PluginBillingExprOption,
 }
 
@@ -171,7 +174,7 @@ func effectiveModelPricing(values map[string]map[string]any, name string) Pricin
 	result := modelPricingValues(values, name)
 	// Legacy wildcard aliases are resolved by the same normalization as relay.
 	alias := ratio_setting.FormatMatchingModelName(name)
-	for _, key := range []string{"ModelPrice", "ModelRatio", "CompletionRatio", "AudioRatio", "AudioCompletionRatio"} {
+	for _, key := range modelPricingOptionKeys[:9] {
 		delete(result, key)
 		if value, exists := values[key][alias]; exists {
 			result[key] = value
@@ -275,6 +278,11 @@ func GetModelPricingSnapshot(names []string) (*ModelPricingSnapshot, error) {
 		configured := modelPricingValues(values, name)
 		entry := ModelPricingEntry{ModelName: name, Version: ModelPricingVersion(configured), Configured: configured,
 			ModelPricingDescription: ModelPricingDescription{Effective: effectiveModelPricing(values, name)}}
+		_, builtinExpr := billing_setting.GetBuiltinBillingExpr(name)
+		alias := ratio_setting.FormatMatchingModelName(name)
+		_, builtinPrice := ratio_setting.GetDefaultModelPriceMap()[alias]
+		_, builtinRatio := ratio_setting.GetDefaultModelRatioMap()[alias]
+		entry.HasBuiltinPricing = builtinExpr || builtinPrice || builtinRatio
 		entry.CacheWriteMode = ResolveCacheWriteMode(name, configured)
 		entry.BillingDetails = ResolveLegacyBillingDetails(name, entry.Effective, configured)
 		if plugin, ok := generation.GetByModel(name); ok {
@@ -535,7 +543,8 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 			return fmt.Errorf("unsupported pricing field: %s", key)
 		}
 		if key == "billing_setting.billing_mode" {
-			if value != "ratio" && value != "tiered_expr" {
+			if value != billing_setting.BillingModeRatio &&
+				value != billing_setting.BillingModeTieredExpr {
 				return errors.New("invalid billing mode")
 			}
 			continue
@@ -587,18 +596,36 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 			}
 			continue
 		}
+		if key == "ModelSecondPrice" {
+			config, ok := value.(map[string]any)
+			if !ok {
+				return fmt.Errorf("%s must be an object", key)
+			}
+			prices, ok := config["prices"].(map[string]any)
+			if !ok {
+				return fmt.Errorf("%s.prices must be an object", key)
+			}
+			for resolution, raw := range prices {
+				price, ok := raw.(float64)
+				if strings.TrimSpace(resolution) == "" || !ok || math.IsNaN(price) || math.IsInf(price, 0) || price < 0 {
+					return fmt.Errorf("%s must contain finite, non-negative prices", key)
+				}
+			}
+			continue
+		}
 		number, ok := value.(float64)
 		if !ok || math.IsNaN(number) || math.IsInf(number, 0) || number < 0 {
 			return fmt.Errorf("%s must be a finite, non-negative number", key)
 		}
 	}
-	if values["billing_setting.billing_mode"] == "tiered_expr" {
+	if values["billing_setting.billing_mode"] == billing_setting.BillingModeTieredExpr {
 		if _, exists := values["billing_setting.billing_expr"]; !exists {
 			if _, builtin := billing_setting.GetBuiltinBillingExpr(name); !builtin {
 				return errors.New("billing expression is required")
 			}
 		}
 	}
+
 	return nil
 }
 
@@ -626,6 +653,10 @@ func UpdateModelPricing(changes []ModelPricingChange) error {
 			pricing := change.Pricing
 			if change.Reset {
 				pricing = modelPricingValues(defaults, change.ModelName)
+			}
+			pricing = maps.Clone(pricing)
+			if err := ConvertPerSecondPricing(pricing); err != nil {
+				return err
 			}
 			if err := validateModelPricing(change.ModelName, pricing, previous); err != nil {
 				return err
@@ -668,9 +699,14 @@ func UpdateModelPricingOptions(updates map[string]string) error {
 			values[key] = entries
 		}
 		for name := range names {
-			if err := validateModelPricing(name, modelPricingValues(values, name), modelPricingValues(previous, name)); err != nil {
+			pricing := modelPricingValues(values, name)
+			if err := ConvertPerSecondPricing(pricing); err != nil {
 				return err
 			}
+			if err := validateModelPricing(name, pricing, modelPricingValues(previous, name)); err != nil {
+				return err
+			}
+			replaceModelPricing(values, name, pricing)
 		}
 		return nil
 	})
@@ -686,7 +722,7 @@ func mutateModelPricingOptions(mutate func(*gorm.DB, map[string]map[string]any) 
 			return err
 		}
 		if len(duplicated) > 0 {
-			common.SysError(common.LogText("options table has duplicate pricing keys [%s]; the table is missing a primary key", strings.Join(duplicated, ", ")))
+			return fmt.Errorf("options table has duplicate pricing keys [%s]; repair the primary key before editing prices", strings.Join(duplicated, ", "))
 		}
 		defaults := defaultPricingMaps()
 		for _, key := range modelPricingOptionKeys {
@@ -701,6 +737,16 @@ func mutateModelPricingOptions(mutate func(*gorm.DB, map[string]map[string]any) 
 			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&row).Error; err != nil {
 				return err
 			}
+		}
+		// A different instance may have inserted a missing row first. Read the
+		// persisted values after conflict handling instead of writing defaults
+		// over that instance's administrator overrides.
+		values, _, duplicated, err = readModelPricingMaps(lockForUpdate(tx))
+		if err != nil {
+			return err
+		}
+		if len(duplicated) > 0 {
+			return fmt.Errorf("options table has duplicate pricing keys [%s]; repair the primary key before editing prices", strings.Join(duplicated, ", "))
 		}
 		if err := mutate(tx, values); err != nil {
 			return err

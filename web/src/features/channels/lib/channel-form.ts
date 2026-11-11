@@ -808,6 +808,10 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     delete settingsObj.claude_beta_query
   }
 
+  if ('claude_code_client_spoofing' in settingsObj) {
+    delete settingsObj.claude_code_client_spoofing
+  }
+
   // Only the Ollama adaptor can switch chat completions to the OpenAI-compatible endpoint.
   if (formData.type === CHANNEL_TYPE_OLLAMA) {
     settingsObj.ollama_openai_chat = formData.ollama_openai_chat === true

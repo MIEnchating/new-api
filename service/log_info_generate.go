@@ -70,6 +70,7 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	if ctx == nil || other == nil {
 		return
 	}
+	other.SetAdmin("use_channel", ctx.GetStringSlice("use_channel"))
 	if relayInfo != nil {
 		if billingModel := relayInfo.GetBillingModelName(); billingModel != "" && billingModel != relayInfo.OriginModelName {
 			other.SetAdmin("billing_model", billingModel)
@@ -90,14 +91,42 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 	}
 
 	AppendChannelAffinityAdminInfo(ctx, other)
+	appendExecutionTraceToLogOther(ctx, other, false)
 	if events := RequestPolicy(ctx).Events(); len(events) > 0 {
 		other.SetAdmin("request_policy", events)
 	}
 }
 
+// appendExecutionTraceToLogOther bridges the legacy trace projection helpers
+// to the scoped LogOther representation. Error logs request the full trace;
+// successful logs use the compact projection when possible.
+func appendExecutionTraceToLogOther(ctx *gin.Context, other *model.LogOther, errorTrace bool) {
+	if ctx == nil || other == nil {
+		return
+	}
+	adminInfo := make(map[string]interface{})
+	if errorTrace {
+		AppendChannelExecutionTraceErrorAdminInfo(ctx, adminInfo)
+	} else {
+		AppendChannelExecutionTraceAdminInfo(ctx, adminInfo)
+	}
+	for key, value := range adminInfo {
+		other.SetAdmin(key, value)
+	}
+}
+
+// AppendChannelExecutionTraceErrorAdminInfoToLogOther adds the full execution
+// timeline to an error log's admin-only metadata.
+func AppendChannelExecutionTraceErrorAdminInfoToLogOther(ctx *gin.Context, other *model.LogOther) {
+	appendExecutionTraceToLogOther(ctx, other, true)
+}
+
 func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, modelRatio, groupRatio, completionRatio float64,
 	cacheTokens int, cacheRatio float64, modelPrice float64, userGroupRatio float64) *model.LogOther {
 	MarkRequestPolicySuccess(ctx, relayInfo.StreamStatus)
+	if RequestPolicy(ctx).Successful {
+		MarkChannelExecutionSuccess(ctx)
+	}
 	other := model.NewLogOther()
 	other.SetPublic("model_ratio", modelRatio)
 	other.SetPublic("group_ratio", groupRatio)

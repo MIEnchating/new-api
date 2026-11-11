@@ -178,9 +178,23 @@ func effectivePricingSyncData(data map[string]any) map[string]any {
 			continue
 		}
 		delete(expressions, name)
-		modes[name] = billing_setting.BillingModeRatio
 		_, fixed := valueMap(result["model_price"])[name]
 		_, token := valueMap(result["model_ratio"])[name]
+		if modes[name] == billing_setting.BillingModePerSecond {
+			if !fixed {
+				for _, field := range pricingSyncFields {
+					delete(valueMap(result[field]), name)
+				}
+				continue
+			}
+			for field := range numericPricingSyncFields {
+				if field != "model_price" {
+					delete(valueMap(result[field]), name)
+				}
+			}
+			continue
+		}
+		modes[name] = billing_setting.BillingModeRatio
 		if !fixed && !token {
 			for _, field := range pricingSyncFields {
 				delete(valueMap(result[field]), name)
@@ -485,9 +499,13 @@ func FetchUpstreamRatios(c *gin.Context) {
 				if item.ModelName == "" {
 					continue
 				}
-				if item.BillingMode == billing_setting.BillingModeTieredExpr {
+				if item.BillingMode == billing_setting.BillingModePerSecond {
+					billingModeMap[item.ModelName] = billing_setting.BillingModePerSecond
+				} else if item.BillingMode == billing_setting.BillingModeTieredExpr {
 					billingModeMap[item.ModelName] = billing_setting.BillingModeTieredExpr
-					billingExprMap[item.ModelName] = item.BillingExpr
+					if strings.TrimSpace(item.BillingExpr) != "" {
+						billingExprMap[item.ModelName] = item.BillingExpr
+					}
 					continue
 				}
 				if item.QuotaType == 1 {

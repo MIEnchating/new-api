@@ -15,6 +15,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -241,6 +242,30 @@ func (a requestIDTestAdaptor) SetupRequestHeader(_ *gin.Context, _ *http.Header,
 	return nil
 }
 
+func TestRelayRequestsInheritAlreadyCancelledClientContext(t *testing.T) {
+	service.InitHttpClient()
+	for _, form := range []bool{false, true} {
+		t.Run(fmt.Sprintf("form=%t", form), func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil).WithContext(ctx)
+			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+			adaptor := requestIDTestAdaptor{url: "http://127.0.0.1:1/not-contacted"}
+			var err error
+			if form {
+				_, err = DoFormRequest(adaptor, c, info, strings.NewReader("request"))
+			} else {
+				_, err = DoApiRequest(adaptor, c, info, strings.NewReader("request"))
+			}
+			var apiErr *types.NewAPIError
+			require.ErrorAs(t, err, &apiErr)
+			require.ErrorIs(t, apiErr.InternalError(), context.Canceled)
+			assert.EqualError(t, apiErr, "upstream error: do request failed")
+		})
+	}
+}
+
 func TestUpstreamRequestIDsHTTP(t *testing.T) {
 	service.InitHttpClient()
 	for _, tc := range []struct {
@@ -285,6 +310,10 @@ func TestUpstreamRequestIDsHTTP(t *testing.T) {
 			wantIDs := append([]string{"previous-id"}, tc.ids...)
 			assert.Equal(t, wantIDs, c.GetStringSlice(common.UpstreamRequestIdsKey))
 			assert.Equal(t, "local-id", c.GetString(common.RequestIdKey))
+			chain := c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
+			require.Len(t, chain, 1)
+			assert.Equal(t, 177, chain[0].ChannelID)
+			assert.Equal(t, "sub2api", chain[0].ChannelType)
 
 			// A subsequent transport failure must clear the primary ID, retaining history.
 			cancelled, cancel := context.WithCancel(context.Background())
@@ -293,6 +322,10 @@ func TestUpstreamRequestIDsHTTP(t *testing.T) {
 			require.NoError(t, err)
 			_, err = DoRequest(c, retry, info)
 			require.Error(t, err)
+			chain = c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
+			require.Len(t, chain, 2)
+			assert.Equal(t, 2, chain[1].Attempt)
+			assert.Empty(t, chain[1].Nodes)
 			assert.Empty(t, c.GetString(common.UpstreamRequestIdKey))
 			assert.Equal(t, wantIDs, c.GetStringSlice(common.UpstreamRequestIdsKey))
 		})
@@ -333,12 +366,20 @@ func TestUpstreamRequestIDsWebSocket(t *testing.T) {
 			assert.Equal(t, "client-id", c.GetString(common.UpstreamRequestIdKey))
 			assert.Equal(t, []string{"client-id", "provider-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
 			assert.Equal(t, "local-id", c.GetString(common.RequestIdKey))
+			chain := c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
+			require.Len(t, chain, 1)
+			assert.Equal(t, 177, chain[0].ChannelID)
+			assert.Equal(t, "sub2api", chain[0].ChannelType)
 
 			cancelled, cancel := context.WithCancel(context.Background())
 			cancel()
 			c.Request = c.Request.WithContext(cancelled)
 			_, err = DoWssRequest(adaptor, c, info, nil)
 			require.Error(t, err)
+			chain = c.MustGet(common.UpstreamRequestChainKey).([]common.UpstreamRequestAttempt)
+			require.Len(t, chain, 2)
+			assert.Equal(t, 2, chain[1].Attempt)
+			assert.Empty(t, chain[1].Nodes)
 			assert.Empty(t, c.GetString(common.UpstreamRequestIdKey))
 			assert.Equal(t, []string{"client-id", "provider-id"}, c.GetStringSlice(common.UpstreamRequestIdsKey))
 		})
@@ -388,13 +429,13 @@ func TestUpstreamRequestIDsPersistLogs(t *testing.T) {
 			c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil)
 			c.Set(common.RequestIdKey, "local-id")
 			c.Set("username", "request-id-test")
-			service.CaptureUpstreamRequestIds(c, http.Header{"X-Client-Request-Id": {"first-client"}, "X-Request-Id": {"first-request"}}, constant.ChannelTypeSub2API)
+			service.CaptureUpstreamRequestChain(c, http.Header{"X-Client-Request-Id": {"first-client"}, "X-Request-Id": {"first-request"}}, service.BeginUpstreamRequestAttempt(c, 177, constant.ChannelTypeSub2API))
 			intermediate := model.NewLogOther()
 			intermediate.SetAdmin("retry_intermediate", true)
 			model.RecordErrorLog(c, 1, 1, "test-model", "", "", "upstream error", 0, 0, false, "default", intermediate)
-			service.CaptureUpstreamRequestIds(c, http.Header{"X-Client-Request-Id": {"second-client"}, "X-Request-Id": {"second-request"}}, constant.ChannelTypeSub2API)
+			service.CaptureUpstreamRequestChain(c, http.Header{"X-Client-Request-Id": {"second-client"}, "X-Request-Id": {"second-request"}}, service.BeginUpstreamRequestAttempt(c, 177, constant.ChannelTypeSub2API))
 			model.RecordConsumeLog(c, 1, model.RecordConsumeLogParams{ModelName: "test-model"})
-			c.Set(common.UpstreamRequestIdKey, "")
+			service.BeginUpstreamRequestAttempt(c, 178, constant.ChannelTypeSub2API)
 			model.RecordErrorLog(c, 1, 1, "test-model", "", "", "network error", 0, 0, false, "default", model.NewLogOther())
 			var logs []model.Log
 			require.NoError(t, db.Order("id ASC").Find(&logs).Error)
@@ -404,9 +445,10 @@ func TestUpstreamRequestIDsPersistLogs(t *testing.T) {
 				assert.Equal(t, primary, logs[i].UpstreamRequestId)
 				var other struct {
 					AdminInfo struct {
-						IDs          []string          `json:"upstream_request_ids"`
-						Sources      map[string]string `json:"upstream_request_id_sources"`
-						Intermediate bool              `json:"retry_intermediate"`
+						Chain        []common.UpstreamRequestAttempt `json:"upstream_request_chain"`
+						IDs          []string                        `json:"upstream_request_ids"`
+						Sources      map[string]string               `json:"upstream_request_id_sources"`
+						Intermediate bool                            `json:"retry_intermediate"`
 					} `json:"admin_info"`
 				}
 				require.NoError(t, common.UnmarshalJsonStr(logs[i].Other, &other))
@@ -416,6 +458,21 @@ func TestUpstreamRequestIDsPersistLogs(t *testing.T) {
 					expectedIDs = append(expectedIDs, "second-client", "second-request")
 					expectedSources["second-request"] = "x-request-id"
 					expectedSources["second-client"] = "x-client-request-id"
+				}
+				require.Len(t, other.AdminInfo.Chain, i+1)
+				for j, attempt := range other.AdminInfo.Chain {
+					assert.Equal(t, j+1, attempt.Attempt)
+					if j == 2 {
+						assert.Equal(t, 178, attempt.ChannelID)
+						assert.Empty(t, attempt.Nodes)
+						continue
+					}
+					assert.Equal(t, 177, attempt.ChannelID)
+					require.Len(t, attempt.Nodes, 2)
+					assert.Equal(t, expectedIDs[j*2], attempt.Nodes[0].ID)
+					assert.Equal(t, expectedIDs[j*2+1], attempt.Nodes[1].ID)
+					assert.Equal(t, "client_correlation", attempt.Nodes[0].Role)
+					assert.Equal(t, "provider_request", attempt.Nodes[1].Role)
 				}
 				assert.Equal(t, expectedIDs, other.AdminInfo.IDs)
 				assert.Equal(t, expectedSources, other.AdminInfo.Sources)

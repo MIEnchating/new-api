@@ -4,6 +4,8 @@
 const OMNI_VIDEO_TOKENS_PER_SECOND = { "360p": 1931, "720p": 5792, "1080p": 8688, "4k": 17376 };
 const RESOLUTIONS = Object.keys(OMNI_VIDEO_TOKENS_PER_SECOND);
 const OMNI_USAGE_SCHEMA = {
+  seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
+  resolution: { enum: RESOLUTIONS, description: { en: "Output video resolution", zh: "输出视频分辨率" } },
   // Input tokens (reported on completion).
   input_tokens: {
     type: "number",
@@ -25,7 +27,7 @@ const OMNI_USAGE_SCHEMA = {
 };
 // Input and text output are only known on completion, which reports them.
 function omniUsageFacts(seconds, resolution) {
-  return { input_tokens: 0, output_tokens: 0, video_tokens: seconds * OMNI_VIDEO_TOKENS_PER_SECOND[resolution] };
+  return { seconds: seconds, resolution: resolution, input_tokens: 0, output_tokens: 0, video_tokens: seconds * OMNI_VIDEO_TOKENS_PER_SECOND[resolution] };
 }
 
 export const meta = {
@@ -314,6 +316,13 @@ function duration(req) {
   if (!Number.isFinite(n) || n <= 0) n = 8;
   return n;
 }
+function veoDuration(req) {
+  const metadata = req.metadata || {};
+  const value = req.duration === undefined || req.duration === "" ? metadata.durationSeconds : req.duration;
+  const n = value === undefined || value === "" ? 8 : Number(value);
+  if (n !== 4 && n !== 6 && n !== 8) throw new Error("durationSeconds must be one of 4, 6, or 8");
+  return n;
+}
 function region(ctx, model) {
   const setting = ctx.userSetting || {};
   const configured = setting.vertexRegion || setting.apiVersion || "global";
@@ -356,6 +365,16 @@ function fetchOperation(ctx, name) {
   };
 }
 
+// Convert native Veo frame objects back to the driver's canonical image input.
+function nativeVeoImage(value) {
+  const image = plainObject(value) || {};
+  const data = image.bytesBase64Encoded;
+  const mime = trimmed(image.mimeType).toLowerCase();
+  if (mime !== "image/jpeg" && mime !== "image/png") throw new Error("input image must be image/jpeg or image/png");
+  if (typeof data !== "string" || !trimmed(data)) throw new Error("Veo image must carry base64 data");
+  return "data:" + mime + ";base64," + data;
+}
+
 export const native = {
   modelMethod: function (ctx) {
     const segment = String((ctx.params || {}).model || "");
@@ -375,9 +394,9 @@ export const native = {
     const instances = Array.isArray(body.instances) ? body.instances : [];
     const instance = plainObject(instances[0]);
     if (instances.length !== 1 || !instance) throw new Error("instances must hold exactly one instance");
-    // buildSubmitRequest sends only the prompt and the first frame.
+    // Preserve the frame and reference-image inputs supported by this driver.
     for (const key of Object.keys(instance)) {
-      if (key !== "prompt" && key !== "image") throw new Error("instances[0]." + key + " is not supported");
+      if (!["prompt", "image", "lastFrame", "referenceImages"].includes(key)) throw new Error("instances[0]." + key + " is not supported");
     }
     const metadata = Object.assign({}, plainObject(body.parameters) || {});
     const requestBody = { model: model, prompt: instance.prompt, metadata: metadata };
@@ -390,12 +409,18 @@ export const native = {
       throw new Error("resolution must be one of 720p, 1080p, or 4k");
     if (instance.image !== undefined) {
       const image = plainObject(instance.image) || {};
-      const mime = trimmed(image.mimeType).toLowerCase();
-      if (!trimmed(image.bytesBase64Encoded)) throw new Error("instances[0].image must carry bytesBase64Encoded");
-      if (mime !== "image/jpeg" && mime !== "image/png") throw new Error("input image must be image/jpeg or image/png");
-      requestBody.images = ["data:" + mime + ";base64," + image.bytesBase64Encoded];
+      metadata.firstFrame = nativeVeoImage(image);
     }
-    return { kind: "submit", model: model, action: requestBody.images ? "image_to_video" : "text_to_video", requestBody: requestBody };
+    if (instance.lastFrame !== undefined) metadata.lastFrame = nativeVeoImage(instance.lastFrame);
+    if (instance.referenceImages !== undefined) {
+      if (!Array.isArray(instance.referenceImages)) throw new Error("Veo referenceImages must be an array");
+      metadata.referenceImages = instance.referenceImages.map(function (reference) {
+        if (!plainObject(reference) || reference.referenceType !== "asset") throw new Error("Veo referenceImages must use the asset reference type");
+        return nativeVeoImage(reference.image);
+      });
+    }
+    const hasVeo31Inputs = applyVeo31Inputs({}, Object.assign({}, metadata));
+    return { kind: "submit", model: model, action: hasVeo31Inputs || requestBody.images ? "image_to_video" : "text_to_video", requestBody: requestBody };
   },
   // Submission renders one task and fetchPredictOperation a list of one. The
   // poller can fail a task whose operation was still running; that operation
@@ -421,22 +446,85 @@ export const native = {
   },
 };
 
+function veoImageInput(value, files) {
+  if (value && typeof value === "object" && !Array.isArray(value) && value.__fileRef) {
+    let mime = String(value.mimeType || "").toLowerCase();
+    if (mime !== "image/jpeg" && mime !== "image/png") {
+      for (const file of files || []) {
+        if (file.ref === value.__fileRef || file.field === "input_reference") {
+          mime = String(file.mimeType || "").toLowerCase();
+          break;
+        }
+      }
+    }
+    if (mime !== "image/jpeg" && mime !== "image/png") return null;
+    return { bytesBase64Encoded: value, mimeType: mime };
+  }
+  const text = trimmed(value);
+  if (!text) return null;
+  const comma = text.indexOf(",");
+  let mime = "";
+  let data = text;
+  if (text.startsWith("data:") && comma >= 0) {
+    mime = text.slice(5, comma).split(";")[0].toLowerCase();
+    data = text.slice(comma + 1);
+  } else if (text.startsWith("iVBORw0KGgo")) mime = "image/png";
+  else if (text.startsWith("/9j/")) mime = "image/jpeg";
+  if ((mime !== "image/jpeg" && mime !== "image/png") || !data) return null;
+  return { bytesBase64Encoded: data, mimeType: mime };
+}
+
+function applyVeo31Inputs(instance, metadata, files) {
+  const firstFrame = metadata.firstFrame;
+  const lastFrame = metadata.lastFrame;
+  const referenceImages = metadata.referenceImages;
+  delete metadata.firstFrame;
+  delete metadata.lastFrame;
+  delete metadata.referenceImages;
+
+  const hasFirstFrame = trimmed(firstFrame) !== "";
+  const hasLastFrame = trimmed(lastFrame) !== "";
+  if (hasLastFrame && !hasFirstFrame) throw new Error("Veo lastFrame requires firstFrame");
+  if (referenceImages !== undefined && !Array.isArray(referenceImages)) throw new Error("Veo referenceImages must be an array");
+  const references = referenceImages || [];
+  if (references.length > 3) throw new Error("Veo referenceImages supports at most 3 images");
+  if ((hasFirstFrame || hasLastFrame) && references.length) throw new Error("Veo frame inputs cannot be combined with referenceImages");
+
+  if (hasFirstFrame) {
+    instance.image = veoImageInput(firstFrame, files);
+    if (!instance.image) throw new Error("invalid Veo firstFrame image");
+  }
+  if (hasLastFrame) {
+    instance.lastFrame = veoImageInput(lastFrame, files);
+    if (!instance.lastFrame) throw new Error("invalid Veo lastFrame image");
+  }
+  if (references.length) {
+    instance.referenceImages = references.map(function (value) {
+      const image = veoImageInput(value, files);
+      if (!image) throw new Error("invalid Veo referenceImages image");
+      return { image: image, referenceType: "asset" };
+    });
+  }
+  return hasFirstFrame || hasLastFrame || references.length > 0;
+}
+
 export function buildSubmitRequest(ctx) {
   if (ctx.authError) throw new Error(ctx.authError);
   const req = ctx.requestBody || {},
     metadata = Object.assign({}, req.metadata || {}),
     model = ctx.upstreamModel || "veo-3.0-generate-001";
   if (omniModel(ctx)) return omniSubmitRequest(ctx, req, model);
-  if (Number(req.duration) > 0) metadata.durationSeconds = Number(req.duration);
+  const instance = { prompt: req.prompt };
+  const hasVeo31Inputs = applyVeo31Inputs(instance, metadata, ctx.files);
+  if (req.duration !== undefined || metadata.durationSeconds !== undefined) metadata.durationSeconds = veoDuration(req);
   if (!metadata.resolution && req.size) metadata.resolution = resolution(req.size);
   if (!metadata.aspectRatio && req.size) metadata.aspectRatio = aspect(req.size);
   if (metadata.resolution) metadata.resolution = String(metadata.resolution).toLowerCase();
   metadata.sampleCount = 1;
-  const instance = { prompt: req.prompt };
-  const image = (req.images || [])[0];
+  const image = hasVeo31Inputs ? null : (req.images || [])[0];
   if (image) {
-    const frame = inputImage(ctx, image);
-    instance.image = { bytesBase64Encoded: frame.data, mimeType: frame.mime };
+    instance.image = veoImageInput(image, ctx.files);
+    if (!instance.image) throw new Error("input image must be image/jpeg or image/png");
   }
   return {
     // A gateway runs the request in its own project, so the path names none.
@@ -444,7 +532,7 @@ export function buildSubmitRequest(ctx) {
     method: "POST",
     headers: requestHeaders(ctx),
     body: { instances: [instance], parameters: metadata },
-    action: image ? "image_to_video" : "text_to_video",
+    action: hasVeo31Inputs || image ? "image_to_video" : "text_to_video",
   };
 }
 
@@ -461,9 +549,17 @@ export function parseSubmitResponse(ctx, resp) {
 export function extractUsage(ctx) {
   const req = ctx.requestBody || {};
   const metadata = req.metadata || {};
-  if (omniModel(ctx)) return omniUsageFacts(omniDuration(req), omniResolution(req));
+  if (omniModel(ctx)) {
+    const seconds = omniDuration(req);
+    const resolution = omniResolution(req);
+    // Keep existing per-second prices and saved expressions usable. Token
+    // quantities must not multiply legacy prices as additional ratios.
+    const legacy = { seconds: seconds, resolution: resolution, generate_audio: true };
+    if (ctx.usagePurpose === "billing_ratios") return legacy;
+    return Object.assign(legacy, omniUsageFacts(seconds, resolution));
+  }
   return {
-    seconds: duration(req),
+    seconds: veoDuration(req),
     resolution: String(metadata.resolution || resolution(req.size) || "720p").toLowerCase(),
     generate_audio: metadata.generateAudio !== false,
   };
@@ -474,13 +570,23 @@ export function extractUsageOnComplete(ctx, _result, body) {
   const usage = plainObject(body && body.usage);
   if (!usage) return null;
   const facts = {};
-  const inputTokens = Number(usage.total_input_tokens);
-  if (Number.isFinite(inputTokens)) facts.input_tokens = inputTokens;
-  let textTokens = Number(usage.total_thought_tokens);
+  for (const key of ["total_input_tokens", "total_thought_tokens"]) {
+    const value = usage[key];
+    if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value) || value < 0))
+      throw new Error("interaction usage must contain finite non-negative token counts");
+  }
+  if (usage.total_input_tokens !== undefined && usage.total_input_tokens !== null) facts.input_tokens = usage.total_input_tokens;
+  let textTokens = usage.total_thought_tokens == null ? NaN : usage.total_thought_tokens;
   let videoTokens = NaN;
+  if (usage.output_tokens_by_modality != null && !Array.isArray(usage.output_tokens_by_modality))
+    throw new Error("interaction output token usage must be an array");
   for (const item of Array.isArray(usage.output_tokens_by_modality) ? usage.output_tokens_by_modality : []) {
     const entry = plainObject(item) || {};
-    const tokens = Number(entry.tokens) || 0;
+    const tokens = entry.tokens;
+    // A missing or malformed count is not a measured zero. Fail the hook so
+    // the host retains the reservation instead of silently refunding it.
+    if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens < 0)
+      throw new Error("interaction usage must contain finite non-negative token counts");
     const modality = trimmed(entry.modality).toLowerCase();
     if (modality === "video" || modality === "audio") videoTokens = (videoTokens || 0) + tokens;
     else textTokens = (textTokens || 0) + tokens;

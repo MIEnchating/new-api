@@ -179,7 +179,7 @@ it('keeps other rows mounted when a different model is opened for editing', asyn
   expect(otherName).toBeInTheDocument()
 })
 
-it('shows pricing issues and opens custom prices without local provenance labels', async () => {
+it('keeps built-in pricing provenance visible alongside overrides and pricing issues', async () => {
   useAuthStore.getState().auth.setUser({ id: 1, username: 'admin', role: 100 })
   await renderEditor({
     issues: [
@@ -196,31 +196,29 @@ it('shows pricing issues and opens custom prices without local provenance labels
         version: '1',
         configured: { ModelRatio: 0.2 },
         effective: { ModelRatio: 0.2 },
+        has_builtin_pricing: true,
       },
       {
         model_name: 'claude-sonnet',
         version: '2',
         configured: { ModelRatio: 1.5 },
         effective: { ModelRatio: 1.5 },
+        has_builtin_pricing: false,
       },
     ],
   })
   fireEvent.click(screen.getByRole('button', { name: 'Show all models' }))
   const builtin = screen.getByRole('row', { name: /gpt-4\.1-mini/ })
   const custom = screen.getByRole('row', { name: /claude-sonnet/ })
-  expect(
-    within(builtin).queryByText('Has built-in pricing')
-  ).not.toBeInTheDocument()
+  expect(within(builtin).getByText('Has built-in pricing')).toBeVisible()
   expect(within(builtin).getByText('Price needs attention')).toBeVisible()
-  expect(
-    within(custom).queryByText('No built-in pricing')
-  ).not.toBeInTheDocument()
+  expect(within(custom).getByText('No built-in pricing')).toBeVisible()
   fireEvent.click(within(builtin).getByText('gpt-4.1-mini'))
   expect(
-    screen.queryByText(
+    await screen.findByText(
       'This model has built-in default pricing and may have custom overrides. Built-in expressions take effect again when custom pricing is removed.'
     )
-  ).not.toBeInTheDocument()
+  ).toBeVisible()
 })
 
 it('does not guess a pricing source when the server supplies no provenance', async () => {

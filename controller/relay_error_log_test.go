@@ -82,7 +82,7 @@ func TestProcessChannelErrorUsesSnapshotWithoutLeakingChannelMetadata(t *testing
 	}
 	adminInfo, ok := storedOther["admin_info"].(map[string]any)
 	require.True(t, ok)
-	assert.NotContains(t, adminInfo, "use_channel")
+	assert.Equal(t, []any{"101"}, adminInfo["use_channel"])
 
 	logs, total, err := model.GetUserLogs(7, model.LogFilter{Type: model.LogTypeError}, 0, 10)
 	require.NoError(t, err)

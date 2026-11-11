@@ -36,6 +36,7 @@ import type { ModelPricingEntry } from './api'
 
 export const PRICING_KEYS = [
   'ModelPrice',
+  'ModelSecondPrice',
   'ModelRatio',
   'CompletionRatio',
   'CacheRatio',
@@ -48,10 +49,11 @@ export const PRICING_KEYS = [
   'billing_setting.plugin_billing_expr',
 ] as const
 export type PricingKey = (typeof PRICING_KEYS)[number]
+type ModelSecondPriceConfig = NonNullable<ModelRatioData['secondPriceConfig']>
 export type PricingValues = Partial<
   Record<
     Exclude<PricingKey, 'billing_setting.plugin_billing_expr'>,
-    number | string
+    number | string | Record<string, number> | ModelSecondPriceConfig
   >
 > & {
   'billing_setting.plugin_billing_expr'?: Record<string, string>
@@ -91,6 +93,11 @@ export function modelPricingDisplay(
     completion_ratio: Number(values.CompletionRatio ?? Number.NaN),
     model_price:
       values.ModelPrice === undefined ? undefined : Number(values.ModelPrice),
+    model_second_price:
+      values.ModelSecondPrice && typeof values.ModelSecondPrice === 'object'
+        ? (values.ModelSecondPrice as { prices?: Record<string, number> })
+            .prices
+        : undefined,
     cache_ratio:
       values.CacheRatio === undefined || Number(values.CacheRatio) === 1
         ? undefined
@@ -144,6 +151,8 @@ export const pricingFieldMap = {
   audioCompletionRatio: 'AudioCompletionRatio',
 } as const
 
+const secondPriceKey = 'ModelSecondPrice' as const
+
 export function pricingOptions(
   values: Record<string, string | boolean>
 ): PricingOptions {
@@ -168,6 +177,7 @@ export function pricingOptions(
 export function pricingRows(options: PricingOptions): ModelPricingSnapshot[] {
   return buildModelSnapshots({
     modelPrice: options.ModelPrice,
+    modelSecondPrice: options.ModelSecondPrice,
     modelRatio: options.ModelRatio,
     completionRatio: options.CompletionRatio,
     cacheRatio: options.CacheRatio,
@@ -226,13 +236,49 @@ export function pricingRow(
   const row = pricingRows(options).find((entry) => entry.name === name)
   let billingMode: ModelRatioData['billingMode'] = 'per-token'
   if (row?.billingMode === 'tiered_expr') billingMode = 'tiered_expr'
+  else if (row?.billingMode === 'per-second') billingMode = 'per-second'
   else if (row?.price) billingMode = 'per-request'
+  const configured = values[secondPriceKey]
+  const secondPriceConfig =
+    configured && typeof configured === 'object' && !Array.isArray(configured)
+      ? (configured as ModelRatioData['secondPriceConfig'])
+      : undefined
   return {
     ...row,
     name,
     billingMode,
+    secondPriceConfig,
     pluginBillingExpr: values['billing_setting.plugin_billing_expr'],
   }
+}
+
+// Convert legacy per-second drafts and imported prices to task expressions.
+export function perSecondExpression(data: ModelRatioData): string {
+  const price = Number(data.price)
+  if (!data.price?.trim() || !Number.isFinite(price) || price < 0) {
+    throw new Error(t('Enter a finite, non-negative price'))
+  }
+  let expression = `tier("base", u("seconds") * ${price})`
+  const prices = new Map<string, number>()
+  for (const [name, value] of Object.entries(
+    data.secondPriceConfig?.prices ?? {}
+  )) {
+    const resolution = name.trim().toLowerCase()
+    if (
+      !resolution ||
+      !Number.isFinite(value) ||
+      value < 0 ||
+      (prices.has(resolution) && prices.get(resolution) !== value)
+    ) {
+      throw new Error(t('Invalid pricing value'))
+    }
+    prices.set(resolution, value)
+  }
+  for (const resolution of [...prices.keys()].sort().reverse()) {
+    const literal = JSON.stringify(resolution)
+    expression = `lower(trim(u("resolution") ?? "")) == ${literal} ? tier(${literal}, u("seconds") * ${prices.get(resolution)}) : (${expression})`
+  }
+  return expression
 }
 
 export function pricingFromDraft(data: ModelRatioData): PricingValues {
@@ -241,7 +287,9 @@ export function pricingFromDraft(data: ModelRatioData): PricingValues {
       ? {}
       : { 'billing_setting.plugin_billing_expr': data.pluginBillingExpr }),
     'billing_setting.billing_mode':
-      data.billingMode === 'tiered_expr' ? 'tiered_expr' : 'ratio',
+      data.billingMode === 'tiered_expr' || data.billingMode === 'per-second'
+        ? 'tiered_expr'
+        : 'ratio',
   }
   for (const [field, key] of Object.entries(pricingFieldMap)) {
     const value = data[field as keyof typeof pricingFieldMap]
@@ -250,11 +298,11 @@ export function pricingFromDraft(data: ModelRatioData): PricingValues {
     if (!Number.isFinite(number) || number < 0) {
       throw new Error(t('Enter a finite, non-negative price'))
     }
+    const isFixedPrice =
+      data.billingMode === 'per-request' || data.billingMode === 'per-second'
     if (
       data.billingMode === 'tiered_expr' ||
-      (data.billingMode === 'per-request'
-        ? key === 'ModelPrice'
-        : key !== 'ModelPrice')
+      (isFixedPrice ? key === 'ModelPrice' : key !== 'ModelPrice')
     ) {
       values[key] = number
     }
@@ -264,6 +312,10 @@ export function pricingFromDraft(data: ModelRatioData): PricingValues {
       data.billingExpr || '',
       data.requestRuleExpr || ''
     )
+  }
+  if (data.billingMode === 'per-second') {
+    values['billing_setting.billing_mode'] = 'tiered_expr'
+    values['billing_setting.billing_expr'] = perSecondExpression(data)
   }
   return values
 }
@@ -339,7 +391,11 @@ export function pricingValuesByModel(
       throw new Error(t('Pricing must be a JSON object'))
     }
     for (const [name, value] of Object.entries(map)) {
-      if (typeof value !== 'number' && typeof value !== 'string') {
+      if (
+        typeof value !== 'number' &&
+        typeof value !== 'string' &&
+        (typeof value !== 'object' || value === null || Array.isArray(value))
+      ) {
         throw new Error(t('Invalid pricing value'))
       }
       if (key === 'billing_setting.plugin_billing_expr') {
@@ -371,11 +427,14 @@ export function applyPriceSyncSelections(
     const expression =
       typeof fields.billing_expr === 'string' &&
       fields.billing_expr.trim() !== ''
+    const perSecond =
+      fields.billing_mode === 'per_second' &&
+      typeof fields.model_price === 'number'
     if (expression) {
       next['billing_setting.billing_mode'] = 'tiered_expr'
       next['billing_setting.billing_expr'] = fields.billing_expr
     } else {
-      next['billing_setting.billing_mode'] = 'ratio'
+      next['billing_setting.billing_mode'] = perSecond ? 'per_second' : 'ratio'
       const fixed = fields.model_price !== undefined
       for (const [field, value] of Object.entries(fields)) {
         if (field === 'billing_mode' || field === 'billing_expr') continue

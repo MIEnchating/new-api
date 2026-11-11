@@ -28,6 +28,8 @@ func TestPricingSyncExpressionPriority(t *testing.T) {
 		{"expression imports without legacy conflicts", map[string]any{"model_ratio": map[string]float64{"m": 1}}, map[string]any{"billing_mode": map[string]string{"m": "tiered_expr"}, "billing_expr": map[string]string{"m": expression}, "model_ratio": map[string]float64{"m": 3}, "model_price": map[string]float64{"m": 2}}, []string{"billing_mode", "billing_expr"}},
 		{"inactive expression follows explicit ratio mode", map[string]any{"model_ratio": map[string]float64{"m": 1}}, map[string]any{"billing_mode": map[string]string{"m": "ratio"}, "billing_expr": map[string]string{"m": expression}, "model_ratio": map[string]float64{"m": 3}}, []string{"model_ratio"}},
 		{"empty active expression never imports a false free price", map[string]any{}, map[string]any{"billing_mode": map[string]string{"m": "tiered_expr"}, "billing_expr": map[string]string{"m": " "}, "model_ratio": map[string]float64{"m": 0}}, nil},
+		{"equal per-second prices preserve their mode", map[string]any{"billing_mode": map[string]string{"m": "per_second"}, "model_price": map[string]float64{"m": 0.4}}, map[string]any{"billing_mode": map[string]string{"m": "per_second"}, "model_price": map[string]float64{"m": 0.4}, "model_ratio": map[string]float64{"m": 9}}, nil},
+		{"per-second prices import as a complete price", map[string]any{"model_ratio": map[string]float64{"m": 1}}, map[string]any{"billing_mode": map[string]string{"m": "per_second"}, "model_price": map[string]float64{"m": 0.4}}, []string{"billing_mode", "model_price"}},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {

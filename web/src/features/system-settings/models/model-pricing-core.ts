@@ -77,9 +77,13 @@ export type ModelRatioData = {
   imageRatio?: string
   audioRatio?: string
   audioCompletionRatio?: string
-  billingMode?: PricingMode
+  // Legacy drafts remain readable, but cannot be selected as a pricing mode.
+  billingMode?: PricingMode | 'per-second'
   billingExpr?: string
   requestRuleExpr?: string
+  secondPriceConfig?: {
+    prices: Record<string, number>
+  }
 }
 
 export function usesTaskModelPricing(
@@ -254,7 +258,7 @@ export function createInitialLaneState(data?: ModelRatioData | null) {
 
 export function buildPreviewRows(
   values: ModelPricingFormValues,
-  mode: PricingMode,
+  mode: NonNullable<ModelRatioData['billingMode']>,
   billingExpr: string,
   requestRuleExpr: string,
   promptPrice: string,
@@ -291,6 +295,18 @@ export function buildPreviewRows(
           : t('Empty'),
       },
       ...pricingAdjustmentRows(billingDetails, t),
+    ]
+  }
+
+  if (mode === 'per-second') {
+    return [
+      {
+        key: 'price',
+        label: t('Price per second'),
+        value: values.price
+          ? formatPricingAmount(values.price, currency)
+          : t('Empty'),
+      },
     ]
   }
 

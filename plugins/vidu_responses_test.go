@@ -33,8 +33,8 @@ func TestViduResponsesProtocol(t *testing.T) {
 			"duration": float64(8),
 			"size":     "720p",
 		},
-		wantUsageKeys:       []string{"credits", "duration", "resolution"},
-		wantSubmitUsageKeys: []string{"duration", "resolution"},
+		wantUsageKeys:       []string{"credits", "duration", "resolution", "seconds"},
+		wantSubmitUsageKeys: []string{"duration", "resolution", "seconds"},
 		wantVendorName:      "vidu",
 	})
 }
@@ -54,7 +54,7 @@ func TestViduMetadataCannotChangeWhatIsBilled(t *testing.T) {
 	usage, err := plugin.Engine.Call(t.Context(), "extractUsage", ctx)
 	require.NoError(t, err)
 	body := decodePluginValue(t, descriptor)["body"].(map[string]any)
-	assert.Equal(t, map[string]any{"duration": float64(4), "resolution": "540p"}, decodePluginValue(t, usage))
+	assert.Equal(t, map[string]any{"seconds": float64(4), "duration": float64(4), "resolution": "540p"}, decodePluginValue(t, usage))
 	assert.Equal(t, "viduq2", body["model"])
 	assert.Equal(t, float64(4), body["duration"])
 	assert.Equal(t, "540p", body["resolution"])
@@ -184,14 +184,14 @@ func TestViduVideosProtocolTakesAnyModel(t *testing.T) {
 			body:      map[string]any{"model": "viduq5", "prompt": "a cat", "size": "1920x1080"},
 			wantURL:   "https://api.vidu.example/ent/v2/text2video",
 			wantBody:  map[string]any{"model": "viduq5", "prompt": "a cat", "duration": float64(5), "resolution": "1080p"},
-			wantFacts: map[string]any{"duration": float64(5), "resolution": "1080p"},
+			wantFacts: map[string]any{"seconds": float64(5), "duration": float64(5), "resolution": "1080p"},
 		},
 		{
 			name:      "a model the endpoint does not list",
 			body:      map[string]any{"model": "viduq2", "prompt": "a cat", "input_reference": "https://cdn.example/a.png", "seconds": "8"},
 			wantURL:   "https://api.vidu.example/ent/v2/img2video",
 			wantBody:  map[string]any{"model": "viduq2", "prompt": "a cat", "images": []any{"https://cdn.example/a.png"}, "duration": float64(8), "resolution": "720p"},
-			wantFacts: map[string]any{"duration": float64(8), "resolution": "720p"},
+			wantFacts: map[string]any{"seconds": float64(8), "duration": float64(8), "resolution": "720p"},
 		},
 		{
 			name:      "an alias takes the channel model's defaults",
@@ -199,7 +199,7 @@ func TestViduVideosProtocolTakesAnyModel(t *testing.T) {
 			upstream:  "viduq3-pro",
 			wantURL:   "https://api.vidu.example/ent/v2/text2video",
 			wantBody:  map[string]any{"model": "viduq3-pro", "prompt": "a cat", "duration": float64(5), "resolution": "720p"},
-			wantFacts: map[string]any{"duration": float64(5), "resolution": "720p"},
+			wantFacts: map[string]any{"seconds": float64(5), "duration": float64(5), "resolution": "720p"},
 		},
 		{
 			name: "a vendorBody field is not a native body",
@@ -207,7 +207,7 @@ func TestViduVideosProtocolTakesAnyModel(t *testing.T) {
 				"vendorBody": map[string]any{"model": "viduq2", "prompt": "x", "callback_url": "https://client.example/hook"}},
 			wantURL:   "https://api.vidu.example/ent/v2/text2video",
 			wantBody:  map[string]any{"model": "viduq2", "prompt": "a cat", "duration": float64(5), "resolution": "720p"},
-			wantFacts: map[string]any{"duration": float64(5), "resolution": "720p"},
+			wantFacts: map[string]any{"seconds": float64(5), "duration": float64(5), "resolution": "720p"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -266,105 +266,105 @@ func TestViduNativeBodies(t *testing.T) {
 			name:      "defaults are reserved and nothing is added",
 			route:     "/ent/v2/text2video",
 			body:      map[string]any{"model": "viduq3-pro", "prompt": "a cat", "bgm": false},
-			wantFacts: map[string]any{"duration": float64(5), "resolution": "720p"},
+			wantFacts: map[string]any{"seconds": float64(5), "duration": float64(5), "resolution": "720p"},
 		},
 		{
 			name:  "subjects need no top-level images",
 			route: "/ent/v2/reference2video",
 			body: map[string]any{"model": "viduq2-pro", "prompt": "[@cat] runs", "duration": 8,
 				"subjects": []any{map[string]any{"name": "cat", "images": []any{"https://cdn.example/cat.png"}}}},
-			wantFacts: map[string]any{"duration": float64(8), "resolution": "720p"},
+			wantFacts: map[string]any{"seconds": float64(8), "duration": float64(8), "resolution": "720p"},
 		},
 		{
 			name:      "q4 renders 4K",
 			route:     "/ent/v2/img2video",
 			body:      map[string]any{"model": "viduq4-preview", "images": []any{"https://cdn.example/a.png"}, "resolution": "4K", "duration": 16},
-			wantFacts: map[string]any{"duration": float64(16), "resolution": "4K"},
+			wantFacts: map[string]any{"seconds": float64(16), "duration": float64(16), "resolution": "4K"},
 		},
 		{
 			name:      "drama defaults to eight seconds in 1080p",
 			route:     "/ent/v2/reference2video",
 			body:      map[string]any{"model": "viduq3-drama", "prompt": "a scene", "images": []any{"https://cdn.example/a.png"}},
-			wantFacts: map[string]any{"duration": float64(8), "resolution": "1080p"},
+			wantFacts: map[string]any{"seconds": float64(8), "duration": float64(8), "resolution": "1080p"},
 		},
 		{
 			name:      "1.5 defaults to four seconds in 360p",
 			route:     "/ent/v2/text2video",
 			body:      map[string]any{"model": "vidu1.5", "prompt": "a cat"},
-			wantFacts: map[string]any{"duration": float64(4), "resolution": "360p"},
+			wantFacts: map[string]any{"seconds": float64(4), "duration": float64(4), "resolution": "360p"},
 		},
 		{
 			name:      "1.5 references take eight seconds",
 			route:     "/ent/v2/reference2video",
 			body:      map[string]any{"model": "vidu1.5", "prompt": "a scene", "images": []any{"a", "b", "c"}, "duration": 8},
-			wantFacts: map[string]any{"duration": float64(8), "resolution": "720p"},
+			wantFacts: map[string]any{"seconds": float64(8), "duration": float64(8), "resolution": "720p"},
 		},
 		{
 			name:      "a pixel size reserves the dearest resolution",
 			route:     "/ent/v2/text2video",
 			body:      map[string]any{"model": "viduq2", "prompt": "a cat", "resolution": "1280x720"},
-			wantFacts: map[string]any{"duration": float64(5), "resolution": "1080p"},
+			wantFacts: map[string]any{"seconds": float64(5), "duration": float64(5), "resolution": "1080p"},
 		},
 		{
 			name:      "a resolution the model does not list is reserved as asked",
 			route:     "/ent/v2/img2video",
 			body:      map[string]any{"model": "viduq1", "images": []any{"https://cdn.example/a.png"}, "resolution": "720p"},
-			wantFacts: map[string]any{"duration": float64(5), "resolution": "720p"},
+			wantFacts: map[string]any{"seconds": float64(5), "duration": float64(5), "resolution": "720p"},
 		},
 		{
 			name:      "a model the endpoint does not list reserves its dearest elsewhere",
 			route:     "/ent/v2/start-end2video",
 			body:      map[string]any{"model": "viduq2", "images": []any{"a", "b"}},
-			wantFacts: map[string]any{"duration": float64(10), "resolution": "1080p"},
+			wantFacts: map[string]any{"seconds": float64(10), "duration": float64(10), "resolution": "1080p"},
 		},
 		{
 			name:      "2.0 at eight seconds in 1080p",
 			route:     "/ent/v2/img2video",
 			body:      map[string]any{"model": "vidu2.0", "images": []any{"a"}, "duration": 8, "resolution": "1080p"},
-			wantFacts: map[string]any{"duration": float64(8), "resolution": "1080p"},
+			wantFacts: map[string]any{"seconds": float64(8), "duration": float64(8), "resolution": "1080p"},
 		},
 		{
 			name:      "2.0 at six seconds",
 			route:     "/ent/v2/img2video",
 			body:      map[string]any{"model": "vidu2.0", "images": []any{"a"}, "duration": 6},
-			wantFacts: map[string]any{"duration": float64(6), "resolution": "360p"},
+			wantFacts: map[string]any{"seconds": float64(6), "duration": float64(6), "resolution": "360p"},
 		},
 		{
 			name:      "1.5 at five seconds",
 			route:     "/ent/v2/start-end2video",
 			body:      map[string]any{"model": "vidu1.5", "images": []any{"a", "b"}, "duration": 5},
-			wantFacts: map[string]any{"duration": float64(5), "resolution": "360p"},
+			wantFacts: map[string]any{"seconds": float64(5), "duration": float64(5), "resolution": "360p"},
 		},
 		{
 			name:      "a duration past the model's longest is reserved as asked",
 			route:     "/ent/v2/text2video",
 			body:      map[string]any{"model": "viduq3-turbo", "prompt": "a cat", "duration": 17},
-			wantFacts: map[string]any{"duration": float64(17), "resolution": "720p"},
+			wantFacts: map[string]any{"seconds": float64(17), "duration": float64(17), "resolution": "720p"},
 		},
 		{
 			name:      "a duration given as a string",
 			route:     "/ent/v2/text2video",
 			body:      map[string]any{"model": "viduq3-turbo", "prompt": "a cat", "duration": "8"},
-			wantFacts: map[string]any{"duration": float64(8), "resolution": "720p"},
+			wantFacts: map[string]any{"seconds": float64(8), "duration": float64(8), "resolution": "720p"},
 		},
 		{
 			name:      "an unreadable duration reserves the longest in the dearest resolution",
 			route:     "/ent/v2/text2video",
 			body:      map[string]any{"model": "viduq3-pro", "prompt": "a cat", "duration": "long"},
-			wantFacts: map[string]any{"duration": float64(16), "resolution": "1080p"},
+			wantFacts: map[string]any{"seconds": float64(16), "duration": float64(16), "resolution": "1080p"},
 		},
 		{
 			name:      "a model the plugin does not list reserves the dearest of every model",
 			route:     "/ent/v2/text2video",
 			body:      map[string]any{"model": "viduq5", "prompt": "a cat"},
-			wantFacts: map[string]any{"duration": float64(16), "resolution": "4K"},
+			wantFacts: map[string]any{"seconds": float64(16), "duration": float64(16), "resolution": "4K"},
 		},
 		{
 			name:      "an alias goes as the channel's model",
 			route:     "/ent/v2/text2video",
 			body:      map[string]any{"model": "my-vidu", "prompt": "a cat"},
 			upstream:  "viduq3-pro",
-			wantFacts: map[string]any{"duration": float64(5), "resolution": "720p"},
+			wantFacts: map[string]any{"seconds": float64(5), "duration": float64(5), "resolution": "720p"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

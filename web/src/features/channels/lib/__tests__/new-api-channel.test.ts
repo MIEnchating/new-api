@@ -103,14 +103,14 @@ describe('New API channel', () => {
     expect(result.success).toBe(true)
   })
 
-  test('preserves additional stored settings when saving a New API channel', () => {
+  test('removes the retired Claude Code emulation setting', () => {
     const payload = transformFormDataToCreatePayload({
       ...newAPIForm('https://upstream.example'),
       settings: '{"claude_code_client_spoofing":true}',
     })
     const settings = JSON.parse(payload.channel.settings || '{}')
 
-    expect(settings.claude_code_client_spoofing).toBe(true)
+    expect('claude_code_client_spoofing' in settings).toBe(false)
   })
 })
 

@@ -14,9 +14,48 @@ import (
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
+
+func TestModelPricingWriteRejectsDuplicateKeysWithoutChangingRows(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	connection, err := db.DB()
+	require.NoError(t, err)
+	connection.SetMaxOpenConns(1)
+	previousDB := DB
+	previousType := common.MainDatabaseType()
+	DB = db
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	initCol()
+	t.Cleanup(func() {
+		DB = previousDB
+		common.SetMainDatabaseType(previousType)
+		initCol()
+		require.NoError(t, connection.Close())
+	})
+	// Represent a legacy options table whose primary key is missing.
+	type optionRow struct {
+		Key   string
+		Value string
+	}
+	require.NoError(t, db.Table("options").AutoMigrate(&optionRow{}))
+	rows := []optionRow{{Key: "ModelPrice", Value: `{"video":1}`}, {Key: "ModelPrice", Value: `{"video":2}`}}
+	require.NoError(t, db.Table("options").Create(&rows).Error)
+	mutated := false
+	err = mutateModelPricingOptions(func(_ *gorm.DB, _ map[string]map[string]any) error {
+		mutated = true
+		return nil
+	})
+	require.ErrorContains(t, err, "duplicate pricing keys")
+	assert.False(t, mutated)
+	var persisted []optionRow
+	require.NoError(t, db.Table("options").Order("value ASC").Find(&persisted).Error)
+	assert.Equal(t, rows, persisted)
+}
 
 func pricingUsagePluginSource(version, usageSchema string) string {
 	return fmt.Sprintf(`

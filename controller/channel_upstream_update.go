@@ -39,6 +39,8 @@ const (
 	channelUpstreamModelUpdateNotifyMaxChannelDetails     = 8
 	channelUpstreamModelUpdateNotifyMaxModelDetails       = 12
 	channelUpstreamModelUpdateNotifyMaxFailedChannelIDs   = 10
+	channelUpstreamModelResponseMaxBytes                  = 8 << 20
+	channelUpstreamModelRequestTimeout                    = 20 * time.Second
 )
 
 var channelUpstreamModelUpdateSelectFields = []string{
@@ -306,6 +308,18 @@ func sanitizeFetchModelsError(err error, key string) error {
 	return errors.New(message)
 }
 
+func readUpstreamModelResponse(body io.Reader) ([]byte, error) {
+	limited := &io.LimitedReader{R: body, N: channelUpstreamModelResponseMaxBytes + 1}
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if limited.N <= 0 {
+		return nil, fmt.Errorf("upstream model response exceeds %d bytes", channelUpstreamModelResponseMaxBytes)
+	}
+	return data, nil
+}
+
 func sanitizeAdvancedCustomRequestError(err error, key string, requestURL string) error {
 	err = sanitizeFetchModelsError(err, key)
 	if err == nil {
@@ -335,7 +349,9 @@ func sanitizeAdvancedCustomRequestError(err error, key string, requestURL string
 }
 
 func getFetchModelsResponseBody(method string, requestURL string, channel *model.Channel, headers http.Header) ([]byte, error) {
-	request, err := http.NewRequest(method, requestURL, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), channelUpstreamModelRequestTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, method, requestURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +376,7 @@ func getFetchModelsResponseBody(method string, requestURL string, channel *model
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("status code: %d", response.StatusCode)
 	}
-	return io.ReadAll(response.Body)
+	return readUpstreamModelResponse(response.Body)
 }
 
 func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
@@ -368,6 +384,25 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		plugin, ok := jsplugin.DefaultRegistry.Get(channel.GetSetting().TaskPluginKey)
 		if !ok {
 			return nil, fmt.Errorf("task plugin %q is not registered", channel.GetSetting().TaskPluginKey)
+		}
+		// Sora plugins use the OpenAI-compatible /v1/models endpoint. Keep
+		// discovery dynamic for type-61 channels while retaining the manifest
+		// models as a fallback for self-hosted endpoints without model listing.
+		if channel.GetSetting().TaskPluginKey == "sora" && channel.GetBaseURL() != "" {
+			key, _, apiErr := channel.GetNextEnabledKey()
+			if apiErr != nil {
+				return nil, fmt.Errorf("获取渠道密钥失败: %w", apiErr)
+			}
+			key = strings.TrimSpace(key)
+			headers, err := buildFetchModelsHeaders(channel, key)
+			if err == nil {
+				body, fetchErr := getFetchModelsResponseBody(http.MethodGet, strings.TrimRight(channel.GetBaseURL(), "/")+"/v1/models", channel, headers)
+				if fetchErr == nil {
+					if models, parseErr := parseOpenAIModelIDs(body); parseErr == nil {
+						return models, nil
+					}
+				}
+			}
 		}
 		return normalizeModelNames(plugin.Meta.Models), nil
 	}

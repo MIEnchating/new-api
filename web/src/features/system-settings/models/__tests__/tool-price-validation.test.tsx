@@ -19,11 +19,43 @@ For commercial licensing, please contact support@quantumnous.com
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen } from '@testing-library/react'
 import i18next from 'i18next'
-import { beforeAll, describe, expect, test } from 'vitest'
+import { afterEach, beforeAll, describe, expect, test } from 'vitest'
+
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { ToolPriceSettings } from '../tool-price-settings'
 
 describe('tool price validation', () => {
+  const initialConfig = useSystemConfigStore.getState().config
+  afterEach(() => useSystemConfigStore.setState({ config: initialConfig }))
+
+  test('converts vendor CNY defaults to USD while preserving explicit USD overrides', () => {
+    useSystemConfigStore.setState({
+      config: {
+        ...initialConfig,
+        currency: { ...initialConfig.currency, usdExchangeRate: 10 },
+      },
+    })
+    const queryClient = new QueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToolPriceSettings defaultValue='{"search_std":0,"search_pro":2}' />
+      </QueryClientProvider>
+    )
+    expect(
+      screen.getByRole('spinbutton', { name: 'Price ($/1K calls): search_std' })
+    ).toHaveValue(0)
+    expect(
+      screen.getByRole('spinbutton', { name: 'Price ($/1K calls): search_pro' })
+    ).toHaveValue(2)
+    expect(
+      screen.getByRole('spinbutton', {
+        name: 'Price ($/1K calls): search_pro_sogou',
+      })
+    ).toHaveValue(5)
+    queryClient.clear()
+  })
+
   beforeAll(() => {
     i18next.addResourceBundle('en', 'translation', {
       'Price ($/1K calls)': 'Price ($/1K calls)',

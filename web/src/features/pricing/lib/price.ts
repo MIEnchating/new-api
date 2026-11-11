@@ -225,7 +225,12 @@ export function formatFixedPrice(
   }
 
   const ratio = getConfiguredGroupRatio(groupRatio, group)
-  let priceInUSD = (model.model_price || 0) * ratio
+  const resolutionPrices = Object.values(model.model_second_price || {})
+  const basePrice =
+    model.billing_mode === 'per_second' && resolutionPrices.length > 0
+      ? Math.min(...resolutionPrices)
+      : model.model_price || 0
+  let priceInUSD = basePrice * ratio
 
   priceInUSD = applyRechargeRate(
     priceInUSD,
@@ -258,7 +263,12 @@ export function formatRequestPrice(
 
   const displayGroupRatio = getDisplayGroupRatio(model, selectedGroup)
 
-  let priceInUSD = (model.model_price || 0) * displayGroupRatio
+  const resolutionPrices = Object.values(model.model_second_price || {})
+  const basePrice =
+    model.billing_mode === 'per_second' && resolutionPrices.length > 0
+      ? Math.min(...resolutionPrices)
+      : model.model_price || 0
+  let priceInUSD = basePrice * displayGroupRatio
 
   priceInUSD = applyRechargeRate(
     priceInUSD,

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,27 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+const streamOutputStartedKey = "stream_client_output_started"
+
+func markStreamOutputStarted(c *gin.Context) {
+	if c != nil {
+		c.Set(streamOutputStartedKey, true)
+	}
+}
+
+func StreamOutputStarted(c *gin.Context) bool {
+	return c != nil && c.GetBool(streamOutputStartedKey)
+}
+
+func markClaudeStreamOutputStarted(c *gin.Context, eventType string) {
+	// Anthropic ping events are protocol keepalives. They can safely precede a
+	// retry or route failover and must not lock the request to a failed stream.
+	if strings.EqualFold(strings.TrimSpace(eventType), "ping") {
+		return
+	}
+	markStreamOutputStarted(c)
+}
 
 // streamKeepAliveWriter 在业务写入前保活，写入开始时等待心跳退出。
 type streamKeepAliveWriter struct {
@@ -202,6 +224,7 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 	if err != nil {
 		common.SysError(common.LogText("error marshalling stream response: %s", err.Error()))
 	} else {
+		markClaudeStreamOutputStarted(c, resp.Type)
 		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
 	}
@@ -214,6 +237,7 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 		return
 	}
 
+	markClaudeStreamOutputStarted(c, resp.Type)
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s\n", data)})
 	_ = FlushWriter(c)
@@ -224,6 +248,7 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
+	markStreamOutputStarted(c)
 	event := common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)}
 	if err := event.Render(c.Writer); err != nil {
 		return err
@@ -244,6 +269,7 @@ func StringData(c *gin.Context, str string) error {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
+	markStreamOutputStarted(c)
 	c.Render(-1, common.CustomEvent{Data: "data: " + str})
 	return FlushWriter(c)
 }
@@ -283,7 +309,6 @@ func WssString(c *gin.Context, ws *websocket.Conn, str string) error {
 		logger.LogError(c, common.LogText("websocket connection is nil"))
 		return errors.New("websocket connection is nil")
 	}
-	//common.LogInfo(c, fmt.Sprintf("sending message: %s", str))
 	return ws.WriteMessage(1, []byte(str))
 }
 
@@ -296,7 +321,6 @@ func WssObject(c *gin.Context, ws *websocket.Conn, object any) error {
 		logger.LogError(c, common.LogText("websocket connection is nil"))
 		return errors.New("websocket connection is nil")
 	}
-	//common.LogInfo(c, fmt.Sprintf("sending message: %s", jsonData))
 	return ws.WriteMessage(1, jsonData)
 }
 

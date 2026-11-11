@@ -94,6 +94,49 @@ export interface ChannelAffinityInfo {
   using_group?: string
 }
 
+interface ChannelExecutionFinalErrorInfo {
+  status_code?: number
+  message?: string
+}
+
+export interface ChannelExecutionTraceInfo {
+  compact?: boolean
+  request_id?: string
+  mode?: 'route' | 'retry'
+  group?: string
+  route_groups?: string[]
+  route_group_statuses?: Array<{
+    group: string
+    status?: 'pending' | 'active' | 'cooling' | 'skipped' | 'success' | 'failed'
+    cooldown_until?: number
+  }>
+  model?: string
+  request_path?: string
+  status?: 'running' | 'success' | 'failed' | 'cancelled'
+  started_at?: number
+  updated_at?: number
+  channel_ids?: number[]
+  channel_name?: string
+  priority?: number
+  affinity_hit?: boolean
+  original_final_error?: ChannelExecutionFinalErrorInfo
+  user_visible_final_error?: ChannelExecutionFinalErrorInfo
+  custom_error_applied?: boolean
+  events?: Array<{
+    sequence?: number
+    timestamp?: number
+    group?: string
+    channel_id?: number
+    channel_name?: string
+    priority?: number
+    state?: string
+    reason?: string
+    retry_index?: number
+    next_ids?: number[]
+    cooldown_until?: number
+  }>
+}
+
 export const USAGE_BILLING_PATH = {
   LOCAL: 'local',
   UPSTREAM: 'upstream',
@@ -114,15 +157,32 @@ interface ToolSurchargeItem {
   price: number
 }
 
+export interface UpstreamRequestNode {
+  id: string
+  source: string
+  service: string
+  role: string
+}
+
+export interface UpstreamRequestAttempt {
+  attempt: number
+  channel_id: number
+  channel_type: string
+  nodes: UpstreamRequestNode[]
+}
+
 export interface LogOtherData {
   admin_info?: {
     retry_intermediate?: boolean
     request_policy?: PolicyEvent[]
     is_multi_key?: boolean
     multi_key_index?: number
+    use_channel?: Array<number | string>
     local_count_tokens?: boolean
     usage_billing_path?: UsageBillingPath | string
     channel_affinity?: ChannelAffinityInfo
+    channel_execution_trace?: ChannelExecutionTraceInfo
+    upstream_request_chain?: UpstreamRequestAttempt[]
     upstream_request_ids?: string[]
     upstream_request_id_sources?: Record<string, string>
     // Top-up audit fields (type=1, admin only)

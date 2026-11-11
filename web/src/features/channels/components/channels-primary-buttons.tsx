@@ -29,6 +29,7 @@ import {
   ListChecks,
   RefreshCw,
   ArrowUpFromLine,
+  Workflow,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -68,6 +69,7 @@ import {
 import type { ChannelSortBy } from '../types'
 import { ChannelSortControl } from './channel-priority-controls'
 import { useChannels } from './channels-provider'
+import { ChannelExecutionHubDialog } from './dialogs/channel-execution-hub-dialog'
 
 const route = getRouteApi('/_authenticated/channels/')
 
@@ -90,6 +92,7 @@ export function ChannelsPrimaryButtons() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [showConsistencyDialog, setShowConsistencyDialog] = useState(false)
   const [isRepairingConsistency, setIsRepairingConsistency] = useState(false)
+  const [executionDialogOpen, setExecutionDialogOpen] = useState(false)
   const currentUser = useAuthStore((s) => s.auth.user)
   const canEditSensitive = hasPermission(
     currentUser,
@@ -156,6 +159,28 @@ export function ChannelsPrimaryButtons() {
             })
           }}
         />
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                type='button'
+                variant='outline'
+                size='sm'
+                onClick={() => setExecutionDialogOpen(true)}
+                aria-label={t('Channel execution')}
+                data-mobile-compact-action='execution'
+                className='max-sm:px-2'
+              />
+            }
+          >
+            <Workflow className='h-4 w-4' />
+            <span className='sr-only sm:not-sr-only'>
+              {t('Channel execution')}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{t('Channel execution')}</TooltipContent>
+        </Tooltip>
 
         {/* Create Channel */}
         <Tooltip>
@@ -325,6 +350,11 @@ export function ChannelsPrimaryButtons() {
             setIsRepairingConsistency(false)
           }
         }}
+      />
+
+      <ChannelExecutionHubDialog
+        open={executionDialogOpen}
+        onOpenChange={setExecutionDialogOpen}
       />
     </>
   )

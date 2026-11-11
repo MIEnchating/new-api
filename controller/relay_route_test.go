@@ -13,6 +13,8 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -62,6 +64,19 @@ func TestShouldRetryRejectsContextWindowErrorWithRetryableStatus(t *testing.T) {
 	}, http.StatusBadGateway)
 
 	assert.False(t, shouldRetry(c, err, 2))
+}
+
+func TestChannelExecutionErrorReasonIncludesHiddenTransportCause(t *testing.T) {
+	err := types.NewError(
+		errors.New(`Post "https://upstream.example/v1/responses?key=diagnostic-key": EOF`),
+		types.ErrorCodeDoRequestFailed,
+		types.ErrOptionWithHideErrMsg("upstream error: do request failed"),
+	)
+
+	reason := channelExecutionErrorReason(err)
+	assert.Contains(t, reason, "upstream error: do request failed")
+	assert.Contains(t, reason, "https://upstream.example/v1/responses?key=diagnostic-key")
+	assert.Contains(t, reason, "transport_error=")
 }
 
 func TestReloadChannelForRetryRestoresCompleteChannel(t *testing.T) {
@@ -134,6 +149,78 @@ func TestTokenGroupRoutingDoesNotDependOnLegacyRetryBudget(t *testing.T) {
 	assert.False(t, shouldAttemptNextTaskChannel(c, 1, taskErr, 10, true, false))
 }
 
+func TestShouldAttemptNextChannelStopsAfterStreamOutput(t *testing.T) {
+	oldRouteEnabled := common.ChannelRouteCooldownEnabled
+	t.Cleanup(func() { common.ChannelRouteCooldownEnabled = oldRouteEnabled })
+	common.ChannelRouteCooldownEnabled = true
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	err := types.NewOpenAIError(errors.New("stream failed"), types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
+
+	assert.True(t, shouldAttemptNextChannel(c, err, 0, true))
+	helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "ping"}, `{\"type\":\"ping\"}`)
+	assert.True(t, shouldAttemptNextChannel(c, err, 0, true))
+	require.NoError(t, helper.StringData(c, `{\"type\":\"response.output_text.delta\"}`))
+	assert.False(t, shouldAttemptNextChannel(c, err, 10, true))
+}
+
+func TestSameChannelRetryAllowsClaudePingButStopsAfterBusinessOutput(t *testing.T) {
+	oldRouteEnabled := common.ChannelRouteCooldownEnabled
+	oldSameChannelRetries := common.ChannelRouteSameChannelRetries
+	t.Cleanup(func() {
+		common.ChannelRouteCooldownEnabled = oldRouteEnabled
+		common.ChannelRouteSameChannelRetries = oldSameChannelRetries
+	})
+	common.ChannelRouteCooldownEnabled = true
+	common.ChannelRouteSameChannelRetries = 1
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	err := types.NewOpenAIError(errors.New("stream failed"), types.ErrorCodeReadResponseBodyFailed, http.StatusBadGateway)
+
+	assert.True(t, shouldRetrySameChannel(c, err, 0))
+	helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "ping"}, `{"type":"ping"}`)
+	assert.True(t, shouldRetrySameChannel(c, err, 0))
+	helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "message_start"}, `{"type":"message_start"}`)
+	assert.False(t, shouldRetrySameChannel(c, err, 0))
+}
+
+func TestSameChannelRetryAllowsResponsesStreamEventBeforeBusinessOutput(t *testing.T) {
+	oldRouteEnabled := common.ChannelRouteCooldownEnabled
+	oldSameChannelRetries := common.ChannelRouteSameChannelRetries
+	t.Cleanup(func() {
+		common.ChannelRouteCooldownEnabled = oldRouteEnabled
+		common.ChannelRouteSameChannelRetries = oldSameChannelRetries
+	})
+	common.ChannelRouteCooldownEnabled = true
+	common.ChannelRouteSameChannelRetries = 2
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	streamErr := types.NewOpenAIError(
+		errors.New("upstream response stream failed"),
+		types.ErrorCodeBadResponse,
+		http.StatusBadGateway,
+		types.ErrOptionWithStreamEvent(),
+	)
+	httpErr := types.NewOpenAIError(
+		errors.New("upstream returned HTTP 502"),
+		types.ErrorCodeBadResponseStatusCode,
+		http.StatusBadGateway,
+	)
+
+	assert.True(t, shouldRetrySameChannel(c, streamErr, 0))
+	assert.True(t, shouldRetrySameChannel(c, httpErr, 0))
+	require.NoError(t, helper.StringData(c, `{"type":"response.output_text.delta"}`))
+	assert.False(t, shouldRetrySameChannel(c, streamErr, 0))
+}
+
 func TestSetRelayResponseRequestIdReplacesUpstreamRequestId(t *testing.T) {
 	err := types.NewOpenAIError(
 		errors.New("upstream failed (request id: upstream-request-id)"),
@@ -172,6 +259,17 @@ func TestWriteRelayErrorResponseAppliesCustomRuleBeforeJSON(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	c.Set(common.RequestIdKey, "custom-response-trace")
+	service.TrackChannelExecutionGroupEvent(
+		c,
+		"default",
+		"gpt-test",
+		"/v1/responses",
+		"failed",
+		"status_code=503, original intermediate failure",
+		0,
+	)
+	service.MarkChannelExecutionFailed(c, "status_code=500, original final failure")
 	apiErr := types.NewError(
 		errors.New(`Post "https://internal.example/v1/responses?key=must-not-leak": EOF`),
 		types.ErrorCodeDoRequestFailed,
@@ -190,6 +288,20 @@ func TestWriteRelayErrorResponseAppliesCustomRuleBeforeJSON(t *testing.T) {
 	assert.Equal(t, http.StatusTooManyRequests, logStatusCode)
 	assert.Contains(t, logContent, "服务繁忙")
 	assert.NotContains(t, logContent, "must-not-leak")
+
+	trace, found, traceErr := service.GetChannelExecutionTrace("custom-response-trace")
+	require.NoError(t, traceErr)
+	require.True(t, found)
+	require.NotNil(t, trace.OriginalFinalError)
+	assert.Equal(t, http.StatusInternalServerError, trace.OriginalFinalError.StatusCode)
+	assert.Contains(t, trace.OriginalFinalError.Message, "must-not-leak")
+	require.NotNil(t, trace.UserVisibleError)
+	assert.Equal(t, http.StatusTooManyRequests, trace.UserVisibleError.StatusCode)
+	assert.Contains(t, trace.UserVisibleError.Message, "服务繁忙")
+	assert.Contains(t, trace.UserVisibleError.Message, "local-id")
+	assert.True(t, trace.CustomErrorApplied)
+	require.NotEmpty(t, trace.Events)
+	assert.Equal(t, "status_code=503, original intermediate failure", trace.Events[0].Reason)
 }
 
 func TestWriteRelayErrorResponseMasksOriginalWhenCustomRulePassesThroughMessage(t *testing.T) {
@@ -248,6 +360,16 @@ func TestWriteRelayErrorResponseMasksFinalOriginalTransportErrorForUser(t *testi
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://upstream.example")
+	c.Set(common.RequestIdKey, "masked-final-transport-trace")
+	service.TrackChannelExecutionGroupEvent(
+		c,
+		"default",
+		"gpt-test",
+		"/v1/responses",
+		"failed",
+		"status_code=503, original intermediate failure",
+		0,
+	)
 	rawMessage := `Post "https://upstream.example/v1/responses?key=diagnostic-key": dial tcp 10.0.0.8:443: connection reset by peer`
 	apiErr := types.NewError(
 		errors.New(rawMessage),
@@ -263,6 +385,17 @@ func TestWriteRelayErrorResponseMasksFinalOriginalTransportErrorForUser(t *testi
 	assert.NotContains(t, recorder.Body.String(), "diagnostic-key")
 	assert.NotContains(t, recorder.Body.String(), "10.0.0.8")
 	assert.Contains(t, recorder.Body.String(), "***")
+
+	trace, found, traceErr := service.GetChannelExecutionTrace("masked-final-transport-trace")
+	require.NoError(t, traceErr)
+	require.True(t, found)
+	require.NotNil(t, trace.OriginalFinalError)
+	assert.Contains(t, trace.OriginalFinalError.Message, "upstream.example")
+	assert.Contains(t, trace.OriginalFinalError.Message, "10.0.0.8")
+	require.NotNil(t, trace.UserVisibleError)
+	assert.NotContains(t, trace.UserVisibleError.Message, "upstream.example")
+	assert.NotContains(t, trace.UserVisibleError.Message, "10.0.0.8")
+	assert.Contains(t, trace.UserVisibleError.Message, "***")
 }
 
 func TestWriteRelayErrorResponseUsesSSEAfterHeadersCommitted(t *testing.T) {
@@ -298,8 +431,7 @@ func TestWriteRelayErrorResponseUsesSSEAfterHeadersCommitted(t *testing.T) {
 	writeRelayErrorResponse(c, nil, types.RelayFormatOpenAIResponses, apiErr, "local-id")
 
 	assert.Equal(t, http.StatusOK, recorder.Code)
-	assert.Contains(t, recorder.Body.String(), "data: [DONE]")
-	assert.NotContains(t, recorder.Body.String(), "event: error")
+	assert.Contains(t, recorder.Body.String(), "event: error")
 	assert.Contains(t, recorder.Body.String(), "流式服务繁忙")
 	assert.NotContains(t, recorder.Body.String(), "}{")
 }

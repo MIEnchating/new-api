@@ -225,6 +225,7 @@ function seedanceUsageSchema(profile) {
   const resolutionLabels = {};
   for (const resolution of profile.resolutions) resolutionLabels[resolution] = { en: resolution, zh: resolution };
   const schema = {
+    seconds: { type: "number", unit: "second", description: { en: "Video generation unit price", zh: "视频生成单价" } },
     // Upstream billing tokens (estimated at submit, actual on completion).
     tokens: {
       type: "number",
@@ -266,10 +267,10 @@ function seedanceUsageExamples(profile) {
     resolution: resolution,
     seconds: 5,
   }));
-  if (profile.videoInput) specs.push({ label: "720p · 5s (+4s 输入视频)", resolution: "720p", seconds: 9, video_input: "video" });
+  if (profile.videoInput) specs.push({ label: "720p · 5s (+4s 输入视频)", resolution: "720p", seconds: 5, tokenSeconds: 9, video_input: "video" });
   if (profile.audio) specs.push({ label: "720p · 5s · 无声", resolution: "720p", seconds: 5, generate_audio: false });
   return specs.map((spec) => {
-    const facts = { tokens: Math.round(estimateTokens(spec.seconds, spec.resolution)), resolution: spec.resolution };
+    const facts = { seconds: spec.seconds, tokens: Math.round(estimateTokens(spec.tokenSeconds ?? spec.seconds, spec.resolution)), resolution: spec.resolution };
     if (profile.videoInput) facts.video_input = spec.video_input || "none";
     if (profile.audio) facts.generate_audio = spec.generate_audio !== false;
     return { label: spec.label, facts: facts };
@@ -613,6 +614,7 @@ function convertImage(ctx) {
 function imageEntries(body) {
   const data = body && body.data;
   if (Array.isArray(data)) return data.filter((item) => item && typeof item === "object" && !Array.isArray(item));
+  if (data && typeof data === "object") return [data];
   return [];
 }
 
@@ -631,7 +633,13 @@ function deliveredImages(body) {
 // inconsistent with the delivered payloads means the response is not
 // understood; the host then keeps the reservation instead of settling on a guess.
 function imagePayloads(body) {
-  const payloads = deliveredImages(body);
+  const entries = imageEntries(body);
+  const urls = entries.filter((item) => trimmed(item.url));
+  const base64 = entries.filter((item) => trimmed(item.b64_json));
+  // Compatible gateways can split one image into URL and base64 entries.
+  // Match the host image relay's max(URL payloads, base64 payloads) rule,
+  // keeping one representation per image for pixel-tier settlement.
+  const payloads = urls.length >= base64.length ? urls : base64;
   if (payloads.length > MAX_IMAGE_OUTPUTS) throw new Error("too many output images");
   const count = (body.usage || {}).generated_images;
   if (count !== undefined && (!Number.isInteger(count) || count < 0 || count > MAX_IMAGE_OUTPUTS || count !== payloads.length))
@@ -919,10 +927,6 @@ export function extractUsage(ctx) {
   }
   const req = ctx.requestBody || {};
   const metadata = req.vendorBody || req.metadata || {};
-  if (ctx.usagePurpose === "billing_ratios") {
-    const ratio = videoInputRatio(ctx.upstreamModel || ctx.model, metadata.resolution, metadata.content);
-    return ratio === 1 ? null : { video_input_ratio: ratio };
-  }
   const profile = videoProfile(ctx);
   // A missing duration or -1 (the model picks the length; Seedance 2.5
   // defaults to it) reserves the longest duration the model can produce.
@@ -934,8 +938,14 @@ export function extractUsage(ctx) {
   }
   if (seconds <= 0) seconds = 5;
   seconds = Math.min(seconds, 3600);
+  if (ctx.usagePurpose === "billing_ratios") {
+    const ratio = videoInputRatio(ctx.upstreamModel || ctx.model, metadata.resolution, metadata.content);
+    const ratios = {};
+    if (ratio !== 1) ratios.video_input_ratio = ratio;
+    return Object.keys(ratios).length ? ratios : null;
+  }
   const resolution = videoResolution(ctx);
-  const facts = { tokens: estimateTokens(seconds, resolution), resolution: resolution };
+  const facts = { seconds: seconds, tokens: estimateTokens(seconds, resolution), resolution: resolution };
   // Every model reports video_input, including those whose profile omits it:
   // expressions saved when all Seedance models declared the field then keep
   // matching their no-video tier.
@@ -1027,6 +1037,9 @@ export function extractUsageOnComplete(task, taskResult, body) {
   if (imageTask(task)) return imageUsage(body || {}, imageProfile(task));
   if (!body || body.status !== "succeeded") return {};
   const facts = {};
+  // Ark's task response reports the generated duration at the top level.
+  // Missing measurements keep the host reservation; never infer seconds from tokens.
+  if (typeof body.duration === "number" && Number.isFinite(body.duration) && body.duration >= 0 && body.duration <= 3600) facts.seconds = body.duration;
   const usage = body.usage || {};
   let tokens = Number(usage.completion_tokens);
   if (!Number.isFinite(tokens) || tokens <= 0) tokens = Number(usage.total_tokens);

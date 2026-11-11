@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -40,9 +42,12 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 		GroupSpecialRatio: -1,
 	}
 
-	// check auto group
-	autoGroup, exists := ctx.Get("auto_group")
-	if exists {
+	if routeGroup, exists := common.GetContextKey(ctx, constant.ContextKeyTokenGroupRouteGroup); exists {
+		if group, ok := routeGroup.(string); ok && group != "" {
+			logger.LogDebug(ctx, "final token route group: %s", group)
+			relayInfo.UsingGroup = group
+		}
+	} else if autoGroup, exists := ctx.Get("auto_group"); exists {
 		logger.LogDebug(ctx, "final group: %s", autoGroup)
 		relayInfo.UsingGroup = autoGroup.(string)
 	}
@@ -56,7 +61,7 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 		groupRatioInfo.HasSpecialRatio = true
 	} else {
 		// normal group ratio
-		groupRatioInfo.GroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
+		groupRatioInfo.GroupRatio, _, _ = ratio_setting.GetEffectiveGroupRatio(relayInfo.UsingGroup, time.Now())
 	}
 
 	return groupRatioInfo
@@ -216,6 +221,9 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 	modelPrice, success := ratio_setting.GetModelPrice(info.OriginModelName, true)
 	usePrice := success
 	var modelRatio float64
+	if !success && billing_setting.GetBillingMode(info.OriginModelName) == billing_setting.BillingModePerSecond {
+		return hosttypes.PriceData{}, modelPriceNotConfiguredError(c, info.OriginModelName, info.UserId)
+	}
 
 	if !success {
 		defaultPrice, ok := ratio_setting.GetDefaultModelPriceMap()[info.OriginModelName]

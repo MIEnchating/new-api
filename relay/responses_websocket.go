@@ -123,6 +123,7 @@ type responsesWSSession struct {
 	lockedUpstreamRequestID      string
 	lockedUpstreamRequestIDs     []string
 	lockedUpstreamRequestSources map[string]string
+	lockedUpstreamRequestChain   []common.UpstreamRequestAttempt
 	lockedContext                map[appconstant.ContextKey]any
 	lockedRoute                  dto.AdvancedCustomRoute
 }
@@ -249,6 +250,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 	var info *relaycommon.RelayInfo
 	billingPrepared := false
 	failureHandled := true
+	defer service.FinalizeChannelExecutionTrace(c)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			apiErr = types.NewError(fmt.Errorf("responses websocket call panic: %v", recovered), types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
@@ -266,6 +268,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		}
 		if info != nil && apiErr != nil {
 			if !failureHandled && c.Request.Context().Err() == nil {
+				service.TrackChannelExecutionFailure(c, c.GetInt("channel_id"), apiErr.ErrorWithStatusCode())
 				service.HandleChannelFailure(c, *types.NewChannelError(c.GetInt("channel_id"), c.GetInt("channel_type"), c.GetString("channel_name"), common.GetContextKeyBool(c, appconstant.ContextKeyChannelIsMultiKey), common.GetContextKeyString(c, appconstant.ContextKeyChannelKey), c.GetBool("auto_ban")), apiErr)
 			}
 			service.RecordRelayErrorLog(c, c.GetInt("channel_id"), apiErr, info, false)
@@ -290,10 +293,12 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		}
 		info = relaycommon.GenRelayInfoResponses(c, &create.Request)
 		service.AppendUsedChannel(c, s.lockedChannelID)
+		service.TrackResolvedChannelExecutionAttempt(c, s.lockedGroup, modelName, c.Request.URL.Path, &appmodel.Channel{Id: s.lockedChannelID, Name: c.GetString("channel_name")}, 0)
 		c.Set(common.UpstreamRequestIdKey, s.lockedUpstreamRequestID)
 		// Reused calls share the handshake IDs; no new transport attempt occurred.
 		c.Set(common.UpstreamRequestIdsKey, slices.Clone(s.lockedUpstreamRequestIDs))
 		c.Set(common.UpstreamRequestIdSourcesKey, maps.Clone(s.lockedUpstreamRequestSources))
+		c.Set(common.UpstreamRequestChainKey, s.lockedUpstreamRequestChain)
 		info.IsStream = true
 		common.SetContextKey(c, appconstant.ContextKeyIsStream, true)
 		if apiErr = PrepareRequestBilling(c, info); apiErr != nil {
@@ -331,6 +336,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				return apiErr
 			}
 			service.AppendUsedChannel(c, channel.Id)
+			service.TrackResolvedChannelExecutionAttempt(c, common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup), modelName, c.Request.URL.Path, channel, retry.GetRetry())
 			if info == nil {
 				info = relaycommon.GenRelayInfoResponses(c, &create.Request)
 				info.IsStream = true
@@ -360,9 +366,11 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				apiErr = service.NormalizeViolationFeeError(types.NewError(dialErr, types.ErrorCodeDoRequestFailed))
 				service.ResetStatusCode(apiErr, c.GetString("status_code_mapping"))
 				info.LastError = apiErr
+				service.TrackChannelExecutionFailure(c, channel.Id, apiErr.ErrorWithStatusCode())
 				if service.ShouldRetrySameChannelRouteForContext(c, apiErr, sameChannelRetries) {
 					sameChannelRetries++
 					sameChannel = channel
+					service.TrackChannelExecutionSameChannelRetry(c, channel, sameChannelRetries)
 					service.RecordRelayErrorLog(c, channel.Id, apiErr, info, true)
 					continue
 				}
@@ -395,6 +403,8 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			sources, _ := c.Get(common.UpstreamRequestIdSourcesKey)
 			sourceByID, _ := sources.(map[string]string)
 			s.lockedUpstreamRequestSources = maps.Clone(sourceByID)
+			chain, _ := c.Get(common.UpstreamRequestChainKey)
+			s.lockedUpstreamRequestChain, _ = chain.([]common.UpstreamRequestAttempt)
 			s.lockedKey, s.lockedKeyIndex = info.ApiKey, info.ChannelMultiKeyIndex
 			s.lockedRoute, _ = channel.GetOtherSettings().AdvancedCustom.MatchPathForModel(c.Request.URL.Path, modelName)
 			s.lockedContext = make(map[appconstant.ContextKey]any)
@@ -441,7 +451,10 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			if incoming.err != nil {
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, incoming.err)
 				state.closeCode, state.closeReason = websocket.CloseInternalServerErr, "upstream connection closed"
-				ConsumeResponsesQuota(c, info, accumulator.Finish())
+				if !accepted {
+					return types.NewErrorWithStatusCode(incoming.err, types.ErrorCodeBadResponse, http.StatusBadGateway, types.ErrOptionWithSkipRetry())
+				}
+				settleResponsesWSUsage(c, info, accumulator.Finish())
 				return nil
 			}
 			info.SetFirstResponseTime()
@@ -534,7 +547,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 					service.RecordChannelAffinity(c, s.lockedChannelID)
 				}
 				state.terminal = &incoming
-				ConsumeResponsesQuota(c, info, accumulator.Finish())
+				settleResponsesWSUsage(c, info, accumulator.Finish())
 				return nil
 			}
 			if err := s.writeClient(incoming.kind, incoming.body); err != nil {
@@ -563,11 +576,17 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		case <-idle.C:
 			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, context.DeadlineExceeded)
 			state.closeCode, state.closeReason = websocket.CloseInternalServerErr, "upstream response timed out"
-			ConsumeResponsesQuota(c, info, accumulator.Finish())
+			if !accepted {
+				return types.NewErrorWithStatusCode(context.DeadlineExceeded, types.ErrorCodeBadResponse, http.StatusGatewayTimeout, types.ErrOptionWithSkipRetry())
+			}
+			settleResponsesWSUsage(c, info, accumulator.Finish())
 			return nil
 		case <-s.ctx.Done():
 			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, s.ctx.Err())
-			ConsumeResponsesQuota(c, info, accumulator.Finish())
+			if !accepted {
+				return types.NewError(s.ctx.Err(), types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
+			}
+			settleResponsesWSUsage(c, info, accumulator.Finish())
 			return nil
 		}
 	}
@@ -601,6 +620,20 @@ func responsesWSErrorEndsRequest(event responsesWSErrorEvent, streamID, response
 		return false, false, false
 	}
 	return true, len(control) > 0 && event.ResponseID == "", false
+}
+
+func settleResponsesWSUsage(c *gin.Context, info *relaycommon.RelayInfo, usage *dto.Usage) {
+	status := info.StreamStatus
+	if status != nil && status.EndReason != relaycommon.StreamEndReasonClientGone && (!status.IsNormalEnd() || status.HasErrors()) {
+		streamErr := status.EndError
+		if streamErr == nil {
+			streamErr = fmt.Errorf("upstream response stream failed (%s)", status.Summary())
+		}
+		apiErr := types.NewOpenAIError(streamErr, types.ErrorCodeBadResponse, http.StatusBadGateway, types.ErrOptionWithStreamEvent())
+		service.TrackChannelExecutionFailure(c, info.ChannelId, apiErr.ErrorWithStatusCode())
+		service.HandleChannelFailure(c, *types.NewChannelError(info.ChannelId, info.ChannelType, c.GetString("channel_name"), info.ChannelIsMultiKey, info.ApiKey, c.GetBool("auto_ban")), apiErr)
+	}
+	ConsumeResponsesQuota(c, info, usage)
 }
 
 func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model string) *types.NewAPIError {
