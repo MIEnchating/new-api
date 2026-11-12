@@ -121,20 +121,38 @@ describe('date picker year and month dropdowns', () => {
         ...document.querySelectorAll<HTMLElement>('[data-slot="select-item"]'),
       ].find((item) => item.textContent?.trim() === label)
 
-    await act(async () => yearTrigger.click())
+    // Model the focus and pointer events of a mouse selection in the nested dropdowns.
+    await act(async () => {
+      yearTrigger.focus()
+      yearTrigger.click()
+    })
     const nextYear = findSelectItem('2027')
     assert.ok(nextYear)
 
-    await act(async () => monthTrigger.click())
+    await act(async () => {
+      monthTrigger.focus()
+      monthTrigger.click()
+    })
     assert.ok(document.querySelector('[data-trigger="DatePicker"]'))
     const december = findSelectItem('December')
     assert.ok(december)
-    await act(async () => december.click())
+    await act(async () => {
+      fireEvent.pointerDown(december, { pointerType: 'mouse' })
+      december.click()
+    })
 
-    await act(async () => getYearTrigger()?.click())
+    const reopenedTrigger = getYearTrigger()
+    assert.ok(reopenedTrigger)
+    await act(async () => {
+      reopenedTrigger.focus()
+      reopenedTrigger.click()
+    })
     const reopenedNextYear = findSelectItem('2027')
     assert.ok(reopenedNextYear)
-    await act(async () => reopenedNextYear.click())
+    await act(async () => {
+      fireEvent.pointerDown(reopenedNextYear, { pointerType: 'mouse' })
+      reopenedNextYear.click()
+    })
 
     assert.equal(getYearTrigger()?.textContent?.trim(), '2027')
     assert.equal(getMonthTrigger()?.textContent?.trim(), 'December')

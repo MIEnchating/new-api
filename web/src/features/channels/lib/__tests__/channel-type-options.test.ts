@@ -24,6 +24,7 @@ import {
   MODEL_FETCHABLE_TYPES,
   channelTypeOptionsForTaskPluginBind,
 } from '../../constants'
+import { getChannelConfigurationState } from '../channel-configuration'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
   transformFormDataToCreatePayload,
@@ -48,18 +49,26 @@ test('Sora form excludes model discovery and upstream detection settings', () =>
   expect(settings).not.toHaveProperty('upstream_model_update_ignored_models')
 })
 
-test('Task Plugin channels omit upstream discovery settings', () => {
+test('plugin channels expose discovery settings only with provider capability', () => {
   expect(MODEL_FETCHABLE_TYPES.has(CHANNEL_TYPE_TASK_PLUGIN)).toBe(false)
-  const payload = transformFormDataToCreatePayload({
+  const form = {
     ...CHANNEL_FORM_DEFAULT_VALUES,
     name: 'Plugin channel',
     type: CHANNEL_TYPE_TASK_PLUGIN,
-    task_plugin_key: 'video-a',
+    task_plugin_key: 'provider-a',
+    upstream_model_update_check_enabled: true,
+  }
+  expect(
+    getChannelConfigurationState(form, {}, false).blocks.upstreamModelDetection
+  ).toBe('idle')
+  expect(
+    getChannelConfigurationState(form, {}, false, { provider: true }).blocks
+      .upstreamModelDetection
+  ).toBe('configured')
+  const payload = transformFormDataToCreatePayload(form)
+  expect(JSON.parse(payload.channel.settings || '{}')).toMatchObject({
     upstream_model_update_check_enabled: true,
   })
-  expect(JSON.parse(payload.channel.settings || '{}')).not.toHaveProperty(
-    'upstream_model_update_check_enabled'
-  )
 })
 
 describe('channel type options for task plugin bind', () => {
