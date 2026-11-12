@@ -306,11 +306,15 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		} else {
 			facts = provider.ExtractUsageFacts(c, info)
 		}
-		// A saved expression may outlive a provider meter. Do not silently use
-		// an optional/default branch when that meter no longer supplies a fact.
-		for key := range billingexpr.UsedUsageKeys(exprStr) {
-			if value, present := facts[key]; !present || value == nil {
-				return nil, service.TaskErrorWrapperLocal(fmt.Errorf("task pricing requires unavailable usage fact %s; update the provider expression", key), "model_price_error", http.StatusBadRequest)
+		// A saved expression may outlive a provider meter. Retired fields must
+		// still be supplied; declared optional facts retain expression defaults.
+		if pinnedPlugin.Plugin != nil {
+			schema, _ := pinnedPlugin.Plugin.Meta.UsageForModels(info.UpstreamModelName, modelName)
+			for key := range billingexpr.UsedUsageKeys(exprStr) {
+				_, declared := schema[key]
+				if value, present := facts[key]; !declared && (!present || value == nil) {
+					return nil, service.TaskErrorWrapperLocal(fmt.Errorf("task pricing requires unavailable usage fact %s; update the provider expression", key), "model_price_error", http.StatusBadRequest)
+				}
 			}
 		}
 		cost, trace, runErr := billingexpr.RunExprWithRequest(exprStr, billingexpr.TokenParams{}, billingexpr.RequestInput{Usage: facts})
