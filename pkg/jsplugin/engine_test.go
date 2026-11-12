@@ -708,7 +708,7 @@ func TestEngineMemoryLimitIsPerHookCall(t *testing.T) {
 export function run(mib) {
   calls++;
   if (mib < 0) {
-    try { const kept = []; for (;;) kept.push([mib]); } catch (e) { return "caught"; }
+    try { const kept = []; for (;;) kept.push(new ArrayBuffer(1 << 20)); } catch (e) { return "caught"; }
   }
   for (let i = 0; i < mib; i++) new ArrayBuffer(1 << 20);
   return calls;

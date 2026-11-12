@@ -174,6 +174,7 @@ func TestResponsesWebSocketRunsRequestPlugins(t *testing.T) {
 	require.NoError(t, model.LOG_DB.Where("type = ?", model.LogTypeError).Find(&errorLogs).Error)
 	require.Len(t, errorLogs, 1)
 	assert.Contains(t, errorLogs[0].Content, "Blocked")
+	assert.NotContains(t, errorLogs[0].Other, "Blocked")
 	assert.JSONEq(t, `[{"plugin":"rp-ws","stage":"ingress","rejected":{"code":"blocked.ws"}}]`, stripRecordNames(t, gjson.Get(errorLogs[0].Other, "request_plugins").Raw))
 }
 
