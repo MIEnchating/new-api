@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import type { ChannelAffinitySettings } from '../general/channel-affinity/types'
 import { DEFAULT_REQUEST_ERROR_ROUTING_RULES_JSON } from '../models/request-error-routing-rules'
-import type { ModelSettings, SecuritySettings } from '../types'
+import type { ModelSettings } from '../types'
 
 export type RetrySettings = {
   RetryTimes: number
@@ -38,13 +38,8 @@ export type HealthSettings = {
     | 'auto_ban_only'
     | 'passive_recovery'
 }
-export type FilteringSettings = Pick<
-  SecuritySettings,
-  'CheckSensitiveEnabled' | 'CheckSensitiveOnPromptEnabled' | 'SensitiveWords'
->
 export type RequestPolicySettings = RetrySettings &
   HealthSettings &
-  FilteringSettings &
   Pick<
     ModelSettings,
     | 'ChannelRouteCooldownEnabled'
@@ -91,7 +86,4 @@ export const defaultRequestPolicySettings: RequestPolicySettings = {
   'channel_affinity_setting.max_entries': 100000,
   'channel_affinity_setting.default_ttl_seconds': 3600,
   'channel_affinity_setting.rules': '[]',
-  CheckSensitiveEnabled: false,
-  CheckSensitiveOnPromptEnabled: false,
-  SensitiveWords: '',
 }

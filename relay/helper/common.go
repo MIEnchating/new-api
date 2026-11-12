@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,6 +17,20 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+const streamOutputStartedKey = "stream_client_output_started"
+
+// StreamOutputStarted distinguishes application output from protocol keepalives.
+// A new upstream attempt cannot replace an answer already sent to the client.
+func StreamOutputStarted(c *gin.Context) bool {
+	return c != nil && c.GetBool(streamOutputStartedKey)
+}
+
+func markStreamOutputStarted(c *gin.Context) {
+	if c != nil {
+		c.Set(streamOutputStartedKey, true)
+	}
+}
 
 // streamKeepAliveWriter 在业务写入前保活，写入开始时等待心跳退出。
 type streamKeepAliveWriter struct {
@@ -87,10 +102,12 @@ func (writer *streamKeepAliveWriter) ping() error {
 // StartStreamKeepAlive 按 interval 发送心跳，覆盖请求准备和重试；业务写入开始后交给流处理器。
 // 内层请求复用外层的保活，内层清理不会提前结束它。
 func StartStreamKeepAlive(c *gin.Context, interval time.Duration) func() {
-	if previous, ok := c.Writer.(*streamKeepAliveWriter); ok {
+	if previous := keepAliveWriter(c); previous != nil {
 		select {
 		case <-previous.done:
-			c.Writer = previous.ResponseWriter
+			if c.Writer == gin.ResponseWriter(previous) {
+				c.Writer = previous.ResponseWriter
+			}
 		default:
 			return func() {}
 		}
@@ -110,6 +127,22 @@ func StartStreamKeepAlive(c *gin.Context, interval time.Duration) func() {
 	c.Writer = writer
 	go writer.keepAlive(ctx, interval)
 	return writer.stop
+}
+
+// keepAliveWriter 返回 c.Writer 链上的请求保活，包括被其他 writer（如请求插件的回复检查）包裹的情况。
+func keepAliveWriter(c *gin.Context) *streamKeepAliveWriter {
+	var writer http.ResponseWriter = c.Writer
+	for writer != nil {
+		if keepAlive, ok := writer.(*streamKeepAliveWriter); ok {
+			return keepAlive
+		}
+		unwrapper, ok := writer.(interface{ Unwrap() http.ResponseWriter })
+		if !ok {
+			return nil
+		}
+		writer = unwrapper.Unwrap()
+	}
+	return nil
 }
 
 func (writer *streamKeepAliveWriter) keepAlive(ctx context.Context, interval time.Duration) {
@@ -202,6 +235,9 @@ func ClaudeData(c *gin.Context, resp dto.ClaudeResponse) error {
 	if err != nil {
 		common.SysError(common.LogText("error marshalling stream response: %s", err.Error()))
 	} else {
+		if !strings.EqualFold(strings.TrimSpace(resp.Type), "ping") {
+			markStreamOutputStarted(c)
+		}
 		c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 		c.Render(-1, common.CustomEvent{Data: "data: " + string(jsonData)})
 	}
@@ -214,6 +250,9 @@ func ClaudeChunkData(c *gin.Context, resp dto.ClaudeResponse, data string) {
 		return
 	}
 
+	if !strings.EqualFold(strings.TrimSpace(resp.Type), "ping") {
+		markStreamOutputStarted(c)
+	}
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)})
 	c.Render(-1, common.CustomEvent{Data: fmt.Sprintf("data: %s\n", data)})
 	_ = FlushWriter(c)
@@ -224,6 +263,7 @@ func ResponseChunkData(c *gin.Context, resp dto.ResponsesStreamResponse, data st
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
+	markStreamOutputStarted(c)
 	event := common.CustomEvent{Data: fmt.Sprintf("event: %s\n", resp.Type)}
 	if err := event.Render(c.Writer); err != nil {
 		return err
@@ -244,6 +284,7 @@ func StringData(c *gin.Context, str string) error {
 		return fmt.Errorf("request context done: %w", c.Request.Context().Err())
 	}
 
+	markStreamOutputStarted(c)
 	c.Render(-1, common.CustomEvent{Data: "data: " + str})
 	return FlushWriter(c)
 }
@@ -284,6 +325,7 @@ func WssString(c *gin.Context, ws *websocket.Conn, str string) error {
 		return errors.New("websocket connection is nil")
 	}
 	//common.LogInfo(c, fmt.Sprintf("sending message: %s", str))
+	markStreamOutputStarted(c)
 	return ws.WriteMessage(1, []byte(str))
 }
 
@@ -297,6 +339,7 @@ func WssObject(c *gin.Context, ws *websocket.Conn, object any) error {
 		return errors.New("websocket connection is nil")
 	}
 	//common.LogInfo(c, fmt.Sprintf("sending message: %s", jsonData))
+	markStreamOutputStarted(c)
 	return ws.WriteMessage(1, jsonData)
 }
 

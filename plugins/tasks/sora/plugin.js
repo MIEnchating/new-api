@@ -134,8 +134,11 @@ export function extractUsage(ctx) {
 
 export function extractUsageOnComplete(task, taskResult, body) {
   const facts = {};
-  const seconds = Number((body || {}).seconds || (body || {}).duration || 0);
-  if (Number.isFinite(seconds) && seconds > 0) facts.seconds = Math.min(seconds, 3600);
+  const measured = (body || {}).seconds ?? (body || {}).duration;
+  if (typeof measured === "number" || (typeof measured === "string" && measured.trim())) {
+    const seconds = Number(measured);
+    if (Number.isFinite(seconds) && seconds >= 0 && seconds <= 3600) facts.seconds = seconds;
+  }
   const size = trimmed((body || {}).size);
   if (["720x1280", "1280x720", "1792x1024", "1024x1792"].includes(size)) facts.size = size;
   return facts;

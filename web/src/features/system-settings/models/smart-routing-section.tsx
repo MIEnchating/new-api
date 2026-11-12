@@ -68,6 +68,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { TemplateKeysCopyButton } from '@/features/keys/components/template-keys-copy-button'
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
+import { cn } from '@/lib/utils'
 
 import { getSmartRoutingGroups } from '../api'
 import {
@@ -147,6 +148,8 @@ function SmartRoutingTemplateEditor(props: TemplateEditorProps) {
     control: props.form.control,
     name: `templates.${props.index}.group_routes`,
   })
+
+  const hasMultipleRoutes = routeFields.fields.length > 1
 
   return (
     <Card size='sm'>
@@ -292,7 +295,12 @@ function SmartRoutingTemplateEditor(props: TemplateEditorProps) {
           {routeFields.fields.map((route, routeIndex) => (
             <div
               key={route.id}
-              className='grid min-w-0 gap-3 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_7rem_8rem_auto_auto] sm:items-end'
+              className={cn(
+                'grid min-w-0 gap-3 rounded-md border p-3 sm:items-end',
+                hasMultipleRoutes
+                  ? 'sm:grid-cols-[minmax(0,1fr)_7rem_8rem_auto_auto]'
+                  : 'sm:grid-cols-[minmax(0,1fr)_auto_auto]'
+              )}
             >
               <FormField
                 control={props.form.control}
@@ -325,49 +333,53 @@ function SmartRoutingTemplateEditor(props: TemplateEditorProps) {
                   </FormItem>
                 )}
               />
-              <FormField
-                control={props.form.control}
-                name={`templates.${props.index}.group_routes.${routeIndex}.priority`}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Priority')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        min='0'
-                        step='1'
-                        value={field.value}
-                        onChange={(event) =>
-                          field.onChange(Number(event.target.value))
-                        }
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={props.form.control}
-                name={`templates.${props.index}.group_routes.${routeIndex}.cooldown_seconds`}
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Cooldown time (seconds)')}</FormLabel>
-                    <FormControl>
-                      <Input
-                        type='number'
-                        min='1'
-                        max='31536000'
-                        step='1'
-                        value={field.value}
-                        onChange={(event) =>
-                          field.onChange(Number(event.target.value))
-                        }
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {hasMultipleRoutes && (
+                <>
+                  <FormField
+                    control={props.form.control}
+                    name={`templates.${props.index}.group_routes.${routeIndex}.priority`}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Priority')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min='0'
+                            step='1'
+                            value={field.value}
+                            onChange={(event) =>
+                              field.onChange(Number(event.target.value))
+                            }
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={props.form.control}
+                    name={`templates.${props.index}.group_routes.${routeIndex}.cooldown_seconds`}
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Cooldown time (seconds)')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='number'
+                            min='1'
+                            max='31536000'
+                            step='1'
+                            value={field.value}
+                            onChange={(event) =>
+                              field.onChange(Number(event.target.value))
+                            }
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
               <FormField
                 control={props.form.control}
                 name={`templates.${props.index}.group_routes.${routeIndex}.enabled`}

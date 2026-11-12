@@ -500,6 +500,30 @@ func TestVertexAIOmniUsageAndVideoDecoder(t *testing.T) {
 	partial, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": omni}, map[string]any{}, map[string]any{"usage": map[string]any{"total_input_tokens": 12}})
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{"input_tokens": float64(12)}, decodePluginValue(t, partial))
+	for _, tc := range []struct {
+		name  string
+		usage map[string]any
+		facts map[string]any
+		fail  bool
+	}{
+		{name: "null counts stay absent", usage: map[string]any{"total_input_tokens": nil, "total_thought_tokens": nil}, facts: map[string]any{}},
+		{name: "explicit zero is measured", usage: map[string]any{"total_input_tokens": 0, "output_tokens_by_modality": []any{map[string]any{"modality": "video", "tokens": 0}}}, facts: map[string]any{"input_tokens": float64(0), "video_tokens": float64(0)}},
+		{name: "string count is invalid", usage: map[string]any{"total_input_tokens": "12"}, fail: true},
+		{name: "negative thought count is invalid", usage: map[string]any{"total_thought_tokens": -1}, fail: true},
+		{name: "object modality list is invalid", usage: map[string]any{"output_tokens_by_modality": map[string]any{}}, fail: true},
+		{name: "null modality count is invalid", usage: map[string]any{"output_tokens_by_modality": []any{map[string]any{"modality": "video", "tokens": nil}}}, fail: true},
+		{name: "missing modality count is invalid", usage: map[string]any{"output_tokens_by_modality": []any{map[string]any{"modality": "video"}}}, fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			value, callErr := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": omni}, map[string]any{}, map[string]any{"usage": tc.usage})
+			if tc.fail {
+				require.Error(t, callErr)
+				return
+			}
+			require.NoError(t, callErr)
+			assert.Equal(t, tc.facts, decodePluginValue(t, value))
+		})
+	}
 	veo, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": "veo-3.0-generate-001"}, map[string]any{}, map[string]any{"done": true})
 	require.NoError(t, err)
 	assert.Nil(t, veo)

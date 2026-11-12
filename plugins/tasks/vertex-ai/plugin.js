@@ -37,7 +37,7 @@ export const meta = {
     en: "Google Veo and Gemini Omni Flash video generation on Vertex AI (text-to-video and image-to-video)",
     zh: "Google Veo 与 Gemini Omni Flash 视频生成（文生视频、图生视频），Vertex AI 版本",
   },
-  version: "1.3.0",
+  version: "1.3.1",
   channelTypes: [41],
   author: { name: "QuantumNous" },
   models: [
@@ -314,11 +314,18 @@ function duration(req) {
   if (!Number.isFinite(n) || n <= 0) n = 8;
   return n;
 }
+// The channel's region field, read as the built-in Vertex AI channel reads it:
+// a plain region, or a JSON map of model to region with a default, keyed by
+// the model the client asked for, before the channel's model mapping.
 function region(ctx, model) {
-  const setting = ctx.userSetting || {};
-  const configured = setting.vertexRegion || setting.apiVersion || "global";
-  if (configured && typeof configured === "object") return configured[model] || configured.default || "global";
-  return String(configured || "global");
+  const other = String(ctx.channelOther || "").trim();
+  if (other.startsWith("{")) {
+    try {
+      const regions = JSON.parse(other);
+      return String(regions[model] || regions.default || "global");
+    } catch (e) {}
+  }
+  return other || "global";
 }
 function apiBase(baseUrl, project, location) {
   const base = String(baseUrl || "").replace(/\/$/, "");
@@ -440,7 +447,7 @@ export function buildSubmitRequest(ctx) {
   }
   return {
     // A gateway runs the request in its own project, so the path names none.
-    url: modelURL(ctx, viaGateway(ctx) ? "-" : ctx.auth.projectId, region(ctx, model), model, "predictLongRunning"),
+    url: modelURL(ctx, viaGateway(ctx) ? "-" : ctx.auth.projectId, region(ctx, ctx.model || model), model, "predictLongRunning"),
     method: "POST",
     headers: requestHeaders(ctx),
     body: { instances: [instance], parameters: metadata },
@@ -474,13 +481,23 @@ export function extractUsageOnComplete(ctx, _result, body) {
   const usage = plainObject(body && body.usage);
   if (!usage) return null;
   const facts = {};
-  const inputTokens = Number(usage.total_input_tokens);
-  if (Number.isFinite(inputTokens)) facts.input_tokens = inputTokens;
-  let textTokens = Number(usage.total_thought_tokens);
+  // Absent usage is not a measured zero. Reject malformed measurements so the
+  // host retains the reservation instead of refunding on coerced nulls/strings.
+  for (const key of ["total_input_tokens", "total_thought_tokens"]) {
+    const value = usage[key];
+    if (value != null && (typeof value !== "number" || !Number.isFinite(value) || value < 0))
+      throw new Error("interaction usage must contain finite non-negative token counts");
+  }
+  if (usage.total_input_tokens != null) facts.input_tokens = usage.total_input_tokens;
+  let textTokens = usage.total_thought_tokens == null ? NaN : usage.total_thought_tokens;
   let videoTokens = NaN;
+  if (usage.output_tokens_by_modality != null && !Array.isArray(usage.output_tokens_by_modality))
+    throw new Error("interaction output token usage must be an array");
   for (const item of Array.isArray(usage.output_tokens_by_modality) ? usage.output_tokens_by_modality : []) {
     const entry = plainObject(item) || {};
-    const tokens = Number(entry.tokens) || 0;
+    const tokens = entry.tokens;
+    if (typeof tokens !== "number" || !Number.isFinite(tokens) || tokens < 0)
+      throw new Error("interaction usage must contain finite non-negative token counts");
     const modality = trimmed(entry.modality).toLowerCase();
     if (modality === "video" || modality === "audio") videoTokens = (videoTokens || 0) + tokens;
     else textTokens = (textTokens || 0) + tokens;

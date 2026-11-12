@@ -692,6 +692,40 @@ func TestDoubaoImageResults(t *testing.T) {
 		assert.Empty(t, alibabaObject(t, value), "no delivered image leaves the reservation in place")
 	})
 
+	t.Run("compatible payload shapes bill images rather than entries", func(t *testing.T) {
+		for _, tc := range []struct {
+			name string
+			data any
+			want float64
+		}{
+			{"single object", map[string]any{"url": first, "size": "1024x1024"}, 1},
+			{"base64 object", map[string]any{"b64_json": "aW1hZ2U=", "size": "1024x1024"}, 1},
+			{"both representations", []any{map[string]any{"url": first, "b64_json": "aW1hZ2U=", "size": "1024x1024"}}, 1},
+			{"split representations", []any{map[string]any{"url": first, "size": "1024x1024"}, map[string]any{"b64_json": "aW1hZ2U=", "size": "1024x1024"}}, 1},
+			{"more base64 payloads", []any{map[string]any{"url": first, "size": "1024x1024"}, map[string]any{"b64_json": "YQ==", "size": "1024x1024"}, map[string]any{"b64_json": "Yg==", "size": "1024x1024"}}, 2},
+			{"prompt-only object", map[string]any{"revised_prompt": "a cat"}, 0},
+			{"prompt-only entries", []any{map[string]any{"revised_prompt": "a cat"}}, 0},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				payload := map[string]any{"data": tc.data, "usage": map[string]any{"generated_images": tc.want}}
+				value, err := plugin.Engine.Call(t.Context(), "extractUsageOnSubmit", proQuery, payload)
+				require.NoError(t, err)
+				if tc.want == 0 {
+					assert.Empty(t, alibabaObject(t, value), "empty payloads keep the reservation")
+				} else {
+					assert.Equal(t, map[string]any{"image_count": tc.want}, alibabaObject(t, value))
+				}
+				value, err = plugin.Engine.Call(t.Context(), "extractUsageOnComplete", proQuery, map[string]any{"status": "SUCCESS"}, payload)
+				require.NoError(t, err)
+				if tc.want == 0 {
+					assert.Empty(t, alibabaObject(t, value), "empty payloads must not refund the reservation")
+				} else {
+					assert.Equal(t, map[string]any{"images_up_to_1_5k": tc.want, "images_above_1_5k": float64(0)}, alibabaObject(t, value))
+				}
+			})
+		}
+	})
+
 	t.Run("mixed-tier layers settle per layer with the input image count", func(t *testing.T) {
 		request := map[string]any{"model": pro, "image": "https://cdn.example/photo.png", "layer_decomposition": true, "size": "auto"}
 		immediate := parseResponse(t, pro, request, layerBody)

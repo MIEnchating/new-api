@@ -613,6 +613,7 @@ function convertImage(ctx) {
 function imageEntries(body) {
   const data = body && body.data;
   if (Array.isArray(data)) return data.filter((item) => item && typeof item === "object" && !Array.isArray(item));
+  if (data && typeof data === "object") return [data];
   return [];
 }
 
@@ -631,7 +632,12 @@ function deliveredImages(body) {
 // inconsistent with the delivered payloads means the response is not
 // understood; the host then keeps the reservation instead of settling on a guess.
 function imagePayloads(body) {
-  const payloads = deliveredImages(body);
+  const entries = imageEntries(body);
+  const urls = entries.filter((item) => trimmed(item.url));
+  const base64 = entries.filter((item) => trimmed(item.b64_json));
+  // Compatible endpoints may split one image into a URL and a Base64 entry.
+  // Count the larger representation, never both representations of one image.
+  const payloads = urls.length >= base64.length ? urls : base64;
   if (payloads.length > MAX_IMAGE_OUTPUTS) throw new Error("too many output images");
   const count = (body.usage || {}).generated_images;
   if (count !== undefined && (!Number.isInteger(count) || count < 0 || count > MAX_IMAGE_OUTPUTS || count !== payloads.length))
@@ -647,6 +653,7 @@ function imagePayloads(body) {
 function imageUsage(body, profile) {
   const usage = body.usage || {};
   const payloads = imagePayloads(body);
+  if (!payloads.length) return {};
   const facts = {};
   if (hasLowerImageTier(profile)) {
     let lower = 0,

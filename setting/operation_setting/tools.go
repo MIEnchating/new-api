@@ -3,6 +3,7 @@ package operation_setting
 import (
 	"encoding/json"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -23,7 +24,7 @@ import (
 // operator values. Lookup uses the longest model prefix before the tool
 // default, and a matched numeric zero is terminal.
 //
-// Built-in keys are written in the vendor's list currency.
+// CNY built-in prices are converted at lookup; operator prices are USD.
 // ---------------------------------------------------------------------------
 
 const ToolPriceOptionKey = "tool_price_setting.prices"
@@ -63,8 +64,9 @@ func seedHardcodedToolPrices(prices map[string]float64) {
 	prices["google_search_grounded_prompt:gemini-2.0*"] = 35
 	prices["google_search_grounded_prompt:gemini-1.5*"] = 35
 
-	// Vendor search tiers, verbatim in the vendor's list currency per 1K
-	// calls. CNY: Zhipu search engines, 0.01/0.03/0.05 CNY per call
+	// Vendor search tiers, in the vendor's list currency per 1K calls.
+	// CNY defaults are converted to USD at lookup. CNY: Zhipu search
+	// engines, 0.01/0.03/0.05 CNY per call
 	// (https://docs.bigmodel.cn/cn/guide/tools/web-search), and Alibaba Model
 	// Studio search strategies at Beijing prices
 	// (https://help.aliyun.com/zh/model-studio/web-search); the Singapore
@@ -134,11 +136,16 @@ func IsBuiltInToolPriceKey(name string) bool {
 
 type prefixEntry struct {
 	prefix string
-	price  float64
+	price  toolPrice
+}
+
+type toolPrice struct {
+	amount float64
+	cny    bool
 }
 
 type toolPriceIndex struct {
-	defaults map[string]float64
+	defaults map[string]toolPrice
 	prefixes map[string][]prefixEntry
 }
 
@@ -209,17 +216,24 @@ func LoadToolPricesFromJSONString(value string) {
 // RebuildToolPriceIndex rebuilds the lookup index from the current config.
 // Called on init and after config updates. Not on the billing hot path.
 func RebuildToolPriceIndex() {
-	merged := make(map[string]float64, 9+len(toolPriceSetting.Prices))
-	seedHardcodedToolPrices(merged)
+	seeded := make(map[string]float64)
+	seedHardcodedToolPrices(seeded)
+	merged := make(map[string]toolPrice, len(seeded)+len(toolPriceSetting.Prices))
+	for key, price := range seeded {
+		merged[key] = toolPrice{amount: price, cny: slices.Contains([]string{
+			"search_std", "search_pro", "search_pro_sogou", "search_pro_quark",
+			"search_strategy_turbo", "search_strategy_max", "search_strategy_agent", "search_strategy_agent_max",
+		}, key)}
+	}
 	for k, v := range toolPriceSetting.Prices {
 		if !isValidToolPrice(v) {
 			continue
 		}
-		merged[k] = v
+		merged[k] = toolPrice{amount: v}
 	}
 
 	idx := &toolPriceIndex{
-		defaults: make(map[string]float64),
+		defaults: make(map[string]toolPrice),
 		prefixes: make(map[string][]prefixEntry),
 	}
 
@@ -261,18 +275,25 @@ func GetToolPriceForModel(toolName, modelName string) float64 {
 		}
 	}
 
+	price := idx.defaults[toolName]
 	if entries, ok := idx.prefixes[toolName]; ok && modelName != "" {
 		for _, e := range entries {
 			if strings.HasPrefix(modelName, e.prefix) {
-				return e.price
+				price = e.price
+				break
 			}
 		}
 	}
 
-	if p, ok := idx.defaults[toolName]; ok {
-		return p
+	if price.cny {
+		rate := USDExchangeRate
+		if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) || math.IsInf(price.amount/rate, 0) {
+			common.SysError("invalid USDExchangeRate, skipping CNY built-in tool charge")
+			return 0
+		}
+		return price.amount / rate
 	}
-	return 0
+	return price.amount
 }
 
 // GetToolPrice is a convenience wrapper when no model name is needed.

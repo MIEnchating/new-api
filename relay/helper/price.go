@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -40,9 +42,9 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 		GroupSpecialRatio: -1,
 	}
 
-	// check auto group
-	autoGroup, exists := ctx.Get("auto_group")
-	if exists {
+	if routeGroup := common.GetContextKeyString(ctx, constant.ContextKeyTokenGroupRouteGroup); routeGroup != "" {
+		relayInfo.UsingGroup = routeGroup
+	} else if autoGroup, exists := ctx.Get("auto_group"); exists {
 		logger.LogDebug(ctx, "final group: %s", autoGroup)
 		relayInfo.UsingGroup = autoGroup.(string)
 	}
@@ -56,7 +58,7 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 		groupRatioInfo.HasSpecialRatio = true
 	} else {
 		// normal group ratio
-		groupRatioInfo.GroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
+		groupRatioInfo.GroupRatio, _, _ = ratio_setting.GetEffectiveGroupRatio(relayInfo.UsingGroup, time.Now())
 	}
 
 	return groupRatioInfo
@@ -382,7 +384,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 		return hosttypes.PriceData{}, err
 	}
 
-	requestInput, err := ResolveIncomingBillingExprRequestInput(c, info)
+	requestInput, err := ResolveIncomingBillingExprRequestInput(c, info, usedVars["param"])
 	if err != nil {
 		return hosttypes.PriceData{}, err
 	}

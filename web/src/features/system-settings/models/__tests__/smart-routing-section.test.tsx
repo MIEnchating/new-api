@@ -71,8 +71,42 @@ describe('smart routing template editor', () => {
     await user.click(screen.getByRole('button', { name: 'Add route group' }))
 
     expect(screen.getByRole('combobox', { name: 'Group' })).toBeVisible()
-    expect(screen.getByRole('spinbutton', { name: 'Priority' })).toHaveValue(1)
-    expect(screen.getByText('Cooldown time (seconds)')).toBeVisible()
+    expect(
+      screen.queryByRole('spinbutton', { name: 'Priority' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('spinbutton', { name: 'Cooldown time (seconds)' })
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Add route group' }))
+    const priorities = screen.getAllByRole('spinbutton', { name: 'Priority' })
+    const cooldowns = screen.getAllByRole('spinbutton', {
+      name: 'Cooldown time (seconds)',
+    })
+    expect(priorities).toHaveLength(2)
+    expect(cooldowns).toHaveLength(2)
+    await user.clear(priorities[0])
+    await user.type(priorities[0], '7')
+    await user.clear(cooldowns[0])
+    await user.type(cooldowns[0], '90')
+
+    await user.click(
+      screen.getAllByRole('button', { name: 'Remove route group' })[1]
+    )
+    expect(
+      screen.queryByRole('spinbutton', { name: 'Priority' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('spinbutton', { name: 'Cooldown time (seconds)' })
+    ).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Add route group' }))
+    expect(
+      screen.getAllByRole('spinbutton', { name: 'Priority' })[0]
+    ).toHaveValue(7)
+    expect(
+      screen.getAllByRole('spinbutton', { name: 'Cooldown time (seconds)' })[0]
+    ).toHaveValue(90)
 
     await user.click(
       screen.getByRole('button', { name: 'Remove routing template' })

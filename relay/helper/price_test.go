@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -802,3 +803,42 @@ func (s *priceTestReservation) GetPreConsumedQuota() int { return s.held }
 func (s *priceTestReservation) Reserve(quota int) error  { s.held = max(s.held, quota); return nil }
 
 func (s *priceTestReservation) ReserveBeforeSubmit(quota int) error { return s.Reserve(quota) }
+
+func TestHandleGroupRatioUsesFinalTokenRouteAndScheduledPrice(t *testing.T) {
+	groups := ratio_setting.GroupRatio2JSONString()
+	special := ratio_setting.GroupGroupRatio2JSONString()
+	schedule := ratio_setting.GroupRatioSchedule2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(groups))
+		require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(special))
+		require.NoError(t, ratio_setting.UpdateGroupRatioScheduleByJSONString(schedule))
+	})
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"route-final":2,"auto-stale":9}`))
+	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"vip":{"route-final":0.1}}`))
+	// Complementary daily windows cover every minute, independent of the clock.
+	require.NoError(t, ratio_setting.UpdateGroupRatioScheduleByJSONString(`{
+		"route-final":{"enabled":true,"periods":[
+			{"start":"00:00","end":"12:00","ratio":0.25},
+			{"start":"12:00","end":"00:00","ratio":0.25}
+		]}
+	}`))
+	for _, tc := range []struct {
+		group   string
+		ratio   float64
+		special bool
+	}{
+		{"ordinary", 0.25, false},
+		{"vip", 0.1, true},
+	} {
+		t.Run(tc.group, func(t *testing.T) {
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Set("auto_group", "auto-stale")
+			common.SetContextKey(ctx, constant.ContextKeyTokenGroupRouteGroup, "route-final")
+			info := &relaycommon.RelayInfo{UserGroup: tc.group, UsingGroup: "auto-stale"}
+			ratio := HandleGroupRatio(ctx, info)
+			assert.Equal(t, "route-final", info.UsingGroup)
+			assert.Equal(t, tc.ratio, ratio.GroupRatio)
+			assert.Equal(t, tc.special, ratio.HasSpecialRatio)
+		})
+	}
+}

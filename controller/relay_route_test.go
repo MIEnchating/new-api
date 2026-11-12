@@ -13,6 +13,8 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
@@ -24,6 +26,48 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestRelayRetriesStopAfterBusinessOutputOrCancellation(t *testing.T) {
+	oldRouteEnabled := common.ChannelRouteCooldownEnabled
+	oldCooldownSeconds := common.ChannelRouteCooldownSeconds
+	common.ChannelRouteCooldownEnabled = true
+	common.ChannelRouteCooldownSeconds = 60
+	t.Cleanup(func() {
+		common.ChannelRouteCooldownEnabled = oldRouteEnabled
+		common.ChannelRouteCooldownSeconds = oldCooldownSeconds
+	})
+	err := types.NewErrorWithStatusCode(errors.New("upstream failed"), types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway)
+	for _, kind := range []string{"comment ping", "Claude ping", "chat", "Claude", "Responses", "cancelled"} {
+		t.Run(kind, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			helper.SetEventStreamHeaders(c)
+			switch kind {
+			case "comment ping":
+				require.NoError(t, helper.PingData(c))
+			case "Claude ping":
+				require.NoError(t, helper.ClaudeData(c, dto.ClaudeResponse{Type: "ping"}))
+			case "chat":
+				require.NoError(t, helper.StringData(c, `{"choices":[{"delta":{"content":"hello"}}]}`))
+			case "Claude":
+				helper.ClaudeChunkData(c, dto.ClaudeResponse{Type: "content_block_delta"}, `{"type":"content_block_delta"}`)
+			case "Responses":
+				require.NoError(t, helper.ResponseChunkData(c, dto.ResponsesStreamResponse{Type: "response.output_text.delta"}, `{"delta":"hello"}`))
+			case "cancelled":
+				ctx, cancel := context.WithCancel(c.Request.Context())
+				c.Request = c.Request.WithContext(ctx)
+				cancel()
+			}
+			if kind == "comment ping" || kind == "Claude ping" {
+				assert.True(t, shouldAttemptNextChannel(c, err, 2, true))
+				return
+			}
+			assert.False(t, shouldRetry(c, err, 2))
+			assert.False(t, shouldRetrySameChannel(c, err, 0))
+			assert.False(t, shouldAttemptNextChannel(c, err, 2, true))
+		})
+	}
+}
 
 func TestShouldAttemptNextChannelKeepsRouteAndRetryMutuallyExclusive(t *testing.T) {
 	oldRouteEnabled := common.ChannelRouteCooldownEnabled

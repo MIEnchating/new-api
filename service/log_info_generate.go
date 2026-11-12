@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/base64"
+	"slices"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -80,6 +81,9 @@ func AppendRelayLogAdminInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo,
 		if relayInfo.ConversionDiagnosticsTruncated() {
 			other.SetAdmin("conversion_diagnostics_truncated", true)
 		}
+		if len(relayInfo.RequestPluginSteps) > 0 {
+			other.SetAdmin("request_plugins", relayInfo.RequestPluginSteps)
+		}
 	}
 	if common.GetContextKeyBool(ctx, constant.ContextKeyChannelIsMultiKey) {
 		other.SetAdmin("is_multi_key", true)
@@ -129,6 +133,7 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	appendFinalRequestFormat(relayInfo, other)
 	appendBillingInfo(relayInfo, other)
 	appendParamOverrideInfo(relayInfo, other)
+	AppendRequestPluginRecord(relayInfo, other)
 	appendStreamStatus(relayInfo, other)
 	return other
 }
@@ -151,6 +156,16 @@ func appendParamOverrideInfo(relayInfo *relaycommon.RelayInfo, other *model.LogO
 		return
 	}
 	other.SetPublic("po", relayInfo.ParamOverrideAudit)
+}
+
+// AppendRequestPluginRecord shows users what the request plugins changed in
+// their request. A retry rewrites the attempt's entries in place, so the
+// log keeps a copy.
+func AppendRequestPluginRecord(relayInfo *relaycommon.RelayInfo, other *model.LogOther) {
+	if relayInfo == nil || other == nil || len(relayInfo.RequestPluginRecord) == 0 {
+		return
+	}
+	other.SetPublic("request_plugins", relaycommon.CapRequestPluginRecord(slices.Clone(relayInfo.RequestPluginRecord)))
 }
 
 func appendStreamStatus(relayInfo *relaycommon.RelayInfo, other *model.LogOther) {
@@ -189,7 +204,7 @@ func AppendStreamStatusForLog(relayInfo *relaycommon.RelayInfo, other *model.Log
 }
 
 // AppendStreamStatus is retained for legacy callers that build a plain map.
-func AppendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
+func AppendStreamStatus(relayInfo *relaycommon.RelayInfo, other map[string]any) {
 	if relayInfo == nil || other == nil {
 		return
 	}
@@ -349,6 +364,7 @@ func GenerateMjOtherInfo(relayInfo *relaycommon.RelayInfo, priceData hosttypes.P
 		other.SetPublic("user_group_ratio", priceData.GroupRatioInfo.GroupSpecialRatio)
 	}
 	appendRequestPath(nil, relayInfo, other)
+	AppendRequestPluginRecord(relayInfo, other)
 	return other
 }
 

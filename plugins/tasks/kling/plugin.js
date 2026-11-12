@@ -625,10 +625,10 @@ export function parseTaskResult(ctx, body) {
   const videos = status === "SUCCESS" && data.task_result && data.task_result.videos ? data.task_result.videos : [];
   const result = { code: body.code || 0, taskId: data.task_id, status: status, reason: data.task_status_msg || "" };
   if (videos.length && videos[0].url) result.url = videos[0].url;
-  const units = Number.parseFloat(data.final_unit_deduction || "");
-  if (Number.isFinite(units) && units > 0) {
-    result.completionTokens = Math.ceil(units);
-    result.totalTokens = Math.ceil(units);
+  const usage = extractUsageOnComplete(ctx, null, body);
+  if (usage && usage.units > 0) {
+    result.completionTokens = Math.ceil(usage.units);
+    result.totalTokens = Math.ceil(usage.units);
   }
   return result;
 }
@@ -663,16 +663,10 @@ export function buildContentRequest(ctx) {
 export function extractUsageOnComplete(ctx, _taskResult, body) {
   if (isKling4Task(ctx)) return kling4CompletedUnits(ctx, body);
   const data = (body && body.data) || {};
-  if (
-    !Object.prototype.hasOwnProperty.call(data, "final_unit_deduction") ||
-    data.final_unit_deduction === undefined ||
-    data.final_unit_deduction === null ||
-    data.final_unit_deduction === ""
-  ) {
-    return null;
-  }
-  const units = Number.parseFloat(data.final_unit_deduction);
-  if (!Number.isFinite(units)) return null;
+  const value = data.final_unit_deduction;
+  if (typeof value !== "number" && (typeof value !== "string" || !value.trim())) return null;
+  const units = Number(value);
+  if (!Number.isFinite(units) || units < 0) return null;
   return { units: units };
 }
 
