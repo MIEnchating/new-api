@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -521,7 +522,11 @@ func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string,
 	if other == nil {
 		other = NewLogOther()
 	}
-	other.SetAdmin("user_error_content", common.MaskSensitiveInfo(common.MessageWithoutRequestId(content), common.UpstreamAddresses(c)...))
+	// The rejection already has its normal error content and a structured
+	// plugin record. Keep plugin-supplied messages out of log metadata.
+	if other.public["error_code"] != relaytypes.ErrorCodeRequestRejected {
+		other.SetAdmin("user_error_content", common.MaskSensitiveInfo(common.MessageWithoutRequestId(content), common.UpstreamAddresses(c)...))
+	}
 	appendUpstreamRequestIdsToLogOther(c, other)
 	otherStr := other.JSONString()
 	// 判断是否需要记录 IP

@@ -126,11 +126,7 @@ func RecordRelayErrorLog(c *gin.Context, channelID int, err *types.NewAPIError, 
 	if relayInfo != nil {
 		actualResponseModel = relayInfo.ActualResponseModel()
 	}
-	content := "Request rejected by a request processing plugin"
-	if err.GetErrorCode() != types.ErrorCodeRequestRejected {
-		content = err.MaskSensitiveErrorWithStatusCode(common.UpstreamAddresses(c)...)
-	}
 	model.RecordErrorLog(c, c.GetInt("id"), channelID, c.GetString("original_model"), actualResponseModel,
-		c.GetString("token_name"), content, c.GetInt("token_id"),
+		c.GetString("token_name"), err.MaskSensitiveErrorWithStatusCode(common.UpstreamAddresses(c)...), c.GetInt("token_id"),
 		int(time.Since(startTime).Seconds()), common.GetContextKeyBool(c, constant.ContextKeyIsStream), c.GetString("group"), other)
 }

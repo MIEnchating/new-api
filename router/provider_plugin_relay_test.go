@@ -2060,6 +2060,7 @@ export function outbound(ctx, req) {
 	assert.Zero(t, errorLog.ChannelId)
 	assert.Equal(t, relayTestModel, errorLog.ModelName)
 	assert.Contains(t, errorLog.Content, "Not at the door (code: blocked.door)")
+	assert.NotContains(t, errorLog.Other, "Not at the door")
 	assert.JSONEq(t, `[{"plugin":"rp-relay","name":{"en":"Redact"},"stage":"ingress","rejected":{"code":"blocked.door"}}]`,
 		gjson.Get(errorLog.Other, "request_plugins").Raw)
 	assert.Equal(t, "reject", gjson.Get(errorLog.Other, `admin_info.request_plugins.0.action`).Str)
