@@ -126,24 +126,6 @@ function getPriceGroups(
         t
       )
     )
-  } else if (snapshot.billingMode === 'per-second') {
-    const lines: PriceLine[] = []
-    if (hasPricingValue(snapshot.price)) {
-      lines.push({
-        label: t('Per-second'),
-        value: getSyncPriceLines({ model_price: Number(snapshot.price) }, t)[0]
-          .value,
-      })
-    }
-    for (const [resolution, price] of Object.entries(
-      snapshot.secondPriceConfig?.prices ?? {}
-    ).sort(([a], [b]) => a.localeCompare(b))) {
-      lines.push({
-        label: `${t('Per-second')} · ${resolution}`,
-        value: getSyncPriceLines({ model_price: price }, t)[0].value,
-      })
-    }
-    if (lines.length > 0) groups.push({ key: '', lines })
   } else {
     const values: PricingSyncValues = {}
     for (const [from, to] of SYNC_FIELDS) {

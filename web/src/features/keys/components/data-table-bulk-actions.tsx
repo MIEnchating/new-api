@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { Table } from '@tanstack/react-table'
-import { Copy, Trash2, Loader2 } from 'lucide-react'
+import { Copy, Trash2, Loader2, Pencil } from 'lucide-react'
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -33,6 +33,7 @@ import { copyToClipboard } from '@/lib/copy-to-clipboard'
 
 import type { ApiKey } from '../types'
 import { ApiKeysMultiDeleteDialog } from './api-keys-multi-delete-dialog'
+import { ApiKeysMutateDrawer } from './api-keys-mutate-drawer'
 import { useApiKeys } from './api-keys-provider'
 
 type DataTableBulkActionsProps<TData> = {
@@ -45,6 +46,7 @@ export function DataTableBulkActions<TData>({
   const { t } = useTranslation()
   const { resolveRealKeysBatch } = useApiKeys()
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [editingIds, setEditingIds] = useState<number[] | null>(null)
   const [isCopying, setIsCopying] = useState(false)
   const selectedRows = table.getFilteredSelectedRowModel().rows
 
@@ -83,6 +85,19 @@ export function DataTableBulkActions<TData>({
   return (
     <>
       <BulkActionsToolbar table={table} entityName='API key'>
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={selectedRows.length === 0 || selectedRows.length > 100}
+          onClick={() =>
+            setEditingIds(
+              selectedRows.map((row) => (row.original as ApiKey).id)
+            )
+          }
+        >
+          <Pencil className='size-4' aria-hidden='true' />
+          {t('Batch edit')}
+        </Button>
         <Tooltip>
           <TooltipTrigger
             render={
@@ -133,6 +148,14 @@ export function DataTableBulkActions<TData>({
         onOpenChange={setShowDeleteConfirm}
         table={table}
       />
+      {editingIds && (
+        <ApiKeysMutateDrawer
+          open
+          batchIds={editingIds}
+          onOpenChange={(open) => !open && setEditingIds(null)}
+          onBatchSuccess={() => table.resetRowSelection()}
+        />
+      )}
     </>
   )
 }

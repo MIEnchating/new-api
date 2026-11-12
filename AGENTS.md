@@ -187,6 +187,16 @@ Tasks that touch none of these (for example unrelated frontend work, authenticat
 
 ### Project Governance
 
+**Upstream synchronization:**
+
+- Before merging upstream, review the local commits since the merge base, including intentional deletions and changed regression expectations. Treat the current local branch as the baseline for product behavior; a previous release is historical context, not a specification to restore wholesale.
+- Separate changes actually introduced by upstream from additional compatibility or cleanup edits. Do not resurrect locally deleted features merely because an older release contained them. If a deletion conflicts with a safety or data-compatibility requirement, identify the specific conflict and resolve it within the user's authorized scope rather than silently undoing the deletion.
+- Preserve the removal of the channels page's top-right **Channel execution** entry and its dialog mount unless the user requests its return. Preserve the request logs' **upstream request chain**; these are separate product decisions.
+- Run the existing regression checks for affected local behavior. Do not rewrite a regression expectation solely to accommodate a restoration made during synchronization.
+- Before and after synchronization, run `node .github/scripts/check-local-changes.mjs`; it checks the working tree, including uncommitted changes. Audit a candidate commit with `--ref <revision>`. The historical anchors in `.agents/upstream-sync-policy.json` protect the local cleanup decisions; only the upstream request chain is allowed to return. Do not replace these anchors, broaden exceptions, delete the guard, or weaken its tests merely to make a merge pass. A changed product decision requires an explicit user instruction.
+- Before merging or releasing, run the channel-entry and upstream-request-chain frontend regression files, plus the upstream-ID transport/capture and WebSocket-reuse backend tests. A guard failure blocks completion; report its specific conflict and resolve it without silently restoring old behavior. The guard catches deleted paths and exact old versions; changed implementations still require behavioral review and tests.
+- In the merge handoff, list any local behavior changed or restored and explain why. A clean textual merge does not establish that local product decisions were preserved.
+
 **Protected project information:** The following project-related information is strictly protected and MUST NOT be modified, deleted, replaced, or removed under any circumstances:
 
 - Any references, mentions, branding, metadata, or attributions related to **nеw-аρi** (the project name/identity)

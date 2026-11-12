@@ -20,10 +20,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, cleanup, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import i18next from 'i18next'
-import { I18nextProvider } from 'react-i18next'
 import { afterEach, expect, it, vi } from 'vitest'
 
-import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
 import {
   DEFAULT_CURRENCY_CONFIG,
@@ -34,7 +32,6 @@ import { DynamicPricingBreakdown } from '../components/dynamic-pricing-breakdown
 import { ModelCard } from '../components/model-card'
 import { ModelDetailsContent } from '../components/model-details'
 import { ModelPriceCell } from '../components/model-price-cell'
-import { getDailyTimePrices } from '../lib/daily-time-pricing'
 import { getTaskPricingDisplayTiers } from '../lib/task-matrix-display'
 import {
   hasSimpleTaskPricing,
@@ -77,188 +74,6 @@ it('renders weekday and hour conditions as time windows instead of expression so
     ).length
   ).toBeGreaterThan(0)
   expect(screen.queryByText(/weekday\(/)).not.toBeInTheDocument()
-})
-
-it('shows separate time windows with their actual conjunction, one timezone and a neutral multiplier', async () => {
-  const translations = i18next.createInstance()
-  await translations.init({
-    lng: 'zh',
-    fallbackLng: 'en',
-    resources: { zh, en: { translation: {} } },
-  })
-  render(
-    <I18nextProvider i18n={translations}>
-      <DynamicPricingBreakdown
-        compact
-        billingExpr='(tier("base", p * 1 + c * 4 + cr * 0.02)) * (hour("Asia/Shanghai") >= 9 && hour("Asia/Shanghai") < 12 && hour("Asia/Shanghai") >= 14 && hour("Asia/Shanghai") < 18 ? 1 : 1)'
-      />
-    </I18nextProvider>
-  )
-  const rule = within(screen.getByRole('listitem'))
-  expect(rule.getByText('09:00至12:00且14:00至18:00')).toBeVisible()
-  expect(rule.getByText('时区: Asia/Shanghai')).toBeVisible()
-  expect(rule.getByText('价格不变')).toBeVisible()
-  expect(rule.queryByText(/&&|小时|1x/)).not.toBeInTheDocument()
-  await act(() => translations.changeLanguage('en'))
-  expect(rule.getByText('09:00–12:00 and 14:00–18:00')).toBeVisible()
-  expect(rule.getByText('Timezone: Asia/Shanghai')).toBeVisible()
-  expect(rule.getByText('No price change')).toBeVisible()
-})
-
-it('preserves overnight alternatives and formats weekday and minute ranges in their own units', () => {
-  render(
-    <DynamicPricingBreakdown billingExpr='(tier("base", p * 1)) * ((hour("Asia/Shanghai") >= 21 || hour("Asia/Shanghai") < 6) && weekday("Asia/Shanghai") >= 1 && weekday("Asia/Shanghai") < 6 && minute("Asia/Shanghai") >= 15 && minute("Asia/Shanghai") < 30 ? 0.5 : 1)' />
-  )
-  const rule = within(screen.getByRole('listitem'))
-  expect(
-    rule.getByText('(21:00–24:00 or 00:00–06:00) and Mon–Fri and Minute: 15–29')
-  ).toBeVisible()
-  expect(rule.getByText('Timezone: Asia/Shanghai')).toBeVisible()
-  expect(rule.getByText('0.5×')).toBeVisible()
-})
-
-it('keeps multiple timezones and non-time conditions attached to the right rules', () => {
-  render(
-    <DynamicPricingBreakdown billingExpr='(tier("base", p * 1)) * (hour("Asia/Shanghai") >= 9 && hour("Asia/Shanghai") < 12 && hour("UTC") >= 1 && hour("UTC") < 4 && header("mode") == "fast" ? 2 : 1)' />
-  )
-  const rule = within(screen.getByRole('listitem'))
-  expect(
-    rule.getByText(
-      '09:00–12:00 (Asia/Shanghai) and 01:00–04:00 (UTC) and Header mode = fast'
-    )
-  ).toBeVisible()
-  expect(rule.getByText('2×')).toBeVisible()
-})
-
-it('preserves recorded matches and unknown conditions in compact log details', () => {
-  render(
-    <DynamicPricingBreakdown
-      compact
-      billingExpr='tier("base", p * 1)'
-      requestRules={[
-        {
-          cond: 'hour("Asia/Shanghai") >= 9 && hour("Asia/Shanghai") < 12 && header("mode") == "fast"',
-          multiplier: 2,
-          matched: true,
-        },
-        { cond: 'custom("unknown")', multiplier: 0.5, matched: false },
-      ]}
-    />
-  )
-  const [matched, unknown] = screen
-    .getAllByRole('listitem')
-    .map((row) => within(row))
-  expect(matched.getByText('09:00–12:00 and Header mode = fast')).toBeVisible()
-  expect(matched.getByText('Timezone: Asia/Shanghai')).toBeVisible()
-  expect(matched.getByText('2× · Matched')).toBeVisible()
-  expect(unknown.getByText('custom("unknown")')).toBeVisible()
-  expect(unknown.queryByText(/Matched/)).not.toBeInTheDocument()
-})
-
-it('shows the actual input, output and cache prices for two daily windows and their complement', () => {
-  render(
-    <DynamicPricingBreakdown billingExpr='(tier("base", p * 1 + c * 4 + cr * 0.02)) * (hour("Asia/Shanghai") >= 9 && hour("Asia/Shanghai") < 12 ? 2 : 1) * (hour("Asia/Shanghai") >= 14 && hour("Asia/Shanghai") < 18 ? 2 : 1)' />
-  )
-  const table = within(screen.getByRole('table'))
-  const adjusted = within(
-    table.getByRole('row', { name: /09:00–12:00 or 14:00–18:00/ })
-  )
-  expect(adjusted.getByText('$2.0000')).toBeVisible()
-  expect(adjusted.getByText('$8.0000')).toBeVisible()
-  expect(adjusted.getByText('$0.0400')).toBeVisible()
-  const base = within(table.getByRole('row', { name: /^Other times/ }))
-  expect(base.getByText('$1.0000')).toBeVisible()
-  expect(base.getByText('$4.0000')).toBeVisible()
-  expect(base.getByText('$0.0200')).toBeVisible()
-  expect(table.getByText('Input / 1M token')).toBeVisible()
-  expect(screen.queryByText('Conditional multipliers')).not.toBeInTheDocument()
-})
-
-it('includes overlapping multipliers and retains the original OR semantics', () => {
-  expect(
-    getDailyTimePrices(
-      '(hour("Asia/Shanghai") >= 9 && hour("Asia/Shanghai") < 12 ? 2 : 1) * (hour("Asia/Shanghai") >= 11 && hour("Asia/Shanghai") < 14 ? 3 : 1)'
-    )
-  ).toEqual({
-    timezone: 'Asia/Shanghai',
-    periods: [
-      { multiplier: 2, ranges: [{ start: 9, end: 11 }] },
-      { multiplier: 6, ranges: [{ start: 11, end: 12 }] },
-      { multiplier: 3, ranges: [{ start: 12, end: 14 }] },
-      {
-        multiplier: 1,
-        ranges: [
-          { start: 0, end: 9 },
-          { start: 14, end: 24 },
-        ],
-      },
-    ],
-  })
-  expect(
-    getDailyTimePrices('(hour("UTC") >= 9 || hour("UTC") < 12 ? 2 : 1)')
-      ?.periods
-  ).toEqual([{ multiplier: 2, ranges: [{ start: 0, end: 24 }] }])
-  expect(
-    getDailyTimePrices('(hour("UTC") >= 21 || hour("UTC") < 6 ? 0.5 : 1)')
-      ?.periods
-  ).toEqual([
-    {
-      multiplier: 0.5,
-      ranges: [
-        { start: 0, end: 6 },
-        { start: 21, end: 24 },
-      ],
-    },
-    { multiplier: 1, ranges: [{ start: 6, end: 21 }] },
-  ])
-  expect(getDailyTimePrices('(weekday("UTC") == 1 ? 2 : 1)')).toBeNull()
-  expect(
-    getDailyTimePrices(
-      '(hour("UTC") < 12 && hour("Asia/Shanghai") >= 9 ? 2 : 1)'
-    )
-  ).toBeNull()
-  expect(getDailyTimePrices('(header("mode") == "fast" ? 2 : 1)')).toBeNull()
-})
-
-it('keeps free time windows at zero and converts multiplied prices to the selected currency', () => {
-  const config = useSystemConfigStore.getState().config
-  useSystemConfigStore.setState({
-    config: {
-      ...config,
-      currency: {
-        ...config.currency,
-        quotaDisplayType: 'CNY',
-        usdExchangeRate: 7,
-      },
-    },
-  })
-  try {
-    render(
-      <DynamicPricingBreakdown billingExpr='(tier("base", p * 1 + c * 4)) * (hour("UTC") < 8 ? 0 : 1) * (hour("UTC") >= 9 && hour("UTC") < 12 ? 2 : 1)' />
-    )
-    const table = within(screen.getByRole('table'))
-    const free = within(table.getByRole('row', { name: /00:00–08:00/ }))
-    expect(free.getAllByText('¥0.0000')).toHaveLength(2)
-    const adjusted = within(table.getByRole('row', { name: /09:00–12:00/ }))
-    expect(adjusted.getByText('¥14.0000')).toBeVisible()
-    expect(adjusted.getByText('¥56.0000')).toBeVisible()
-  } finally {
-    useSystemConfigStore.setState({ config })
-  }
-})
-
-it('preserves tier conditions, per-request units and explicitly free cache prices', () => {
-  render(
-    <DynamicPricingBreakdown billingExpr='(len < 1000 ? tier("short", fixed(0.01)) : tier("long", p * 1 + c * 4 + cr * 0)) * (hour("UTC") < 8 ? 0.5 : 1)' />
-  )
-  const table = within(screen.getByRole('table'))
-  expect(table.getAllByRole('row')).toHaveLength(5)
-  expect(table.getByText('$0.005/request')).toBeVisible()
-  expect(table.getByText('$0.01/request')).toBeVisible()
-  expect(table.getByText('$0.5000')).toBeVisible()
-  expect(table.getByText('$2.0000')).toBeVisible()
-  expect(table.getAllByText('$0.0000')).toHaveLength(2)
-  expect(table.getAllByText('Full input length < 1K')).toHaveLength(2)
 })
 
 const model: PricingModel = {
@@ -848,21 +663,4 @@ it('shows provider count, price range and missing-price status in both list and 
   )
   expect(screen.getByText('0.4 – 0.8/s')).toBeVisible()
   expect(screen.getByText('$0.4 – $0.8')).toBeVisible()
-})
-
-it('keeps per-second task pricing distinct from per-request pricing in shared cells', () => {
-  render(
-    <ModelPriceCell
-      model={{
-        ...model,
-        billing_mode: 'per_second',
-        billing_expr: undefined,
-        quota_type: 1,
-        model_price: 0.2,
-      }}
-    />
-  )
-  expect(screen.getByText('Per-second')).toBeInTheDocument()
-  expect(screen.queryByText('Per-request')).not.toBeInTheDocument()
-  expect(screen.getByText(/\/ second$/)).toBeInTheDocument()
 })

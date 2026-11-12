@@ -71,11 +71,7 @@ import {
   isValidPricingCurrency,
   USD_PRICING_CURRENCY,
 } from '@/features/model-pricing/currency'
-import {
-  perSecondExpression,
-  pricingFromDraft,
-  pricingRow,
-} from '@/features/model-pricing/pricing'
+import { pricingFromDraft, pricingRow } from '@/features/model-pricing/pricing'
 import { PricingAmountInput } from '@/features/model-pricing/pricing-amount-input'
 import {
   PricingConversionDialog,
@@ -145,6 +141,7 @@ export type ModelPricingEditorPanelHandle = {
 }
 
 const DEFAULT_TOKEN_BILLING_EXPR = 'tier("base", p * 0 + c * 0)'
+
 export const ModelPricingSheet = forwardRef<
   ModelPricingEditorPanelHandle,
   ModelPricingSheetProps
@@ -191,12 +188,13 @@ export const ModelPricingSheet = forwardRef<
     </Sheet>
   )
 })
+
 export const ModelPricingEditorPanel = forwardRef<
   ModelPricingEditorPanelHandle,
   ModelPricingEditorPanelProps
 >(function ModelPricingEditorPanel(
   {
-    editData: sourceEditData,
+    editData,
     className,
     onSave,
     isSaving,
@@ -209,36 +207,6 @@ export const ModelPricingEditorPanel = forwardRef<
   ref
 ) {
   const { t } = useTranslation()
-  const legacyPricing = useMemo<{
-    data: typeof sourceEditData
-    error: string
-  }>(() => {
-    if (sourceEditData?.billingMode !== 'per-second') {
-      return { data: sourceEditData, error: '' }
-    }
-    try {
-      return {
-        data: {
-          ...sourceEditData,
-          billingMode: 'tiered_expr',
-          billingExpr: perSecondExpression(sourceEditData),
-          requestRuleExpr: '',
-        },
-        error: '',
-      }
-    } catch (error) {
-      return {
-        data: {
-          ...sourceEditData,
-          billingMode: 'tiered_expr',
-          billingExpr: '',
-        },
-        error:
-          error instanceof Error ? error.message : t('Invalid pricing value'),
-      }
-    }
-  }, [sourceEditData, t])
-  const editData = legacyPricing.data
   const promptPriceId = useId()
   const formElementRef = useRef<HTMLFormElement>(null)
   const currencyConfig = useSystemConfigStore((state) => state.config.currency)
@@ -252,8 +220,6 @@ export const ModelPricingEditorPanel = forwardRef<
       ? siteCurrency
       : USD_PRICING_CURRENCY
   const [pricingMode, setPricingMode] = useState<PricingMode>('tiered_expr')
-  const isLegacyPricingMode =
-    pricingMode === 'per-token' || pricingMode === 'per-request'
   const [promptPrice, setPromptPrice] = useState('')
   const [lanePrices, setLanePrices] = useState<Record<LaneKey, string>>({
     ...EMPTY_LANE_PRICES,
@@ -630,9 +596,7 @@ export const ModelPricingEditorPanel = forwardRef<
   ])
 
   const warnings = useMemo(() => {
-    const nextWarnings: string[] = legacyPricing.error
-      ? [legacyPricing.error]
-      : []
+    const nextWarnings: string[] = []
     const hasConflict =
       !!editData?.price &&
       [
@@ -674,18 +638,9 @@ export const ModelPricingEditorPanel = forwardRef<
     }
 
     return nextWarnings
-  }, [
-    editData,
-    legacyPricing.error,
-    laneEnabled,
-    lanePrices,
-    pricingMode,
-    promptPrice,
-    t,
-  ])
+  }, [editData, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
   const validatePricingValues = useCallback(() => {
-    if (legacyPricing.error) return false
     if (
       pricingMode === 'per-token' &&
       ((toNumberOrNull(promptPrice) === 0 &&
@@ -729,15 +684,7 @@ export const ModelPricingEditorPanel = forwardRef<
     }
 
     return true
-  }, [
-    form,
-    legacyPricing.error,
-    laneEnabled,
-    lanePrices,
-    pricingMode,
-    promptPrice,
-    t,
-  ])
+  }, [form, laneEnabled, lanePrices, pricingMode, promptPrice, t])
 
   const buildSubmitData = useCallback(
     (values: ModelPricingFormValues) => {
@@ -763,6 +710,7 @@ export const ModelPricingEditorPanel = forwardRef<
         data.billingExpr = resolvedBillingExpr
         data.requestRuleExpr = requestRuleExpr
       }
+
       return data
     },
     [
@@ -780,7 +728,7 @@ export const ModelPricingEditorPanel = forwardRef<
       conversion.isPending ||
       conversionPreview ||
       billingExpr.trim() ||
-      !isLegacyPricingMode
+      pricingMode === 'tiered_expr'
     ) {
       return
     }
@@ -830,7 +778,7 @@ export const ModelPricingEditorPanel = forwardRef<
     setConversionPreview(null)
     if (
       billingExpr.trim() ||
-      !isLegacyPricingMode ||
+      pricingMode === 'tiered_expr' ||
       JSON.stringify(buildSubmitData(form.getValues())) !==
         conversionPreview.draftFingerprint
     ) {
@@ -863,20 +811,10 @@ export const ModelPricingEditorPanel = forwardRef<
         }
         const isValid = await form.trigger()
         if (!isValid || !validatePricingValues()) return null
-        try {
-          return buildSubmitData(form.getValues())
-        } catch (error) {
-          form.setError('price', {
-            message:
-              error instanceof Error
-                ? error.message
-                : t('Invalid pricing value'),
-          })
-          return null
-        }
+        return buildSubmitData(form.getValues())
       },
     }),
-    [form, validatePricingValues, buildSubmitData, t]
+    [form, validatePricingValues, buildSubmitData]
   )
 
   const configureOrdinaryPricing = () => {
@@ -1042,7 +980,7 @@ export const ModelPricingEditorPanel = forwardRef<
                       </TabsTrigger>
                     </TabsList>
 
-                    {isLegacyPricingMode && (
+                    {pricingMode !== 'tiered_expr' && (
                       <Alert className='border-amber-500/40 bg-amber-500/10 p-4 text-amber-900 dark:text-amber-100'>
                         <AlertTriangle aria-hidden='true' className='size-5' />
                         <AlertDescription className='space-y-3 text-sm text-inherit'>
@@ -1077,8 +1015,7 @@ export const ModelPricingEditorPanel = forwardRef<
                         </AlertDescription>
                       </Alert>
                     )}
-                    {(isLegacyPricingMode ||
-                      (pricingMode === 'tiered_expr' && wasConverted)) && (
+                    {(pricingMode !== 'tiered_expr' || wasConverted) && (
                       <p className='text-muted-foreground text-xs'>
                         {t(
                           'After conversion, expression reservation and rounding rules apply. Effective unit prices are preserved; individual rounded charges may differ.'

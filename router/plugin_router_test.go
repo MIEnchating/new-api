@@ -543,18 +543,7 @@ func TestBuiltInPluginRoutesAreServedBesideHostRoutes(t *testing.T) {
 	outer.NoRoute((&pluginRouteDispatcher{registry: registry}).dispatch, controller.RelayNotFound)
 
 	require.Empty(t, registry.RoutingErrors())
-	// The fork's shared plural video endpoint keeps host precedence; xAI's
-	// native wire format remains available under its pinned /xai address.
-	assert.Equal(t, []jsplugin.SkippedRoute{{
-		PluginKey: "xai",
-		Route: jsplugin.Route{
-			Method: http.MethodPost, Path: "/v1/videos/generations", Type: jsplugin.RouteTypeSubmit,
-			Decode: "createGeneration", Render: "videoCreated",
-		},
-		Reason: "host_route",
-	}}, registry.Generation().SkippedRoutes())
-	hostReply := performPluginRequest(outer, http.MethodPost, "/v1/videos/generations")
-	assert.Equal(t, http.StatusUnauthorized, hostReply.Code)
+	require.Empty(t, registry.Generation().SkippedRoutes())
 	for _, plugin := range builtIns {
 		_, active := registry.Get(plugin.Meta.Key)
 		assert.True(t, active, plugin.Meta.Key)

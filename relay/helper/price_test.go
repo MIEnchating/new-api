@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
@@ -23,31 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestHandleGroupRatioUsesFinalTokenRouteAndScheduledPrice(t *testing.T) {
-	savedRatios := ratio_setting.GroupRatio2JSONString()
-	savedSpecialRatios := ratio_setting.GroupGroupRatio2JSONString()
-	savedSchedule := ratio_setting.GroupRatioSchedule2JSONString()
-	t.Cleanup(func() {
-		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(savedRatios))
-		require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(savedSpecialRatios))
-		require.NoError(t, ratio_setting.UpdateGroupRatioScheduleByJSONString(savedSchedule))
-	})
-	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"route":2,"auto":3}`))
-	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{}`))
-	require.NoError(t, ratio_setting.UpdateGroupRatioScheduleByJSONString(`{"route":{"enabled":true,"periods":[{"start":"00:00","end":"23:59","ratio":0.5}]}}`))
-	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
-	ctx.Set("auto_group", "auto")
-	common.SetContextKey(ctx, constant.ContextKeyTokenGroupRouteGroup, "route")
-	info := &relaycommon.RelayInfo{UsingGroup: "initial", UserGroup: "customer"}
-	price := HandleGroupRatio(ctx, info)
-	assert.Equal(t, "route", info.UsingGroup)
-	assert.Equal(t, 0.5, price.GroupRatio)
-	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"customer":{"route":0.25}}`))
-	price = HandleGroupRatio(ctx, info)
-	assert.True(t, price.HasSpecialRatio)
-	assert.Equal(t, 0.25, price.GroupRatio)
-}
 
 func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
 	gin.SetMode(gin.TestMode)

@@ -93,7 +93,6 @@ type NewAPIError struct {
 	internalErr    error
 	responseRaw    bool
 	skipRetry      bool
-	streamEvent    bool
 	recordErrorLog *bool
 	errorType      ErrorType
 	errorCode      ErrorCode
@@ -442,21 +441,9 @@ func IsSkipRetryError(err *NewAPIError) bool {
 	return err.skipRetry
 }
 
-// IsStreamEventError reports whether the failure came from an error event
-// embedded in an otherwise successful streaming HTTP response.
-func IsStreamEventError(err *NewAPIError) bool {
-	return err != nil && err.streamEvent
-}
-
 func ErrOptionWithSkipRetry() NewAPIErrorOptions {
 	return func(e *NewAPIError) {
 		e.skipRetry = true
-	}
-}
-
-func ErrOptionWithStreamEvent() NewAPIErrorOptions {
-	return func(e *NewAPIError) {
-		e.streamEvent = true
 	}
 }
 

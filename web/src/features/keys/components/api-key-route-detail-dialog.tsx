@@ -97,6 +97,7 @@ export function ApiKeyRouteDetailDialog() {
     [currentRow?.group_route_config]
   )
   const routes = draftRoutes
+  const isTemplateLinked = !!currentRow?.routing_template_id
   const isDirty = JSON.stringify(draftRoutes) !== JSON.stringify(storedRoutes)
   const { data: routeStatusData, refetch: refetchRouteStatus } = useQuery({
     queryKey: ['api-key-route-status', currentRow?.id],
@@ -150,7 +151,7 @@ export function ApiKeyRouteDetailDialog() {
   }
 
   const handleSaveRoutes = async () => {
-    if (!currentRow?.id || !isDirty || isSaving) return
+    if (!currentRow?.id || !isDirty || isSaving || isTemplateLinked) return
     if (
       draftRoutes.some(
         (route) => !Number.isInteger(route.priority) || route.priority < 0
@@ -271,6 +272,7 @@ export function ApiKeyRouteDetailDialog() {
                       {t('Priority')}
                     </span>
                     <Input
+                      disabled={isTemplateLinked}
                       type='number'
                       min={0}
                       step={1}
@@ -340,6 +342,7 @@ export function ApiKeyRouteDetailDialog() {
                         }
                       >
                         <Switch
+                          disabled={isTemplateLinked}
                           checked={enabled}
                           onCheckedChange={(checked) =>
                             handleRouteEnabledChange(index, checked)
@@ -389,6 +392,11 @@ export function ApiKeyRouteDetailDialog() {
           </div>
         )}
 
+        {isTemplateLinked && (
+          <p className='text-muted-foreground text-xs'>
+            {t('Detach the routing template before editing routes')}
+          </p>
+        )}
         <DialogFooter className='sm:flex-wrap sm:items-center'>
           <Button
             type='button'
@@ -412,7 +420,7 @@ export function ApiKeyRouteDetailDialog() {
           <Button
             type='button'
             onClick={() => void handleSaveRoutes()}
-            disabled={!isDirty || isSaving}
+            disabled={!isDirty || isSaving || isTemplateLinked}
           >
             {isSaving ? (
               <Loader2 className='size-4 animate-spin' />

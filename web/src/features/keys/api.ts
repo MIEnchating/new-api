@@ -29,6 +29,7 @@ import type {
   RouteStatus,
   TokenAutoGroupsConfig,
   SmartRoutingTemplate,
+  ApiKeyBatchUpdate,
 } from './types'
 
 // ============================================================================
@@ -146,6 +147,14 @@ export async function batchDeleteApiKeys(
   return res.data
 }
 
+export async function batchUpdateApiKeys(
+  ids: number[],
+  updates: ApiKeyBatchUpdate
+): Promise<ApiResponse<number>> {
+  const res = await api.put('/api/token/batch', { ids, updates })
+  return res.data
+}
+
 // Update API key status (enable/disable)
 export async function updateApiKeyStatus(
   id: number,
@@ -170,5 +179,14 @@ export async function fetchTokenKeysBatch(ids: number[]): Promise<{
   data?: { keys: Record<number, string> }
 }> {
   const res = await api.post('/api/token/batch/keys', { ids })
+  return res.data
+}
+
+export async function fetchTemplateTokenKeys(
+  templateID: string
+): Promise<ApiResponse<{ keys: Record<number, string> }>> {
+  const res = await api.post('/api/token/batch/keys', {
+    routing_template_id: templateID,
+  })
   return res.data
 }

@@ -10,7 +10,7 @@ import (
 )
 
 // Keep routing schema compatibility while authenticating every metadata field.
-const tokenCacheSchemaVersion = 3
+const tokenCacheSchemaVersion = 4
 
 func (token Token) cacheMAC() (string, error) {
 	key := getTokenCacheKey(token.Key)
@@ -115,7 +115,7 @@ redis.call('HSET', KEYS[1],
   'AllowIps', ARGV[11], 'Group', ARGV[12], 'CrossGroupRetry', ARGV[13],
   'AutoGroups', ARGV[14], 'AllowUserQuotaQuery', ARGV[17],
   'GroupRouteConfig', ARGV[23], 'GroupRouteSticky', ARGV[24], 'CacheSchema', ARGV[25],
-  'CacheExpiresAt', ARGV[19], 'CacheMAC', ARGV[20])
+  'RoutingTemplateID', ARGV[26], 'CacheExpiresAt', ARGV[19], 'CacheMAC', ARGV[20])
 for _, counter in ipairs({{'AccessedTime', ARGV[6]}, {'RemainQuota', ARGV[15]}, {'UsedQuota', ARGV[16]}}) do
   if not string.match(redis.call('HGET', KEYS[1], counter[1]) or '', '^-?%d+$') then
     redis.call('HSET', KEYS[1], counter[1], counter[2])
@@ -138,7 +138,7 @@ return 1`
 		strconv.FormatBool(token.AllowUserQuotaQuery),
 		tokenCacheTTLSeconds(),
 		token.CacheExpiresAt, mac, strconv.FormatBool(repair), existing.CacheMAC,
-		token.GroupRouteConfig, strconv.FormatBool(token.GroupRouteSticky), token.CacheSchema,
+		token.GroupRouteConfig, strconv.FormatBool(token.GroupRouteSticky), token.CacheSchema, token.RoutingTemplateID,
 	).Int()
 }
 

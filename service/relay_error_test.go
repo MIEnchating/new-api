@@ -241,8 +241,6 @@ func TestRequestPolicyEventsReachLogAdminInfo(t *testing.T) {
 	c.Set("channel_id", 7)
 	state := RequestPolicy(c)
 	state.BeginAttempt(&model.Channel{Id: 7}, "default")
-	require.Len(t, state.Events(), 1)
-	assert.Equal(t, PolicyDecision{Action: "attempt", Reason: "channel_selected", Source: "routing"}, state.Events()[0].Decision)
 	apiErr := types.NewOpenAIError(errors.New("invalid credential"), types.ErrorCodeBadResponseStatusCode, http.StatusUnauthorized)
 	RecordPolicyFailure(c, 7, apiErr, DecideRelayRetry(c, apiErr, 0))
 
@@ -251,22 +249,15 @@ func TestRequestPolicyEventsReachLogAdminInfo(t *testing.T) {
 	events, ok := failed.Snapshot()["admin_info"].(map[string]any)["request_policy"].([]PolicyEvent)
 	require.True(t, ok, "a failed relay exposes its decision events to administrators")
 	require.Len(t, events, 3)
+	assert.Equal(t, PolicyDecision{Action: "attempt", Reason: "channel_selected", Source: "routing"}, events[0].Decision)
+	assert.Equal(t, "default", events[0].Group)
 	assert.Equal(t, PolicyDecision{Action: "failure", Reason: "upstream_failure", Source: "upstream"}, events[1].Decision)
+	assert.Equal(t, http.StatusUnauthorized, events[1].Status)
 	assert.Equal(t, PolicyDecision{Action: "stop", Reason: "attempt_budget_exhausted", Source: "global"}, events[2].Decision)
-	for _, event := range events[1:] {
-		assert.Equal(t, http.StatusUnauthorized, event.Status)
-		assert.Equal(t, string(types.ErrorCodeBadResponseStatusCode), event.ErrorCode)
-		assert.Equal(t, "upstream", event.ErrorSource)
-		assert.Equal(t, 1, event.Attempt)
-		assert.Equal(t, 7, event.ChannelID)
-		assert.Equal(t, "default", event.Group)
-	}
 	assert.Equal(t, "channel_disable_requested", events[2].Health, "the health entry follows the automatic disable rules")
 	common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
 	RecordPolicyFailure(c, 7, apiErr, DecideRelayRetry(c, apiErr, 0))
-	events = state.Events()
-	require.Len(t, events, 5)
-	assert.Equal(t, "key_disable_requested", events[4].Health)
+	assert.Equal(t, "key_disable_requested", state.Events()[4].Health)
 
 	state.BeginAttempt(&model.Channel{Id: 8}, "default")
 	c.Set("channel_id", 8)
@@ -277,7 +268,6 @@ func TestRequestPolicyEventsReachLogAdminInfo(t *testing.T) {
 	events, ok = succeeded.Snapshot()["admin_info"].(map[string]any)["request_policy"].([]PolicyEvent)
 	require.True(t, ok, "a successful relay exposes its decision events to administrators")
 	require.Len(t, events, 7, "the outcome is recorded once")
-	assert.Equal(t, PolicyDecision{Action: "attempt", Reason: "channel_selected", Source: "routing"}, events[5].Decision)
 	assert.Equal(t, PolicyDecision{Action: "success", Reason: "request_completed", Source: "upstream"}, events[6].Decision)
 	assert.Equal(t, 8, events[6].ChannelID)
 	assert.Equal(t, 2, events[6].Attempt)
@@ -286,5 +276,6 @@ func TestRequestPolicyEventsReachLogAdminInfo(t *testing.T) {
 	untouched, _ := gin.CreateTestContext(httptest.NewRecorder())
 	other := model.NewLogOther()
 	AppendRelayLogAdminInfo(untouched, nil, other)
-	assert.NotContains(t, other.Snapshot()["admin_info"], "request_policy", "requests without decisions do not carry an empty record")
+	_, hasAdminInfo := other.Snapshot()["admin_info"]
+	assert.False(t, hasAdminInfo, "requests without decisions do not carry an empty record")
 }

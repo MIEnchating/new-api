@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,12 +40,15 @@ type tokenRequest struct {
 	model.Token
 	AutoGroups tokenAutoGroupsInput `json:"auto_groups"`
 	// 指针区分“未传”和显式 false：新建时未传即开启，更新时未传则保留原值。
-	AllowUserQuotaQuery *bool `json:"allow_user_quota_query"`
+	AllowUserQuotaQuery *bool   `json:"allow_user_quota_query"`
+	RoutingTemplateID   *string `json:"routing_template_id"`
 }
 
 type tokenResponse struct {
+	RoutingTemplateName string `json:"routing_template_name"`
 	*model.Token
-	AutoGroups []string `json:"auto_groups"`
+	AutoGroups               []string `json:"auto_groups"`
+	RoutingTemplateAvailable bool     `json:"routing_template_available"`
 }
 
 func maxTokenQuota() int {
@@ -61,9 +65,16 @@ func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	if token == nil {
 		return nil
 	}
-	maskedToken := *token
+	effective, resolveErr := token.ResolveRoutingTemplate()
+	if resolveErr != nil {
+		fallback := *token
+		fallback.Group, fallback.GroupRouteConfig, fallback.ModelLimits = "", "", ""
+		fallback.ModelLimitsEnabled = true
+		effective = &fallback
+	}
+	maskedToken := *effective
 	maskedToken.Key = token.GetMaskedKey()
-	autoGroups, err := token.GetAutoGroups()
+	autoGroups, err := effective.GetAutoGroups()
 	if err != nil {
 		common.SysError(common.LogText("failed to parse auto groups for token %d: %v", token.Id, err))
 		autoGroups = nil
@@ -71,7 +82,16 @@ func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	if len(autoGroups) == 0 {
 		autoGroups = nil
 	}
-	return &tokenResponse{Token: &maskedToken, AutoGroups: autoGroups}
+	response := &tokenResponse{Token: &maskedToken, AutoGroups: autoGroups, RoutingTemplateAvailable: resolveErr == nil}
+	if token.RoutingTemplateID != "" {
+		for _, template := range operation_setting.CurrentSmartRoutingSetting().Templates {
+			if template.ID == token.RoutingTemplateID {
+				response.RoutingTemplateName = template.Name
+				break
+			}
+		}
+	}
+	return response
 }
 
 func buildMaskedTokenResponses(tokens []*model.Token) []*tokenResponse {
@@ -80,6 +100,21 @@ func buildMaskedTokenResponses(tokens []*model.Token) []*tokenResponse {
 		maskedTokens = append(maskedTokens, buildMaskedTokenResponse(token))
 	}
 	return maskedTokens
+}
+
+func applyTokenRoutingTemplate(token *model.Token) error {
+	if token.RoutingTemplateID == "" {
+		return nil
+	}
+	effective, err := token.ResolveRoutingTemplate()
+	if err != nil {
+		return err
+	}
+	if _, err := normalizeTokenGroupRouteConfigForUser(token.UserId, effective.GroupRouteConfig); err != nil {
+		return err
+	}
+	*token = *effective
+	return nil
 }
 
 func normalizeTokenGroupRouteConfigForUser(userID int, config string) (string, error) {
@@ -305,6 +340,16 @@ func getTokenModelGroups(token *model.Token) ([]string, error) {
 }
 
 func getTokenModels(token *model.Token) ([]string, error) {
+	effective, err := token.ResolveRoutingTemplate()
+	if err != nil {
+		return nil, err
+	}
+	token = effective
+	if token.RoutingTemplateID != "" {
+		if _, err := normalizeTokenGroupRouteConfigForUser(token.UserId, token.GroupRouteConfig); err != nil {
+			return nil, err
+		}
+	}
 	groups, err := getTokenModelGroups(token)
 	if err != nil {
 		return nil, err
@@ -382,6 +427,11 @@ func GetTokenRouteStatus(c *gin.Context) {
 		return
 	}
 	token, err := model.GetTokenByIds(id, userId)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	token, err = token.ResolveRoutingTemplate()
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -496,6 +546,10 @@ func UpdateTokenGroupRoutes(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if token.RoutingTemplateID != "" {
+		common.ApiErrorT(c, "Detach the routing template before editing routes")
+		return
+	}
 	normalized, err := normalizeTokenGroupRouteConfigForUser(userID, request.GroupRouteConfig)
 	if err != nil {
 		common.ApiError(c, err)
@@ -608,6 +662,13 @@ func buildTokenUsageLabels(c *gin.Context) gin.H {
 }
 
 func buildTokenUsageData(token *model.Token, accountQuota int, expiredAt int64, labels gin.H) gin.H {
+	if effective, err := token.ResolveRoutingTemplate(); err == nil {
+		token = effective
+	} else {
+		unavailable := *token
+		unavailable.ModelLimitsEnabled, unavailable.ModelLimits = true, ""
+		token = &unavailable
+	}
 	data := gin.H{
 		"object":               "token_usage",
 		"labels":               labels,
@@ -636,6 +697,14 @@ func AddToken(c *gin.Context) {
 		return
 	}
 	token := request.Token
+	token.UserId = c.GetInt("id")
+	if request.RoutingTemplateID != nil {
+		token.RoutingTemplateID = *request.RoutingTemplateID
+	}
+	if err := applyTokenRoutingTemplate(&token); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if len(token.Name) > 50 {
 		common.ApiErrorT(c, "Token name is too long")
 		return
@@ -697,6 +766,7 @@ func AddToken(c *gin.Context) {
 	}
 	cleanToken := model.Token{
 		UserId:             c.GetInt("id"),
+		RoutingTemplateID:  token.RoutingTemplateID,
 		Name:               token.Name,
 		Key:                key,
 		CreatedTime:        common.GetTimestamp(),
@@ -799,6 +869,15 @@ func UpdateToken(c *gin.Context) {
 	if statusOnly != "" {
 		cleanToken.Status = token.Status
 	} else {
+		token.UserId = userId
+		token.RoutingTemplateID = cleanToken.RoutingTemplateID
+		if request.RoutingTemplateID != nil {
+			token.RoutingTemplateID = *request.RoutingTemplateID
+		}
+		if err := applyTokenRoutingTemplate(&token); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		groupRouteConfig, err := normalizeTokenGroupRouteConfigForUser(userId, token.GroupRouteConfig)
 		if err != nil {
 			common.ApiError(c, err)
@@ -828,6 +907,7 @@ func UpdateToken(c *gin.Context) {
 		}
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
+		cleanToken.RoutingTemplateID = token.RoutingTemplateID
 		cleanToken.GroupRouteConfig = groupRouteConfig
 		cleanToken.GroupRouteSticky = token.GroupRouteSticky
 		if token.Group != "auto" {
@@ -863,6 +943,7 @@ func UpdateToken(c *gin.Context) {
 				(previous.AllowIps != nil && cleanToken.AllowIps != nil && *previous.AllowIps != *cleanToken.AllowIps)},
 			{"allow_user_quota_query", previous.AllowUserQuotaQuery != cleanToken.AllowUserQuotaQuery},
 			{"group", previous.Group != cleanToken.Group},
+			{"routing_template_id", previous.RoutingTemplateID != cleanToken.RoutingTemplateID},
 			{"cross_group_retry", previous.CrossGroupRetry != cleanToken.CrossGroupRetry},
 			{"auto_groups", previous.AutoGroups != cleanToken.AutoGroups},
 		} {
@@ -883,6 +964,164 @@ func UpdateToken(c *gin.Context) {
 
 type TokenBatch struct {
 	Ids []int `json:"ids"`
+}
+
+type tokenBatchUpdateFields struct {
+	RoutingTemplateID   *string              `json:"routing_template_id"`
+	Name                *string              `json:"name"`
+	Status              *int                 `json:"status"`
+	ExpiredTime         *int64               `json:"expired_time"`
+	RemainQuota         *int                 `json:"remain_quota"`
+	UnlimitedQuota      *bool                `json:"unlimited_quota"`
+	ModelLimitsEnabled  *bool                `json:"model_limits_enabled"`
+	ModelLimits         *string              `json:"model_limits"`
+	AllowIps            *string              `json:"allow_ips"`
+	AllowUserQuotaQuery *bool                `json:"allow_user_quota_query"`
+	Group               *string              `json:"group"`
+	CrossGroupRetry     *bool                `json:"cross_group_retry"`
+	GroupRouteConfig    *string              `json:"group_route_config"`
+	GroupRouteSticky    *bool                `json:"group_route_sticky"`
+	AutoGroups          tokenAutoGroupsInput `json:"auto_groups"`
+}
+
+func UpdateTokenBatch(c *gin.Context) {
+	// Reject simple content types even though Gin's JSON binder accepts them.
+	if c.ContentType() != "application/json" {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	var request struct {
+		Ids     []int                  `json:"ids"`
+		Updates tokenBatchUpdateFields `json:"updates"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	params := tokenBatchAuditParams(c, request.Ids)
+	if len(request.Ids) == 0 || c.GetInt("id") <= 0 {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	if len(request.Ids) > 100 {
+		common.ApiErrorT(c, "Too many items in batch request, maximum is {{max}}", map[string]any{"max": 100})
+		return
+	}
+	for _, id := range request.Ids {
+		if id <= 0 {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+	}
+	patch := request.Updates
+	updates := make(map[string]any)
+	if patch.Name != nil {
+		if strings.TrimSpace(*patch.Name) == "" || len(*patch.Name) > 50 {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		updates["name"] = *patch.Name
+	}
+	if patch.Status != nil {
+		if *patch.Status != common.TokenStatusEnabled && *patch.Status != common.TokenStatusDisabled {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		updates["status"] = *patch.Status
+	}
+	if patch.ExpiredTime != nil {
+		if *patch.ExpiredTime < -1 {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		updates["expired_time"] = *patch.ExpiredTime
+	}
+	if patch.RemainQuota != nil {
+		if *patch.RemainQuota < 0 || *patch.RemainQuota > maxTokenQuota() {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		updates["remain_quota"] = *patch.RemainQuota
+	}
+	if patch.UnlimitedQuota != nil {
+		updates["unlimited_quota"] = *patch.UnlimitedQuota
+	}
+	if patch.ModelLimitsEnabled != nil || patch.ModelLimits != nil {
+		if patch.ModelLimitsEnabled == nil || patch.ModelLimits == nil || (*patch.ModelLimitsEnabled && strings.TrimSpace(*patch.ModelLimits) == "") {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		updates["model_limits_enabled"], updates["model_limits"] = *patch.ModelLimitsEnabled, *patch.ModelLimits
+	}
+	if patch.AllowIps != nil {
+		updates["allow_ips"] = *patch.AllowIps
+	}
+	if patch.AllowUserQuotaQuery != nil {
+		updates["allow_user_quota_query"] = *patch.AllowUserQuotaQuery
+	}
+	if patch.Group != nil || patch.GroupRouteConfig != nil || patch.CrossGroupRetry != nil || patch.GroupRouteSticky != nil || patch.AutoGroups.Set {
+		if patch.Group == nil || patch.GroupRouteConfig == nil || patch.CrossGroupRetry == nil || patch.GroupRouteSticky == nil || !patch.AutoGroups.Set {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		config, err := normalizeTokenGroupRouteConfigForUser(c.GetInt("id"), *patch.GroupRouteConfig)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		token := model.Token{GroupRouteConfig: config}
+		if config != "" {
+			token.GroupRouteSticky = *patch.GroupRouteSticky
+		} else {
+			token.Group, err = normalizeTokenGroupForUser(c.GetInt("id"), *patch.Group)
+			if err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			if token.Group == "auto" {
+				token.CrossGroupRetry = *patch.CrossGroupRetry
+				if !setTokenAutoGroups(c, &token, patch.AutoGroups.Groups) {
+					return
+				}
+			}
+		}
+		updates["routing_template_id"] = ""
+		updates["group"], updates["group_route_config"], updates["group_route_sticky"] = token.Group, token.GroupRouteConfig, token.GroupRouteSticky
+		updates["auto_groups"], updates["cross_group_retry"] = token.AutoGroups, token.CrossGroupRetry
+	}
+	if patch.RoutingTemplateID != nil {
+		token := model.Token{UserId: c.GetInt("id"), RoutingTemplateID: *patch.RoutingTemplateID}
+		if token.RoutingTemplateID != "" {
+			if err := applyTokenRoutingTemplate(&token); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			updates["group"], updates["auto_groups"], updates["cross_group_retry"] = "", "", false
+			updates["group_route_config"], updates["group_route_sticky"] = token.GroupRouteConfig, token.GroupRouteSticky
+		}
+		updates["routing_template_id"] = token.RoutingTemplateID
+	}
+	if len(updates) == 0 {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	fields := make([]string, 0, len(updates))
+	for field := range updates {
+		fields = append(fields, field)
+	}
+	slices.Sort(fields)
+	params["changed_fields"] = fields
+	count, err := model.BatchUpdateTokens(request.Ids, c.GetInt("id"), updates)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	for _, id := range request.Ids {
+		service.ClearTokenGroupRouteState(id)
+	}
+	params["count"] = count
+	common.SetContextKey(c, constant.ContextKeyTokenAuditSucceeded, true)
+	common.ApiSuccess(c, count)
 }
 
 func DeleteTokenBatch(c *gin.Context) {
@@ -914,13 +1153,20 @@ func DeleteTokenBatch(c *gin.Context) {
 	})
 }
 func GetTokenKeysBatch(c *gin.Context) {
-	tokenBatch := TokenBatch{}
+	var tokenBatch struct {
+		Ids               []int  `json:"ids"`
+		RoutingTemplateID string `json:"routing_template_id"`
+	}
+	if c.ContentType() != "application/json" {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
 	if err := c.ShouldBindJSON(&tokenBatch); err != nil {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	params := tokenBatchAuditParams(c, tokenBatch.Ids)
-	if len(tokenBatch.Ids) == 0 {
+	if len(tokenBatch.Ids) == 0 && tokenBatch.RoutingTemplateID == "" {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
@@ -929,7 +1175,18 @@ func GetTokenKeysBatch(c *gin.Context) {
 		return
 	}
 	userId := c.GetInt("id")
-	tokens, err := model.GetTokenKeysByIds(tokenBatch.Ids, userId)
+	var tokens []model.Token
+	var err error
+	if tokenBatch.RoutingTemplateID != "" {
+		if len(tokenBatch.Ids) != 0 || len(tokenBatch.RoutingTemplateID) > 64 {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		params["routing_template_id"] = tokenBatch.RoutingTemplateID
+		tokens, err = model.GetTokenKeysByTemplate(tokenBatch.RoutingTemplateID, userId)
+	} else {
+		tokens, err = model.GetTokenKeysByIds(tokenBatch.Ids, userId)
+	}
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -941,7 +1198,10 @@ func GetTokenKeysBatch(c *gin.Context) {
 		returnedIDs = append(returnedIDs, t.Id)
 	}
 	params["count"] = len(tokens)
-	params["returned_ids"] = returnedIDs
+	params["returned_ids"] = returnedIDs[:min(len(returnedIDs), 100)]
+	if len(returnedIDs) > 100 {
+		params["returned_ids_truncated"] = true
+	}
 	common.SetContextKey(c, constant.ContextKeyTokenAuditSucceeded, true)
 	common.ApiSuccess(c, gin.H{"keys": keysMap})
 }

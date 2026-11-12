@@ -119,6 +119,7 @@ it.each([
   ['token.status_update', '更新 API 令牌「1」（ID: 11）'],
   ['token.delete', '删除 API 令牌「1」（ID: 11）'],
   ['token.delete_batch', '批量删除 API 令牌'],
+  ['token.update_batch', '批量修改 API 令牌'],
   ['token.key_view', '查看 API 令牌「1」的密钥（ID: 11）'],
   ['token.key_view_batch', '批量查看 API 令牌密钥'],
 ])('localizes the neutral event summary for %s', async (action, summary) => {
@@ -958,4 +959,39 @@ it('does not load scope labels for other records', async () => {
   const get = vi.spyOn(api, 'get')
   await openDetails()
   expect(get).not.toHaveBeenCalled()
+})
+
+it('describes a batch update as updated tokens and never as returned secrets', async () => {
+  const i18n = createInstance()
+  await i18n.init({ lng: 'en', resources: { en: { translation: {} } } })
+  const detail = buildAuditDetails(
+    {
+      ...entry,
+      category: 'security',
+      success: true,
+      action: 'token.update_batch',
+      content: '',
+      other: {
+        op: {
+          action: 'token.update_batch',
+          params: {
+            requested_ids: [11, 12],
+            total: 2,
+            count: 2,
+            changed_fields: ['allow_ips'],
+          },
+        },
+      },
+    },
+    i18n.t
+  )
+  expect(detail.tokenOperation?.fields).toContainEqual({
+    label: 'Updated tokens',
+    value: 2,
+  })
+  expect(
+    detail.tokenOperation?.fields.some(
+      (field) => field.label === 'Returned keys'
+    )
+  ).toBe(false)
 })

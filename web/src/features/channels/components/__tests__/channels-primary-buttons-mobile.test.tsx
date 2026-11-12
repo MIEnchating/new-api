@@ -16,10 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-
 import { Window } from 'happy-dom'
-import { afterAll, describe, test } from 'vitest'
+import { afterAll, describe, expect, test } from 'vitest'
 
 const domWindow = new Window()
 const domGlobals = [
@@ -79,7 +77,7 @@ reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 describe('channel management mobile primary actions', () => {
   afterAll(() => domWindow.close())
 
-  test('uses icon-sized mobile actions while retaining accessible labels', async () => {
+  test('keeps the compact create action without the removed channel execution entry', async () => {
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
@@ -116,17 +114,17 @@ describe('channel management mobile primary actions', () => {
       )
     )
 
-    for (const action of ['execution', 'create']) {
-      const button = container.querySelector<HTMLButtonElement>(
-        `[data-mobile-compact-action="${action}"]`
-      )
-      assert.ok(button)
-      assert.ok(button.getAttribute('aria-label'))
-      const label = button.querySelector<HTMLElement>('span')
-      assert.ok(label)
-      assert.equal(label.classList.contains('sr-only'), true)
-      assert.equal(label.classList.contains('sm:not-sr-only'), true)
-    }
+    expect(
+      container.querySelector('button[aria-label="Channel execution"]')
+    ).toBeNull()
+
+    const button = container.querySelector<HTMLButtonElement>(
+      '[data-mobile-compact-action="create"]'
+    )
+    expect(button?.getAttribute('aria-label')).toBe('Create Channel')
+    const label = button?.querySelector<HTMLElement>('span')
+    expect(label?.classList.contains('sr-only')).toBe(true)
+    expect(label?.classList.contains('sm:not-sr-only')).toBe(true)
 
     await act(async () => root.unmount())
     queryClient.clear()

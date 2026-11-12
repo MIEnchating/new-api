@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Check, Copy } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -27,11 +27,13 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { handleServerError } from '@/lib/handle-server-error'
 import { cn } from '@/lib/utils'
 
 interface CopyButtonProps {
   disabled?: boolean
-  value: string
+  value?: string
+  getValue?: () => Promise<string>
   children?: ReactNode
   className?: string
   iconClassName?: string
@@ -44,6 +46,7 @@ interface CopyButtonProps {
 
 export function CopyButton({
   value,
+  getValue,
   disabled,
   children,
   className,
@@ -56,7 +59,25 @@ export function CopyButton({
 }: CopyButtonProps) {
   const { t } = useTranslation()
   const { copiedText, copyToClipboard } = useCopyToClipboard({ notify: false })
-  const isCopied = copiedText === value
+  const [loading, setLoading] = useState(false)
+  const isCopied =
+    copiedText !== null && (getValue ? true : copiedText === value)
+  const copy = async () => {
+    if (loading) return
+    setLoading(true)
+    try {
+      const text = getValue ? await getValue() : value
+      if (text === undefined || (getValue && text === '')) return
+      const success = await copyToClipboard(text)
+      if (!success) {
+        handleServerError(new Error(t('Failed to copy to clipboard')))
+      }
+    } catch (error) {
+      handleServerError(error, t('Failed to copy to clipboard'))
+    } finally {
+      setLoading(false)
+    }
+  }
   const resolvedTooltip = tooltip ?? t('Copy to clipboard')
   const resolvedSuccessTooltip = successTooltip ?? t('Copied!')
   const resolvedAriaLabel = ariaLabel ?? resolvedTooltip
@@ -64,11 +85,13 @@ export function CopyButton({
 
   const button = (
     <Button
-      disabled={disabled}
+      type='button'
+      disabled={disabled || loading}
+      aria-busy={loading}
       variant={variant}
       size={size}
       className={cn('shrink-0', className)}
-      onClick={() => copyToClipboard(value)}
+      onClick={copy}
       aria-label={isCopied ? copiedAriaLabel : resolvedAriaLabel}
     >
       {isCopied ? (

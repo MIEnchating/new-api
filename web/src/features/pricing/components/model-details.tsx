@@ -56,7 +56,6 @@ import {
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
 import { PluginIcon } from '@/features/task-plugins/components/plugin-icon'
-import { formatBillingCurrencyFromUSD } from '@/lib/currency'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
@@ -67,11 +66,6 @@ import { useBillingTime } from '../hooks/use-billing-time'
 import { usePricingData } from '../hooks/use-pricing-data'
 import type { ParsedTaskTier } from '../lib/billing-expr'
 import { formatBillingCondition } from '../lib/billing-expression/condition-display'
-import {
-  getDailyTimePricingTiers,
-  formatDailyTimePriceLabel,
-  type DailyTimePrice,
-} from '../lib/daily-time-pricing'
 import {
   formatTaskUsageUnitPrice,
   getDynamicPriceEntries,
@@ -86,11 +80,7 @@ import {
 import { parseTags } from '../lib/filters'
 import { getAvailableGroups, isTokenBasedModel } from '../lib/model-helpers'
 import { withPluginPricing } from '../lib/plugin-pricing'
-import {
-  formatFixedPrice,
-  formatGroupPrice,
-  formatRequestPrice,
-} from '../lib/price'
+import { formatFixedPrice, formatGroupPrice } from '../lib/price'
 import {
   evaluateTaskUsageExamples,
   getTaskEnumFields,
@@ -850,75 +840,24 @@ function PriceSection(props: {
   }
 
   if (!isTokenBased) {
-    const resolutionPrices = Object.entries(
-      props.model.model_second_price || {}
-    ).sort(([a], [b]) => a.localeCompare(b, undefined, { numeric: true }))
     return (
       <section>
         <SectionTitle>{t('Base Price')}</SectionTitle>
         <div className='flex items-baseline justify-between'>
           <span className='text-muted-foreground text-sm'>
-            {t(
-              props.model.billing_mode === 'per_second'
-                ? 'Per-second'
-                : 'Per request'
-            )}
+            {t('Per request')}
           </span>
           <span className='text-foreground font-mono text-sm font-semibold tabular-nums'>
-            {props.model.billing_mode === 'per_second'
-              ? formatRequestPrice(
-                  props.model,
-                  props.showRechargePrice,
-                  props.priceRate,
-                  props.usdExchangeRate,
-                  undefined,
-                  true
-                )
-              : formatFixedPrice(
-                  props.model,
-                  baseGroupKey,
-                  props.showRechargePrice,
-                  props.priceRate,
-                  props.usdExchangeRate,
-                  baseGroupRatioMap
-                )}
-            <span className='text-muted-foreground/40 ml-1 text-xs font-normal'>
-              /{' '}
-              {t(
-                props.model.billing_mode === 'per_second' ? 'second' : 'request'
-              )}
-            </span>
+            {formatFixedPrice(
+              props.model,
+              baseGroupKey,
+              props.showRechargePrice,
+              props.priceRate,
+              props.usdExchangeRate,
+              baseGroupRatioMap
+            )}
           </span>
         </div>
-        {props.model.billing_mode === 'per_second' &&
-          resolutionPrices.length > 0 && (
-            <div className='bg-muted/20 mt-3 rounded-lg border px-3 py-2.5'>
-              <div className='text-muted-foreground mb-2 text-sm'>
-                {t('Prices by resolution')}
-              </div>
-              <div className='space-y-1.5'>
-                {resolutionPrices.map(([resolution, price]) => (
-                  <div
-                    key={resolution}
-                    className='flex items-baseline justify-between gap-4'
-                  >
-                    <span className='text-muted-foreground/70 text-sm'>
-                      {resolution}
-                    </span>
-                    <span className='text-muted-foreground font-mono text-sm tabular-nums'>
-                      {formatBillingCurrencyFromUSD(price, {
-                        showSymbol: true,
-                        digitsLarge: 4,
-                        digitsSmall: 6,
-                        abbreviate: false,
-                      })}{' '}
-                      / {t('second')}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
       </section>
     )
   }
@@ -1010,10 +949,7 @@ function AutoGroupChain(props: { model: PricingModel; autoGroups: string[] }) {
 }
 
 type DynamicPriceOptions = Parameters<typeof getDynamicPriceEntries>[1]
-type DynamicPricingTier = ReturnType<typeof getDynamicPricingTiers>[number] & {
-  timePrice?: DailyTimePrice
-  otherTimes?: boolean
-}
+type DynamicPricingTier = ReturnType<typeof getDynamicPricingTiers>[number]
 type DynamicFormattedPricesByTier = Map<DynamicPricingTier, Map<string, string>>
 
 function getDynamicPriceFields(
@@ -1174,29 +1110,15 @@ function ProviderGroupPricingSection(
   )
 
   if (isDynamicPricingModel(props.model)) {
-    const timePrices = props.model.billing_usage_schema
-      ? null
-      : getDailyTimePricingTiers(props.model.billing_expr || '')
-    const dynamicTiers: DynamicPricingTier[] =
-      timePrices?.tiers ??
-      (props.model.billing_usage_schema
-        ? getTaskPricingDisplayTiers(
-            props.model.billing_expr,
-            props.model.billing_usage_schema
-          )
-        : getDynamicPricingTiers(props.model))
+    const dynamicTiers = props.model.billing_usage_schema
+      ? getTaskPricingDisplayTiers(
+          props.model.billing_expr,
+          props.model.billing_usage_schema
+        )
+      : getDynamicPricingTiers(props.model)
     const hasRequestPrice = dynamicTiers.some(
       (tier) => !('unitPrices' in tier) && tier.billingUnit === 'request'
     )
-    let tierColumnLabel = props.model.billing_usage_schema
-      ? t('Applicable conditions')
-      : t('Tier')
-    if (timePrices) tierColumnLabel = t('Time period')
-    const timeBaseTierCount = timePrices
-      ? timePrices.tiers.filter(
-          (tier) => tier.timePrice === timePrices.tiers[0]?.timePrice
-        ).length
-      : 0
 
     if (dynamicTiers.length === 0) {
       return (
@@ -1245,7 +1167,7 @@ function ProviderGroupPricingSection(
     })
     const formattedPricesByGroup = new Map(
       availableGroups.map((group) => {
-        const ratio = props.groupRatio[group] ?? 1
+        const ratio = props.groupRatio[group] || 1
         return [
           group,
           getDynamicFormattedPricesByTier(dynamicTiers, {
@@ -1268,7 +1190,7 @@ function ProviderGroupPricingSection(
         <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
         <div className='space-y-3'>
           {availableGroups.map((group) => {
-            const ratio = props.groupRatio[group] ?? 1
+            const ratio = props.groupRatio[group] || 1
             const formattedPricesByTier =
               formattedPricesByGroup.get(group) ??
               new Map<DynamicPricingTier, Map<string, string>>()
@@ -1295,7 +1217,9 @@ function ProviderGroupPricingSection(
                       : [
                           {
                             id: 'tier',
-                            header: tierColumnLabel,
+                            header: props.model.billing_usage_schema
+                              ? t('Applicable conditions')
+                              : t('Tier'),
                             className: thClass,
                             cellClassName:
                               'text-muted-foreground py-2.5 whitespace-normal break-words',
@@ -1315,21 +1239,6 @@ function ProviderGroupPricingSection(
                                   )
                                 )
                               }
-                              if (tier.timePrice) {
-                                const label = formatDailyTimePriceLabel(tier, t)
-                                return (
-                                  <div>
-                                    <div className='text-foreground'>
-                                      {label}
-                                    </div>
-                                    {timeBaseTierCount > 1 && (
-                                      <div className='text-xs'>
-                                        {tier.label}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              }
                               if (tier.conditionText) {
                                 return `${tier.label}: ${formatBillingCondition(tier.conditionText, t, i18n.language) ?? tier.conditionText}`
                               }
@@ -1345,7 +1254,7 @@ function ProviderGroupPricingSection(
                         i18n.language,
                         unitLabelKey ? t(unitLabelKey) : ''
                       )
-                      if (!unitLabel && (hasRequestPrice || timePrices)) {
+                      if (!unitLabel && hasRequestPrice) {
                         unitLabel = t('{{unit}} tokens', {
                           unit: tokenUnitLabel,
                         })

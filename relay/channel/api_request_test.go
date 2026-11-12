@@ -15,7 +15,6 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -240,30 +239,6 @@ func (a requestIDTestAdaptor) GetRequestURL(_ *relaycommon.RelayInfo) (string, e
 
 func (a requestIDTestAdaptor) SetupRequestHeader(_ *gin.Context, _ *http.Header, _ *relaycommon.RelayInfo) error {
 	return nil
-}
-
-func TestRelayRequestsInheritAlreadyCancelledClientContext(t *testing.T) {
-	service.InitHttpClient()
-	for _, form := range []bool{false, true} {
-		t.Run(fmt.Sprintf("form=%t", form), func(t *testing.T) {
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			ctx, cancel := context.WithCancel(context.Background())
-			cancel()
-			c.Request = httptest.NewRequest(http.MethodPost, "/relay", nil).WithContext(ctx)
-			info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
-			adaptor := requestIDTestAdaptor{url: "http://127.0.0.1:1/not-contacted"}
-			var err error
-			if form {
-				_, err = DoFormRequest(adaptor, c, info, strings.NewReader("request"))
-			} else {
-				_, err = DoApiRequest(adaptor, c, info, strings.NewReader("request"))
-			}
-			var apiErr *types.NewAPIError
-			require.ErrorAs(t, err, &apiErr)
-			require.ErrorIs(t, apiErr.InternalError(), context.Canceled)
-			assert.EqualError(t, apiErr, "upstream error: do request failed")
-		})
-	}
 }
 
 func TestUpstreamRequestIDsHTTP(t *testing.T) {

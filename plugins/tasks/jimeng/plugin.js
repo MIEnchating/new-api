@@ -14,8 +14,6 @@ export const meta = {
   fetchMode: "per_task",
   upstreams: ["vendor", "new_api"],
   usageSchema: {
-    // These endpoints do not report a standardized output resolution.
-    resolution: { enum: [""], enumLabels: { "": { en: "Unknown", zh: "未知" } }, description: { en: "Output video resolution", zh: "输出视频分辨率" } },
     // Requested video duration in seconds. S2.0 Pro is fixed at 5; 3.0 req_keys allow 5 or 10.
     seconds: {
       type: "number",
@@ -35,13 +33,13 @@ export const meta = {
     },
   },
   usageExamples: [
-    { label: "S2.0 Pro 5s", facts: { resolution: "", seconds: 5, product: "s2_pro" } },
-    { label: "3.0 720P 5s", facts: { resolution: "", seconds: 5, product: "v30_720p" } },
-    { label: "3.0 720P 10s", facts: { resolution: "", seconds: 10, product: "v30_720p" } },
-    { label: "3.0 1080P 5s", facts: { resolution: "", seconds: 5, product: "v30_1080p" } },
-    { label: "3.0 1080P 10s", facts: { resolution: "", seconds: 10, product: "v30_1080p" } },
-    { label: "3.0 Pro 5s", facts: { resolution: "", seconds: 5, product: "v30_pro" } },
-    { label: "3.0 Pro 10s", facts: { resolution: "", seconds: 10, product: "v30_pro" } },
+    { label: "S2.0 Pro 5s", facts: { seconds: 5, product: "s2_pro" } },
+    { label: "3.0 720P 5s", facts: { seconds: 5, product: "v30_720p" } },
+    { label: "3.0 720P 10s", facts: { seconds: 10, product: "v30_720p" } },
+    { label: "3.0 1080P 5s", facts: { seconds: 5, product: "v30_1080p" } },
+    { label: "3.0 1080P 10s", facts: { seconds: 10, product: "v30_1080p" } },
+    { label: "3.0 Pro 5s", facts: { seconds: 5, product: "v30_pro" } },
+    { label: "3.0 Pro 10s", facts: { seconds: 10, product: "v30_pro" } },
   ],
   protocols: [{ name: "openai_responses", supports: ["stream", "sync", "background"] }, "openai_video"],
   // Jimeng's Bearer API, which takes the bodies of the signed
@@ -50,8 +48,6 @@ export const meta = {
   routes: [
     { method: "POST", path: "/api/common/v3/submit_task_v2", type: "submit", decode: "submitTask", render: "taskSubmitted" },
     { method: "POST", path: "/api/common/v3/get_result_v2", type: "dynamic", decode: "getResult", render: "taskResult" },
-    // Keep the previous gateway Action endpoint for existing clients.
-    { method: "POST", path: "/jimeng/", type: "dynamic", decode: "legacyAction", render: "legacyTask" },
   ],
 };
 
@@ -378,11 +374,9 @@ export function parseSubmitResponse(ctx, resp) {
 }
 
 export function extractUsage(ctx) {
+  if (ctx.usagePurpose === "billing_ratios") return null;
   const reqKey = submitReqKey(ctx);
-  if (ctx.usagePurpose === "billing_ratios") {
-    return null;
-  }
-  return { resolution: "", seconds: outboundSeconds(ctx.requestBody || {}, reqKey), product: productForReqKey(reqKey) };
+  return { seconds: outboundSeconds(ctx.requestBody || {}, reqKey), product: productForReqKey(reqKey) };
 }
 
 export function buildQueryRequest(ctx) {
@@ -574,33 +568,6 @@ protocols.openai_video = {
 
 export const native = {
   submitTask: submitTask,
-  legacyAction: function (ctx) {
-    const body = nativeBody(ctx);
-    const actions = (ctx.query || {}).Action || [];
-    const action = actions[0];
-    if (!action) throw new Error("Action query parameter is required");
-    if (action === "CVSync2AsyncGetResult") {
-      if (typeof body.task_id !== "string" || !body.task_id.trim()) throw new Error("task_id is required for CVSync2AsyncGetResult");
-      return { kind: "query", taskIds: [body.task_id] };
-    }
-    if (action !== "CVSync2AsyncSubmitTask") throw new Error("unsupported Jimeng Action");
-    let images = (Array.isArray(body.image_urls) ? body.image_urls : []).concat(Array.isArray(body.binary_data_base64) ? body.binary_data_base64 : []);
-    if (!images.length && Array.isArray(body.images)) images = body.images.slice();
-    if (!images.length && typeof body.image === "string" && body.image.trim()) images.push(body.image);
-    const model = typeof body.req_key === "string" ? body.req_key : "";
-    return {
-      kind: "submit",
-      model: model,
-      action: actionForImageCount(images.length),
-      requestBody: { model: model, prompt: typeof body.prompt === "string" ? body.prompt : "", images: images, metadata: body },
-    };
-  },
-  legacyTask: function (ctx, tasks) {
-    const task = Array.isArray(tasks) ? tasks[0] : tasks;
-    const stored = task.data && typeof task.data === "object" ? task.data : {};
-    const data = stored.data && typeof stored.data === "object" ? stored.data : {};
-    return Object.assign({}, stored, { code: stored.code === undefined ? 10000 : stored.code, data: Object.assign({}, data, { task_id: task.task_id }) });
-  },
   // The gateway answers from its last poll and cannot pass req_json, the
   // watermark settings of a live query, to Jimeng.
   getResult: function (ctx) {

@@ -32,6 +32,7 @@ type SmartRoutingTemplate struct {
 	Enabled          bool                     `json:"enabled"`
 	GroupRoutes      []SmartRoutingGroupRoute `json:"group_routes"`
 	GroupRouteSticky bool                     `json:"group_route_sticky"`
+	ModelLimits      []string                 `json:"model_limits,omitempty"`
 }
 
 type SmartRoutingSetting struct {
@@ -61,6 +62,7 @@ func cloneSmartRoutingSetting(setting SmartRoutingSetting) *SmartRoutingSetting 
 	clone.Templates = make([]SmartRoutingTemplate, len(setting.Templates))
 	for index, template := range setting.Templates {
 		clone.Templates[index] = template
+		clone.Templates[index].ModelLimits = append([]string(nil), template.ModelLimits...)
 		clone.Templates[index].GroupRoutes = make([]SmartRoutingGroupRoute, len(template.GroupRoutes))
 		for routeIndex, route := range template.GroupRoutes {
 			clone.Templates[index].GroupRoutes[routeIndex] = route
@@ -161,6 +163,16 @@ func ValidateSmartRoutingTemplates(templates []SmartRoutingTemplate) error {
 			return fmt.Errorf("智能路由模板 %s 至少需要一条分组路由", name)
 		}
 
+		if len(template.ModelLimits) > 1000 {
+			return common.NewMessage("Invalid parameters")
+		}
+		seenModels := make(map[string]bool, len(template.ModelLimits))
+		for _, name := range template.ModelLimits {
+			if name == "" || name != strings.TrimSpace(name) || strings.ContainsAny(name, ",\n\r") || len(name) > 255 || seenModels[name] {
+				return common.NewMessage("Invalid parameters")
+			}
+			seenModels[name] = true
+		}
 		seenGroups := make(map[string]struct{}, len(template.GroupRoutes))
 		hasEnabledRoute := false
 		for _, route := range template.GroupRoutes {

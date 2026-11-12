@@ -21,8 +21,11 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
@@ -968,7 +971,11 @@ func TestAPITokenAuditDatabaseMatrix(t *testing.T) {
 				db, _ := newAuditTestDatabase(t, database.name, dsn)
 				model.DB = db
 				common.SetDatabaseTypes(database.typ, database.typ)
-				require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.Token{}))
+				if !separateLog {
+					verifyRoutingTemplateMigration(t, db)
+				}
+				require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.Token{}, &model.UserAccessToken{}))
+				require.NoError(t, db.AutoMigrate(&model.Token{}))
 				// Initialize production column quoting as well as the existing audit table.
 				require.NoError(t, model.InitLogDB())
 				if separateLog {
@@ -996,9 +1003,9 @@ func TestAPITokenAuditDatabaseMatrix(t *testing.T) {
 
 func verifyAPITokenAudit(t *testing.T) {
 	t.Helper()
-	pat := "api-token-audit-pat-secret"
-	user := &model.User{Username: "token-owner", Password: "placeholder", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, AccessToken: &pat, AffCode: "token-owner"}
+	user := &model.User{Username: "token-owner", Password: "placeholder", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, AffCode: "token-owner"}
 	require.NoError(t, model.DB.Create(user).Error)
+	pat, _ := createScopedAccessToken(t, user.Id, 0, "api_key:reveal")
 	other := &model.User{Username: "other-owner", Password: "placeholder", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, AffCode: "other-owner"}
 	require.NoError(t, model.DB.Create(other).Error)
 	session := &model.UserSession{SID: "token-audit-session", UserID: user.Id, Version: 1, UserAuthVersion: 1, Status: model.UserSessionStatusActive, RefreshHash: "placeholder", LoginMethod: "password", LastActiveAt: time.Now().Unix(), ExpiresAt: time.Now().Add(time.Hour).Unix()}
@@ -1012,7 +1019,8 @@ func verifyAPITokenAudit(t *testing.T) {
 	tokenRoutes.PUT("/", UpdateToken)
 	tokenRoutes.DELETE("/:id", DeleteToken)
 	tokenRoutes.POST("/batch", DeleteTokenBatch)
-	tokenRoutes.POST("/batch/keys", GetTokenKeysBatch)
+	tokenRoutes.PUT("/batch", UpdateTokenBatch)
+	tokenRoutes.POST("/batch/keys", middleware.DisableCache(), GetTokenKeysBatch)
 	tokenRoutes.POST("/:id/key", func(c *gin.Context) {
 		if c.GetHeader("X-Test-Limit") != "" {
 			c.AbortWithStatusJSON(429, gin.H{"success": false})
@@ -1023,7 +1031,10 @@ func verifyAPITokenAudit(t *testing.T) {
 	tokenRoutes.GET("/", GetAllTokens)
 	tokenRoutes.GET("/:id", GetToken)
 	tokenRoutes.GET("/search", SearchTokens)
+	router.GET("/template-relay", middleware.TokenAuth(), func(c *gin.Context) { common.ApiSuccess(c, c.GetStringMap("token_model_limit")) })
 	router.GET("/api/audit/self", middleware.UserAuth(), GetAuditLogs)
+	verifyTokenBatchUpdates(t, router, user.Id, other.Id, jwt)
+	verifyTokenRoutingTemplates(t, router, user.Id, other.Id, jwt)
 
 	for index, tc := range []struct {
 		name, method, path, body, action string
@@ -1054,6 +1065,9 @@ func verifyAPITokenAudit(t *testing.T) {
 		{name: "PAT key view", method: "POST", path: "/$id/key", action: "token.key_view", success: true, params: `{"id":$id,"name":"owned"}`, usePAT: true},
 		{name: "foreign key view", method: "POST", path: "/$other/key", action: "token.key_view", params: `{"id":$other}`},
 		{name: "rate limited key view", method: "POST", path: "/$id/key", action: "token.key_view", params: `{"id":$id}`, rateLimit: true},
+		{name: "batch update", method: "PUT", path: "/batch", body: `{"ids":[$id,$id],"updates":{"allow_user_quota_query":false,"allow_ips":"203.0.113.57"}}`, action: "token.update_batch", success: true, params: `{"requested_ids":[$id,$id],"total":2,"count":1,"changed_fields":["allow_ips","allow_user_quota_query"]}`},
+		{name: "batch update foreign rejects all", method: "PUT", path: "/batch", body: `{"ids":[$id,$other],"updates":{"status":2}}`, action: "token.update_batch", params: `{"requested_ids":[$id,$other],"total":2,"changed_fields":["status"]}`},
+		{name: "batch update storage failure", method: "PUT", path: "/batch", body: `{"ids":[$id],"updates":{"status":2}}`, action: "token.update_batch", failWrite: true, params: `{"requested_ids":[$id],"total":1,"changed_fields":["status"]}`},
 		{name: "batch delete partial and duplicate", method: "POST", path: "/batch", body: `{"ids":[$id,$id,$other,999999]}`, action: "token.delete_batch", success: true, params: `{"requested_ids":[$id,$id,$other,999999],"total":4,"count":1}`},
 		{name: "empty batch delete", method: "POST", path: "/batch", body: `{"ids":[]}`, action: "token.delete_batch", params: `{"requested_ids":[],"total":0}`},
 		{name: "batch keys partial and duplicate", method: "POST", path: "/batch/keys", body: `{"ids":[$id,$id,$other,999999]}`, action: "token.key_view_batch", success: true, params: `{"requested_ids":[$id,$id,$other,999999],"total":4,"count":1,"returned_ids":[$id]}`},
@@ -1110,7 +1124,7 @@ func verifyAPITokenAudit(t *testing.T) {
 			if tc.usePAT {
 				expectedEvents = 2
 			}
-			require.Len(t, events, expectedEvents)
+			require.Len(t, events, expectedEvents, response.Body.String())
 			var operation *model.AuditLog
 			for i := range events {
 				if events[i].Category == model.AuditCategorySecurity {
@@ -1246,4 +1260,427 @@ func verifyAPITokenAudit(t *testing.T) {
 		require.NoError(t, model.DB.Model(&model.Token{}).Where("name = ?", "audit-down").Count(&count).Error)
 		assert.EqualValues(t, 1, count)
 	})
+}
+
+// verifyTokenBatchUpdates runs against each real database in the audit matrix,
+// including a separately configured log database.
+func verifyTokenBatchUpdates(t *testing.T, router *gin.Engine, userID, otherID int, jwt string) {
+	t.Helper()
+	writer, _ := createScopedAccessToken(t, userID, 0, "api_key:write")
+	reader, _ := createScopedAccessToken(t, userID, 0, "api_key:read")
+	expired, _ := createScopedAccessToken(t, userID, time.Now().Unix()-1, "api_key:write")
+	for index, tc := range []struct {
+		name, updates, contentType, auth, routing                     string
+		foreign, missing, empty, tooMany, expired, exhausted, success bool
+		wantStatus                                                    int
+		wantQuota                                                     int
+		wantUnlimited                                                 bool
+	}{
+		{name: "anonymous cannot batch edit", updates: `{"status":2}`, auth: "none"},
+		{name: "read scope cannot batch edit", updates: `{"status":2}`, auth: "read"},
+		{name: "expired credential cannot batch edit", updates: `{"status":2}`, auth: "expired"},
+		{name: "write scope can batch edit", updates: `{"status":2}`, auth: "write", success: true, wantStatus: 2, wantQuota: 125, wantUnlimited: true},
+		{name: "disable preserves quotas and settings", updates: `{"status":2,"key":"forged","user_id":999,"used_quota":0}`, success: true, wantStatus: 2, wantQuota: 125, wantUnlimited: true},
+		{name: "explicit zero and false persist", updates: `{"remain_quota":0,"unlimited_quota":false,"allow_user_quota_query":false,"allow_ips":"","model_limits_enabled":false,"model_limits":""}`, success: true, wantStatus: 1, wantQuota: 0},
+		{name: "foreign ID rolls back entire batch", updates: `{"status":2}`, foreign: true},
+		{name: "missing ID rolls back entire batch", updates: `{"status":2}`, missing: true},
+		{name: "empty selection rejected", updates: `{"status":2}`, empty: true},
+		{name: "oversized selection rejected", updates: `{"status":2}`, tooMany: true},
+		{name: "empty patch rejected", updates: `{}`},
+		{name: "unknown fields cannot transfer ownership", updates: `{"user_id":999,"key":"forged","used_quota":0}`},
+		{name: "null field does not clear configuration", updates: `{"status":null}`},
+		{name: "negative quota rejected", updates: `{"remain_quota":-1}`},
+		{name: "overflow quota rejected", updates: `{"remain_quota":9223372036854775807}`},
+		{name: "invalid status rejected", updates: `{"status":4}`},
+		{name: "incomplete model restriction rejected", updates: `{"model_limits_enabled":false}`},
+		{name: "incomplete routing rejected", updates: `{"group":"default"}`},
+		{name: "ordinary routing clears Auto configuration", updates: `{"group":"default","auto_groups":[],"cross_group_retry":true,"group_route_config":"","group_route_sticky":true}`, routing: "ordinary", success: true, wantQuota: 125, wantUnlimited: true},
+		{name: "Auto routing validates ordered overrides", updates: `{"group":"auto","auto_groups":["default"],"cross_group_retry":false,"group_route_config":"","group_route_sticky":false}`, routing: "auto", success: true, wantQuota: 125, wantUnlimited: true},
+		{name: "manual routing clears incompatible Auto configuration", updates: `{"group":"auto","auto_groups":["default"],"cross_group_retry":true,"group_route_config":"[{\"group\":\"default\",\"priority\":1,\"cooldown_seconds\":60}]","group_route_sticky":true}`, routing: "manual", success: true, wantQuota: 125, wantUnlimited: true},
+		{name: "unauthorized routing rejected", updates: `{"group":"private-group","auto_groups":[],"cross_group_retry":false,"group_route_config":"","group_route_sticky":false}`},
+		{name: "simple content type rejected", updates: `{"status":2}`, contentType: "text/plain"},
+		{name: "expired enable cannot partially enable batch", updates: `{"status":1}`, expired: true},
+		{name: "exhausted enable cannot partially enable batch", updates: `{"status":1}`, exhausted: true},
+		{name: "expiry repair and enable in one patch", updates: `{"status":1,"expired_time":-1}`, expired: true, success: true, wantStatus: 1, wantQuota: 125, wantUnlimited: true},
+		{name: "quota repair and enable in one patch", updates: `{"status":1,"remain_quota":20}`, exhausted: true, success: true, wantStatus: 1, wantQuota: 20},
+	} {
+		t.Run("batch contract/"+tc.name, func(t *testing.T) {
+			ips := "192.0.2.10"
+			tokens := []model.Token{
+				{UserId: userID, Key: fmt.Sprintf("batch-contract-%d-a", index), Name: "first", Status: 1, ExpiredTime: -1, RemainQuota: 125, UsedQuota: 35, UnlimitedQuota: true, AllowIps: &ips, ModelLimitsEnabled: true, ModelLimits: "gpt-test", AllowUserQuotaQuery: true, Group: "auto", CrossGroupRetry: true, AutoGroups: `["default"]`},
+				{UserId: userID, Key: fmt.Sprintf("batch-contract-%d-b", index), Name: "second", Status: 2, ExpiredTime: -1, RemainQuota: 125, UsedQuota: 70, UnlimitedQuota: true, AllowIps: &ips, ModelLimitsEnabled: true, ModelLimits: "gpt-test", AllowUserQuotaQuery: true, Group: "auto", CrossGroupRetry: true, AutoGroups: `["default"]`},
+			}
+			if tc.expired {
+				tokens[1].ExpiredTime = 1
+				tokens[1].Status = 3
+			}
+			if tc.exhausted {
+				tokens[1].RemainQuota = 0
+				tokens[1].UnlimitedQuota = false
+				tokens[1].Status = 4
+				tokens[0].UnlimitedQuota = false
+			}
+			if tc.foreign {
+				tokens[1].UserId = otherID
+			}
+			require.NoError(t, model.DB.Create(&tokens).Error)
+			ids := []int{tokens[0].Id, tokens[1].Id, tokens[0].Id}
+			if tc.missing {
+				ids[1] = 99999999
+			}
+			if tc.empty {
+				ids = []int{}
+			}
+			if tc.tooMany {
+				ids = make([]int, 101)
+				for i := range ids {
+					ids[i] = tokens[0].Id
+				}
+			}
+			body, err := common.Marshal(gin.H{"ids": ids, "updates": json.RawMessage(tc.updates)})
+			require.NoError(t, err)
+			request := httptest.NewRequest(http.MethodPut, "/api/token/batch", bytes.NewReader(body))
+			credential := jwt
+			switch tc.auth {
+			case "none":
+				credential = ""
+			case "read":
+				credential = reader
+			case "write":
+				credential = writer
+			case "expired":
+				credential = expired
+			}
+			if credential != "" {
+				request.Header.Set("Authorization", "Bearer "+credential)
+			}
+			contentType := tc.contentType
+			if contentType == "" {
+				contentType = "application/json"
+			}
+			request.Header.Set("Content-Type", contentType)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			response := decodeAPIResponse(t, recorder)
+			require.Equal(t, tc.success, response.Success, recorder.Body.String())
+			assert.NotContains(t, recorder.Body.String(), tokens[0].Key)
+			assert.NotContains(t, recorder.Body.String(), tokens[1].Key)
+			if tc.success {
+				assert.JSONEq(t, `2`, string(response.Data))
+			}
+			for _, before := range tokens {
+				var after model.Token
+				require.NoError(t, model.DB.First(&after, before.Id).Error)
+				expected := before
+				if tc.success {
+					if tc.name != "explicit zero and false persist" && tc.routing == "" {
+						expected.Status = tc.wantStatus
+					}
+					expected.RemainQuota = tc.wantQuota
+					expected.UnlimitedQuota = tc.wantUnlimited
+					if tc.expired {
+						expected.ExpiredTime = -1
+					}
+					switch tc.routing {
+					case "ordinary":
+						expected.Group = "default"
+						expected.AutoGroups = ""
+						expected.CrossGroupRetry = false
+						expected.GroupRouteSticky = false
+					case "auto":
+						expected.CrossGroupRetry = false
+					case "manual":
+						expected.Group = ""
+						expected.AutoGroups = ""
+						expected.CrossGroupRetry = false
+						expected.GroupRouteSticky = true
+						expected.GroupRouteConfig = `[{"group":"default","priority":1,"cooldown_seconds":60}]`
+					}
+
+					if tc.name == "explicit zero and false persist" {
+						empty := ""
+						expected.AllowIps = &empty
+						expected.AllowUserQuotaQuery = false
+						expected.ModelLimitsEnabled = false
+						expected.ModelLimits = ""
+					}
+				}
+				assert.Equal(t, expected, after, "unselected fields and usage counters must remain unchanged")
+			}
+		})
+	}
+}
+
+func TestUpdateTokenBatchInvalidatesCachedPermissions(t *testing.T) {
+	for _, cacheAvailable := range []bool{true, false} {
+		t.Run(fmt.Sprintf("cache_available=%v", cacheAvailable), func(t *testing.T) {
+			previousDB, previousLogDB := model.DB, model.LOG_DB
+			previousType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
+			previousRDB, previousEnabled := common.RDB, common.RedisEnabled
+			t.Cleanup(func() {
+				model.DB, model.LOG_DB = previousDB, previousLogDB
+				common.SetDatabaseTypes(previousType, previousLogType)
+				common.RDB, common.RedisEnabled = previousRDB, previousEnabled
+			})
+			db := setupTokenControllerTestDB(t)
+			t.Setenv("LOG_SQL_DSN", "")
+			require.NoError(t, model.InitLogDB())
+			server := miniredis.RunT(t)
+			client := redis.NewClient(&redis.Options{Addr: server.Addr(), MaxRetries: -1})
+			common.RDB, common.RedisEnabled = client, true
+			t.Cleanup(func() { require.NoError(t, client.Close()) })
+			token := seedToken(t, db, 1, "cached-key", "batch-cached-permission")
+			_, err := model.ValidateUserToken(token.Key)
+			require.NoError(t, err, "key must authenticate before the mutation")
+			if !cacheAvailable {
+				server.Close()
+			}
+			ctx, recorder := newAuthenticatedContext(t, http.MethodPut, "/api/token/batch", gin.H{"ids": []int{token.Id}, "updates": gin.H{"status": common.TokenStatusDisabled}}, 1)
+			UpdateTokenBatch(ctx)
+			response := decodeAPIResponse(t, recorder)
+			require.Equal(t, cacheAvailable, response.Success)
+			if cacheAvailable {
+				_, err = model.ValidateUserToken(token.Key)
+				require.Error(t, err, "disabled keys must stop authenticating immediately")
+			} else {
+				var stored model.Token
+				require.NoError(t, db.First(&stored, token.Id).Error)
+				assert.Equal(t, common.TokenStatusEnabled, stored.Status, "cache failure must roll back the mutation")
+			}
+		})
+	}
+}
+
+// verifyTokenRoutingTemplates exercises the API contract on every configured engine.
+func verifyTokenRoutingTemplates(t *testing.T, router *gin.Engine, userID, otherID int, jwt string) {
+	t.Helper()
+	previous := operation_setting.CurrentSmartRoutingSetting()
+	previousJSON, err := common.Marshal(previous.Templates)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{"enabled": strconv.FormatBool(previous.Enabled), "templates": string(previousJSON)}))
+	})
+	require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{"enabled": "true", "templates": `[{"id":"linked","name":"Linked","enabled":true,"group_routes":[{"group":"default","priority":1,"cooldown_seconds":60}],"group_route_sticky":true,"model_limits":["model-before"]}]`}))
+	request := func(method, path, body, credential string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if credential != "" {
+			req.Header.Set("Authorization", "Bearer "+credential)
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+	created := request("POST", "/api/token/", `{"name":"template-created","routing_template_id":"linked","expired_time":-1,"unlimited_quota":true}`, jwt)
+	require.True(t, decodeAPIResponse(t, created).Success, created.Body.String())
+	var token model.Token
+	require.NoError(t, model.DB.Where("name = ?", "template-created").First(&token).Error)
+	assert.Equal(t, "linked", token.RoutingTemplateID)
+	assert.Equal(t, "model-before", token.ModelLimits)
+	invalid := request("POST", "/api/token/", `{"name":"template-invalid","routing_template_id":"missing","unlimited_quota":true}`, jwt)
+	assert.False(t, decodeAPIResponse(t, invalid).Success)
+	// Templates never bypass the caller's group access checks, at binding or relay time.
+	require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{"templates": `[{"id":"linked","name":"Linked","enabled":true,"group_routes":[{"group":"private-template-group","priority":1,"cooldown_seconds":60}]}]`}))
+	deniedCreate := request("POST", "/api/token/", `{"name":"forbidden-template","routing_template_id":"linked","unlimited_quota":true}`, jwt)
+	assert.False(t, decodeAPIResponse(t, deniedCreate).Success)
+	deniedRelay := request("GET", "/template-relay", "", token.GetFullKey())
+	assert.Equal(t, http.StatusForbidden, deniedRelay.Code, deniedRelay.Body.String())
+	deniedModels, err := getTokenModels(&token)
+	require.Error(t, err)
+	assert.Nil(t, deniedModels)
+	require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{"templates": `[{"id":"linked","name":"Linked","enabled":true,"group_routes":[{"group":"default","priority":1,"cooldown_seconds":60}],"group_route_sticky":true,"model_limits":["model-before"]}]`}))
+	// API credentials with a read scope cannot reveal secrets by switching selectors.
+	reader, _ := createScopedAccessToken(t, userID, 0, "api_key:read")
+	reveal, _ := createScopedAccessToken(t, userID, 0, "api_key:reveal")
+	writer, _ := createScopedAccessToken(t, userID, 0, "api_key:write")
+	expired, _ := createScopedAccessToken(t, userID, time.Now().Unix()-1, "api_key:reveal")
+	for _, credential := range []string{"", reader, writer, expired} {
+		response := request("POST", "/api/token/batch/keys", `{"routing_template_id":"linked"}`, credential)
+		assert.GreaterOrEqual(t, response.Code, 400)
+		assert.NotContains(t, response.Body.String(), token.Key)
+	}
+	foreign := seedToken(t, model.DB, otherID, "foreign-template-key", "foreign-template-secret")
+	foreign.RoutingTemplateID = "linked"
+	require.NoError(t, foreign.Update())
+	removed := seedToken(t, model.DB, userID, "deleted-template-key", "deleted-template-secret")
+	removed.RoutingTemplateID = "linked"
+	require.NoError(t, removed.Update())
+	require.NoError(t, removed.Delete())
+	// More than a page and more than the ordinary batch selector's 100-ID limit.
+	keys := make([]model.Token, 101)
+	for i := range keys {
+		keys[i] = model.Token{UserId: userID, Key: fmt.Sprintf("template-owned-%d", i), Name: "linked", RoutingTemplateID: "linked", UnlimitedQuota: true, ExpiredTime: -1}
+	}
+	require.NoError(t, model.DB.Create(&keys).Error)
+	response := request("POST", "/api/token/batch/keys", `{"routing_template_id":"linked"}`, reveal)
+	var result struct {
+		Success bool `json:"success"`
+		Data    struct {
+			Keys map[int]string `json:"keys"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+	require.True(t, result.Success, response.Body.String())
+	assert.Len(t, result.Data.Keys, 102)
+	assert.Equal(t, token.GetFullKey(), result.Data.Keys[token.Id])
+	assert.NotContains(t, response.Body.String(), foreign.Key)
+	assert.NotContains(t, response.Body.String(), removed.Key)
+	assert.Contains(t, response.Header().Get("Cache-Control"), "no-store")
+	var audit model.AuditLog
+	require.NoError(t, model.LOG_DB.Where("request_id = ? AND action = ?", response.Header().Get(common.RequestIdKey), "token.key_view_batch").First(&audit).Error)
+	encoded, err := common.Marshal(audit)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), token.Key)
+	assert.NotContains(t, string(encoded), keys[0].Key)
+	assert.True(t, audit.Success)
+	for _, body := range []string{`{"routing_template_id":"linked","ids":[1]}`, `{"routing_template_id":"` + strings.Repeat("a", 65) + `"}`} {
+		assert.False(t, decodeAPIResponse(t, request("POST", "/api/token/batch/keys", body, reveal)).Success)
+	}
+	// Updates are live and never overwrite counters or stored association.
+	require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{"templates": `[{"id":"linked","name":"Linked","enabled":true,"group_routes":[{"group":"default","priority":5,"cooldown_seconds":90}],"model_limits":["model-after"]}]`}))
+	detail := request("GET", fmt.Sprintf("/api/token/%d", token.Id), "", jwt)
+	assert.Contains(t, detail.Body.String(), "model-after")
+	assert.NotContains(t, detail.Body.String(), "model-before")
+	assert.NotContains(t, detail.Body.String(), token.Key)
+	effective, err := model.ValidateUserToken(token.Key)
+	require.NoError(t, err)
+	assert.Equal(t, "model-after", effective.ModelLimits)
+	assert.False(t, effective.GroupRouteSticky)
+	assert.Equal(t, 5, effective.GetGroupRoutes()[0].Priority)
+	// Older clients that omit the link retain it and cannot overwrite template fields.
+	single := fmt.Sprintf(`{"id":%d,"name":"template-created","expired_time":-1,"unlimited_quota":true,"group":"private-template-group","model_limits":"forged"}`, token.Id)
+	require.True(t, decodeAPIResponse(t, request("PUT", "/api/token/", single, jwt)).Success)
+	require.NoError(t, model.DB.First(&token, token.Id).Error)
+	assert.Equal(t, "linked", token.RoutingTemplateID)
+	assert.Equal(t, "model-after", token.ModelLimits)
+	patch := fmt.Sprintf(`{"ids":[%d],"updates":{"routing_template_id":"linked"}}`, token.Id)
+	require.True(t, decodeAPIResponse(t, request("PUT", "/api/token/batch", patch, jwt)).Success)
+	require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{"enabled": "false"}))
+	_, err = model.ValidateUserToken(token.Key)
+	require.ErrorIs(t, err, model.ErrTokenInvalid)
+	// Explicit detach remains possible while the template is unavailable.
+	patch = fmt.Sprintf(`{"ids":[%d],"updates":{"routing_template_id":"","group":"default","auto_groups":[],"cross_group_retry":false,"group_route_config":"","group_route_sticky":false}}`, token.Id)
+	require.True(t, decodeAPIResponse(t, request("PUT", "/api/token/batch", patch, jwt)).Success)
+	effective, err = model.ValidateUserToken(token.Key)
+	require.NoError(t, err)
+	assert.Empty(t, effective.RoutingTemplateID)
+	assert.Equal(t, "default", effective.Group)
+	require.NoError(t, model.DB.Where("routing_template_id = ?", "linked").Delete(&model.Token{}).Error)
+}
+
+func TestRoutingTemplateUpdatesApplyToCachedKeys(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	previousRDB, previousRedis := common.RDB, common.RedisEnabled
+	previousSecret := common.SessionSecret
+	previous := operation_setting.CurrentSmartRoutingSetting()
+	previousJSON, err := common.Marshal(previous.Templates)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		common.RDB, common.RedisEnabled, common.SessionSecret = previousRDB, previousRedis, previousSecret
+		require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{"enabled": strconv.FormatBool(previous.Enabled), "templates": string(previousJSON)}))
+	})
+	common.SessionSecret = "routing-template-cache-test"
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() { require.NoError(t, client.Close()) })
+	common.RDB, common.RedisEnabled = client, true
+	require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{"enabled": "true", "templates": `[{"id":"cache","name":"Cache","enabled":true,"group_routes":[{"group":"default","priority":1,"cooldown_seconds":60}],"model_limits":["before"]}]`}))
+	token := seedToken(t, db, 1, "cached-template", "cachedtemplatekey")
+	token.RoutingTemplateID = "cache"
+	require.NoError(t, token.Update())
+	// Let the normal cache fence expire, then prove the warm hash survives edits.
+	server.FastForward(11 * time.Second)
+	for range 2 {
+		effective, err := model.ValidateUserToken(token.Key)
+		require.NoError(t, err)
+		assert.Equal(t, "before", effective.ModelLimits)
+	}
+	cacheKey := "token:" + common.GenerateHMAC(token.Key)
+	require.True(t, server.Exists(cacheKey))
+	cachedBefore := server.HGet(cacheKey, "CacheMAC")
+	require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{"templates": `[{"id":"cache","name":"Cache","enabled":true,"group_routes":[{"group":"default","priority":9,"cooldown_seconds":30}],"group_route_sticky":true,"model_limits":["after"]}]`}))
+	effective, err := model.ValidateUserToken(token.Key)
+	require.NoError(t, err)
+	assert.Equal(t, "after", effective.ModelLimits)
+	assert.True(t, effective.GroupRouteSticky)
+	assert.Equal(t, 9, effective.GetGroupRoutes()[0].Priority)
+	assert.Equal(t, cachedBefore, server.HGet(cacheKey, "CacheMAC"), "template updates must work without per-key cache eviction")
+	ctx, _ := newAuthenticatedContext(t, "GET", "/v1/models", nil, 1)
+	require.NoError(t, middleware.SetupContextForToken(ctx, effective))
+	value, _ := ctx.Get("token_model_limit")
+	assert.Equal(t, map[string]bool{"after": true}, value)
+	raw, err := model.GetTokenByKey(token.Key, false)
+	require.NoError(t, err)
+	assert.Empty(t, raw.ModelLimits, "request-local effective permissions must never pollute the raw cache")
+	for _, templates := range []string{
+		`[{"id":"cache","name":"Cache","enabled":false,"group_routes":[]}]`,
+		`[]`,
+	} {
+		require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{"templates": templates}))
+		_, err := model.ValidateUserToken(token.Key)
+		require.ErrorIs(t, err, model.ErrTokenInvalid)
+	}
+}
+
+// routingTemplateReleaseToken preserves the v2026.11.12 schema for upgrade verification.
+type routingTemplateReleaseToken struct {
+	Id                 int            `json:"id"`
+	UserId             int            `json:"user_id" gorm:"index"`
+	Key                string         `json:"key" gorm:"type:varchar(128);uniqueIndex"`
+	Status             int            `json:"status" gorm:"default:1"`
+	Name               string         `json:"name" gorm:"index" `
+	CreatedTime        int64          `json:"created_time" gorm:"bigint"`
+	AccessedTime       int64          `json:"accessed_time" gorm:"bigint"`
+	ExpiredTime        int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
+	RemainQuota        int            `json:"remain_quota" gorm:"default:0"`
+	UnlimitedQuota     bool           `json:"unlimited_quota"`
+	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
+	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
+	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
+	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
+	Group              string         `json:"group" gorm:"default:''"`
+	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
+	GroupRouteConfig   string         `json:"group_route_config" gorm:"type:text"`
+	GroupRouteSticky   bool           `json:"group_route_sticky" gorm:"default:false"`
+	AutoGroups         string         `json:"-" gorm:"type:text"`
+	CacheSchema        int            `json:"-" gorm:"-"`
+	DeletedAt          gorm.DeletedAt `gorm:"index"`
+	// 允许用此令牌查询所属用户的额度；新建令牌默认开启，已有令牌升级后保持关闭
+	AllowUserQuotaQuery bool   `json:"allow_user_quota_query"`
+	CacheExpiresAt      int64  `json:"-" gorm:"-"`
+	CacheMAC            string `json:"-" gorm:"-"`
+}
+
+func (routingTemplateReleaseToken) TableName() string { return "tokens" }
+
+func verifyRoutingTemplateMigration(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.AutoMigrate(&routingTemplateReleaseToken{}))
+	legacy := routingTemplateReleaseToken{UserId: 77, Key: "release-template-migration", Name: "release key", Status: 1, ExpiredTime: -1, RemainQuota: 127, UsedQuota: 33, Group: "default", ModelLimitsEnabled: true, ModelLimits: "release-model", GroupRouteConfig: `[{"group":"default","priority":1,"cooldown_seconds":60}]`, GroupRouteSticky: true, AllowUserQuotaQuery: true}
+	require.NoError(t, db.Create(&legacy).Error)
+	for range 2 {
+		require.NoError(t, db.AutoMigrate(&model.Token{}))
+	}
+	var upgraded model.Token
+	require.NoError(t, db.First(&upgraded, legacy.Id).Error)
+	assert.Empty(t, upgraded.RoutingTemplateID, "existing keys retain independent routing")
+	assert.Equal(t, legacy.Key, upgraded.Key)
+	assert.Equal(t, legacy.GroupRouteConfig, upgraded.GroupRouteConfig)
+	assert.Equal(t, legacy.ModelLimits, upgraded.ModelLimits)
+	assert.Equal(t, legacy.RemainQuota, upgraded.RemainQuota)
+	assert.Equal(t, legacy.UsedQuota, upgraded.UsedQuota)
+	assert.True(t, upgraded.AllowUserQuotaQuery)
+	assert.True(t, upgraded.GroupRouteSticky)
+	require.True(t, db.Migrator().HasIndex(&model.Token{}, "Key"))
+	duplicate := model.Token{UserId: 77, Key: legacy.Key, Name: "duplicate"}
+	require.Error(t, db.Create(&duplicate).Error, "unique keys remain enforced after migration")
+	upgraded.RoutingTemplateID = "persisted-template"
+	require.NoError(t, db.Model(&upgraded).Update("routing_template_id", upgraded.RoutingTemplateID).Error)
+	for range 2 {
+		require.NoError(t, db.AutoMigrate(&model.Token{}))
+	}
+	var persisted model.Token
+	require.NoError(t, db.First(&persisted, legacy.Id).Error)
+	assert.Equal(t, "persisted-template", persisted.RoutingTemplateID)
+	require.NoError(t, db.Unscoped().Delete(&persisted).Error)
 }

@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -29,6 +30,7 @@ type Token struct {
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
+	RoutingTemplateID  string         `json:"routing_template_id" gorm:"type:varchar(64);index"`
 	GroupRouteConfig   string         `json:"group_route_config" gorm:"type:text"`
 	GroupRouteSticky   bool           `json:"group_route_sticky" gorm:"default:false"`
 	AutoGroups         string         `json:"-" gorm:"type:text"`
@@ -118,6 +120,40 @@ func NormalizeTokenGroupRouteConfig(config string) (string, []TokenGroupRoute, e
 		return "", nil, fmt.Errorf("路由配置序列化失败: %w", err)
 	}
 	return string(data), normalized, nil
+}
+
+// ResolveRoutingTemplate returns a request-local view. Never cache or persist
+// this view: the stored template ID must be resolved against the latest snapshot.
+func (token *Token) ResolveRoutingTemplate() (*Token, error) {
+	effective := *token
+	if token.RoutingTemplateID == "" {
+		return &effective, nil
+	}
+	setting := operation_setting.CurrentSmartRoutingSetting()
+	if setting.Enabled {
+		for _, template := range setting.Templates {
+			if template.ID != token.RoutingTemplateID || !template.Enabled {
+				continue
+			}
+			data, err := common.Marshal(template.GroupRoutes)
+			if err != nil {
+				return nil, err
+			}
+			config, routes, err := NormalizeTokenGroupRouteConfig(string(data))
+			if err != nil || len(EnabledTokenGroupRoutes(routes)) == 0 {
+				break
+			}
+			effective.Group = ""
+			effective.AutoGroups = ""
+			effective.CrossGroupRetry = false
+			effective.GroupRouteConfig = config
+			effective.GroupRouteSticky = template.GroupRouteSticky
+			effective.ModelLimitsEnabled = len(template.ModelLimits) > 0
+			effective.ModelLimits = strings.Join(template.ModelLimits, ",")
+			return &effective, nil
+		}
+	}
+	return nil, common.NewMessage("Routing template is unavailable")
 }
 
 func (token *Token) GetGroupRoutes() []TokenGroupRoute {
@@ -349,7 +385,11 @@ func ValidateUserToken(key string) (token *Token, err error) {
 			}
 			return token, ErrTokenInvalid
 		}
-		return token, nil
+		effective, resolveErr := token.ResolveRoutingTemplate()
+		if resolveErr != nil {
+			return token, ErrTokenInvalid
+		}
+		return effective, nil
 	}
 	common.SysLog(common.LogText("ValidateUserToken: failed to get token: %s", err.Error()))
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -414,7 +454,7 @@ func (token *Token) Update() (err error) {
 		common.SysLog(common.LogText("failed to invalidate token cache before update: %s", cacheErr.Error()))
 	}
 	return DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "group_route_config", "group_route_sticky", "auto_groups",
+		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "group_route_config", "group_route_sticky", "auto_groups", "routing_template_id",
 		"allow_user_quota_query").Updates(token).Error
 }
 
@@ -540,6 +580,58 @@ func CountUserTokens(userId int) (int64, error) {
 	return total, err
 }
 
+// BatchUpdateTokens applies a validated configuration patch atomically. Only
+// explicitly selected fields are written, preserving concurrent usage counters.
+func BatchUpdateTokens(ids []int, userID int, updates map[string]any) (int, error) {
+	ids = slices.Sorted(slices.Values(ids))
+	ids = slices.Compact(ids)
+	if userID <= 0 || len(ids) == 0 || len(ids) > 100 || ids[0] <= 0 || len(updates) == 0 {
+		return 0, errors.New("Invalid parameters")
+	}
+	var tokens []Token
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where("user_id = ? AND id IN ?", userID, ids).Order("id").Find(&tokens).Error; err != nil {
+			return err
+		}
+		if len(tokens) != len(ids) {
+			return errors.New("API keys not found or inaccessible")
+		}
+		if updates["status"] == common.TokenStatusEnabled {
+			for _, token := range tokens {
+				expiry, quota, unlimited := token.ExpiredTime, token.RemainQuota, token.UnlimitedQuota
+				if value, ok := updates["expired_time"].(int64); ok {
+					expiry = value
+				}
+				if value, ok := updates["remain_quota"].(int); ok {
+					quota = value
+				}
+				if value, ok := updates["unlimited_quota"].(bool); ok {
+					unlimited = value
+				}
+				if expiry != -1 && expiry <= common.GetTimestamp() {
+					return errors.New("Token has expired and cannot be enabled. Please modify the expiration time or set it to never expire")
+				}
+				if !unlimited && quota <= 0 {
+					return errors.New("Token quota is exhausted and cannot be enabled. Please modify the remaining quota or set it to unlimited")
+				}
+			}
+		}
+		if err := invalidateTokensCache(tokens); err != nil {
+			return err
+		}
+		return tx.Model(&Token{}).Where("user_id = ? AND id IN ?", userID, ids).Updates(updates).Error
+	})
+	if err != nil {
+		return 0, err
+	}
+	// Renew the fence after commit so readers holding a pre-commit snapshot
+	// cannot republish stale permissions after a long-running transaction.
+	if err := invalidateTokensCache(tokens); err != nil {
+		common.SysError("failed to invalidate token cache after batch update")
+	}
+	return len(tokens), nil
+}
+
 // BatchDeleteTokens 删除指定用户的一组令牌，返回成功删除数量
 func BatchDeleteTokens(ids []int, userId int) (int, error) {
 	if len(ids) == 0 {
@@ -566,6 +658,15 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 		return 0, err
 	}
 	return len(tokens), nil
+}
+
+func GetTokenKeysByTemplate(templateID string, userID int) ([]Token, error) {
+	if templateID == "" || userID <= 0 {
+		return nil, common.NewMessage("Invalid parameters")
+	}
+	var tokens []Token
+	err := DB.Select("id", commonKeyCol).Where("user_id = ? AND routing_template_id = ?", userID, templateID).Order("id").Find(&tokens).Error
+	return tokens, err
 }
 
 func GetTokenKeysByIds(ids []int, userId int) ([]Token, error) {

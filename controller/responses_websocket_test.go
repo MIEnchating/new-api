@@ -636,9 +636,9 @@ func TestResponsesWebSocketReusesConnectionAndSettlesEachRequest(t *testing.T) {
 		assert.NotContains(t, other, "use_channel")
 		assert.Equal(t, map[string]any{"status": "ok", "end_reason": "done", "response_status": "completed"}, other["stream_status"])
 	}
-	// Policy records retain outcomes, channel selection and the pin constraint
-	// on later creates, alongside the detailed execution trace.
-	for index, wantDecision := range []string{"success:request_completed", "select:pinned_channel"} {
+	// Routing decisions include channel selection and the pin constraint on
+	// later creates that reuse the established connection.
+	for index, wantDecision := range []string{"attempt:channel_selected", "select:pinned_channel"} {
 		var other struct {
 			AdminInfo struct {
 				RequestPolicy []struct {
@@ -657,7 +657,6 @@ func TestResponsesWebSocketReusesConnectionAndSettlesEachRequest(t *testing.T) {
 			decisions = append(decisions, event.Decision.Action+":"+event.Decision.Reason)
 		}
 		assert.Contains(t, decisions, wantDecision, "request %d policy events: %v", index, decisions)
-		assert.Contains(t, decisions, "attempt:channel_selected")
 	}
 	require.NoError(t, model.DB.First(token, token.Id).Error)
 	require.NoError(t, model.DB.First(user, user.Id).Error)

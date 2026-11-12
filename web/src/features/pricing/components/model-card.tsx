@@ -259,10 +259,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
           )}
           <span className='text-muted-foreground text-xs font-normal'>
             {' '}
-            /{' '}
-            {t(
-              props.model.billing_mode === 'per_second' ? 'second' : 'request'
-            )}
+            / {t('request')}
           </span>
         </span>
       </div>

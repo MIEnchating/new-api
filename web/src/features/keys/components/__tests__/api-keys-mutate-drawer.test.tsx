@@ -40,6 +40,7 @@ type ApiMethod = (url: string, data?: unknown) => Promise<{ data: unknown }>
 type MockableApi = {
   get: ApiMethod
   post: ApiMethod
+  put: ApiMethod
 }
 type RenderedDrawer = {
   queryClient: InstanceType<typeof QueryClient>
@@ -48,6 +49,7 @@ type RenderedDrawer = {
 const apiClient = api as unknown as MockableApi
 const originalGet = apiClient.get
 const originalPost = apiClient.post
+const originalPut = apiClient.put
 let renderedDrawer: RenderedDrawer | null = null
 
 function installApiFixtures(
@@ -265,6 +267,7 @@ function selectComboboxOption(
 afterEach(() => {
   apiClient.get = originalGet
   apiClient.post = originalPost
+  apiClient.put = originalPut
   localStorage.clear()
   if (renderedDrawer) {
     renderedDrawer.queryClient.clear()
@@ -362,7 +365,7 @@ describe('API keys mutate drawer routing mode', () => {
     expect(document.body).toHaveTextContent('Group routing rules')
 
     await user.click(templateTrigger)
-    expect(screen.queryByRole('option', { name: 'Custom routing' })).toBeNull()
+    expect(screen.getByRole('option', { name: 'Custom routing' })).toBeVisible()
     const claudeOption = screen.getByRole('option', { name: 'Claude' })
     await user.click(claudeOption)
 
@@ -374,10 +377,12 @@ describe('API keys mutate drawer routing mode', () => {
       )
     ).toHaveLength(2)
 
+    expect(screen.getByRole('radio', { name: 'Single group' })).toBeDisabled()
     changeInput(getControlByLabel('Name'), 'templated')
     fireEvent.click(findButton('Save changes', true))
     await waitFor(() => expect(createdPayloads).toHaveLength(1))
 
+    expect(createdPayloads[0]?.routing_template_id).toBe('claude')
     expect(createdPayloads[0]?.group).toBe('')
     expect(createdPayloads[0]?.group_route_sticky).toBe(true)
     expect(JSON.parse(String(createdPayloads[0]?.group_route_config))).toEqual([
@@ -395,6 +400,104 @@ describe('API keys mutate drawer routing mode', () => {
       },
     ])
   })
+
+  test('custom routing detaches the template and enables independent route editing', async () => {
+    const user = userEvent.setup()
+    const payloads: Array<Record<string, unknown>> = []
+    installApiFixtures(payloads)
+    await renderCreateDrawer()
+    const template = screen.getByRole('combobox', { name: 'Smart Routing' })
+    await waitFor(() => expect(template).toHaveTextContent('Claude'))
+    await user.click(template)
+    await user.click(screen.getByRole('option', { name: 'Custom routing' }))
+    expect(screen.getByRole('radio', { name: 'Single group' })).toBeEnabled()
+    await user.click(screen.getByRole('radio', { name: 'Single group' }))
+    changeInput(getControlByLabel('Name'), 'independent')
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(payloads).toHaveLength(1))
+    expect(payloads[0]?.routing_template_id).toBe('')
+    expect(payloads[0]?.group_route_config).toBe('')
+  })
+
+  test.each([true, false])(
+    'editing a key preserves its stored template link when availability is %s',
+    async (available) => {
+      const user = userEvent.setup()
+      installApiFixtures([], available)
+      const key: ApiKey = {
+        id: 9,
+        name: 'linked key',
+        key: '',
+        status: 1,
+        remain_quota: 100,
+        used_quota: 0,
+        unlimited_quota: true,
+        expired_time: -1,
+        created_time: 1,
+        accessed_time: 1,
+        group: '',
+        auto_groups: null,
+        cross_group_retry: false,
+        group_route_config: JSON.stringify([
+          { group: 'default', priority: 1, cooldown_seconds: 60 },
+        ]),
+        group_route_sticky: false,
+        model_limits_enabled: true,
+        model_limits: 'model-current',
+        allow_ips: '',
+        allow_user_quota_query: true,
+        routing_template_id: 'claude',
+        routing_template_available: available,
+      }
+      const fixtureGet = apiClient.get
+      apiClient.get = async (url) =>
+        url === '/api/token/9'
+          ? { data: { success: true, data: key } }
+          : fixtureGet(url)
+      const put = vi
+        .spyOn(api, 'put')
+        .mockResolvedValue({ data: { success: true } })
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      renderedDrawer = { queryClient }
+      render(
+        <QueryClientProvider client={queryClient}>
+          <I18nextProvider i18n={i18n}>
+            <ApiKeysProvider>
+              <ApiKeysMutateDrawer
+                open
+                currentRow={key}
+                onOpenChange={() => undefined}
+              />
+            </ApiKeysProvider>
+          </I18nextProvider>
+        </QueryClientProvider>
+      )
+      const selector = await screen.findByRole('combobox', {
+        name: 'Smart Routing',
+      })
+      await waitFor(() =>
+        expect(
+          screen.getByRole('radio', { name: 'Single group' })
+        ).toBeDisabled()
+      )
+      if (!available) {
+        expect(screen.getByRole('status')).toHaveTextContent(
+          'Routing template is unavailable'
+        )
+        await user.click(selector)
+        await user.click(screen.getByRole('option', { name: 'Custom routing' }))
+      }
+      changeInput(getControlByLabel('Name'), 'renamed linked key')
+      fireEvent.click(findButton('Save changes', true))
+      await waitFor(() => expect(put).toHaveBeenCalled())
+      expect(put.mock.calls[0]?.[1]).toMatchObject({
+        id: 9,
+        routing_template_id: available ? 'claude' : '',
+      })
+    }
+  )
 
   test('disables press scaling on the advanced settings trigger', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
@@ -619,5 +722,150 @@ describe('API keys mutate drawer user quota query switch', () => {
     fireEvent.click(findButton('Save changes', true))
     await waitFor(() => expect(createdPayloads).toHaveLength(1))
     expect(createdPayloads[0]?.allow_user_quota_query).toBe(false)
+  })
+})
+
+describe('API key batch editing', () => {
+  async function renderBatchDrawer() {
+    installApiFixtures([])
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    renderedDrawer = { queryClient }
+    const onOpenChange = vi.fn()
+    const onBatchSuccess = vi.fn()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <I18nextProvider i18n={i18n}>
+          <ApiKeysProvider>
+            <ApiKeysMutateDrawer
+              open
+              batchIds={[11, 12]}
+              onOpenChange={onOpenChange}
+              onBatchSuccess={onBatchSuccess}
+            />
+          </ApiKeysProvider>
+        </I18nextProvider>
+      </QueryClientProvider>
+    )
+    await screen.findByRole('heading', { name: 'Edit 2 API key(s)' })
+    return { onOpenChange, onBatchSuccess }
+  }
+
+  test('selecting only quota-query permission sends false without changing other settings', async () => {
+    const requests: unknown[] = []
+    apiClient.put = async (url, data) => {
+      expect(url).toBe('/api/token/batch')
+      requests.push(data)
+      return { data: { success: true, data: 2 } }
+    }
+    const { onBatchSuccess, onOpenChange } = await renderBatchDrawer()
+    const save = screen.getByRole('button', { name: 'Save changes' })
+    expect(save).toBeDisabled()
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Allow querying user quota' })
+    )
+    const permission = await screen.findByRole('switch', {
+      name: 'Allow querying user quota',
+    })
+    await waitFor(() => expect(save).toBeEnabled())
+    await user.click(permission)
+    await user.click(save)
+    await waitFor(() => expect(onBatchSuccess).toHaveBeenCalledOnce())
+    expect(requests).toEqual([
+      { ids: [11, 12], updates: { allow_user_quota_query: false } },
+    ])
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+  })
+
+  test('batch routing requires an explicit choice instead of applying the creation template', async () => {
+    await renderBatchDrawer()
+    const user = userEvent.setup()
+    await user.click(screen.getByRole('checkbox', { name: 'Group Routing' }))
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled()
+    )
+    expect(
+      screen.getByRole('combobox', { name: 'Smart Routing' })
+    ).toHaveTextContent('Smart Routing')
+    expect(
+      screen.queryByRole('button', { name: 'Add group routing rule' })
+    ).not.toBeInTheDocument()
+  })
+
+  test('pending batch update disables saving and closing until the result arrives', async () => {
+    let finish!: (result: { data: unknown }) => void
+    apiClient.put = () =>
+      new Promise((resolve) => {
+        finish = resolve
+      })
+    const { onOpenChange, onBatchSuccess } = await renderBatchDrawer()
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByRole('checkbox', { name: 'IP Whitelist (supports CIDR)' })
+    )
+    const save = screen.getByRole('button', { name: 'Save changes' })
+    await waitFor(() => expect(save).toBeEnabled())
+    await user.click(save)
+    expect(screen.getByRole('button', { name: 'Saving...' })).toBeDisabled()
+    expect(
+      screen
+        .getAllByRole('button', { name: 'Close' })
+        .some((button) => button.hasAttribute('disabled'))
+    ).toBe(true)
+    await user.keyboard('{Escape}')
+    expect(onOpenChange).not.toHaveBeenCalled()
+    await act(async () => finish({ data: { success: true, data: 2 } }))
+    await waitFor(() => expect(onBatchSuccess).toHaveBeenCalledOnce())
+  })
+
+  test('failed batch update keeps the form and selection available for retry', async () => {
+    const requests: unknown[] = []
+    apiClient.put = async (_url, data) => {
+      requests.push(data)
+      return {
+        data: { success: false, message: 'API keys not found or inaccessible' },
+      }
+    }
+    const { onBatchSuccess, onOpenChange } = await renderBatchDrawer()
+    const user = userEvent.setup()
+    await user.click(
+      screen.getByRole('checkbox', { name: 'IP Whitelist (supports CIDR)' })
+    )
+    const save = screen.getByRole('button', { name: 'Save changes' })
+    await waitFor(() => expect(save).toBeEnabled())
+    await user.click(save)
+    await waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0]).toEqual({ ids: [11, 12], updates: { allow_ips: '' } })
+    expect(onBatchSuccess).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(save).toBeEnabled()
+  })
+
+  test('deselecting an edited field excludes it from the batch request', async () => {
+    const requests: unknown[] = []
+    apiClient.put = async (_url, data) => {
+      requests.push(data)
+      return { data: { success: true, data: 2 } }
+    }
+    await renderBatchDrawer()
+    const user = userEvent.setup()
+    const name = screen.getByRole('checkbox', { name: 'Name' })
+    await user.click(name)
+    await user.type(
+      await screen.findByRole('textbox', { name: 'Name' }),
+      'shared-name'
+    )
+    await user.click(name)
+    await user.click(screen.getByRole('checkbox', { name: 'Expiration Time' }))
+    const save = screen.getByRole('button', { name: 'Save changes' })
+    await waitFor(() => expect(save).toBeEnabled())
+    await user.click(save)
+    await waitFor(() =>
+      expect(requests).toEqual([
+        { ids: [11, 12], updates: { expired_time: -1 } },
+      ])
+    )
   })
 })

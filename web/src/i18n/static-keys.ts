@@ -530,9 +530,6 @@ export const STATIC_I18N_KEYS = [
   'Finished',
   'Running',
   'Cancelled',
-  'Intermediate retry error',
-  'This entry records an intermediate channel failure. The execution trace may include later attempts and the final state of the same request.',
-  'Retry Chain at This Log',
   'Elapsed Time at This Log',
   'Request cancelled before this channel returned a result',
   'Unknown',
@@ -549,7 +546,6 @@ export const STATIC_I18N_KEYS = [
   'Attempts',
   'Current selection',
   'Backup candidate',
-  'Channel execution',
 
   // Models constants
   'Exact Match',
@@ -1021,6 +1017,8 @@ export const STATIC_I18N_KEYS = [
   'View API token key',
   'View key for API token “{{name}}”',
   'Batch delete API tokens',
+  'Batch update API tokens',
+  'API keys not found or inaccessible',
   'View API token keys in batch',
   'API token creation',
   'API token configuration update',

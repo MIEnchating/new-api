@@ -1,0 +1,18 @@
+{
+  "before_cleanup": "4ecc40ec0787291e84e236be953f1040c705f993",
+  "local_baseline": "dba504a2124a2608f66282a3b13169b5a58560c5",
+  "allowed_restorations": [
+    "common/constants.go",
+    "common/upstream_request_chain.go",
+    "model/log.go",
+    "relay/channel/api_request_test.go",
+    "service/http.go",
+    "service/http_test.go"
+  ],
+  "required_paths": [
+    "common/upstream_request_chain.go",
+    "web/src/features/channels/components/__tests__/channels-primary-buttons-mobile.test.tsx",
+    "web/src/features/usage-logs/components/dialogs/upstream-request-id-chain.tsx",
+    "web/src/features/usage-logs/components/dialogs/__tests__/upstream-request-id-chain.test.tsx"
+  ]
+}

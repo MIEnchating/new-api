@@ -308,6 +308,17 @@ function KeysPage() {
 async function renderKeysPage(status = 1, overrides: Partial<ApiKey> = {}) {
   let currentKey = { ...key, status, ...overrides }
   vi.mocked(api.get).mockImplementation(async (url) => {
+    if (url === '/api/token/auto-groups') {
+      return {
+        data: { success: true, data: { groups: ['default'], max_count: 5 } },
+      }
+    }
+    if (
+      url === '/api/token/smart-routing-templates' ||
+      url === '/api/user/models'
+    ) {
+      return { data: { success: true, data: [] } }
+    }
     if (url.startsWith('/api/token/')) {
       return {
         data: { success: true, data: { items: [currentKey], total: 1 } },
@@ -318,7 +329,12 @@ async function renderKeysPage(status = 1, overrides: Partial<ApiKey> = {}) {
   const post = vi.spyOn(api, 'post').mockResolvedValue({
     data: { success: true, data: { key: 'fake-key-for-test-only' } },
   })
-  const put = vi.spyOn(api, 'put').mockImplementation(async (_url, data) => {
+  const put = vi.spyOn(api, 'put').mockImplementation(async (url, data) => {
+    if (url === '/api/token/batch') {
+      const batch = data as { updates: Partial<ApiKey> }
+      currentKey = { ...currentKey, ...batch.updates }
+      return { data: { success: true, data: 1 } }
+    }
     const update = data as { id: number; status: number }
     currentKey = { ...currentKey, status: update.status }
     return { data: { success: true, data: currentKey } }
@@ -562,4 +578,33 @@ it('keeps mobile quota readable and opens complete model and IP restrictions by 
   details = await screen.findByRole('dialog')
   expect(within(details).getByText('192.0.2.1')).toBeVisible()
   expect(within(details).getByText('2001:db8::1')).toBeVisible()
+})
+
+it('batch edit opens for selected keys and refreshes the row and selection after saving', async () => {
+  const user = userEvent.setup()
+  const { put, post } = await renderKeysPage()
+  expect(
+    screen.queryByRole('button', { name: 'Batch edit' })
+  ).not.toBeInTheDocument()
+  await user.click(screen.getByRole('checkbox', { name: 'Select row' }))
+  await user.click(screen.getByRole('button', { name: 'Batch edit' }))
+  await screen.findByRole('heading', { name: 'Edit 1 API key(s)' })
+  await user.click(screen.getByRole('checkbox', { name: 'Status' }))
+  const save = screen.getByRole('button', { name: 'Save changes' })
+  await waitFor(() => expect(save).toBeEnabled())
+  await user.click(save)
+  await waitFor(() =>
+    expect(put).toHaveBeenCalledWith('/api/token/batch', {
+      ids: [7],
+      updates: { status: 2 },
+    })
+  )
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('heading', { name: 'Edit 1 API key(s)' })
+    ).not.toBeInTheDocument()
+  )
+  expect(screen.getByRole('checkbox', { name: 'Select row' })).not.toBeChecked()
+  await screen.findByText('Disabled')
+  expect(post).not.toHaveBeenCalled()
 })

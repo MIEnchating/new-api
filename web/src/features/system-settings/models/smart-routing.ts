@@ -32,6 +32,7 @@ export type SmartRoutingTemplateForm = {
   enabled: boolean
   group_routes: SmartRoutingGroupRouteForm[]
   group_route_sticky: boolean
+  model_limits?: string[]
 }
 
 export type SmartRoutingFormValues = {
@@ -61,6 +62,17 @@ export function createSmartRoutingSchema(t: Translator) {
       enabled: z.boolean(),
       group_routes: z.array(routeSchema).max(100),
       group_route_sticky: z.boolean(),
+      model_limits: z
+        .array(
+          z
+            .string()
+            .trim()
+            .min(1)
+            .max(255)
+            .refine((value) => !/[,\r\n]/.test(value))
+        )
+        .max(1000)
+        .optional(),
     })
     .superRefine((template, context) => {
       if (template.enabled && template.group_routes.length === 0) {
@@ -163,6 +175,11 @@ export function parseSmartRoutingTemplates(
         enabled: template.enabled === true,
         group_routes: routes,
         group_route_sticky: template.group_route_sticky === true,
+        model_limits: Array.isArray(template.model_limits)
+          ? template.model_limits.filter(
+              (value): value is string => typeof value === 'string'
+            )
+          : [],
       }
     })
   } catch {
@@ -186,6 +203,9 @@ export function serializeSmartRoutingTemplates(
         enabled: route.enabled,
       })),
       group_route_sticky: template.group_route_sticky,
+      ...(template.model_limits?.length
+        ? { model_limits: template.model_limits }
+        : {}),
     }))
   )
 }

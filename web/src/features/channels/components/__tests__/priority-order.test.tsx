@@ -698,17 +698,14 @@ test('the header places reorder before batch mode while shared display controls 
   expect(toolbar.getByRole('group', { name: 'View mode' })).toBeVisible()
 })
 
-test('the saved priority preference wins over a stale ID preference', async () => {
+test('the upstream ID preference is honored even with an older fork priority preference', async () => {
   localStorage.setItem('channels-id-sort', 'true')
   localStorage.setItem('channels-priority-sort', 'true')
   await mount('card', false)
   expect(
     screen.getByRole('combobox', { name: 'Sort channels by' })
-  ).toHaveTextContent('Priority')
-  await waitFor(() =>
-    expect(orderInView()).toEqual(['channel:1', 'channel:2', 'channel:3'])
-  )
-  expect(screen.getByRole('button', { name: 'Drag mode' })).toBeEnabled()
+  ).toHaveTextContent('ID')
+  expect(screen.getByRole('button', { name: 'Drag mode' })).toBeDisabled()
 })
 
 test('the header honors the saved ID preference and changes the shared sort direction', async () => {

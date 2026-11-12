@@ -32,6 +32,7 @@ func OaiResponsesToChatHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeReadResponseBodyFailed, http.StatusInternalServerError)
 	}
+
 	info.ObserveActualResponseModel(body)
 
 	if err := common.Unmarshal(body, &responsesResp); err != nil {
@@ -83,6 +84,7 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 			}
 			continue
 		}
+
 		info.ObserveActualResponseModel(common.StringToByteSlice(data))
 
 		var streamResp dto.ResponsesStreamResponse
@@ -107,8 +109,14 @@ func OaiResponsesToChatBufferedStreamHandler(c *gin.Context, info *relaycommon.R
 					finalResponse.Status = []byte(`"incomplete"`)
 				}
 			}
-		case "response.failed", "response.error", "error":
-			streamErr = newResponsesStreamError(streamResp)
+		case "response.failed", "response.error":
+			if streamResp.Response != nil {
+				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
+					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
+					break
+				}
+			}
+			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
 		}
 		if streamErr != nil || finalResponse != nil {
 			break
@@ -183,7 +191,6 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 	streamErr := (*types.NewAPIError)(nil)
-	pendingPreamble := make([]dto.ResponsesStreamResponse, 0, 2)
 	// upstreamFailed records a response.failed / response.error event and
 	// failedUsage the usage it reported, if any.
 	upstreamFailed := false
@@ -261,11 +268,12 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
-		info.ObserveActualResponseModel(common.StringToByteSlice(data))
 		if streamErr != nil {
 			stopStream(sr, streamErr)
 			return
 		}
+
+		info.ObserveActualResponseModel(common.StringToByteSlice(data))
 
 		var streamResp dto.ResponsesStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResp); err != nil {
@@ -277,34 +285,20 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		if streamResp.Response != nil {
 			info.ObserveResponseModel(streamResp.Response.Model)
 		}
-		if streamResp.Type == "response.error" || streamResp.Type == "response.failed" || streamResp.Type == "error" {
+		if streamResp.Type == "response.error" || streamResp.Type == "response.failed" {
 			upstreamFailed = true
 			if streamResp.Response != nil {
 				failedUsage = streamResp.Response.Usage
-			}
-			streamErr = newResponsesStreamError(streamResp)
-			stopStream(sr, streamErr)
-			return
-		}
-		if streamResp.Type == "response.created" || streamResp.Type == "response.in_progress" {
-			pendingPreamble = append(pendingPreamble, streamResp)
-			return
-		}
-		for i := range pendingPreamble {
-			results, err := service.ConvertStreamResponseChunk(c, info, state, &pendingPreamble[i])
-			if err != nil {
-				streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
-				stopStream(sr, streamErr)
-				return
-			}
-			for _, result := range results {
-				if !sendStreamResult(result) {
+				if oaiErr := streamResp.Response.GetOpenAIError(); oaiErr != nil && oaiErr.Type != "" {
+					streamErr = types.WithOpenAIError(*oaiErr, http.StatusInternalServerError)
 					stopStream(sr, streamErr)
 					return
 				}
 			}
+			streamErr = types.NewOpenAIError(fmt.Errorf("responses stream error: %s", streamResp.Type), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+			stopStream(sr, streamErr)
+			return
 		}
-		pendingPreamble = pendingPreamble[:0]
 
 		results, err := service.ConvertStreamResponseChunk(c, info, state, &streamResp)
 		if err != nil {
@@ -329,7 +323,7 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		// estimate) and send the client the same error the failed request
 		// path writes. stream_status already records the failure.
 		usage := relayconvert.UsageFromResponsesUsage(failedUsage)
-		if usage == nil || usage.TotalTokens == 0 {
+		if usage.TotalTokens == 0 {
 			usage = state.Usage()
 		}
 		if usage == nil || usage.TotalTokens == 0 {
@@ -359,19 +353,10 @@ func OaiResponsesToChatStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		}
 		return usage, nil
 	}
-	if len(pendingPreamble) > 0 {
-		return nil, types.NewOpenAIError(
-			fmt.Errorf("upstream response stream ended before a terminal event"),
-			types.ErrorCodeBadResponse,
-			http.StatusBadGateway,
-			types.ErrOptionWithStreamEvent(),
-		)
-	}
 
 	usage := state.Usage()
 	if usage == nil || usage.TotalTokens == 0 {
-		usageText := state.UsageText()
-		usage = service.ResponseText2Usage(c, usageText, info.UpstreamModelName, info.GetEstimatePromptTokens())
+		usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		state.SetUsage(usage)
 	}
 	if info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {

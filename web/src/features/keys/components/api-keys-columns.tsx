@@ -127,7 +127,25 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
         accessorKey: 'name',
         header: t('Name'),
         cell: ({ row }) => (
-          <span className='font-medium'>{row.getValue('name')}</span>
+          <div className='flex min-w-0 flex-col items-start gap-1'>
+            <span className='font-medium'>{row.getValue('name')}</span>
+            {row.original.routing_template_id && (
+              <StatusBadge
+                label={
+                  row.original.routing_template_available === false
+                    ? t('Routing template is unavailable')
+                    : row.original.routing_template_name ||
+                      row.original.routing_template_id
+                }
+                variant={
+                  row.original.routing_template_available === false
+                    ? 'warning'
+                    : 'info'
+                }
+                copyable={false}
+              />
+            )}
+          </div>
         ),
         size: 180,
         meta: { mobileTitle: true },

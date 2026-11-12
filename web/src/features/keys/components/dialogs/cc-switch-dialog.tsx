@@ -444,7 +444,7 @@ export function CCSwitchDialog(props: Props) {
                 placeholder={t('API Endpoint')}
                 emptyText={t('No matching items')}
               />
-              <FieldDescription className='text-xs break-all'>
+              <FieldDescription className='break-all text-xs'>
                 {getDefaultCCSwitchEndpoint(app, endpointAddress, apiFormat)}
               </FieldDescription>
             </Field>

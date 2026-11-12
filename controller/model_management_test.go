@@ -804,11 +804,11 @@ export function parseTaskResult() { return {}; }
 					ExpectedVersion: loaded.Entries[0].Version,
 					Pricing: model.PricingValues{
 						"ModelPrice":                   float64(0.4),
-						"billing_setting.billing_mode": billing_setting.BillingModePerSecond,
+						"billing_setting.billing_mode": "per_second",
 					},
 				}
-				// A text model cannot supply the seconds required by the converted expression.
-				require.ErrorContains(t, model.UpdateModelPricing([]model.ModelPricingChange{perSecond}), "no task plugin usage schema")
+				// The upstream pricing contract rejects the removed legacy mode.
+				require.ErrorContains(t, model.UpdateModelPricing([]model.ModelPricingChange{perSecond}), "invalid billing mode")
 				loaded, err = model.GetModelPricingSnapshot([]string{"matrix-priced"})
 				require.NoError(t, err)
 				assert.Equal(t, float64(0), loaded.Entries[0].Effective["ModelPrice"])
@@ -832,7 +832,7 @@ export function parseTaskResult() { return {}; }
 				invalid := other
 				invalid.Pricing = model.PricingValues{"ModelPrice": float64(-1)}
 				assert.Error(t, model.UpdateModelPricing([]model.ModelPricingChange{invalid}))
-				invalid.Pricing = model.PricingValues{"billing_setting.billing_mode": billing_setting.BillingModePerSecond}
+				invalid.Pricing = model.PricingValues{"billing_setting.billing_mode": "per_second"}
 				assert.Error(t, model.UpdateModelPricing([]model.ModelPricingChange{invalid}))
 				// A physical failure after earlier option writes must roll back all
 				// rows and leave the previously published runtime price intact.
@@ -1092,25 +1092,14 @@ export function parseTaskResult() { return {}; }
 				modelManagementRequest(t, SyncUpstreamPreview, "GET", "/api/models/sync_upstream/preview?locale=zh", nil, &preview)
 				assert.False(t, preview.Success)
 			})
-			t.Run("legacy_per_second_writes_persist_only_expressions", func(t *testing.T) {
+			t.Run("legacy_per_second_writes_are_rejected_without_changing_prices", func(t *testing.T) {
 				before, err := model.GetModelPricingSnapshot([]string{"matrix-task"})
 				require.NoError(t, err)
-				require.NoError(t, model.UpdateModelPricing([]model.ModelPricingChange{{ModelName: "matrix-task", ExpectedVersion: before.Entries[0].Version, Pricing: model.PricingValues{"ModelPrice": .4, "billing_setting.billing_mode": "per_second"}}}))
+				require.ErrorContains(t, model.UpdateModelPricing([]model.ModelPricingChange{{ModelName: "matrix-task", ExpectedVersion: before.Entries[0].Version, Pricing: model.PricingValues{"ModelPrice": .4, "billing_setting.billing_mode": "per_second"}}}), "invalid billing mode")
+				require.ErrorContains(t, model.UpdateModelPricingOptions(map[string]string{"ModelPrice": `{"matrix-task":0.2}`, "billing_setting.billing_mode": `{"matrix-task":"per_second"}`}), "invalid billing mode")
 				after, err := model.GetModelPricingSnapshot([]string{"matrix-task"})
 				require.NoError(t, err)
-				assert.Equal(t, "tiered_expr", after.Entries[0].Configured["billing_setting.billing_mode"])
-				assert.Equal(t, `tier("base", u("seconds") * 0.4)`, after.Entries[0].Configured["billing_setting.billing_expr"])
-				assert.NotContains(t, after.Entries[0].Configured, "ModelSecondPrice")
-				require.NoError(t, model.UpdateModelPricingOptions(map[string]string{"ModelPrice": `{"matrix-task":0.2}`, "billing_setting.billing_mode": `{"matrix-task":"per_second"}`}))
-				after, err = model.GetModelPricingSnapshot([]string{"matrix-task"})
-				require.NoError(t, err)
-				assert.Equal(t, "tiered_expr", after.Entries[0].Configured["billing_setting.billing_mode"])
-				assert.Equal(t, `tier("base", u("seconds") * 0.2)`, after.Entries[0].Configured["billing_setting.billing_expr"])
-				// Conversion must still validate against the plugin's seconds-only schema.
-				require.Error(t, model.UpdateModelPricingOptions(map[string]string{"billing_setting.billing_mode": `{"matrix-task":"per_second"}`, "ModelSecondPrice": `{"matrix-task":{"prices":{"1080p":0.8}}}`}))
-				unchanged, err := model.GetModelPricingSnapshot([]string{"matrix-task"})
-				require.NoError(t, err)
-				assert.Equal(t, after.Entries[0].Configured, unchanged.Entries[0].Configured)
+				assert.Equal(t, before.Entries, after.Entries)
 			})
 
 		})

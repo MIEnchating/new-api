@@ -19,9 +19,7 @@ import (
 
 const (
 	BillingModeRatio        = "ratio"
-	BillingModePerRequest   = "per-request"
 	BillingModeTieredExpr   = "tiered_expr"
-	BillingModePerSecond    = "per_second"
 	BillingModeField        = "billing_mode"
 	BillingExprField        = "billing_expr"
 	PluginBillingExprOption = "billing_setting.plugin_billing_expr"
@@ -187,6 +185,7 @@ func GetPricingSyncData(base map[string]any) map[string]any {
 // ---------------------------------------------------------------------------
 // Smoke test (called externally for validation before save)
 // ---------------------------------------------------------------------------
+
 func SmokeTestExpr(exprStr string) error {
 	return smokeTestExpr(exprStr)
 }

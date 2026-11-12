@@ -70,10 +70,7 @@ func HandleChannelFailure(c *gin.Context, channelError types.ChannelError, err *
 	}
 	upstreamURLs := common.UpstreamAddresses(c)
 	logger.LogError(c, common.LogText("channel error (channel #%d, status code: %d): %s", channelError.ChannelId, err.StatusCode, common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode(upstreamURLs...))))
-	if types.IsStreamEventError(err) &&
-		(types.IsSkipRetryError(err) || operation_setting.IsAlwaysSkipRetryError(err)) {
-		return false
-	}
+
 	nextChannelExcluded := IsNextChannelRouteExcluded(c)
 	if IsChannelRouteEnabled() || HasTokenGroupRoutes(c) {
 		ClearChannelAffinityForRetryableFailure(c, channelError.ChannelId, err)
@@ -114,7 +111,6 @@ func RecordRelayErrorLog(c *gin.Context, channelID int, err *types.NewAPIError, 
 	other.SetPublic("error_code", err.GetErrorCode())
 	other.SetPublic("status_code", err.StatusCode)
 	AppendRelayLogAdminInfo(c, relayInfo, other)
-	AppendChannelExecutionTraceErrorAdminInfoToLogOther(c, other)
 	AppendStreamStatusForLog(relayInfo, other)
 	AppendResponseModelLogInfo(relayInfo, other)
 	AppendTaskPluginContextAuditInfo(c, other)

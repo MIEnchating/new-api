@@ -40,6 +40,8 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.ref }}
+      - name: Reject restored local removals
+        run: node .github/scripts/check-local-changes.mjs
       - name: Validate release notes and generated output
         run: |
           node .github/scripts/validate-release-tag.mjs "$GITHUB_REF_NAME"
@@ -50,6 +52,9 @@ jobs:
       - name: Install frontend dependencies
         working-directory: web
         run: bun install --frozen-lockfile
+      - name: Verify channel removal and request chain preservation
+        working-directory: web
+        run: bun run test src/features/channels/components/__tests__/channels-primary-buttons-mobile.test.tsx src/features/usage-logs/components/dialogs/__tests__/upstream-request-id-chain.test.tsx
       - name: Frontend typecheck
         working-directory: web
         run: bun run typecheck

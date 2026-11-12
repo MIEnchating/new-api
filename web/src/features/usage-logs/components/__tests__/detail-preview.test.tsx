@@ -224,30 +224,6 @@ test.each([
   expect(preview.textContent).toBe(expected)
 })
 
-test.each([true, false])(
-  'per-second details show the recorded unit price and duration for admin=%s',
-  async (isAdmin) => {
-    const preview = renderPreview(
-      {
-        is_task: true,
-        billing_mode: 'per_second',
-        model_price: 0.4,
-        seconds: 5,
-        group_ratio: 1,
-      },
-      isAdmin
-    )
-    fireEvent.click(preview)
-    const dialog = within(await screen.findByRole('dialog'))
-    expect(dialog.getByText('Per-second')).toBeVisible()
-    expect(dialog.getByText('Price per second')).toBeVisible()
-    expect(dialog.getByText('$0.4/second')).toBeVisible()
-    expect(dialog.getByText('Billable duration')).toBeVisible()
-    expect(dialog.getByText('5 second')).toBeVisible()
-    expect(dialog.queryByText('Per-call')).not.toBeInTheDocument()
-  }
-)
-
 test.each([
   {
     tier: 'standard',

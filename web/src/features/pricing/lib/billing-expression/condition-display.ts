@@ -130,13 +130,13 @@ function describeTimeRange(
   return { text, kind, timezone: first.timezone }
 }
 
-function describeConditionNode(
+function describeBillingCondition(
   node: ExpressionNode,
   t: Translate,
   locale: string
 ): Description | null {
   if (node.kind === 'unary' && node.operator === '!') {
-    const description = describeConditionNode(node.operand, t, locale)
+    const description = describeBillingCondition(node.operand, t, locale)
     if (!description) return null
     return {
       ...description,
@@ -183,7 +183,7 @@ function describeConditionNode(
         range.push(comparison)
         ranges.set(key, range)
       } else {
-        const description = describeConditionNode(part, t, locale)
+        const description = describeBillingCondition(part, t, locale)
         if (!description) return null
         parts.push(description)
       }
@@ -195,7 +195,7 @@ function describeConditionNode(
     }
   } else {
     for (const part of nodes) {
-      const description = describeConditionNode(part, t, locale)
+      const description = describeBillingCondition(part, t, locale)
       if (!description) return null
       parts.push(description)
     }
@@ -240,34 +240,29 @@ function describeConditionNode(
 }
 
 /** Presentation only. Unknown conditions retain their source; this never changes tier selection. */
-export function describeBillingCondition(
+export function formatBillingCondition(
   source: string,
   t: Translate,
   locale = 'en'
-): Description | null {
+): string | null {
   const compiled = compileBillingExpression(source)
   if (compiled.status !== 'ready') return null
   try {
     // The returned value is rendered as React text, never as HTML.
     const translate: Translate = (key, options) =>
       t(key, { ...options, interpolation: { escapeValue: false } })
-    return describeConditionNode(compiled.ast, translate, locale)
+    const description = describeBillingCondition(
+      compiled.ast,
+      translate,
+      locale
+    )
+    if (!description) return null
+    if (!description.timezone) return description.text
+    return translate('{{condition}} ({{timezone}})', {
+      condition: description.text,
+      timezone: description.timezone,
+    })
   } catch {
     return null
   }
-}
-
-export function formatBillingCondition(
-  source: string,
-  t: Translate,
-  locale = 'en'
-): string | null {
-  const description = describeBillingCondition(source, t, locale)
-  if (!description) return null
-  if (!description.timezone) return description.text
-  return t('{{condition}} ({{timezone}})', {
-    condition: description.text,
-    timezone: description.timezone,
-    interpolation: { escapeValue: false },
-  })
 }

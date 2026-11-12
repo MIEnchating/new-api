@@ -36,10 +36,9 @@ import zh from '@/i18n/locales/zh.json'
 import { usageLogSchema } from '../../../data/schema'
 import { DetailsDialog } from '../details-dialog'
 import {
-  ExecutionTraceDialog,
   UpstreamRequestChain,
   UpstreamRequestIdChain,
-} from '../execution-trace-dialog'
+} from '../upstream-request-id-chain'
 
 const i18n = createInstance()
 const originalClipboard = Object.getOwnPropertyDescriptor(
@@ -394,33 +393,6 @@ describe('structured upstream request chain', () => {
     expect(screen.getByText('Sub2API 客户端关联 ID')).toBeVisible()
   })
 
-  test('execution trace displays the structured chain from its log', async () => {
-    client.setQueryData(['channel-execution-trace', 'local-id'], {
-      success: true,
-      data: {
-        request_id: 'local-id',
-        status: 'success',
-        events: [],
-        channel_ids: [177],
-      },
-    })
-    renderWithProviders(
-      <ExecutionTraceDialog
-        requestId='local-id'
-        upstreamRequestChain={attempts}
-        upstreamRequestIds={['legacy-id']}
-        open
-        onOpenChange={() => {}}
-      />
-    )
-    const dialog = within(await screen.findByRole('dialog'))
-    expect(
-      dialog.getByRole('group', { name: 'Attempt 1 · Channel 177' })
-    ).toBeVisible()
-    expect(dialog.getByText('Sub2API client correlation ID')).toBeVisible()
-    expect(dialog.queryByText('legacy-id')).not.toBeInTheDocument()
-  })
-
   test('falls back to historical IDs when no structured attempts exist', () => {
     renderWithProviders(
       <UpstreamRequestChain
@@ -435,7 +407,7 @@ describe('structured upstream request chain', () => {
     ).toBeVisible()
   })
 
-  test('log details prefer attempt groups and keep the local ID separate', async () => {
+  test('log details retain attempt groups without the removed execution trace action', async () => {
     const log = usageLogSchema.parse({
       id: 1,
       user_id: 1,
@@ -448,6 +420,7 @@ describe('structured upstream request chain', () => {
         admin_info: {
           upstream_request_ids: ['client-id', 'provider-id'],
           upstream_request_chain: attempts,
+          channel_execution_trace: { status: 'success', channel_ids: [177] },
         },
       }),
     })
@@ -461,6 +434,9 @@ describe('structured upstream request chain', () => {
       />
     )
     const dialog = within(await screen.findByRole('dialog'))
+    expect(
+      dialog.queryByRole('button', { name: 'View execution trace' })
+    ).not.toBeInTheDocument()
     expect(
       dialog.getByRole('group', { name: 'Attempt 1 · Channel 177' })
     ).toBeVisible()

@@ -355,9 +355,6 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
-	if err := migratePerSecondPricing(DB); err != nil {
-		return err
-	}
 	if err := initializeTopUpInvoiceFields(); err != nil {
 		return err
 	}

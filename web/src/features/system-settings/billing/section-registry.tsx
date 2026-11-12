@@ -28,7 +28,6 @@ import { createSectionRegistry } from '../utils/section-registry'
 
 const getModelDefaults = (settings: BillingSettings) => ({
   ModelPrice: settings.ModelPrice,
-  ModelSecondPrice: settings.ModelSecondPrice,
   ModelRatio: settings.ModelRatio,
   CacheRatio: settings.CacheRatio,
   CreateCacheRatio: settings.CreateCacheRatio,
@@ -142,11 +141,6 @@ const BILLING_SECTIONS = [
           PayAddress: settings.PayAddress,
           EpayId: settings.EpayId,
           EpayKey: settings.EpayKey,
-          EpaySignType: settings['payment_setting.epay_sign_type'],
-          EpayMerchantPrivateKey:
-            settings['payment_setting.epay_merchant_private_key'],
-          EpayPlatformPublicKey:
-            settings['payment_setting.epay_platform_public_key'],
           Price: settings.Price,
           MinTopUp: settings.MinTopUp,
           CustomCallbackAddress: settings.CustomCallbackAddress,

@@ -28,5 +28,6 @@ export {
   getAutomaticGroupRoutePriorities,
   parseApiKeyGroupRouteConfig,
   transformFormDataToPayload,
+  transformFormDataToBatchPayload,
   transformApiKeyToFormDefaults,
 } from './api-key-form'

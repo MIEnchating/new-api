@@ -19,7 +19,7 @@ func TestSoraResponsesProtocol(t *testing.T) {
 			"seconds": float64(8),
 			"size":    "1792x1024",
 		},
-		wantUsageKeys:  []string{"resolution", "seconds", "size"},
+		wantUsageKeys:  []string{"seconds", "size"},
 		wantVendorName: "sora",
 	})
 }

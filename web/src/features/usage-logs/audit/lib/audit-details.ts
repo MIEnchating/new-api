@@ -59,6 +59,7 @@ const TOKEN_AUDIT_OPERATIONS: Record<
     labelKey: 'View API token key',
     namedKey: 'View key for API token “{{name}}”',
   },
+  'token.update_batch': { labelKey: 'Batch update API tokens' },
   'token.delete_batch': { labelKey: 'Batch delete API tokens' },
   'token.key_view_batch': { labelKey: 'View API token keys in batch' },
 }
@@ -271,7 +272,10 @@ function buildTokenAuditOperation(
     }
   }
 
-  if (success && action === 'token.update') {
+  if (
+    success &&
+    (action === 'token.update' || action === 'token.update_batch')
+  ) {
     const changed = params.changed_fields
     description = t('Field change details were not recorded')
     let changes = description
@@ -339,6 +343,15 @@ function buildTokenAuditOperation(
                 processed,
               })
         fields.push({ label: t('Deleted tokens'), value: processed })
+      } else if (action === 'token.update_batch') {
+        description =
+          total === undefined
+            ? t('Updated: {{processed}}', { processed })
+            : t('Requested: {{total}} · Updated: {{processed}}', {
+                total,
+                processed,
+              })
+        fields.push({ label: t('Updated tokens'), value: processed })
       } else {
         description =
           total === undefined

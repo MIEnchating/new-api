@@ -40,7 +40,7 @@ func TestKlingResponsesProtocol(t *testing.T) {
 			"duration": float64(10),
 			"metadata": map[string]any{"mode": "pro"},
 		},
-		wantUsageKeys:  []string{"resolution", "seconds", "units"},
+		wantUsageKeys:  []string{"units"},
 		wantVendorName: "kling",
 	})
 

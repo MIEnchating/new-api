@@ -51,6 +51,7 @@ import {
 } from '@/components/drawer-layout'
 import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Collapsible,
   CollapsibleContent,
@@ -104,6 +105,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import {
+  batchUpdateApiKeys,
   createApiKey,
   updateApiKey,
   getApiKey,
@@ -118,9 +120,10 @@ import {
   type ApiKeyFormValues,
   getApiKeyFormDefaultValues,
   transformFormDataToPayload,
+  transformFormDataToBatchPayload,
   transformApiKeyToFormDefaults,
 } from '../lib'
-import type { ApiKey } from '../types'
+import type { ApiKey, ApiKeyBatchField } from '../types'
 import {
   ApiKeyGroupCombobox,
   type ApiKeyGroupOption,
@@ -132,6 +135,8 @@ type ApiKeyMutateDrawerProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   currentRow?: ApiKey
+  batchIds?: number[]
+  onBatchSuccess?: () => void
 }
 
 function getFormErrorMessage(error: unknown): string | undefined {
@@ -146,8 +151,13 @@ export function ApiKeysMutateDrawer({
   open,
   onOpenChange,
   currentRow,
+  batchIds,
+  onBatchSuccess,
 }: ApiKeyMutateDrawerProps) {
   const { t } = useTranslation()
+  const isBatch = batchIds !== undefined
+  const [batchFields, setBatchFields] = useState<ApiKeyBatchField[]>([])
+  const [batchStatus, setBatchStatus] = useState(2)
   const isUpdate = !!currentRow
   const currentRowId = currentRow?.id
   const { triggerRefresh } = useApiKeys()
@@ -155,8 +165,7 @@ export function ApiKeysMutateDrawer({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [autoSortGroupRoutes, setAutoSortGroupRoutes] = useState(false)
-  const [selectedSmartRoutingTemplateId, setSelectedSmartRoutingTemplateId] =
-    useState<string | null>(null)
+  const autoTemplateApplied = useRef(false)
   const manualRoutePrioritiesRef = useRef(new Map<string, number>())
   const enabledRouteCooldownsRef = useRef(new Map<string, number>())
   const [initializedTarget, setInitializedTarget] = useState<string | null>(
@@ -270,8 +279,9 @@ export function ApiKeysMutateDrawer({
     [smartRoutingTemplatesData]
   )
   const schema = useMemo(
-    () => getApiKeyFormSchema(t, maxAutoGroups),
-    [t, maxAutoGroups]
+    () =>
+      getApiKeyFormSchema(t, maxAutoGroups, isBatch ? batchFields : undefined),
+    [t, maxAutoGroups, isBatch, batchFields]
   )
 
   const form = useForm<ApiKeyFormValues>({
@@ -286,10 +296,12 @@ export function ApiKeysMutateDrawer({
   // Load existing data when updating
   useEffect(() => {
     if (!open) {
+      autoTemplateApplied.current = false
       form.reset(
         getApiKeyFormDefaultValues(defaultUseAutoGroup && backendHasAuto)
       )
-      setSelectedSmartRoutingTemplateId(null)
+      setBatchFields([])
+      setBatchStatus(2)
       setInitializedTarget(null)
       return
     }
@@ -307,7 +319,7 @@ export function ApiKeysMutateDrawer({
     const target = isUpdate && currentRow ? `update:${currentRow.id}` : 'create'
     if (initializedTarget === target) return
     setAutoSortGroupRoutes(false)
-    setSelectedSmartRoutingTemplateId(null)
+    setAdvancedOpen(isBatch)
     manualRoutePrioritiesRef.current.clear()
     enabledRouteCooldownsRef.current.clear()
     if (isUpdate && currentRow) {
@@ -329,6 +341,7 @@ export function ApiKeysMutateDrawer({
     }
   }, [
     open,
+    isBatch,
     isUpdate,
     currentRow,
     form,
@@ -376,11 +389,37 @@ export function ApiKeysMutateDrawer({
   }, [open, groups, routableGroups, form, selectedGroup])
 
   const onSubmit = async (data: ApiKeyFormValues) => {
+    if (
+      isSubmitting ||
+      (isBatch &&
+        (batchFields.length === 0 ||
+          batchIds.length === 0 ||
+          batchIds.length > 100))
+    ) {
+      return
+    }
     setIsSubmitting(true)
     try {
       const basePayload = transformFormDataToPayload(data)
 
-      if (isUpdate && currentRow) {
+      if (isBatch && batchIds) {
+        const result = await batchUpdateApiKeys(
+          batchIds,
+          transformFormDataToBatchPayload(data, batchFields, batchStatus)
+        )
+        if (result.success) {
+          toast.success(
+            t('Successfully updated {{count}} API key(s)', {
+              count: result.data ?? batchIds.length,
+            })
+          )
+          onBatchSuccess?.()
+          onOpenChange(false)
+          triggerRefresh()
+        } else {
+          handleServerError(result, t(ERROR_MESSAGES.UPDATE_FAILED))
+        }
+      } else if (isUpdate && currentRow) {
         const result = await updateApiKey({
           ...basePayload,
           id: currentRow.id,
@@ -458,25 +497,12 @@ export function ApiKeysMutateDrawer({
   const autoGroupsMode = form.watch('auto_groups_mode')
   const unlimitedQuota = form.watch('unlimited_quota')
   const groupRouteEnabled = form.watch('group_route_enabled')
-  const groupRouteSticky = form.watch('group_route_sticky')
   const groupRoutes = form.watch('group_routes') || []
+  const selectedSmartRoutingTemplateId = form.watch('routing_template_id')
   const selectedSmartRoutingTemplate = smartRoutingTemplates.find(
     (template) => template.id === selectedSmartRoutingTemplateId
   )
-  const selectedSmartRoutingTemplateIsApplied =
-    !!selectedSmartRoutingTemplate &&
-    !!groupRouteEnabled &&
-    selectedSmartRoutingTemplate.group_route_sticky === !!groupRouteSticky &&
-    selectedSmartRoutingTemplate.group_routes.length === groupRoutes.length &&
-    selectedSmartRoutingTemplate.group_routes.every((route, index) => {
-      const currentRoute = groupRoutes[index]
-      return (
-        currentRoute?.group === route.group &&
-        currentRoute.priority === route.priority &&
-        currentRoute.cooldown_seconds === route.cooldown_seconds &&
-        (currentRoute.enabled !== false) === (route.enabled !== false)
-      )
-    })
+  const selectedSmartRoutingTemplateIsApplied = !!selectedSmartRoutingTemplateId
 
   // When the administrator has configured templates, a newly created key
   // starts from the first available template. Users can still choose another
@@ -484,8 +510,10 @@ export function ApiKeysMutateDrawer({
   useEffect(() => {
     if (
       !open ||
+      isBatch ||
       isUpdate ||
       initializedTarget !== 'create' ||
+      autoTemplateApplied.current ||
       selectedSmartRoutingTemplateId ||
       smartRoutingTemplates.length === 0
     ) {
@@ -493,9 +521,11 @@ export function ApiKeysMutateDrawer({
     }
 
     const template = smartRoutingTemplates[0]
+    autoTemplateApplied.current = true
     if (!template) return
 
-    setSelectedSmartRoutingTemplateId(template.id)
+    form.setValue('routing_template_id', template.id)
+    form.setValue('model_limits', template.model_limits || [])
     setAutoSortGroupRoutes(false)
     manualRoutePrioritiesRef.current.clear()
     enabledRouteCooldownsRef.current.clear()
@@ -515,6 +545,7 @@ export function ApiKeysMutateDrawer({
     })
   }, [
     open,
+    isBatch,
     isUpdate,
     initializedTarget,
     selectedSmartRoutingTemplateId,
@@ -615,20 +646,38 @@ export function ApiKeysMutateDrawer({
     )
   }, [autoSortGroupRoutes, form, routeFields.fields])
 
+  const showBasic =
+    !isBatch ||
+    batchFields.some((field) =>
+      ['name', 'status', 'routing', 'expiration'].includes(field)
+    )
+  const showAdvanced =
+    !isBatch ||
+    batchFields.some((field) =>
+      ['models', 'ips', 'quota_query'].includes(field)
+    )
+  let title = isUpdate ? t('Update API Key') : t('Create API Key')
+  let description = isUpdate
+    ? t('Update the API key by providing necessary info.')
+    : t('Add a new API key by providing necessary info.')
+  if (isBatch) {
+    title = t('Edit {{count}} API key(s)', { count: batchIds.length })
+    description = t(
+      'Only selected fields will be updated. Other settings stay unchanged.'
+    )
+  }
+
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet
+      open={open}
+      onOpenChange={(nextOpen) => !isSubmitting && onOpenChange(nextOpen)}
+    >
       <SheetContent
         className={sideDrawerContentClassName('max-w-none sm:!max-w-[620px]')}
       >
         <SheetHeader className={sideDrawerHeaderClassName()}>
-          <SheetTitle>
-            {isUpdate ? t('Update API Key') : t('Create API Key')}
-          </SheetTitle>
-          <SheetDescription>
-            {isUpdate
-              ? t('Update the API key by providing necessary info.')
-              : t('Add a new API key by providing necessary info.')}
-          </SheetDescription>
+          <SheetTitle>{title}</SheetTitle>
+          <SheetDescription>{description}</SheetDescription>
         </SheetHeader>
         <Form {...form}>
           <form
@@ -638,802 +687,957 @@ export function ApiKeysMutateDrawer({
             inert={!isFormInitialized || isSubmitting ? true : undefined}
             className={sideDrawerFormClassName('gap-5')}
           >
-            <SideDrawerSection>
-              <SideDrawerSectionHeader
-                title={t('Basic Information')}
-                description={t('Set API key basic information')}
-                icon={<KeyRound className='size-4' />}
-                iconTone='info'
-              />
-              <FormField
-                control={form.control}
-                name='name'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Name')}</FormLabel>
-                    <FormControl>
-                      <Input {...field} placeholder={t('Enter a name')} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              {smartRoutingTemplates.length > 0 && (
-                <div className='space-y-2'>
-                  <FormLabel>{t('Smart Routing')}</FormLabel>
-                  <Select
-                    value={
-                      selectedSmartRoutingTemplateIsApplied
-                        ? (selectedSmartRoutingTemplateId ?? undefined)
-                        : undefined
-                    }
-                    onValueChange={(templateId) => {
-                      if (!templateId) return
-                      const template = smartRoutingTemplates.find(
-                        (candidate) => candidate.id === templateId
-                      )
-                      if (!template) return
-
-                      setSelectedSmartRoutingTemplateId(template.id)
-                      setAutoSortGroupRoutes(false)
-                      manualRoutePrioritiesRef.current.clear()
-                      enabledRouteCooldownsRef.current.clear()
-                      routeFields.replace(
-                        template.group_routes.map((route) => ({
-                          ...route,
-                          enabled: route.enabled !== false,
-                        }))
-                      )
-                      form.setValue('group_route_enabled', true, {
-                        shouldDirty: true,
-                        shouldValidate: true,
-                      })
-                      form.setValue(
-                        'group_route_sticky',
-                        template.group_route_sticky,
-                        { shouldDirty: true, shouldValidate: true }
-                      )
-                    }}
-                  >
-                    <SelectTrigger aria-label={t('Smart Routing')}>
-                      <Sparkles className='text-muted-foreground size-4' />
-                      <SelectValue>
-                        {selectedSmartRoutingTemplateIsApplied
-                          ? selectedSmartRoutingTemplate.name
-                          : t('Smart Routing')}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent alignItemWithTrigger={false}>
-                      <SelectGroup>
-                        {smartRoutingTemplates.map((template) => (
-                          <SelectItem key={template.id} value={template.id}>
-                            {template.name}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  {selectedSmartRoutingTemplateIsApplied &&
-                    selectedSmartRoutingTemplate.description && (
-                      <p className='text-muted-foreground text-xs'>
-                        {selectedSmartRoutingTemplate.description}
-                      </p>
-                    )}
-                </div>
-              )}
-
-              <FormField
-                control={form.control}
-                name='group_route_enabled'
-                render={({ field }) => (
-                  <FormItem className='gap-2'>
-                    <FormLabel>{t('Routing mode')}</FormLabel>
-                    <FormControl>
-                      <div
-                        role='radiogroup'
-                        aria-label={t('Routing mode')}
-                        className='grid grid-cols-2 gap-2'
-                      >
-                        <button
-                          type='button'
-                          role='radio'
-                          aria-checked={!field.value}
-                          onClick={() => field.onChange(false)}
-                          className={cn(
-                            'border-border hover:bg-muted/40 focus-visible:ring-ring flex h-16 min-w-0 items-center gap-3 rounded-md border px-3 text-left outline-none transition-colors focus-visible:ring-2',
-                            !field.value &&
-                              'border-primary bg-primary/5 hover:bg-primary/5'
-                          )}
-                        >
-                          <span
-                            className={cn(
-                              'bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md',
-                              !field.value && 'bg-primary/10 text-primary'
-                            )}
-                          >
-                            <Layers3 className='size-4' />
-                          </span>
-                          <span className='min-w-0 truncate text-sm font-medium'>
-                            {t('Single group')}
-                          </span>
-                        </button>
-                        <button
-                          type='button'
-                          role='radio'
-                          aria-checked={!!field.value}
-                          onClick={() => {
-                            field.onChange(true)
-                            if (routeFields.fields.length === 0) {
-                              routeFields.append({
-                                group: '',
-                                priority: 1,
-                                cooldown_seconds: 60,
-                                enabled: true,
-                              })
-                            }
-                          }}
-                          className={cn(
-                            'border-border hover:bg-muted/40 focus-visible:ring-ring flex h-16 min-w-0 items-center gap-3 rounded-md border px-3 text-left outline-none transition-colors focus-visible:ring-2',
-                            field.value &&
-                              'border-primary bg-primary/5 hover:bg-primary/5'
-                          )}
-                        >
-                          <span
-                            className={cn(
-                              'bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md',
-                              field.value && 'bg-primary/10 text-primary'
-                            )}
-                          >
-                            <Network className='size-4' />
-                          </span>
-                          <span className='min-w-0 truncate text-sm font-medium'>
-                            {t('Group routing')}
-                          </span>
-                        </button>
-                      </div>
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-
-              {groupRouteEnabled ? (
-                <div className='flex flex-col gap-3'>
-                  <SideDrawerSectionHeader
-                    title={t('Group routing rules')}
-                    description={t('Higher priority groups are tried first')}
-                    icon={<Network className='size-4' />}
-                  />
-                  <FormField
-                    control={form.control}
-                    name='group_route_sticky'
-                    render={({ field }) => (
-                      <FormItem className={sideDrawerSwitchItemClassName()}>
-                        <div className='flex flex-col gap-0.5'>
-                          <FormLabel className='text-sm'>
-                            {t('Group affinity')}
-                          </FormLabel>
-                          <FormDescription className='text-xs'>
-                            {t(
-                              'After a fallback route succeeds, keep using that successful group until it fails.'
-                            )}
-                          </FormDescription>
-                        </div>
-                        <FormControl>
-                          <Switch
-                            checked={!!field.value}
-                            onCheckedChange={field.onChange}
-                          />
-                        </FormControl>
-                      </FormItem>
-                    )}
-                  />
-                  <div className={sideDrawerSwitchItemClassName()}>
-                    <div className='flex flex-col gap-0.5'>
-                      <Label
-                        htmlFor='api-key-auto-sort-group-routes'
-                        className='text-sm'
-                      >
-                        {t('Automatic priority sorting')}
-                      </Label>
-                      <p className='text-muted-foreground text-xs'>
-                        {t(
-                          'Assign priorities from highest to lowest based on the group list order. Turning it off restores the previous manual priorities.'
-                        )}
-                      </p>
-                    </div>
-                    <Switch
-                      id='api-key-auto-sort-group-routes'
-                      checked={autoSortGroupRoutes}
-                      onCheckedChange={handleAutoSortGroupRoutes}
-                    />
-                  </div>
-                  <div className='flex flex-col gap-3'>
-                    {routeFields.fields.map((routeField, index) => (
-                      <div
-                        key={routeField.id}
-                        className='border-border/70 grid min-w-0 gap-3 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_5rem] sm:items-start'
-                      >
-                        <FormField
-                          control={form.control}
-                          name={`group_routes.${index}.group`}
-                          render={({ field }) => (
-                            <FormItem className='min-w-0 sm:col-span-2'>
-                              <FormLabel className='min-h-5'>
-                                {t('Group')}
-                              </FormLabel>
-                              <FormControl>
-                                <ApiKeyGroupCombobox
-                                  options={routableGroups}
-                                  value={field.value}
-                                  onValueChange={field.onChange}
-                                  placeholder={t('Select a group')}
-                                  compact
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-
-                        <FormField
-                          control={form.control}
-                          name={`group_routes.${index}.enabled`}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel className='min-h-5'>
-                                {t('Status')}
-                              </FormLabel>
-                              <FormControl>
-                                <Switch
-                                  checked={field.value !== false}
-                                  onCheckedChange={field.onChange}
-                                  className='my-[4px]'
-                                  aria-label={t('Enabled')}
-                                />
-                              </FormControl>
-                            </FormItem>
-                          )}
-                        />
-
-                        <FormField
-                          control={form.control}
-                          name={`group_routes.${index}.priority`}
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel className='min-h-5'>
-                                {t('Priority')}
-                              </FormLabel>
-                              <FormControl>
-                                <Input
-                                  {...field}
-                                  type='number'
-                                  min='0'
-                                  step='1'
-                                  disabled={autoSortGroupRoutes}
-                                  onChange={(e) =>
-                                    field.onChange(
-                                      Number.parseInt(e.target.value, 10) || 0
-                                    )
-                                  }
-                                />
-                              </FormControl>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-
-                        <FormField
-                          control={form.control}
-                          name={`group_routes.${index}.cooldown_seconds`}
-                          render={({ field }) => (
-                            <FormItem>
-                              <div className='flex min-h-5 items-center justify-between gap-2'>
-                                <FormLabel
-                                  className={cn(
-                                    cooldownUnavailable &&
-                                      'text-muted-foreground'
-                                  )}
-                                >
-                                  {t('Cooldown')}
-                                </FormLabel>
-                                <label className='text-muted-foreground flex cursor-pointer items-center gap-1.5 text-xs'>
-                                  <span>{t('Disable cooldown')}</span>
-                                  <Switch
-                                    size='sm'
-                                    checked={field.value === 0}
-                                    disabled={cooldownUnavailable}
-                                    onCheckedChange={(checked) => {
-                                      if (checked) {
-                                        const currentValue = field.value ?? 60
-                                        if (currentValue > 0) {
-                                          enabledRouteCooldownsRef.current.set(
-                                            routeField.id,
-                                            currentValue
-                                          )
-                                        }
-                                        field.onChange(0)
-                                        return
-                                      }
-                                      field.onChange(
-                                        enabledRouteCooldownsRef.current.get(
-                                          routeField.id
-                                        ) ?? 60
-                                      )
-                                    }}
-                                  />
-                                </label>
-                              </div>
-                              <TooltipProvider delay={100}>
-                                <Tooltip>
-                                  <TooltipTrigger
-                                    render={<div className='w-full' />}
-                                  >
-                                    <FormControl>
-                                      <Input
-                                        {...field}
-                                        type='number'
-                                        min='0'
-                                        max='31536000'
-                                        step='1'
-                                        disabled={
-                                          cooldownUnavailable ||
-                                          field.value === 0
-                                        }
-                                        onChange={(event) => {
-                                          const value = Number.parseInt(
-                                            event.target.value,
-                                            10
-                                          )
-                                          const nextValue = Number.isNaN(value)
-                                            ? 1
-                                            : value
-                                          field.onChange(nextValue)
-                                          if (nextValue > 0) {
-                                            enabledRouteCooldownsRef.current.set(
-                                              routeField.id,
-                                              nextValue
-                                            )
-                                          }
-                                        }}
-                                      />
-                                    </FormControl>
-                                  </TooltipTrigger>
-                                  {cooldownUnavailable ? (
-                                    <TooltipContent
-                                      side='top'
-                                      className='max-w-xs'
-                                    >
-                                      {t(
-                                        'Add and enable at least two group routing rules to configure cooldown.'
-                                      )}
-                                    </TooltipContent>
-                                  ) : null}
-                                </Tooltip>
-                              </TooltipProvider>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-
-                        <div className='grid justify-items-start gap-2 sm:col-start-3 sm:row-start-2'>
-                          <span
-                            aria-hidden='true'
-                            className='hidden min-h-5 sm:block'
-                          />
-                          <Button
-                            type='button'
-                            variant='outline'
-                            size='icon'
-                            onClick={() => routeFields.remove(index)}
-                            aria-label={t('Remove group routing rule')}
-                          >
-                            <Trash2 className='size-4' />
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-
-                    <Button
-                      type='button'
-                      variant='outline'
-                      className='w-full justify-center gap-2'
-                      onClick={() =>
-                        routeFields.append({
-                          group: '',
-                          priority: nextManualRoutePriority(),
-                          cooldown_seconds: 60,
-                          enabled: true,
-                        })
-                      }
+            {isBatch && (
+              <SideDrawerSection>
+                <SideDrawerSectionHeader title={t('Fields to update')} />
+                <div className='grid gap-3 sm:grid-cols-2'>
+                  {(
+                    [
+                      ['name', t('Name')],
+                      ['status', t('Status')],
+                      ['routing', t('Group Routing')],
+                      ['expiration', t('Expiration Time')],
+                      ['quota', t('Quota Settings')],
+                      ['models', t('Model Limits')],
+                      ['ips', t('IP Whitelist (supports CIDR)')],
+                      ['quota_query', t('Allow querying user quota')],
+                    ] satisfies [ApiKeyBatchField, string][]
+                  ).map(([field, label]) => (
+                    <Label
+                      key={field}
+                      className='flex min-w-0 items-center gap-2'
                     >
-                      <Plus className='size-4' />
-                      {t('Add group routing rule')}
-                    </Button>
-                    {groupRoutesMessage && (
-                      <p className='text-destructive text-sm'>
-                        {t(groupRoutesMessage)}
-                      </p>
-                    )}
-                  </div>
+                      <Checkbox
+                        checked={batchFields.includes(field)}
+                        onCheckedChange={(checked) => {
+                          setBatchFields((previous) =>
+                            checked
+                              ? [...previous, field]
+                              : previous.filter((value) => value !== field)
+                          )
+                          form.clearErrors()
+                        }}
+                      />
+                      <span className='break-words'>{label}</span>
+                    </Label>
+                  ))}
                 </div>
-              ) : (
-                <>
+              </SideDrawerSection>
+            )}
+            {showBasic && (
+              <SideDrawerSection>
+                <SideDrawerSectionHeader
+                  title={t('Basic Information')}
+                  description={t('Set API key basic information')}
+                  icon={<KeyRound className='size-4' />}
+                  iconTone='info'
+                />
+                {isBatch && batchFields.includes('status') && (
+                  <div className='space-y-2'>
+                    <Label htmlFor='batch-key-status'>{t('Status')}</Label>
+                    <Select
+                      value={String(batchStatus)}
+                      onValueChange={(value) => setBatchStatus(Number(value))}
+                    >
+                      <SelectTrigger id='batch-key-status'>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value='1'>{t('Enabled')}</SelectItem>
+                        <SelectItem value='2'>{t('Disabled')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {(!isBatch || batchFields.includes('name')) && (
                   <FormField
                     control={form.control}
-                    name='group'
+                    name='name'
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>{t('Group')}</FormLabel>
+                        <FormLabel>{t('Name')}</FormLabel>
                         <FormControl>
-                          <ApiKeyGroupCombobox
-                            options={groups}
-                            value={field.value}
-                            onValueChange={(group) => {
-                              field.onChange(group)
-                              form.setValue(
-                                'cross_group_retry',
-                                group === 'auto',
-                                { shouldDirty: true }
-                              )
-                            }}
-                            placeholder={t('Select a group')}
-                          />
+                          <Input {...field} placeholder={t('Enter a name')} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
+                )}
 
-                  {selectedGroup === 'auto' && (
-                    <FormField
-                      control={form.control}
-                      name='auto_groups'
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('Auto group order')}</FormLabel>
-                          <FormDescription>
-                            {t(
-                              'Choose and order the groups this API key will try.'
-                            )}
-                          </FormDescription>
-                          <FormControl>
-                            <AutoGroupOrderEditor
-                              value={field.value}
-                              mode={autoGroupsMode}
-                              options={groups}
-                              globalOptions={globalAutoGroupOptions}
-                              maxCount={maxAutoGroups}
-                              onChange={(value) => {
-                                form.setValue('auto_groups_mode', value.mode, {
-                                  shouldDirty: true,
-                                  shouldValidate: false,
-                                })
-                                form.setValue(
-                                  'auto_groups',
-                                  value.groups.slice(0, maxAutoGroups),
-                                  {
-                                    shouldDirty: true,
-                                    shouldValidate: true,
-                                  }
-                                )
-                              }}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  )}
+                {(!isBatch || batchFields.includes('routing')) && (
+                  <>
+                    {(smartRoutingTemplates.length > 0 ||
+                      selectedSmartRoutingTemplateId) && (
+                      <div className='space-y-2'>
+                        <FormLabel>{t('Smart Routing')}</FormLabel>
+                        <Select
+                          value={
+                            selectedSmartRoutingTemplateIsApplied
+                              ? (selectedSmartRoutingTemplateId ?? undefined)
+                              : undefined
+                          }
+                          onValueChange={(templateId) => {
+                            if (templateId === '__custom__') {
+                              form.setValue('routing_template_id', '', {
+                                shouldDirty: true,
+                              })
+                              return
+                            }
+                            if (!templateId) return
+                            const template = smartRoutingTemplates.find(
+                              (candidate) => candidate.id === templateId
+                            )
+                            if (!template) return
 
-                  {selectedGroup === 'auto' && (
-                    <FormField
-                      control={form.control}
-                      name='cross_group_retry'
-                      render={({ field }) => (
-                        <FormItem className={sideDrawerSwitchItemClassName()}>
-                          <div className='flex flex-col gap-0.5'>
-                            <FormLabel className='text-sm'>
-                              {t('Cross-group retry')}
-                            </FormLabel>
-                            <FormDescription className='line-clamp-2 text-xs sm:line-clamp-none'>
-                              {t(
-                                'When enabled, if channels in the current group fail, it will try channels in the next group in order.'
-                              )}
-                              <RelatedPolicyLink section='routing' />
-                            </FormDescription>
-                          </div>
-                          <FormControl>
-                            <Switch
-                              checked={!!field.value}
-                              onCheckedChange={field.onChange}
-                            />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
-                  )}
-                </>
-              )}
-
-              <FormField
-                control={form.control}
-                name='expired_time'
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>{t('Expiration Time')}</FormLabel>
-                    <div className='grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center'>
-                      <FormControl>
-                        <DateTimePicker
-                          value={field.value ?? undefined}
-                          onChange={(date) => field.onChange(date ?? null)}
-                          placeholder={t('Never expires')}
-                          className='min-w-0 [&_input[type=time]]:w-24 sm:[&_input[type=time]]:w-32'
-                        />
-                      </FormControl>
-                      <div className='grid grid-cols-4 gap-2 sm:flex'>
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='sm'
-                          className='px-2 text-xs sm:px-3 sm:text-sm'
-                          onClick={() => handleSetExpiry(0, 0, 0)}
+                            form.setValue('routing_template_id', template.id)
+                            form.setValue(
+                              'model_limits',
+                              template.model_limits || []
+                            )
+                            setAutoSortGroupRoutes(false)
+                            manualRoutePrioritiesRef.current.clear()
+                            enabledRouteCooldownsRef.current.clear()
+                            routeFields.replace(
+                              template.group_routes.map((route) => ({
+                                ...route,
+                                enabled: route.enabled !== false,
+                              }))
+                            )
+                            form.setValue('group_route_enabled', true, {
+                              shouldDirty: true,
+                              shouldValidate: true,
+                            })
+                            form.setValue(
+                              'group_route_sticky',
+                              template.group_route_sticky,
+                              { shouldDirty: true, shouldValidate: true }
+                            )
+                          }}
                         >
-                          {t('Never')}
-                        </Button>
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='sm'
-                          className='px-2 text-xs sm:px-3 sm:text-sm'
-                          onClick={() => handleSetExpiry(1, 0, 0)}
-                        >
-                          {t('1 Month')}
-                        </Button>
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='sm'
-                          className='px-2 text-xs sm:px-3 sm:text-sm'
-                          onClick={() => handleSetExpiry(0, 1, 0)}
-                        >
-                          {t('1 Day')}
-                        </Button>
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='sm'
-                          className='px-2 text-xs sm:px-3 sm:text-sm'
-                          onClick={() => handleSetExpiry(0, 0, 1)}
-                        >
-                          {t('1 Hour')}
-                        </Button>
+                          <SelectTrigger aria-label={t('Smart Routing')}>
+                            <Sparkles className='text-muted-foreground size-4' />
+                            <SelectValue>
+                              {selectedSmartRoutingTemplateIsApplied
+                                ? selectedSmartRoutingTemplate?.name ||
+                                  selectedSmartRoutingTemplateId
+                                : t('Smart Routing')}
+                            </SelectValue>
+                          </SelectTrigger>
+                          <SelectContent alignItemWithTrigger={false}>
+                            <SelectGroup>
+                              <SelectItem value='__custom__'>
+                                {t('Custom routing')}
+                              </SelectItem>
+                              {smartRoutingTemplates.map((template) => (
+                                <SelectItem
+                                  key={template.id}
+                                  value={template.id}
+                                >
+                                  {template.name}
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                        {selectedSmartRoutingTemplateIsApplied &&
+                          selectedSmartRoutingTemplate?.description && (
+                            <p className='text-muted-foreground text-xs'>
+                              {selectedSmartRoutingTemplate.description}
+                            </p>
+                          )}
                       </div>
-                    </div>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                    )}
 
-              {!isUpdate && (
-                <FormField
-                  control={form.control}
-                  name='tokenCount'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{t('Quantity')}</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type='number'
-                          min='1'
-                          placeholder={t('Number of keys to create')}
-                          onChange={(e) =>
-                            field.onChange(
-                              Number.parseInt(e.target.value, 10) || 1
-                            )
-                          }
-                        />
-                      </FormControl>
-                      <FormDescription>
+                    {selectedSmartRoutingTemplateId && (
+                      <p
+                        className='text-muted-foreground text-xs'
+                        role='status'
+                      >
                         {t(
-                          'Create multiple API keys at once (random suffix will be added to names)'
+                          'Template changes automatically apply to linked keys. Select custom routing to detach.'
                         )}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-            </SideDrawerSection>
-
-            <SideDrawerSection>
-              <SideDrawerSectionHeader
-                title={t('Quota Settings')}
-                description={t('Set quota amount and limits')}
-                icon={<WalletCards className='size-4' />}
-                iconTone='success'
-              />
-              {!unlimitedQuota && (
-                <FormField
-                  control={form.control}
-                  name='remain_quota_dollars'
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>{quotaLabel}</FormLabel>
-                      <FormControl>
-                        <Input
-                          {...field}
-                          type='number'
-                          step={tokensOnly ? 1 : 0.01}
-                          placeholder={quotaPlaceholder}
-                          onChange={(e) =>
-                            field.onChange(
-                              Number.parseFloat(e.target.value) || 0
-                            )
-                          }
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        {tokensOnly
-                          ? t('Enter the quota amount in tokens')
-                          : t('Enter the quota amount in {{currency}}', {
-                              currency: currencyLabel,
-                            })}
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-
-              <FormField
-                control={form.control}
-                name='unlimited_quota'
-                render={({ field }) => (
-                  <FormItem className={sideDrawerSwitchItemClassName()}>
-                    <div className='flex flex-col gap-0.5'>
-                      <FormLabel className='text-sm'>
-                        {t('Unlimited Quota')}
-                      </FormLabel>
-                      <FormDescription className='text-xs'>
-                        {t('Enable unlimited quota for this API key')}
-                      </FormDescription>
-                    </div>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
+                        {isUpdate &&
+                          apiKeyData?.data?.routing_template_available ===
+                            false &&
+                          t('Routing template is unavailable')}
+                      </p>
+                    )}
+                    <fieldset
+                      disabled={!!selectedSmartRoutingTemplateId}
+                      className='contents'
+                    >
+                      <FormField
+                        control={form.control}
+                        name='group_route_enabled'
+                        render={({ field }) => (
+                          <FormItem className='gap-2'>
+                            <FormLabel>{t('Routing mode')}</FormLabel>
+                            <FormControl>
+                              <div
+                                role='radiogroup'
+                                aria-label={t('Routing mode')}
+                                className='grid grid-cols-2 gap-2'
+                              >
+                                <button
+                                  type='button'
+                                  role='radio'
+                                  aria-checked={!field.value}
+                                  onClick={() => field.onChange(false)}
+                                  className={cn(
+                                    'border-border hover:bg-muted/40 focus-visible:ring-ring flex h-16 min-w-0 items-center gap-3 rounded-md border px-3 text-left outline-none transition-colors focus-visible:ring-2',
+                                    !field.value &&
+                                      'border-primary bg-primary/5 hover:bg-primary/5'
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      'bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md',
+                                      !field.value &&
+                                        'bg-primary/10 text-primary'
+                                    )}
+                                  >
+                                    <Layers3 className='size-4' />
+                                  </span>
+                                  <span className='min-w-0 truncate text-sm font-medium'>
+                                    {t('Single group')}
+                                  </span>
+                                </button>
+                                <button
+                                  type='button'
+                                  role='radio'
+                                  aria-checked={!!field.value}
+                                  onClick={() => {
+                                    field.onChange(true)
+                                    if (routeFields.fields.length === 0) {
+                                      routeFields.append({
+                                        group: '',
+                                        priority: 1,
+                                        cooldown_seconds: 60,
+                                        enabled: true,
+                                      })
+                                    }
+                                  }}
+                                  className={cn(
+                                    'border-border hover:bg-muted/40 focus-visible:ring-ring flex h-16 min-w-0 items-center gap-3 rounded-md border px-3 text-left outline-none transition-colors focus-visible:ring-2',
+                                    field.value &&
+                                      'border-primary bg-primary/5 hover:bg-primary/5'
+                                  )}
+                                >
+                                  <span
+                                    className={cn(
+                                      'bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md',
+                                      field.value &&
+                                        'bg-primary/10 text-primary'
+                                    )}
+                                  >
+                                    <Network className='size-4' />
+                                  </span>
+                                  <span className='min-w-0 truncate text-sm font-medium'>
+                                    {t('Group routing')}
+                                  </span>
+                                </button>
+                              </div>
+                            </FormControl>
+                          </FormItem>
+                        )}
                       />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-            </SideDrawerSection>
 
-            <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-              <SideDrawerSection>
-                <CollapsibleTrigger
-                  render={
-                    <button
-                      type='button'
-                      className='hover:bg-muted/40 flex w-full items-center gap-3 rounded-md py-1.5 text-left transition-colors'
-                    />
-                  }
-                >
-                  <SideDrawerSectionHeader
-                    className='flex-1'
-                    title={t('Advanced Settings')}
-                    description={t('Set API key access restrictions')}
-                    icon={<Settings2 className='size-4' />}
-                  />
-                  <HugeiconsIcon
-                    icon={ArrowDown01Icon}
-                    strokeWidth={2}
-                    aria-hidden='true'
-                    className={cn(
-                      'text-muted-foreground size-4 shrink-0 transition-transform duration-200',
-                      advancedOpen && 'rotate-180'
+                      {groupRouteEnabled ? (
+                        <div className='flex flex-col gap-3'>
+                          <SideDrawerSectionHeader
+                            title={t('Group routing rules')}
+                            description={t(
+                              'Higher priority groups are tried first'
+                            )}
+                            icon={<Network className='size-4' />}
+                          />
+                          <FormField
+                            control={form.control}
+                            name='group_route_sticky'
+                            render={({ field }) => (
+                              <FormItem
+                                className={sideDrawerSwitchItemClassName()}
+                              >
+                                <div className='flex flex-col gap-0.5'>
+                                  <FormLabel className='text-sm'>
+                                    {t('Group affinity')}
+                                  </FormLabel>
+                                  <FormDescription className='text-xs'>
+                                    {t(
+                                      'After a fallback route succeeds, keep using that successful group until it fails.'
+                                    )}
+                                  </FormDescription>
+                                </div>
+                                <FormControl>
+                                  <Switch
+                                    disabled={!!selectedSmartRoutingTemplateId}
+                                    checked={!!field.value}
+                                    onCheckedChange={field.onChange}
+                                  />
+                                </FormControl>
+                              </FormItem>
+                            )}
+                          />
+                          <div className={sideDrawerSwitchItemClassName()}>
+                            <div className='flex flex-col gap-0.5'>
+                              <Label
+                                htmlFor='api-key-auto-sort-group-routes'
+                                className='text-sm'
+                              >
+                                {t('Automatic priority sorting')}
+                              </Label>
+                              <p className='text-muted-foreground text-xs'>
+                                {t(
+                                  'Assign priorities from highest to lowest based on the group list order. Turning it off restores the previous manual priorities.'
+                                )}
+                              </p>
+                            </div>
+                            <Switch
+                              disabled={!!selectedSmartRoutingTemplateId}
+                              id='api-key-auto-sort-group-routes'
+                              checked={autoSortGroupRoutes}
+                              onCheckedChange={handleAutoSortGroupRoutes}
+                            />
+                          </div>
+                          <div className='flex flex-col gap-3'>
+                            {routeFields.fields.map((routeField, index) => (
+                              <div
+                                key={routeField.id}
+                                className='border-border/70 grid min-w-0 gap-3 rounded-md border p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_5rem] sm:items-start'
+                              >
+                                <FormField
+                                  control={form.control}
+                                  name={`group_routes.${index}.group`}
+                                  render={({ field }) => (
+                                    <FormItem className='min-w-0 sm:col-span-2'>
+                                      <FormLabel className='min-h-5'>
+                                        {t('Group')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <ApiKeyGroupCombobox
+                                          options={routableGroups}
+                                          value={field.value}
+                                          onValueChange={field.onChange}
+                                          placeholder={t('Select a group')}
+                                          compact
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={`group_routes.${index}.enabled`}
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel className='min-h-5'>
+                                        {t('Status')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Switch
+                                          disabled={
+                                            !!selectedSmartRoutingTemplateId
+                                          }
+                                          checked={field.value !== false}
+                                          onCheckedChange={field.onChange}
+                                          className='my-[4px]'
+                                          aria-label={t('Enabled')}
+                                        />
+                                      </FormControl>
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={`group_routes.${index}.priority`}
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel className='min-h-5'>
+                                        {t('Priority')}
+                                      </FormLabel>
+                                      <FormControl>
+                                        <Input
+                                          {...field}
+                                          type='number'
+                                          min='0'
+                                          step='1'
+                                          disabled={autoSortGroupRoutes}
+                                          onChange={(e) =>
+                                            field.onChange(
+                                              Number.parseInt(
+                                                e.target.value,
+                                                10
+                                              ) || 0
+                                            )
+                                          }
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <FormField
+                                  control={form.control}
+                                  name={`group_routes.${index}.cooldown_seconds`}
+                                  render={({ field }) => (
+                                    <FormItem>
+                                      <div className='flex min-h-5 items-center justify-between gap-2'>
+                                        <FormLabel
+                                          className={cn(
+                                            cooldownUnavailable &&
+                                              'text-muted-foreground'
+                                          )}
+                                        >
+                                          {t('Cooldown')}
+                                        </FormLabel>
+                                        <label className='text-muted-foreground flex cursor-pointer items-center gap-1.5 text-xs'>
+                                          <span>{t('Disable cooldown')}</span>
+                                          <Switch
+                                            size='sm'
+                                            checked={field.value === 0}
+                                            disabled={
+                                              !!selectedSmartRoutingTemplateId ||
+                                              cooldownUnavailable
+                                            }
+                                            onCheckedChange={(checked) => {
+                                              if (checked) {
+                                                const currentValue =
+                                                  field.value ?? 60
+                                                if (currentValue > 0) {
+                                                  enabledRouteCooldownsRef.current.set(
+                                                    routeField.id,
+                                                    currentValue
+                                                  )
+                                                }
+                                                field.onChange(0)
+                                                return
+                                              }
+                                              field.onChange(
+                                                enabledRouteCooldownsRef.current.get(
+                                                  routeField.id
+                                                ) ?? 60
+                                              )
+                                            }}
+                                          />
+                                        </label>
+                                      </div>
+                                      <TooltipProvider delay={100}>
+                                        <Tooltip>
+                                          <TooltipTrigger
+                                            render={<div className='w-full' />}
+                                          >
+                                            <FormControl>
+                                              <Input
+                                                {...field}
+                                                type='number'
+                                                min='0'
+                                                max='31536000'
+                                                step='1'
+                                                disabled={
+                                                  cooldownUnavailable ||
+                                                  field.value === 0
+                                                }
+                                                onChange={(event) => {
+                                                  const value = Number.parseInt(
+                                                    event.target.value,
+                                                    10
+                                                  )
+                                                  const nextValue =
+                                                    Number.isNaN(value)
+                                                      ? 1
+                                                      : value
+                                                  field.onChange(nextValue)
+                                                  if (nextValue > 0) {
+                                                    enabledRouteCooldownsRef.current.set(
+                                                      routeField.id,
+                                                      nextValue
+                                                    )
+                                                  }
+                                                }}
+                                              />
+                                            </FormControl>
+                                          </TooltipTrigger>
+                                          {cooldownUnavailable ? (
+                                            <TooltipContent
+                                              side='top'
+                                              className='max-w-xs'
+                                            >
+                                              {t(
+                                                'Add and enable at least two group routing rules to configure cooldown.'
+                                              )}
+                                            </TooltipContent>
+                                          ) : null}
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}
+                                />
+
+                                <div className='grid justify-items-start gap-2 sm:col-start-3 sm:row-start-2'>
+                                  <span
+                                    aria-hidden='true'
+                                    className='hidden min-h-5 sm:block'
+                                  />
+                                  <Button
+                                    type='button'
+                                    variant='outline'
+                                    size='icon'
+                                    onClick={() => routeFields.remove(index)}
+                                    aria-label={t('Remove group routing rule')}
+                                  >
+                                    <Trash2 className='size-4' />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+
+                            <Button
+                              type='button'
+                              variant='outline'
+                              className='w-full justify-center gap-2'
+                              onClick={() =>
+                                routeFields.append({
+                                  group: '',
+                                  priority: nextManualRoutePriority(),
+                                  cooldown_seconds: 60,
+                                  enabled: true,
+                                })
+                              }
+                            >
+                              <Plus className='size-4' />
+                              {t('Add group routing rule')}
+                            </Button>
+                            {groupRoutesMessage && (
+                              <p className='text-destructive text-sm'>
+                                {t(groupRoutesMessage)}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <FormField
+                            control={form.control}
+                            name='group'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Group')}</FormLabel>
+                                <FormControl>
+                                  <ApiKeyGroupCombobox
+                                    options={groups}
+                                    value={field.value}
+                                    onValueChange={(group) => {
+                                      field.onChange(group)
+                                      form.setValue(
+                                        'cross_group_retry',
+                                        group === 'auto',
+                                        { shouldDirty: true }
+                                      )
+                                    }}
+                                    placeholder={t('Select a group')}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          {selectedGroup === 'auto' && (
+                            <FormField
+                              control={form.control}
+                              name='auto_groups'
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>{t('Auto group order')}</FormLabel>
+                                  <FormDescription>
+                                    {t(
+                                      'Choose and order the groups this API key will try.'
+                                    )}
+                                  </FormDescription>
+                                  <FormControl>
+                                    <AutoGroupOrderEditor
+                                      value={field.value}
+                                      mode={autoGroupsMode}
+                                      options={groups}
+                                      globalOptions={globalAutoGroupOptions}
+                                      maxCount={maxAutoGroups}
+                                      onChange={(value) => {
+                                        form.setValue(
+                                          'auto_groups_mode',
+                                          value.mode,
+                                          {
+                                            shouldDirty: true,
+                                            shouldValidate: false,
+                                          }
+                                        )
+                                        form.setValue(
+                                          'auto_groups',
+                                          value.groups.slice(0, maxAutoGroups),
+                                          {
+                                            shouldDirty: true,
+                                            shouldValidate: true,
+                                          }
+                                        )
+                                      }}
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          )}
+
+                          {selectedGroup === 'auto' && (
+                            <FormField
+                              control={form.control}
+                              name='cross_group_retry'
+                              render={({ field }) => (
+                                <FormItem
+                                  className={sideDrawerSwitchItemClassName()}
+                                >
+                                  <div className='flex flex-col gap-0.5'>
+                                    <FormLabel className='text-sm'>
+                                      {t('Cross-group retry')}
+                                    </FormLabel>
+                                    <FormDescription className='line-clamp-2 text-xs sm:line-clamp-none'>
+                                      {t(
+                                        'When enabled, if channels in the current group fail, it will try channels in the next group in order.'
+                                      )}
+                                      <RelatedPolicyLink section='routing' />
+                                    </FormDescription>
+                                  </div>
+                                  <FormControl>
+                                    <Switch
+                                      disabled={
+                                        !!selectedSmartRoutingTemplateId
+                                      }
+                                      checked={!!field.value}
+                                      onCheckedChange={field.onChange}
+                                    />
+                                  </FormControl>
+                                </FormItem>
+                              )}
+                            />
+                          )}
+                        </>
+                      )}
+                    </fieldset>
+                  </>
+                )}
+
+                {(!isBatch || batchFields.includes('expiration')) && (
+                  <FormField
+                    control={form.control}
+                    name='expired_time'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Expiration Time')}</FormLabel>
+                        <div className='grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center'>
+                          <FormControl>
+                            <DateTimePicker
+                              value={field.value ?? undefined}
+                              onChange={(date) => field.onChange(date ?? null)}
+                              placeholder={t('Never expires')}
+                              className='min-w-0 [&_input[type=time]]:w-24 sm:[&_input[type=time]]:w-32'
+                            />
+                          </FormControl>
+                          <div className='grid grid-cols-4 gap-2 sm:flex'>
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='sm'
+                              className='px-2 text-xs sm:px-3 sm:text-sm'
+                              onClick={() => handleSetExpiry(0, 0, 0)}
+                            >
+                              {t('Never')}
+                            </Button>
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='sm'
+                              className='px-2 text-xs sm:px-3 sm:text-sm'
+                              onClick={() => handleSetExpiry(1, 0, 0)}
+                            >
+                              {t('1 Month')}
+                            </Button>
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='sm'
+                              className='px-2 text-xs sm:px-3 sm:text-sm'
+                              onClick={() => handleSetExpiry(0, 1, 0)}
+                            >
+                              {t('1 Day')}
+                            </Button>
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='sm'
+                              className='px-2 text-xs sm:px-3 sm:text-sm'
+                              onClick={() => handleSetExpiry(0, 0, 1)}
+                            >
+                              {t('1 Hour')}
+                            </Button>
+                          </div>
+                        </div>
+                        <FormMessage />
+                      </FormItem>
                     )}
                   />
-                </CollapsibleTrigger>
-                <CollapsibleContent>
-                  <div className='flex flex-col gap-4 pt-2'>
-                    <FormField
-                      control={form.control}
-                      name='model_limits'
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>{t('Model Limits')}</FormLabel>
-                          <FormControl>
-                            <MultiSelect
-                              options={models.map((m) => ({
-                                label: m,
-                                value: m,
-                              }))}
-                              selected={field.value}
-                              onChange={field.onChange}
-                              placeholder={t(
-                                'Select models (empty for allow all)'
-                              )}
-                            />
-                          </FormControl>
-                          <FormDescription>
-                            {t('Limit which models can be used with this key')}
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
+                )}
 
-                    <FormField
-                      control={form.control}
-                      name='allow_ips'
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>
-                            {t('IP Whitelist (supports CIDR)')}
-                          </FormLabel>
-                          <FormControl>
-                            <Textarea
-                              {...field}
-                              className='min-h-20 resize-none'
-                              placeholder={t(
-                                'One IP per line (empty for no restriction)'
-                              )}
-                              rows={3}
-                            />
-                          </FormControl>
-                          <FormDescription>
-                            {t(
-                              'Do not over-trust this feature. IP may be spoofed. Please use with nginx, CDN and other gateways.'
-                            )}
-                          </FormDescription>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={form.control}
-                      name='allow_user_quota_query'
-                      render={({ field }) => (
-                        <FormItem className={sideDrawerSwitchItemClassName()}>
-                          <div className='flex flex-col gap-0.5'>
-                            <FormLabel className='text-sm'>
-                              {t('Allow querying user quota')}
-                            </FormLabel>
-                            <FormDescription className='text-xs'>
-                              {t(
-                                "When enabled, this API key can be used to check your account's remaining and used quota."
-                              )}
-                            </FormDescription>
-                          </div>
-                          <FormControl>
-                            <Switch
-                              checked={field.value}
-                              onCheckedChange={field.onChange}
-                            />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-                </CollapsibleContent>
+                {!isUpdate && !isBatch && (
+                  <FormField
+                    control={form.control}
+                    name='tokenCount'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('Quantity')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type='number'
+                            min='1'
+                            placeholder={t('Number of keys to create')}
+                            onChange={(e) =>
+                              field.onChange(
+                                Number.parseInt(e.target.value, 10) || 1
+                              )
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t(
+                            'Create multiple API keys at once (random suffix will be added to names)'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
               </SideDrawerSection>
-            </Collapsible>
+            )}
+            {(!isBatch || batchFields.includes('quota')) && (
+              <SideDrawerSection>
+                <SideDrawerSectionHeader
+                  title={t('Quota Settings')}
+                  description={t('Set quota amount and limits')}
+                  icon={<WalletCards className='size-4' />}
+                  iconTone='success'
+                />
+                {!unlimitedQuota && (
+                  <FormField
+                    control={form.control}
+                    name='remain_quota_dollars'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{quotaLabel}</FormLabel>
+                        <FormControl>
+                          <Input
+                            {...field}
+                            type='number'
+                            step={tokensOnly ? 1 : 0.01}
+                            placeholder={quotaPlaceholder}
+                            onChange={(e) =>
+                              field.onChange(
+                                Number.parseFloat(e.target.value) || 0
+                              )
+                            }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {tokensOnly
+                            ? t('Enter the quota amount in tokens')
+                            : t('Enter the quota amount in {{currency}}', {
+                                currency: currencyLabel,
+                              })}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
+
+                <FormField
+                  control={form.control}
+                  name='unlimited_quota'
+                  render={({ field }) => (
+                    <FormItem className={sideDrawerSwitchItemClassName()}>
+                      <div className='flex flex-col gap-0.5'>
+                        <FormLabel className='text-sm'>
+                          {t('Unlimited Quota')}
+                        </FormLabel>
+                        <FormDescription className='text-xs'>
+                          {t('Enable unlimited quota for this API key')}
+                        </FormDescription>
+                      </div>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </FormItem>
+                  )}
+                />
+              </SideDrawerSection>
+            )}
+            {showAdvanced && (
+              <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                <SideDrawerSection>
+                  <CollapsibleTrigger
+                    render={
+                      <button
+                        type='button'
+                        className='hover:bg-muted/40 flex w-full items-center gap-3 rounded-md py-1.5 text-left transition-colors'
+                      />
+                    }
+                  >
+                    <SideDrawerSectionHeader
+                      className='flex-1'
+                      title={t('Advanced Settings')}
+                      description={t('Set API key access restrictions')}
+                      icon={<Settings2 className='size-4' />}
+                    />
+                    <HugeiconsIcon
+                      icon={ArrowDown01Icon}
+                      strokeWidth={2}
+                      aria-hidden='true'
+                      className={cn(
+                        'text-muted-foreground size-4 shrink-0 transition-transform duration-200',
+                        advancedOpen && 'rotate-180'
+                      )}
+                    />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className='flex flex-col gap-4 pt-2'>
+                      {(!isBatch || batchFields.includes('models')) && (
+                        <FormField
+                          control={form.control}
+                          name='model_limits'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Model Limits')}</FormLabel>
+                              <FormControl>
+                                <MultiSelect
+                                  disabled={!!selectedSmartRoutingTemplateId}
+                                  options={models.map((m) => ({
+                                    label: m,
+                                    value: m,
+                                  }))}
+                                  selected={field.value}
+                                  onChange={field.onChange}
+                                  placeholder={t(
+                                    'Select models (empty for allow all)'
+                                  )}
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Limit which models can be used with this key'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
+
+                      {(!isBatch || batchFields.includes('ips')) && (
+                        <FormField
+                          control={form.control}
+                          name='allow_ips'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>
+                                {t('IP Whitelist (supports CIDR)')}
+                              </FormLabel>
+                              <FormControl>
+                                <Textarea
+                                  {...field}
+                                  className='min-h-20 resize-none'
+                                  placeholder={t(
+                                    'One IP per line (empty for no restriction)'
+                                  )}
+                                  rows={3}
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Do not over-trust this feature. IP may be spoofed. Please use with nginx, CDN and other gateways.'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      )}
+
+                      {(!isBatch || batchFields.includes('quota_query')) && (
+                        <FormField
+                          control={form.control}
+                          name='allow_user_quota_query'
+                          render={({ field }) => (
+                            <FormItem
+                              className={sideDrawerSwitchItemClassName()}
+                            >
+                              <div className='flex flex-col gap-0.5'>
+                                <FormLabel className='text-sm'>
+                                  {t('Allow querying user quota')}
+                                </FormLabel>
+                                <FormDescription className='text-xs'>
+                                  {t(
+                                    "When enabled, this API key can be used to check your account's remaining and used quota."
+                                  )}
+                                </FormDescription>
+                              </div>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      )}
+                    </div>
+                  </CollapsibleContent>
+                </SideDrawerSection>
+              </Collapsible>
+            )}
           </form>
         </Form>
         <SheetFooter className={sideDrawerFooterClassName()}>
           <SheetClose
-            render={<Button variant='outline' className='w-full sm:w-auto' />}
+            render={
+              <Button
+                variant='outline'
+                className='w-full sm:w-auto'
+                disabled={isSubmitting}
+              />
+            }
           >
             {t('Close')}
           </SheetClose>
           <Button
             type='button'
             onClick={form.handleSubmit(onSubmit, onInvalid)}
-            disabled={!isFormInitialized || isSubmitting}
+            disabled={
+              !isFormInitialized ||
+              isSubmitting ||
+              (isBatch &&
+                (batchFields.length === 0 ||
+                  batchIds.length === 0 ||
+                  batchIds.length > 100))
+            }
             className='w-full sm:w-auto'
           >
             {isSubmitting ? t('Saving...') : t('Save changes')}

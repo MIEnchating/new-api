@@ -1362,7 +1362,7 @@ test('quick options show only applicable shortcuts when the provider changes', a
   await user.click(screen.getByRole('button', { name: 'Change provider' }))
   await user.click(screen.getByRole('option', { name: /Video A/ }))
   quick = within(screen.getByRole('group', { name: 'Quick options' }))
-  expect(quick.getAllByRole('switch')).toHaveLength(2)
+  expect(quick.getAllByRole('switch')).toHaveLength(1)
   expect(
     quick.getByRole('switch', { name: 'Auto-disable channel' })
   ).toBeChecked()
@@ -1736,7 +1736,7 @@ test.each([undefined, false, true])(
       ollama_openai_chat: !savedValue,
       disable_task_polling_sleep: true,
     })
-    expect(settings).not.toHaveProperty('claude_code_client_spoofing')
+    expect(settings.claude_code_client_spoofing).toBe(true)
   }
 )
 test('a saved upstream TLS verification skip marks Other Settings and turning it off saves the setting without it', async () => {
@@ -2050,15 +2050,15 @@ test('model configuration keeps unchecked candidates searchable and supports cat
   expect(trigger).toBeDisabled()
 })
 
-test('model configuration is available for a plugin channel with upstream discovery and is disabled when its model list is empty', async () => {
+test('model configuration is available for a plugin channel without upstream discovery and is disabled when its model list is empty', async () => {
   const user = userEvent.setup()
   render(<ConfigurationHarness />)
   await user.click(await screen.findByRole('option', { name: /Video A/ }))
   const trigger = screen.getByRole('button', { name: 'Configure Models' })
   expect(trigger).toBeEnabled()
   expect(
-    screen.getByRole('button', { name: 'Fetch from Upstream' })
-  ).toBeEnabled()
+    screen.queryByRole('button', { name: 'Fetch from Upstream' })
+  ).not.toBeInTheDocument()
   await user.click(trigger)
   const dialog = within(
     screen.getByRole('dialog', { name: 'Configure Models' })

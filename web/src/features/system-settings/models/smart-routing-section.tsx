@@ -29,6 +29,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -64,6 +65,7 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { TemplateKeysCopyButton } from '@/features/keys/components/template-keys-copy-button'
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
@@ -107,6 +109,7 @@ function newSmartRoutingTemplate(): SmartRoutingTemplateForm {
     enabled: false,
     group_routes: [],
     group_route_sticky: false,
+    model_limits: [],
   }
 }
 
@@ -136,6 +139,10 @@ function SmartRoutingTemplateEditor(props: TemplateEditorProps) {
     control: props.form.control,
     name: `templates.${props.index}.name`,
   })
+  const templateID = useWatch({
+    control: props.form.control,
+    name: `templates.${props.index}.id`,
+  })
   const routeFields = useFieldArray({
     control: props.form.control,
     name: `templates.${props.index}.group_routes`,
@@ -148,7 +155,8 @@ function SmartRoutingTemplateEditor(props: TemplateEditorProps) {
           {templateName ||
             t('Routing template #{{number}}', { number: props.index + 1 })}
         </CardTitle>
-        <CardAction className='flex items-center gap-3'>
+        <CardAction className='flex flex-wrap items-center gap-3'>
+          <TemplateKeysCopyButton templateID={templateID} />
           <FormField
             control={props.form.control}
             name={`templates.${props.index}.enabled`}
@@ -234,6 +242,31 @@ function SmartRoutingTemplateEditor(props: TemplateEditorProps) {
           )}
         />
 
+        <FormField
+          control={props.form.control}
+          name={`templates.${props.index}.model_limits`}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Model Limits')}</FormLabel>
+              <FormControl>
+                <MultiSelect
+                  selected={field.value || []}
+                  options={(field.value || []).map((model) => ({
+                    label: model,
+                    value: model,
+                  }))}
+                  onChange={field.onChange}
+                  allowCreate
+                  placeholder={t('Select models (empty for allow all)')}
+                />
+              </FormControl>
+              <FormDescription>
+                {t('Limit which models can be used with this key')}
+              </FormDescription>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
         <div className='space-y-3'>
           <div className='flex items-center justify-between gap-3'>
             <FormLabel>{t('Group routing rules')}</FormLabel>

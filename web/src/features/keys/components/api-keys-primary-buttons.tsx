@@ -40,6 +40,7 @@ import { useApiInfo } from '@/features/dashboard/hooks/use-status-data'
 import { useStatus } from '@/hooks/use-status'
 
 import { CC_SWITCH_LATEST_RELEASE_URL } from '../lib/cc-switch'
+import { ApiKeyTemplatesDialog } from './api-key-templates-dialog'
 import { useApiKeys } from './api-keys-provider'
 
 export function ApiKeysPrimaryButtons() {
@@ -113,6 +114,7 @@ export function ApiKeysPrimaryButtons() {
           )}
         </PopoverContent>
       </Popover>
+      <ApiKeyTemplatesDialog />
       <Button size='sm' onClick={() => setOpen('create')}>
         <Plus data-icon='inline-start' />
         {t('Create API Key')}

@@ -18,7 +18,6 @@ import (
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relay/channel/task/taskcommon"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	"github.com/QuantumNous/new-api/setting/billing_setting"
 
 	"github.com/MoeForge/moego/ojson"
 	"github.com/bytedance/gopkg/util/gopool"
@@ -693,12 +692,9 @@ func truncateBase64(s string) string {
 // settleTaskBillingOnComplete 任务完成时的统一计费调整。
 // 返回 true 表示用量结算路径已接管最终计费；失败任务仅在返回 false 时补做全额退款。
 // 优先级：1. tiered snapshot → 2. adaptor 调整 → 3. token 重算。
+//
 // 表达式求值失败会保留预扣额度，因此也视为已接管，避免错误全退。
 func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor, task *model.Task, taskResult *relaycommon.TaskInfo) bool {
-	billingMode := ""
-	if bc := task.PrivateData.BillingContext; bc != nil {
-		billingMode = bc.BillingMode
-	}
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.TieredSnapshot != nil {
 		// 用量表达式结算只适用于成功任务；失败任务由调用方全额退款。
 		if task.Status == model.TaskStatusFailure {
@@ -717,24 +713,8 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 		RecalculateTaskQuota(ctx, task, result.ActualQuotaAfterGroup, common.NewMessage("Settled by the task usage expression"), result.Clamp)
 		return true
 	}
-	if billingMode == billing_setting.BillingModePerSecond {
-		if task.Status != model.TaskStatusSuccess {
-			return false
-		}
-		bc := task.PrivateData.BillingContext
-		quota, seconds, price, resolution, clamp, ok := EvaluatePerSecondTaskUsage(bc.ModelPrice, bc.GroupRatio, bc.SecondPriceSnapshot, taskResult.UsageFacts)
-		if ok {
-			bc.ModelPrice = price
-			if bc.SecondPriceSnapshot != nil {
-				bc.SecondPriceSnapshot.Resolution = resolution
-			}
-			bc.OtherRatios = map[string]float64{"seconds": seconds}
-			RecalculateTaskQuota(ctx, task, quota, common.NewMessage("Adjusted by the channel adaptor"), clamp)
-		}
-		return true
-	}
 	// 按次计费的成功任务保持预扣；失败任务由调用方全额退款。
-	if bc := task.PrivateData.BillingContext; bc != nil && (bc.PerCallBilling || billingMode == billing_setting.BillingModePerRequest) {
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.PerCallBilling {
 		logger.LogInfo(ctx, common.LogText("task %s is billed per request, skipping difference settlement", task.TaskID))
 		return false
 	}
@@ -748,7 +728,7 @@ func settleTaskBillingOnComplete(ctx context.Context, adaptor TaskPollingAdaptor
 	if tokens == 0 && taskResult.CompletionTokens > 0 {
 		tokens = taskResult.CompletionTokens
 	}
-	if tokens > 0 && billingMode != billing_setting.BillingModePerSecond {
+	if tokens > 0 {
 		return RecalculateTaskQuotaByTokens(ctx, task, tokens)
 	}
 	return false

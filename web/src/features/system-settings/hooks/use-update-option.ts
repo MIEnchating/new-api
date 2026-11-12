@@ -147,6 +147,11 @@ export function useUpdateOptionsBulk() {
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
       queryClient.invalidateQueries({ queryKey: ['request-policy'] })
       queryClient.invalidateQueries({ queryKey: ['channel-ops'] })
+      queryClient.invalidateQueries({
+        queryKey: ['token-smart-routing-templates'],
+      })
+      queryClient.invalidateQueries({ queryKey: ['api-key'] })
+      queryClient.invalidateQueries({ queryKey: ['keys'] })
     },
   })
 }

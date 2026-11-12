@@ -3,9 +3,8 @@ package constant
 type TaskPlatform string
 
 const (
-	TaskPlatformSuno                    = "suno"
-	TaskPlatformMidjourney              = "mj"
-	TaskPlatformSoraCompat TaskPlatform = "sora-compat"
+	TaskPlatformSuno       = "suno"
+	TaskPlatformMidjourney = "mj"
 )
 
 const (

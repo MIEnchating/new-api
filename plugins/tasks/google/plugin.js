@@ -170,83 +170,24 @@ function imageInput(value, files) {
   return { inlineData: { mimeType: mime, data: value } };
 }
 
-function veoImageInput(value, files) {
-  const parsed = imageInput(value, files);
-  if (!parsed) return null;
-  return { bytesBase64Encoded: parsed.inlineData.data, mimeType: parsed.inlineData.mimeType };
-}
-
-function applyVeo31Inputs(instance, metadata, files) {
-  const firstFrame = metadata.firstFrame;
-  const lastFrame = metadata.lastFrame;
-  const referenceImages = metadata.referenceImages;
-  delete metadata.firstFrame;
-  delete metadata.lastFrame;
-  delete metadata.referenceImages;
-
-  const hasFirstFrame = trimmed(firstFrame) !== "";
-  const hasLastFrame = trimmed(lastFrame) !== "";
-  if (hasLastFrame && !hasFirstFrame) throw new Error("Veo lastFrame requires firstFrame");
-  if (referenceImages !== undefined && !Array.isArray(referenceImages)) throw new Error("Veo referenceImages must be an array");
-  const references = referenceImages || [];
-  if (references.length > 3) throw new Error("Veo referenceImages supports at most 3 images");
-  if ((hasFirstFrame || hasLastFrame) && references.length) throw new Error("Veo frame inputs cannot be combined with referenceImages");
-
-  if (hasFirstFrame) {
-    instance.image = veoImageInput(firstFrame, files);
-    if (!instance.image) throw new Error("invalid Veo firstFrame image");
-  }
-  if (hasLastFrame) {
-    instance.lastFrame = veoImageInput(lastFrame, files);
-    if (!instance.lastFrame) throw new Error("invalid Veo lastFrame image");
-  }
-  if (references.length) {
-    instance.referenceImages = references.map(function (value) {
-      const image = veoImageInput(value, files);
-      if (!image) throw new Error("invalid Veo referenceImages image");
-      return { image: image, referenceType: "asset" };
-    });
-  }
-  return hasFirstFrame || hasLastFrame || references.length > 0;
-}
-
-function veoDuration(req) {
-  const metadata = req.metadata || {};
-  const value = req.duration === undefined || req.duration === "" ? metadata.durationSeconds : req.duration;
-  const seconds = value === undefined || value === "" ? 8 : Number(value);
-  if (seconds !== 4 && seconds !== 6 && seconds !== 8) throw new Error("durationSeconds must be one of 4, 6, or 8");
-  return seconds;
-}
-
 function converted(ctx) {
   const req = ctx.requestBody || {};
   const metadata = Object.assign({}, req.metadata || {});
-  const instance = { prompt: req.prompt };
-  const hasVeo31Inputs = applyVeo31Inputs(instance, metadata, ctx.files);
   const params = Object.assign({}, metadata);
-  params.durationSeconds = veoDuration(req);
+  if (Number(req.duration) > 0) params.durationSeconds = Number(req.duration);
   if (!params.resolution && req.size) params.resolution = resolutionForSize(req.size);
   if (!params.aspectRatio && req.size) params.aspectRatio = aspectForSize(req.size);
   if (params.resolution) params.resolution = String(params.resolution).toLowerCase();
   params.numberOfVideos = 1;
-  const image = hasVeo31Inputs ? null : imageInput((req.images || [])[0], ctx.files);
+  const instance = { prompt: req.prompt };
+  const image = imageInput((req.images || [])[0], ctx.files);
   if (image) instance.image = image;
-  return { body: { instances: [instance], parameters: params }, action: hasVeo31Inputs || image ? "image_to_video" : "text_to_video" };
+  return { body: { instances: [instance], parameters: params }, action: image ? "image_to_video" : "text_to_video" };
 }
 
 function version(ctx) {
   const settings = ctx.userSetting || {};
   return settings.geminiVersion || "v1beta";
-}
-
-// Convert native Veo frame objects back to the driver's canonical image input.
-function nativeVeoImage(value) {
-  const image = plainObject(value) || {};
-  const inline = plainObject(image.inlineData);
-  const data = inline ? inline.data : image.bytesBase64Encoded;
-  const mime = trimmed(inline ? inline.mimeType : image.mimeType) || "application/octet-stream";
-  if (typeof data !== "string" || !trimmed(data)) throw new Error("Veo image must carry base64 data");
-  return "data:" + mime + ";base64," + data;
 }
 
 export const native = {
@@ -261,9 +202,9 @@ export const native = {
     const instances = Array.isArray(body.instances) ? body.instances : [];
     const instance = plainObject(instances[0]);
     if (instances.length !== 1 || !instance) throw new Error("instances must hold exactly one instance");
-    // Preserve the frame and reference-image inputs supported by this driver.
+    // buildSubmitRequest sends only the prompt and the first frame.
     for (const key of Object.keys(instance)) {
-      if (!["prompt", "image", "lastFrame", "referenceImages"].includes(key)) throw new Error("instances[0]." + key + " is not supported");
+      if (key !== "prompt" && key !== "image") throw new Error("instances[0]." + key + " is not supported");
     }
     const metadata = Object.assign({}, plainObject(body.parameters) || {});
     const requestBody = { model: model, prompt: instance.prompt, metadata: metadata };
@@ -275,25 +216,11 @@ export const native = {
     if (metadata.resolution !== undefined && ["720p", "1080p", "4k"].indexOf(String(metadata.resolution).toLowerCase()) < 0)
       throw new Error("resolution must be one of 720p, 1080p, or 4k");
     if (instance.image !== undefined) {
-      const image = plainObject(instance.image) || {};
-      if (image.inlineData !== undefined && instance.lastFrame === undefined && instance.referenceImages === undefined) {
-        const inline = plainObject(image.inlineData);
-        if (!inline || !trimmed(inline.data)) throw new Error("instances[0].image must carry inlineData");
-        requestBody.images = ["data:" + (trimmed(inline.mimeType) || "application/octet-stream") + ";base64," + inline.data];
-      } else {
-        metadata.firstFrame = nativeVeoImage(image);
-      }
+      const inline = plainObject(plainObject(instance.image) && instance.image.inlineData);
+      if (!inline || !trimmed(inline.data)) throw new Error("instances[0].image must carry inlineData");
+      requestBody.images = ["data:" + (trimmed(inline.mimeType) || "application/octet-stream") + ";base64," + inline.data];
     }
-    if (instance.lastFrame !== undefined) metadata.lastFrame = nativeVeoImage(instance.lastFrame);
-    if (instance.referenceImages !== undefined) {
-      if (!Array.isArray(instance.referenceImages)) throw new Error("Veo referenceImages must be an array");
-      metadata.referenceImages = instance.referenceImages.map(function (reference) {
-        if (!plainObject(reference) || reference.referenceType !== "asset") throw new Error("Veo referenceImages must use the asset reference type");
-        return nativeVeoImage(reference.image);
-      });
-    }
-    const hasVeo31Inputs = applyVeo31Inputs({}, Object.assign({}, metadata));
-    return { kind: "submit", model: model, action: hasVeo31Inputs || requestBody.images ? "image_to_video" : "text_to_video", requestBody: requestBody };
+    return { kind: "submit", model: model, action: requestBody.images ? "image_to_video" : "text_to_video", requestBody: requestBody };
   },
   // The operation is named after the gateway task, so the caller polls it
   // here. The poller can fail a task whose operation was still running; that
@@ -341,7 +268,8 @@ export function parseSubmitResponse(ctx, resp) {
 export function extractUsage(ctx) {
   const req = ctx.requestBody || {};
   const metadata = req.metadata || {};
-  const seconds = veoDuration(req);
+  let seconds = Number(req.duration);
+  if (!Number.isFinite(seconds) || seconds <= 0) seconds = 8;
   const resolution = String(metadata.resolution || resolutionForSize(req.size) || "720p").toLowerCase();
   return { seconds: seconds, resolution: resolution };
 }

@@ -38,6 +38,7 @@ export interface SmartRoutingTemplate {
   enabled: boolean
   group_routes: ApiKeyGroupRoute[]
   group_route_sticky: boolean
+  model_limits?: string[]
 }
 
 const routeStatusSchema = z.object({
@@ -73,6 +74,9 @@ export const apiKeySchema = z.object({
     }, z.boolean())
     .optional()
     .default(false),
+  routing_template_id: z.string().nullish(),
+  routing_template_name: z.string().optional(),
+  routing_template_available: z.boolean().optional(),
   group_route_config: z.string().nullish().default(''),
   group_route_sticky: z.boolean().optional().default(false),
   model_limits_enabled: z.boolean(),
@@ -117,6 +121,7 @@ export interface SearchApiKeysParams {
 }
 
 export interface ApiKeyFormData {
+  routing_template_id?: string
   name: string
   remain_quota: number
   expired_time: number
@@ -131,6 +136,18 @@ export interface ApiKeyFormData {
   group_route_config: string
   group_route_sticky: boolean
 }
+
+export type ApiKeyBatchField =
+  | 'name'
+  | 'status'
+  | 'routing'
+  | 'expiration'
+  | 'quota'
+  | 'models'
+  | 'ips'
+  | 'quota_query'
+
+export type ApiKeyBatchUpdate = Partial<ApiKeyFormData> & { status?: number }
 
 export interface TokenAutoGroupsConfig {
   groups: string[]

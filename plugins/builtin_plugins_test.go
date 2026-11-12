@@ -13,62 +13,6 @@ import (
 
 var expectedKeys = []string{"alibaba", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "vertex-ai", "vidu", "xai"}
 
-func TestPluginCompletionFactsPreserveReservationsAndImagePayloadCounts(t *testing.T) {
-	cases := []struct {
-		name, plugin, model string
-		body                map[string]any
-		want                map[string]any
-		wantError           bool
-	}{
-		{"omni missing facts remain absent", "vertex-ai", "gemini-omni-1.1-flash-preview", map[string]any{"usage": map[string]any{"total_input_tokens": 12}}, map[string]any{"input_tokens": float64(12)}, false},
-		{"omni null facts remain absent", "vertex-ai", "gemini-omni-1.1-flash-preview", map[string]any{"usage": map[string]any{"total_input_tokens": nil, "total_thought_tokens": nil}}, map[string]any{}, false},
-		{"omni explicit zero is measured", "vertex-ai", "gemini-omni-1.1-flash-preview", map[string]any{"usage": map[string]any{"total_input_tokens": 0, "total_thought_tokens": 0}}, map[string]any{"input_tokens": float64(0), "output_tokens": float64(0)}, false},
-		{"omni malformed video usage fails", "vertex-ai", "gemini-omni-1.1-flash-preview", map[string]any{"usage": map[string]any{"output_tokens_by_modality": []any{map[string]any{"modality": "video", "tokens": "invalid"}}}}, nil, true},
-		{"omni negative usage fails", "vertex-ai", "gemini-omni-1.1-flash-preview", map[string]any{"usage": map[string]any{"total_input_tokens": -1}}, nil, true},
-		{"omni malformed modality list fails", "vertex-ai", "gemini-omni-1.1-flash-preview", map[string]any{"usage": map[string]any{"output_tokens_by_modality": "invalid"}}, nil, true},
-		{"seedream object is one image", "doubao", "doubao-seedream-4-0-250828", map[string]any{"data": map[string]any{"url": "https://image.example/one", "size": "2048x2048"}}, map[string]any{"images_up_to_1_5k": float64(0), "images_above_1_5k": float64(1)}, false},
-		{"seedream split representations bill once", "doubao", "doubao-seedream-4-0-250828", map[string]any{"data": []any{map[string]any{"url": "https://image.example/one", "size": "2048x2048"}, map[string]any{"b64_json": "aGVsbG8=", "size": "2048x2048"}, map[string]any{"revised_prompt": "no image"}}}, map[string]any{"images_up_to_1_5k": float64(0), "images_above_1_5k": float64(1)}, false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			plugin, found := jsplugin.DefaultRegistry.Generation().Get(tc.plugin)
-			require.True(t, found)
-			value, err := plugin.Engine.Call(t.Context(), "extractUsageOnComplete", map[string]any{"upstreamModel": tc.model}, map[string]any{"status": "SUCCESS"}, tc.body)
-			if tc.wantError {
-				require.Error(t, err)
-				return
-			}
-			require.NoError(t, err)
-			encoded, err := common.Marshal(value)
-			require.NoError(t, err)
-			var facts map[string]any
-			require.NoError(t, common.Unmarshal(encoded, &facts))
-			assert.Equal(t, tc.want, facts)
-		})
-	}
-}
-
-func TestSoraCompatibleTaskIDsAndRunningStates(t *testing.T) {
-	plugin, found := jsplugin.DefaultRegistry.Generation().Get("sora")
-	require.True(t, found)
-	for _, status := range []string{"running", "generating"} {
-		value, err := plugin.Engine.Call(t.Context(), "parseTaskResult", map[string]any{}, map[string]any{"status": status})
-		require.NoError(t, err)
-		encoded, err := common.Marshal(value)
-		require.NoError(t, err)
-		var result map[string]any
-		require.NoError(t, common.Unmarshal(encoded, &result))
-		assert.Equal(t, map[string]any{"status": "IN_PROGRESS"}, result)
-	}
-	value, err := plugin.Engine.Call(t.Context(), "parseSubmitResponse", map[string]any{}, map[string]any{"body": map[string]any{"video_id": "video_compat"}})
-	require.NoError(t, err)
-	encoded, err := common.Marshal(value)
-	require.NoError(t, err)
-	var result map[string]any
-	require.NoError(t, common.Unmarshal(encoded, &result))
-	assert.Equal(t, "video_compat", result["taskId"])
-}
-
 func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing.T) {
 	generation := jsplugin.DefaultRegistry.Generation()
 	require.NotNil(t, generation)
@@ -95,7 +39,6 @@ func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing
 		{"POST", "/api/common/v3/submit_task_v2", "jimeng", jsplugin.RouteTypeSubmit, "", "taskSubmitted", false, false},
 		{"POST", "/api/common/v3/get_result_v2", "jimeng", jsplugin.RouteTypeDynamic, "", "taskResult", false, false},
 		{"POST", "/jimeng/api/common/v3/submit_task_v2", "jimeng", jsplugin.RouteTypeSubmit, "", "taskSubmitted", true, false},
-		{"POST", "/jimeng/", "jimeng", jsplugin.RouteTypeDynamic, "", "legacyTask", false, true},
 		{"POST", "/suno/submit/:action", "sunoapi", jsplugin.RouteTypeSubmit, "", "renderSubmit", false, true},
 		{"POST", "/suno/fetch", "sunoapi", jsplugin.RouteTypeDynamic, "", "renderTasks", false, true},
 		{"GET", "/suno/fetch/:task_id", "sunoapi", jsplugin.RouteTypeQuery, "", "renderTask", false, true},
@@ -147,6 +90,7 @@ func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing
 		})
 	}
 	for _, missing := range []struct{ method, path string }{
+		{"POST", "/jimeng/"},
 		{"POST", "/sunoapi/suno/fetch"},
 		{"POST", "/alibaba/ali/api/v1/services/aigc/video-generation/video-synthesis"},
 		{"GET", "/v1/query/video_generation/:task_id"},

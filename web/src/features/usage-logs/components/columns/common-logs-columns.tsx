@@ -57,7 +57,6 @@ import {
   decodeBillingExprB64,
   getTieredBillingSummary,
   hasAnyCacheTokens,
-  getUpstreamRequestIds,
   parseLogOther,
   isViolationFeeLog,
   logTokenName,
@@ -72,10 +71,8 @@ import {
 } from '../../lib/utils'
 import type { LogOtherData } from '../../types'
 import { DetailsDialog } from '../dialogs/details-dialog'
-import { ExecutionTraceDialog } from '../dialogs/execution-trace-dialog'
 import { LogCostDisplay } from '../log-cost-display'
 import { ModelBadge } from '../model-badge'
-import { RetryChainPopover } from '../retry-chain-popover'
 import { TimingMetricsCell, StreamTpsCell } from '../timing-metrics-cell'
 import { useUsageLogsContext } from '../usage-logs-provider'
 
@@ -295,14 +292,6 @@ function buildTypeDetailSegments(
         muted: true,
       })
     }
-  } else if (other.billing_mode === 'per_second') {
-    const modelPrice = other.model_price
-    segments.push({
-      text:
-        modelPrice != null && Number.isFinite(modelPrice) && modelPrice >= 0
-          ? `${t('Per-second')} · ${formatPriceCompact(modelPrice)}/${t('second')}`
-          : t('Per-second'),
-    })
   } else {
     const modelPrice = other.model_price
     const isPerCall = isPerCallBilling(modelPrice)
@@ -390,19 +379,8 @@ export function useCommonLogsColumns(
       function DetailsCell({ row }: CellContext<UsageLog, unknown>) {
         const { t, i18n } = useTranslation()
         const [dialogOpen, setDialogOpen] = useState(false)
-        const [traceDialogOpen, setTraceDialogOpen] = useState(false)
         const log = row.original
         const other = parseLogOther(log.other)
-        const canViewExecutionTrace =
-          isAdmin &&
-          Boolean(log.request_id) &&
-          Boolean(other?.admin_info?.channel_execution_trace)
-        const upstreamRequestIds = getUpstreamRequestIds(
-          other?.admin_info?.upstream_request_ids,
-          log.upstream_request_id,
-          log.request_id
-        )
-
         const pricingData = usePricingData(
           log.type === 2 &&
             other?.is_task === true &&
@@ -512,30 +490,7 @@ export function useCommonLogsColumns(
               isRoot={isRoot}
               open={dialogOpen}
               onOpenChange={setDialogOpen}
-              onViewExecutionTrace={
-                canViewExecutionTrace
-                  ? () => {
-                      setDialogOpen(false)
-                      setTraceDialogOpen(true)
-                    }
-                  : undefined
-              }
             />
-            {canViewExecutionTrace ? (
-              <ExecutionTraceDialog
-                requestId={log.request_id}
-                upstreamRequestIds={upstreamRequestIds}
-                upstreamRequestChain={other?.admin_info?.upstream_request_chain}
-                upstreamRequestIdSources={
-                  other?.admin_info?.upstream_request_id_sources
-                }
-                isRetryIntermediate={
-                  other?.admin_info?.retry_intermediate === true
-                }
-                open={traceDialogOpen}
-                onOpenChange={setTraceDialogOpen}
-              />
-            ) : null}
           </>
         )
       },
@@ -594,14 +549,6 @@ export function useCommonLogsColumns(
 
             const other = parseLogOther(log.other)
             const affinity = other?.admin_info?.channel_affinity
-            const rawUseChannel = other?.admin_info?.use_channel ?? []
-            const useChannel = Array.isArray(rawUseChannel)
-              ? rawUseChannel.map(String).filter(Boolean)
-              : []
-            const hasRetryChain = useChannel.length > 1
-            const channelChain = hasRetryChain
-              ? useChannel.join(' → ')
-              : undefined
             const channelDisplay = log.channel_name
               ? `${log.channel_name} #${log.channel}`
               : `#${log.channel}`
@@ -635,11 +582,6 @@ export function useCommonLogsColumns(
                               ? channelDisplay
                               : channelIdDisplay}
                           </p>
-                          {channelChain && (
-                            <p className='text-muted-foreground text-xs'>
-                              {t('Chain')}: {channelChain}
-                            </p>
-                          )}
                           {showMultiKeyIndex && (
                             <p className='text-muted-foreground text-xs'>
                               {t('Key')}: {multiKeyIndex}
@@ -657,15 +599,6 @@ export function useCommonLogsColumns(
                         variant='neutral'
                         className='h-5 min-w-5 justify-center rounded-full px-1 font-mono text-xs'
                         aria-label={`${t('Key')} ${multiKeyIndex}`}
-                      />
-                    )}
-                    {hasRetryChain && (
-                      <RetryChainPopover
-                        channelIds={useChannel}
-                        logType={log.type}
-                        retryIntermediate={
-                          other?.admin_info?.retry_intermediate === true
-                        }
                       />
                     )}
                     {affinity && (

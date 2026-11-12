@@ -27,6 +27,8 @@ import {
   type ApiKeyFormData,
   type ApiKey,
   type ApiKeyGroupRoute,
+  type ApiKeyBatchField,
+  type ApiKeyBatchUpdate,
 } from '../types'
 
 export function canConfigureGroupRouteCooldown(routes: ApiKeyGroupRoute[]) {
@@ -45,7 +47,11 @@ export function canDisableGroupRoute(
 // Form Schema
 // ============================================================================
 
-export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
+export function getApiKeyFormSchema(
+  t: TFunction,
+  maxAutoGroups = 5,
+  batchFields?: ApiKeyBatchField[]
+) {
   const autoGroupLimit =
     Number.isInteger(maxAutoGroups) && maxAutoGroups > 0 ? maxAutoGroups : 5
   const enabledGroupRouteSchema = apiKeyGroupRouteSchema.extend({
@@ -60,7 +66,13 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
 
   return z
     .object({
-      name: z.string().min(1, t('Please enter a name')),
+      routing_template_id: z.string().optional(),
+      name: z
+        .string()
+        .min(
+          batchFields && !batchFields.includes('name') ? 0 : 1,
+          t('Please enter a name')
+        ),
       remain_quota_dollars: z.number().optional(),
       expired_time: z.date().nullable(),
       unlimited_quota: z.boolean(),
@@ -77,7 +89,12 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
       tokenCount: z.number().min(1).optional(),
     })
     .superRefine((data, ctx) => {
-      if (!data.group_route_enabled && data.group === 'auto') {
+      const validateRouting = !batchFields || batchFields.includes('routing')
+      if (
+        validateRouting &&
+        !data.group_route_enabled &&
+        data.group === 'auto'
+      ) {
         if (
           data.auto_groups_mode === 'custom' &&
           data.auto_groups.length === 0
@@ -111,6 +128,7 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
       }
 
       if (
+        (!batchFields || batchFields.includes('quota')) &&
         !data.unlimited_quota &&
         (data.remain_quota_dollars === undefined ||
           data.remain_quota_dollars < 0)
@@ -122,6 +140,7 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
         })
       }
 
+      if (!validateRouting || data.routing_template_id) return
       if (!data.group_route_enabled) {
         if (!data.group?.trim()) {
           ctx.addIssue({
@@ -181,6 +200,7 @@ export type ApiKeyFormValues = z.infer<ReturnType<typeof getApiKeyFormSchema>>
 // ============================================================================
 
 export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
+  routing_template_id: '',
   name: '',
   remain_quota_dollars: 10,
   expired_time: null,
@@ -259,6 +279,7 @@ export function transformFormDataToPayload(
 ): ApiKeyFormData {
   const groupRoutes = data.group_route_enabled ? data.group_routes || [] : []
   return {
+    routing_template_id: data.routing_template_id || '',
     name: data.name,
     remain_quota: data.unlimited_quota
       ? 0
@@ -299,6 +320,40 @@ export function transformFormDataToPayload(
   }
 }
 
+export function transformFormDataToBatchPayload(
+  data: ApiKeyFormValues,
+  fields: ApiKeyBatchField[],
+  status: number
+): ApiKeyBatchUpdate {
+  const payload = transformFormDataToPayload(data)
+  const updates: ApiKeyBatchUpdate = {}
+  if (fields.includes('name')) updates.name = payload.name
+  if (fields.includes('status')) updates.status = status
+  if (fields.includes('expiration')) updates.expired_time = payload.expired_time
+  if (fields.includes('quota')) {
+    updates.unlimited_quota = payload.unlimited_quota
+    // Unlimited mode only changes the flag; retain each key's remaining quota.
+    if (!payload.unlimited_quota) updates.remain_quota = payload.remain_quota
+  }
+  if (fields.includes('routing')) {
+    updates.routing_template_id = payload.routing_template_id
+    updates.group = payload.group
+    updates.auto_groups = payload.auto_groups
+    updates.cross_group_retry = payload.cross_group_retry
+    updates.group_route_config = payload.group_route_config
+    updates.group_route_sticky = payload.group_route_sticky
+  }
+  if (fields.includes('models')) {
+    updates.model_limits_enabled = payload.model_limits_enabled
+    updates.model_limits = payload.model_limits
+  }
+  if (fields.includes('ips')) updates.allow_ips = payload.allow_ips
+  if (fields.includes('quota_query')) {
+    updates.allow_user_quota_query = payload.allow_user_quota_query
+  }
+  return updates
+}
+
 /**
  * Transform API key data to form defaults
  */
@@ -316,6 +371,7 @@ export function transformApiKeyToFormDefaults(
   const autoGroupsMode = storedAutoGroups.length > 0 ? 'custom' : 'inherit'
 
   return {
+    routing_template_id: apiKey.routing_template_id || '',
     name: apiKey.name,
     remain_quota_dollars: apiKey.unlimited_quota
       ? 0

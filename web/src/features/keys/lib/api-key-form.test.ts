@@ -30,6 +30,7 @@ import {
   getApiKeyFormSchema,
   parseApiKeyGroupRouteConfig,
   transformFormDataToPayload,
+  transformFormDataToBatchPayload,
 } from './api-key-form'
 
 const schema = getApiKeyFormSchema(t)
@@ -215,5 +216,63 @@ describe('API key form schema', () => {
 
     assert.equal(storedRoutes[0]?.enabled, false)
     assert.equal(storedRoutes[1]?.enabled, true)
+  })
+})
+
+describe('API key batch patch', () => {
+  test('unselected routing and name do not block permission updates', () => {
+    const result = getApiKeyFormSchema(t, 5, ['quota_query']).safeParse(
+      getApiKeyFormDefaultValues()
+    )
+    assert.equal(result.success, true)
+    assert.deepEqual(
+      transformFormDataToBatchPayload(
+        { ...getApiKeyFormDefaultValues(), allow_user_quota_query: false },
+        ['quota_query'],
+        2
+      ),
+      { allow_user_quota_query: false }
+    )
+  })
+
+  test('selected routing requires a valid group even when other fields are not selected', () => {
+    const result = getApiKeyFormSchema(t, 5, ['routing']).safeParse(
+      getApiKeyFormDefaultValues()
+    )
+    assert.equal(result.success, false)
+  })
+
+  test('unlimited mode preserves remaining balances while explicit zero sets the balance to zero', () => {
+    const defaults = getApiKeyFormDefaultValues()
+    assert.deepEqual(transformFormDataToBatchPayload(defaults, ['quota'], 2), {
+      unlimited_quota: true,
+    })
+    assert.deepEqual(
+      transformFormDataToBatchPayload(
+        { ...defaults, unlimited_quota: false, remain_quota_dollars: 0 },
+        ['quota'],
+        2
+      ),
+      { unlimited_quota: false, remain_quota: 0 }
+    )
+  })
+
+  test('routing patch carries Auto order and clears incompatible manual routing', () => {
+    const data = {
+      ...getApiKeyFormDefaultValues(),
+      routing_template_id: '',
+      group: 'auto',
+      auto_groups_mode: 'custom' as const,
+      auto_groups: ['vip', 'default'],
+      cross_group_retry: true,
+    }
+    assert.deepEqual(transformFormDataToBatchPayload(data, ['routing'], 2), {
+      routing_template_id: '',
+      group: 'auto',
+      auto_groups: ['vip', 'default'],
+      cross_group_retry: true,
+      group_route_config: '',
+      group_route_sticky: false,
+    })
   })
 })
