@@ -52,6 +52,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
+import type { GroupVendor } from '@/lib/api'
 
 import {
   SettingsForm,
@@ -70,6 +71,7 @@ type GroupFormValues = {
   GroupRatioSchedule: string
   TopupGroupRatio: string
   GroupDescriptions: string
+  GroupCategories: string
   UserUsableGroups: string
   GroupGroupRatio: string
   AutoGroups: string
@@ -80,6 +82,7 @@ type GroupFormValues = {
 }
 
 type GroupRatioFormProps = {
+  vendors?: readonly GroupVendor[]
   form: UseFormReturn<GroupFormValues>
   onSave: (values: GroupFormValues) => Promise<void>
   onGroupRename: (previousName: string, nextName: string) => void
@@ -88,6 +91,7 @@ type GroupRatioFormProps = {
 
 export const GroupRatioForm = memo(function GroupRatioForm({
   form,
+  vendors,
   onSave,
   onGroupRename,
   isSaving,
@@ -172,6 +176,8 @@ export const GroupRatioForm = memo(function GroupRatioForm({
           <GroupRatioVisualEditor
             groupRatioSchedule={values.GroupRatioSchedule ?? ''}
             groupDescriptions={values.GroupDescriptions ?? ''}
+            groupCategories={values.GroupCategories ?? ''}
+            vendors={vendors}
             groupOrder={values.GroupOrder ?? ''}
             onGroupRename={onGroupRename}
             section={section}
@@ -364,6 +370,27 @@ export const GroupRatioForm = memo(function GroupRatioForm({
                       'JSON map used to preserve group descriptions when key creation visibility is disabled.'
                     )}
                   </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='GroupCategories'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Vendors')}</FormLabel>
+                  <FormControl>
+                    <JsonCodeEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      textareaRef={field.ref}
+                      heightClassName='h-40 min-h-40 max-h-40'
+                    />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}

@@ -96,7 +96,7 @@ export function vendorErrorMessage(error: unknown): string {
 
 export async function invalidateVendorData(client: QueryClient) {
   await Promise.all(
-    ['vendors', 'models', 'pricing'].map((key) =>
+    ['vendors', 'models', 'pricing', 'user-groups'].map((key) =>
       client.invalidateQueries({ queryKey: [key] })
     )
   )

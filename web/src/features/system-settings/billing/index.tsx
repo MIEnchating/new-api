@@ -57,6 +57,7 @@ const defaultBillingSettings: BillingSettings = {
   GroupRatio: '',
   GroupRatioSchedule: '{}',
   GroupDescriptions: '{}',
+  GroupCategories: '{}',
   UserUsableGroups: '',
   GroupGroupRatio: '',
   AutoGroups: '',

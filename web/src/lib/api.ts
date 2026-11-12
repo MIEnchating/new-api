@@ -57,6 +57,12 @@ export async function getUserModels(): Promise<{
   return res.data
 }
 
+export type GroupVendor = {
+  id: number
+  name: string
+  icon?: string
+}
+
 export async function getUserGroups(): Promise<{
   success: boolean
   message?: string
@@ -64,6 +70,7 @@ export async function getUserGroups(): Promise<{
     string,
     {
       desc: string
+      vendor?: GroupVendor
       ratio: number | string
       base_ratio?: number
       schedule_enabled?: boolean

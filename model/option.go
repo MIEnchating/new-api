@@ -143,6 +143,7 @@ func InitOptionMap() {
 	common.OptionMap["AutoGroups"] = setting.AutoGroups2JsonString()
 	common.OptionMap["GroupOrder"] = setting.GroupOrder2JSONString()
 	common.OptionMap["GroupDescriptions"] = setting.GroupDescriptions2JSONString()
+	common.OptionMap[setting.GroupCategoriesOptionKey] = "{}"
 	common.OptionMap["DefaultUseAutoGroup"] = strconv.FormatBool(setting.DefaultUseAutoGroup)
 	common.OptionMap["MaxTokenAutoGroups"] = strconv.Itoa(setting.GetMaxTokenAutoGroups())
 	common.OptionMap["PayMethods"] = operation_setting.PayMethods2JsonString()
@@ -259,6 +260,10 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == setting.GroupCategoriesOptionKey {
+		_, err := setting.ParseGroupCategories(value)
+		return err
+	}
 	if key == common.GroupAliasesOptionKey {
 		return errors.New("Group rename history cannot be edited directly")
 	}
@@ -333,7 +338,7 @@ func validateOptionValue(key string, value string) error {
 }
 
 func UpdateOption(key string, value string) error {
-	if key == "GroupRatio" || key == "group_ratio_setting.group_ratio" {
+	if key == "GroupRatio" || key == "group_ratio_setting.group_ratio" || key == setting.GroupCategoriesOptionKey {
 		return UpdateOptionsBulk(map[string]string{key: value})
 	}
 	if IsRequestPolicyOption(key) {
@@ -657,6 +662,8 @@ func updateOptionMap(key string, value string) (err error) {
 		err = setting.UpdateGroupOrderByJSONString(value)
 	case "GroupDescriptions":
 		err = setting.UpdateGroupDescriptionsByJSONString(value)
+	case setting.GroupCategoriesOptionKey:
+		err = setting.UpdateGroupCategories(value)
 	case "MaxTokenAutoGroups":
 		err = setting.UpdateMaxTokenAutoGroups(value)
 	case "CustomCallbackAddress":

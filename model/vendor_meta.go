@@ -1,6 +1,9 @@
 package model
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/QuantumNous/new-api/common"
 
 	"gorm.io/gorm"
@@ -23,6 +26,63 @@ type Vendor struct {
 	CreatedTime int64          `json:"created_time" gorm:"bigint"`
 	UpdatedTime int64          `json:"updated_time" gorm:"bigint"`
 	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index;uniqueIndex:uk_vendor_name_delete_at,priority:2"`
+}
+
+type VendorDisplay struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Icon string `json:"icon,omitempty"`
+}
+
+// GetGroupVendors resolves current vendor metadata for configured group assignments.
+// Older assignments used vendor names, while new assignments use stable IDs.
+func GetGroupVendors(assignments map[string]string) (map[string]VendorDisplay, error) {
+	ids := make(map[string]int, len(assignments))
+	vendorIDs := make([]int, 0, len(assignments))
+	hasLegacyNames := false
+	for group, assignment := range assignments {
+		value, hasID := strings.CutPrefix(assignment, "vendor:")
+		if !hasID {
+			hasLegacyNames = true
+			continue
+		}
+		if id, err := strconv.Atoi(value); err == nil && id > 0 {
+			ids[group] = id
+			vendorIDs = append(vendorIDs, id)
+		}
+	}
+	if len(vendorIDs) == 0 && !hasLegacyNames {
+		return nil, nil
+	}
+
+	query := DB.Model(&Vendor{}).Select("id", "name", "icon")
+	if !hasLegacyNames {
+		query = query.Where("id IN ?", vendorIDs)
+	}
+	var vendors []VendorDisplay
+	if err := query.Order("id").Find(&vendors).Error; err != nil {
+		return nil, err
+	}
+	byID := make(map[int]VendorDisplay, len(vendors))
+	for _, vendor := range vendors {
+		byID[vendor.ID] = vendor
+	}
+	resolved := make(map[string]VendorDisplay, len(assignments))
+	for group, assignment := range assignments {
+		if strings.HasPrefix(assignment, "vendor:") {
+			if vendor, ok := byID[ids[group]]; ok {
+				resolved[group] = vendor
+			}
+			continue
+		}
+		for _, vendor := range vendors {
+			if strings.EqualFold(vendor.Name, assignment) {
+				resolved[group] = vendor
+				break
+			}
+		}
+	}
+	return resolved, nil
 }
 
 // Insert 创建新的供应商记录

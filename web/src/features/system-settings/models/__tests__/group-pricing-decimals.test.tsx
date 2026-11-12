@@ -29,6 +29,7 @@ function PricingFixture() {
     TopupGroupRatio: '{}',
     UserUsableGroups: '{}',
     GroupDescriptions: '{}',
+    GroupCategories: '{}',
     GroupOrder: '[]',
   })
   return (
@@ -40,6 +41,7 @@ function PricingFixture() {
         groupRatio={settings.GroupRatio}
         groupRatioSchedule='{}'
         groupDescriptions={settings.GroupDescriptions}
+        groupCategories={settings.GroupCategories}
         groupOrder={settings.GroupOrder}
         onGroupRename={() => {}}
         topupGroupRatio={settings.TopupGroupRatio}

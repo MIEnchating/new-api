@@ -238,6 +238,27 @@ it('keeps model details grouped with standard pagination', async () => {
   expect(screen.getByRole('button', { name: 'Go to first page' })).toBeVisible()
 })
 
+it('gives the model name the remaining width when optional pricing columns are hidden', async () => {
+  localStorage.setItem(
+    'model-ratio-column-visibility',
+    JSON.stringify({ billingMode: false, priceSummary: false })
+  )
+  await renderEditor()
+
+  const table = within(
+    screen.getByRole('region', { name: 'Model prices' })
+  ).getByRole('table')
+  expect(within(table).queryByRole('columnheader', { name: 'Mode' })).toBeNull()
+  expect(
+    within(table).queryByRole('columnheader', { name: 'Price summary' })
+  ).toBeNull()
+  expect(table).not.toHaveClass('min-w-[852px]')
+  const columns = table.querySelectorAll('col')
+  expect(columns).toHaveLength(3)
+  expect(columns[1]).toHaveClass('w-auto')
+  expect(columns[2]).toHaveClass('w-24')
+})
+
 // kling-v3 was never priced, issue-shared's model expression reads usage its
 // new provider lacks, and vidu1.5 keeps a provider price its plugin dropped.
 const pricingIssueFixture = {

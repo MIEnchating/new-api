@@ -17,7 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, test } from 'vitest'
+
+import type { ApiKeyGroupOption } from '../api-key-group-combobox'
 
 let shouldReduceMotion = false
 const reducedMotionMediaQuery = window.matchMedia('(prefers-reduced-motion)')
@@ -50,6 +53,7 @@ await i18n.use(initReactI18next).init({
         Ratio: 'Ratio',
         'Search...': 'Search...',
         'No group found.': 'No group found.',
+        'Other groups': 'Other groups',
         'Select a group': 'Select a group',
         'Scheduled ratio active': 'Scheduled ratio active',
         'Time-based ratio enabled': 'Time-based ratio enabled',
@@ -76,13 +80,16 @@ const options = [
   },
 ]
 
-function Harness(props: { initialValue: string }) {
+function Harness(props: {
+  initialValue: string
+  options?: ApiKeyGroupOption[]
+}) {
   const [value, setValue] = useState(props.initialValue)
 
   return (
     <I18nextProvider i18n={i18n}>
       <ApiKeyGroupCombobox
-        options={options}
+        options={props.options ?? options}
         value={value}
         onValueChange={setValue}
       />
@@ -105,7 +112,60 @@ function getCommandItem(label: string): HTMLElement {
   return item
 }
 
-describe('API key group combobox Auto effect', () => {
+describe('API key group combobox', () => {
+  test('shows vendor icons, searches by vendor and selects the original group', async () => {
+    const user = userEvent.setup()
+    const openAI = {
+      id: 12,
+      name: 'OpenAI',
+      icon: 'OpenAI.role="img".aria-label="Configured vendor icon"',
+    }
+    render(
+      <Harness
+        initialValue='auto'
+        options={[
+          options[0],
+          { ...options[1], vendor: openAI },
+          { ...options[2], vendor: { id: 13, name: 'Anthropic' } },
+          {
+            value: 'gpt-backup',
+            label: 'gpt-backup',
+            ratio: 1,
+            vendor: openAI,
+          },
+        ]}
+      />
+    )
+
+    await user.click(getTrigger())
+    const openAISection = screen.getByRole('group', { name: 'OpenAI' })
+    expect(
+      await screen.findByLabelText('Configured vendor icon')
+    ).toBeInTheDocument()
+    expect(within(openAISection).getAllByRole('option')).toHaveLength(2)
+    expect(
+      within(screen.getByRole('group', { name: 'Other groups' })).getByRole(
+        'option'
+      )
+    ).toHaveTextContent('Global automatic routing')
+    const search = screen.getByPlaceholderText('Search...')
+    await user.type(search, 'missing')
+    expect(screen.getByText('No group found.')).toBeVisible()
+    expect(
+      screen.queryByRole('group', { name: 'Other groups' })
+    ).not.toBeInTheDocument()
+    await user.clear(search)
+    await user.type(search, 'ANTHROPIC')
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    expect(
+      screen.queryByRole('group', { name: 'OpenAI' })
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('option')).toHaveTextContent('vip')
+    await user.keyboard('{Enter}')
+    expect(screen.getByTestId('selected-group')).toHaveTextContent('vip')
+    expect(getTrigger()).toHaveAttribute('aria-expanded', 'false')
+  })
+
   test('uses the compact table capsules in the selected group and dropdown options', () => {
     setReducedMotion(false)
     render(<Harness initialValue='auto' />)
@@ -148,6 +208,9 @@ describe('API key group combobox Auto effect', () => {
 
     fireEvent.click(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(
+      screen.queryByRole('group', { name: 'Other groups' })
+    ).not.toBeInTheDocument()
     expect(triggerIcon).toHaveClass('rotate-180')
 
     const autoOption = getCommandItem('Global automatic routing')

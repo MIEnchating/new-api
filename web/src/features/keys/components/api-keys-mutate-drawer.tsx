@@ -233,6 +233,7 @@ export function ApiKeysMutateDrawer({
           value: key,
           label: key,
           desc: info.desc ? translateServerText(t, info.desc) : key,
+          vendor: info.vendor,
           ratio: info.ratio,
           baseRatio: info.base_ratio,
           scheduleEnabled: info.schedule_enabled,

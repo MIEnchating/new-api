@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -36,8 +36,11 @@ import {
   type ModelPricingConfig,
 } from '@/features/model-pricing/api'
 import { pricingOptions } from '@/features/model-pricing/pricing'
+import { getVendors } from '@/features/models/api'
+import { vendorsQueryKeys } from '@/features/models/lib/query-keys'
 import { useMediaQuery } from '@/hooks'
 import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { SettingsPageTitleStatusPortal } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
@@ -146,6 +149,20 @@ const createGroupSchema = (t: Translate) =>
     }),
     TopupGroupRatio: createJsonStringField(t),
     GroupDescriptions: createJsonStringField(t),
+    GroupCategories: createJsonStringField(t, {
+      predicate: (parsed) =>
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        !Array.isArray(parsed) &&
+        Object.entries(parsed).every(
+          ([name, category]) =>
+            name.length > 0 &&
+            name === name.trim() &&
+            typeof category === 'string'
+        ),
+      predicateMessage:
+        'Expected a JSON object mapping group names to category names',
+    }),
     UserUsableGroups: createJsonStringField(t),
     GroupGroupRatio: createJsonStringField(t),
     AutoGroups: createJsonStringField(t, {
@@ -205,6 +222,12 @@ export function RatioSettingsCard({
   const updateGroupSettings = useUpdateGroupSettings()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const pendingGroupRenames = useRef<GroupRenameRequest[]>([])
+  const vendorsQuery = useQuery({
+    queryKey: vendorsQueryKeys.list(),
+    queryFn: async () =>
+      requireServerSuccess(await getVendors({ page_size: 1000 })),
+    enabled: visibleTabs.includes('groups'),
+  })
 
   const pricingQuery = useModelPricing()
   const savePricing = useSaveModelPricing()
@@ -277,6 +300,7 @@ export function RatioSettingsCard({
     GroupRatioSchedule: normalizeJsonString(groupDefaults.GroupRatioSchedule),
     TopupGroupRatio: normalizeJsonString(groupDefaults.TopupGroupRatio),
     GroupDescriptions: normalizeJsonString(groupDefaults.GroupDescriptions),
+    GroupCategories: normalizeJsonString(groupDefaults.GroupCategories),
     UserUsableGroups: normalizeJsonString(groupDefaults.UserUsableGroups),
     GroupGroupRatio: normalizeJsonString(groupDefaults.GroupGroupRatio),
     AutoGroups: normalizeJsonString(groupDefaults.AutoGroups),
@@ -322,6 +346,7 @@ export function RatioSettingsCard({
       ),
       TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
       GroupDescriptions: formatJsonForTextarea(groupDefaults.GroupDescriptions),
+      GroupCategories: formatJsonForTextarea(groupDefaults.GroupCategories),
       UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
       GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
       AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
@@ -376,6 +401,7 @@ export function RatioSettingsCard({
       GroupRatioSchedule: normalizeJsonString(groupDefaults.GroupRatioSchedule),
       TopupGroupRatio: normalizeJsonString(groupDefaults.TopupGroupRatio),
       GroupDescriptions: normalizeJsonString(groupDefaults.GroupDescriptions),
+      GroupCategories: normalizeJsonString(groupDefaults.GroupCategories),
       UserUsableGroups: normalizeJsonString(groupDefaults.UserUsableGroups),
       GroupGroupRatio: normalizeJsonString(groupDefaults.GroupGroupRatio),
       AutoGroups: normalizeJsonString(groupDefaults.AutoGroups),
@@ -395,6 +421,7 @@ export function RatioSettingsCard({
       ),
       TopupGroupRatio: formatJsonForTextarea(groupDefaults.TopupGroupRatio),
       GroupDescriptions: formatJsonForTextarea(groupDefaults.GroupDescriptions),
+      GroupCategories: formatJsonForTextarea(groupDefaults.GroupCategories),
       UserUsableGroups: formatJsonForTextarea(groupDefaults.UserUsableGroups),
       GroupGroupRatio: formatJsonForTextarea(groupDefaults.GroupGroupRatio),
       AutoGroups: formatJsonForTextarea(groupDefaults.AutoGroups),
@@ -477,6 +504,7 @@ export function RatioSettingsCard({
         GroupRatioSchedule: normalizeJsonString(values.GroupRatioSchedule),
         TopupGroupRatio: normalizeJsonString(values.TopupGroupRatio),
         GroupDescriptions: normalizeJsonString(values.GroupDescriptions),
+        GroupCategories: normalizeJsonString(values.GroupCategories),
         UserUsableGroups: normalizeJsonString(values.UserUsableGroups),
         GroupGroupRatio: normalizeJsonString(values.GroupGroupRatio),
         AutoGroups: normalizeJsonString(values.AutoGroups),
@@ -595,6 +623,7 @@ export function RatioSettingsCard({
           form={groupForm}
           onSave={saveGroupRatios}
           onGroupRename={trackGroupRename}
+          vendors={vendorsQuery.data?.data?.items}
           isSaving={updateGroupSettings.isPending}
         />
       )

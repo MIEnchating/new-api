@@ -10,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -53,6 +54,8 @@ func preserveGroupRenameRuntime(t *testing.T) {
 	t.Helper()
 	aliases := common.GetGroupAliases()
 	ratios := ratio_setting.GroupRatio2JSONString()
+	categories, err := common.Marshal(setting.GetGroupCategories())
+	require.NoError(t, err)
 	common.OptionMapRWMutex.Lock()
 	options := common.OptionMap
 	common.OptionMap = maps.Clone(options)
@@ -63,6 +66,7 @@ func preserveGroupRenameRuntime(t *testing.T) {
 	t.Cleanup(func() {
 		require.NoError(t, common.SetGroupAliases(aliases))
 		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(ratios))
+		require.NoError(t, setting.UpdateGroupCategories(string(categories)))
 		common.OptionMapRWMutex.Lock()
 		common.OptionMap = options
 		common.OptionMapRWMutex.Unlock()
@@ -86,6 +90,16 @@ func verifyGroupRenameLiveReferences(t *testing.T, db *gorm.DB) {
 	t.Logf("database %s %s", db.Dialector.Name(), version)
 	require.NoError(t, db.Create(&Option{Key: "GroupRatio", Value: `{"default":1,"vip":2.5}`}).Error)
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip":2.5}`))
+	require.NoError(t, UpdateGroupSettingsAndReferences(
+		map[string]string{setting.GroupCategoriesOptionKey: `{"vip":" Internal tools ","default":""}`}, nil,
+	))
+	require.Error(t, UpdateGroupSettingsAndReferences(
+		map[string]string{setting.GroupCategoriesOptionKey: `{"vip":42}`}, nil,
+	))
+	assert.Equal(t, map[string]string{"vip": "Internal tools"}, setting.GetGroupCategories())
+	var categoryOption Option
+	require.NoError(t, db.Where(&Option{Key: setting.GroupCategoriesOptionKey}).First(&categoryOption).Error)
+	assert.JSONEq(t, `{"vip":" Internal tools ","default":""}`, categoryOption.Value)
 	priority := int64(0)
 	weight := uint(100)
 	user := User{Username: "rename-user", Password: "password", Group: "vip", AffCode: "rename-aff"}
@@ -131,7 +145,16 @@ func verifyGroupRenameLiveReferences(t *testing.T, db *gorm.DB) {
 	// Hold a request's channel snapshot across the rename.
 	inFlight, err := LoadSatisfiedChannelSelectionSnapshot("vip", "rename-model", "/v1/chat/completions")
 	require.NoError(t, err)
-	require.NoError(t, UpdateGroupSettingsAndReferences(map[string]string{"GroupRatio": `{"default":1,"pro":2.5}`}, map[string]string{"vip": "pro"}))
+	require.NoError(t, UpdateGroupSettingsAndReferences(
+		map[string]string{
+			"GroupRatio":                     `{"default":1,"pro":2.5}`,
+			setting.GroupCategoriesOptionKey: `{"pro":"Internal tools"}`,
+		},
+		map[string]string{"vip": "pro"},
+	))
+	require.NoError(t, db.Where(&Option{Key: setting.GroupCategoriesOptionKey}).First(&categoryOption).Error)
+	assert.JSONEq(t, `{"pro":"Internal tools"}`, categoryOption.Value)
+	assert.Equal(t, map[string]string{"pro": "Internal tools"}, setting.GetGroupCategories())
 	selected, err := inFlight.Select(0, nil)
 	require.NoError(t, err)
 	require.NotNil(t, selected)

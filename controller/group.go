@@ -61,6 +61,22 @@ func GetUserGroups(c *gin.Context) {
 			"order": len(orderedGroups),
 		}
 	}
+	if userId > 0 {
+		categories := setting.GetGroupCategories()
+		assignments := make(map[string]string)
+		for group := range usableGroups {
+			if category := categories[group]; category != "" {
+				assignments[group] = category
+			}
+		}
+		vendors, err := model.GetGroupVendors(assignments)
+		if err != nil {
+			common.SysError(common.LogText("failed to load group vendors: %s", err.Error()))
+		}
+		for group, vendor := range vendors {
+			usableGroups[group]["vendor"] = vendor
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",

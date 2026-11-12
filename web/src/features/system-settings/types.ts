@@ -349,6 +349,7 @@ export type BillingSettings = {
   GroupRatio: string
   GroupRatioSchedule: string
   GroupDescriptions: string
+  GroupCategories: string
   UserUsableGroups: string
   GroupGroupRatio: string
   AutoGroups: string

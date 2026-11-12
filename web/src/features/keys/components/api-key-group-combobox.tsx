@@ -42,6 +42,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { useMediaQuery } from '@/hooks'
+import type { GroupVendor } from '@/lib/api'
+import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
 import {
@@ -54,6 +56,7 @@ export type ApiKeyGroupOption = {
   value: string
   label: string
   desc?: string
+  vendor?: GroupVendor
   ratio?: number | string
   baseRatio?: number
   scheduleEnabled?: boolean
@@ -85,19 +88,51 @@ export function ApiKeyGroupCombobox({
   const selectedOption = options.find((option) => option.value === value)
   const isAutoSelected = selectedOption?.value === 'auto'
 
-  const filteredOptions = useMemo(() => {
+  const { sections, hasVendors } = useMemo(() => {
     const search = searchValue.trim().toLowerCase()
-    if (!search) return options
-
-    return options.filter((option) => {
-      const ratioText = String(option.ratio ?? '').toLowerCase()
-      return (
-        option.value.toLowerCase().includes(search) ||
-        option.label.toLowerCase().includes(search) ||
-        option.desc?.toLowerCase().includes(search) ||
-        ratioText.includes(search)
-      )
-    })
+    const sections = new Map<
+      number,
+      { vendor: GroupVendor; options: ApiKeyGroupOption[] }
+    >()
+    const otherOptions: ApiKeyGroupOption[] = []
+    let hasVendors = false
+    for (const option of options) {
+      if (option.vendor) hasVendors = true
+      if (
+        search &&
+        !option.value.toLowerCase().includes(search) &&
+        !option.label.toLowerCase().includes(search) &&
+        !option.desc?.toLowerCase().includes(search) &&
+        !String(option.ratio ?? '')
+          .toLowerCase()
+          .includes(search) &&
+        !option.vendor?.name.toLowerCase().includes(search)
+      ) {
+        continue
+      }
+      if (!option.vendor) {
+        otherOptions.push(option)
+        continue
+      }
+      const section = sections.get(option.vendor.id)
+      if (section) {
+        section.options.push(option)
+      } else {
+        sections.set(option.vendor.id, {
+          vendor: option.vendor,
+          options: [option],
+        })
+      }
+    }
+    return {
+      sections: [
+        ...sections.values(),
+        ...(otherOptions.length > 0
+          ? [{ vendor: undefined, options: otherOptions }]
+          : []),
+      ],
+      hasVendors,
+    }
   }, [options, searchValue])
 
   const handleSelect = (selectedValue: string) => {
@@ -134,6 +169,14 @@ export function ApiKeyGroupCombobox({
       >
         {isAutoSelected && (
           <AutoGroupFlowBorder shouldReduceMotion={shouldReduceMotion} />
+        )}
+        {selectedOption?.vendor && (
+          <span aria-hidden='true' className='shrink-0'>
+            {getLobeIcon(
+              selectedOption.vendor.icon || selectedOption.vendor.name,
+              16
+            )}
+          </span>
         )}
         <span className='flex min-w-0 flex-1 items-center justify-between gap-2 overflow-hidden sm:gap-3'>
           <span className='min-w-0'>
@@ -185,61 +228,80 @@ export function ApiKeyGroupCombobox({
           />
           <CommandList className='max-h-[360px]'>
             <CommandEmpty>{t('No group found.')}</CommandEmpty>
-            <CommandGroup>
-              {filteredOptions.map((option) => {
-                const isAutoOption = option.value === 'auto'
-
-                return (
-                  <CommandItem
-                    key={option.value}
-                    value={option.value}
-                    data-auto-group-effect={isAutoOption ? 'option' : undefined}
-                    onSelect={() => handleSelect(option.value)}
-                    className={cn(
-                      'data-[selected=true]:bg-muted items-start gap-3 rounded-lg px-3 py-3 transition-colors',
-                      isAutoOption &&
-                        cn(
-                          AUTO_GROUP_FRAME_CLASS_NAME,
-                          'border-primary/35 data-[selected=true]:border-primary/55'
-                        )
-                    )}
-                  >
-                    {isAutoOption && (
-                      <AutoGroupFlowBorder
-                        shouldReduceMotion={shouldReduceMotion}
-                      />
-                    )}
-                    <Check
-                      aria-hidden='true'
-                      className={cn(
-                        'mt-0.5 size-4',
-                        value === option.value ? 'opacity-100' : 'opacity-0'
-                      )}
-                    />
-                    <span className='min-w-0 flex-1'>
-                      <span className='block truncate font-medium'>
-                        {option.label}
+            {sections.map(({ vendor, options: groupOptions }) => (
+              <CommandGroup
+                key={vendor?.id ?? 'other'}
+                value={vendor ? String(vendor.id) : 'other'}
+                heading={
+                  vendor ? (
+                    <span className='flex min-w-0 items-center gap-2'>
+                      <span aria-hidden='true' className='shrink-0'>
+                        {getLobeIcon(vendor.icon || vendor.name, 16)}
                       </span>
-                      {option.desc && (
-                        <span className='text-muted-foreground block truncate text-xs'>
-                          {option.desc}
-                        </span>
-                      )}
+                      <span className='truncate'>{vendor.name}</span>
                     </span>
-                    <span className='flex items-center gap-1.5'>
-                      {option.scheduleEnabled && (
-                        <ScheduleIndicator active={option.scheduleActive} />
+                  ) : (
+                    hasVendors && t('Other groups')
+                  )
+                }
+              >
+                {groupOptions.map((option) => {
+                  const isAutoOption = option.value === 'auto'
+
+                  return (
+                    <CommandItem
+                      key={option.value}
+                      value={option.value}
+                      data-auto-group-effect={
+                        isAutoOption ? 'option' : undefined
+                      }
+                      onSelect={() => handleSelect(option.value)}
+                      className={cn(
+                        'data-[selected=true]:bg-muted items-start gap-3 rounded-lg px-3 py-3 transition-colors',
+                        isAutoOption &&
+                          cn(
+                            AUTO_GROUP_FRAME_CLASS_NAME,
+                            'border-primary/35 data-[selected=true]:border-primary/55'
+                          )
                       )}
-                      <GroupRatioBadge
-                        ratio={option.ratio}
-                        isAuto={isAutoOption}
-                        shouldReduceMotion={shouldReduceMotion}
+                    >
+                      {isAutoOption && (
+                        <AutoGroupFlowBorder
+                          shouldReduceMotion={shouldReduceMotion}
+                        />
+                      )}
+                      <Check
+                        aria-hidden='true'
+                        className={cn(
+                          'mt-0.5 size-4',
+                          value === option.value ? 'opacity-100' : 'opacity-0'
+                        )}
                       />
-                    </span>
-                  </CommandItem>
-                )
-              })}
-            </CommandGroup>
+                      <span className='min-w-0 flex-1'>
+                        <span className='block truncate font-medium'>
+                          {option.label}
+                        </span>
+                        {option.desc && (
+                          <span className='text-muted-foreground block truncate text-xs'>
+                            {option.desc}
+                          </span>
+                        )}
+                      </span>
+                      <span className='flex items-center gap-1.5'>
+                        {option.scheduleEnabled && (
+                          <ScheduleIndicator active={option.scheduleActive} />
+                        )}
+                        <GroupRatioBadge
+                          ratio={option.ratio}
+                          isAuto={isAutoOption}
+                          shouldReduceMotion={shouldReduceMotion}
+                        />
+                      </span>
+                    </CommandItem>
+                  )
+                })}
+              </CommandGroup>
+            ))}
           </CommandList>
         </Command>
       </PopoverContent>

@@ -111,7 +111,9 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { toIntlLocale } from '@/i18n/languages'
+import type { GroupVendor } from '@/lib/api'
 import { formatNumber } from '@/lib/format'
+import { getLobeIcon } from '@/lib/lobe-icon'
 import { cn } from '@/lib/utils'
 
 import { safeJsonParse } from '../utils/json-parser'
@@ -143,6 +145,8 @@ type GroupRatioVisualEditorProps = {
   groupRatioSchedule: string
   topupGroupRatio: string
   groupDescriptions: string
+  groupCategories: string
+  vendors?: readonly GroupVendor[]
   userUsableGroups: string
   groupGroupRatio: string
   autoGroups: string
@@ -345,6 +349,8 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupRatioSchedule,
   topupGroupRatio,
   groupDescriptions,
+  groupCategories,
+  vendors,
   userUsableGroups,
   groupGroupRatio,
   autoGroups,
@@ -445,6 +451,8 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
           groupRatio={groupRatio}
           groupRatioSchedule={groupRatioSchedule}
           groupDescriptions={groupDescriptions}
+          groupCategories={groupCategories}
+          vendors={vendors}
           groupOrder={groupOrder}
           onGroupRename={onGroupRename}
           userUsableGroups={userUsableGroups}
@@ -555,6 +563,8 @@ type GroupPricingTableProps = {
   groupRatio: string
   groupRatioSchedule: string
   groupDescriptions: string
+  groupCategories: string
+  vendors?: readonly GroupVendor[]
   userUsableGroups: string
   topupGroupRatio: string
   groupOrder: string
@@ -567,6 +577,8 @@ function GroupPricingTable({
   groupRatio,
   groupRatioSchedule,
   groupDescriptions,
+  groupCategories,
+  vendors,
   userUsableGroups,
   topupGroupRatio,
   groupOrder,
@@ -587,6 +599,43 @@ function GroupPricingTable({
   )
   const [scheduleGroupId, setScheduleGroupId] = useState<string | null>(null)
   const editingGroupNameRef = useRef<Record<string, string>>({})
+  const categories = useMemo(
+    () =>
+      new Map(
+        Object.entries(parseUsableMap(groupCategories) ?? {}).filter(
+          ([, category]) => typeof category === 'string'
+        )
+      ),
+    [groupCategories]
+  )
+  const { vendorOptions, vendorValuesByName } = useMemo(() => {
+    const vendorOptions = (vendors ?? []).map((vendor) => ({
+      value: `vendor:${vendor.id}`,
+      label: vendor.name,
+      icon: getLobeIcon(vendor.icon || vendor.name, 16),
+    }))
+    return {
+      vendorOptions: [
+        { value: 'none', label: t('No vendor') },
+        ...vendorOptions,
+      ],
+      vendorValuesByName: new Map(
+        vendorOptions.map((option) => [
+          option.label.toLowerCase(),
+          option.value,
+        ])
+      ),
+    }
+  }, [t, vendors])
+  const updateCategories = useCallback(
+    (next: Map<string, string>) => {
+      onChange(
+        'GroupCategories',
+        JSON.stringify(Object.fromEntries(next), null, 2)
+      )
+    },
+    [onChange]
+  )
   const schedules = useMemo(
     () => parseGroupRatioSchedules(groupRatioSchedule),
     [groupRatioSchedule]
@@ -690,9 +739,15 @@ function GroupPricingTable({
           'GroupRatioSchedule',
           removeGroupRatioSchedule(groupRatioSchedule, removed.name)
         )
+        const name = removed.name.trim()
+        if (categories.has(name)) {
+          const nextCategories = new Map(categories)
+          nextCategories.delete(name)
+          updateCategories(nextCategories)
+        }
       }
     },
-    [emitRows, groupRatioSchedule, onChange, rows]
+    [categories, emitRows, groupRatioSchedule, onChange, rows, updateCategories]
   )
 
   const moveRow = useCallback(
@@ -863,6 +918,18 @@ function GroupPricingTable({
                           if (nextSchedule !== groupRatioSchedule) {
                             onChange('GroupRatioSchedule', nextSchedule)
                           }
+                          const source = previousName.trim()
+                          const category = categories.get(source)
+                          if (
+                            category !== undefined &&
+                            nextName &&
+                            !categories.has(nextName)
+                          ) {
+                            const nextCategories = new Map(categories)
+                            nextCategories.delete(source)
+                            nextCategories.set(nextName, category)
+                            updateCategories(nextCategories)
+                          }
                         }}
                         aria-invalid={duplicateNames.includes(row.name.trim())}
                       />
@@ -944,6 +1011,39 @@ function GroupPricingTable({
                         }
                       />
                     ),
+                  },
+                  {
+                    id: 'vendor',
+                    header: t('Vendor'),
+                    className: 'min-w-44',
+                    cell: (row) => {
+                      const name = row.name.trim()
+                      const assignment = categories.get(name)?.trim() ?? ''
+                      const vendorValue = assignment.startsWith('vendor:')
+                        ? vendorOptions.find(
+                            (option) => option.value === assignment
+                          )?.value
+                        : vendorValuesByName.get(assignment.toLowerCase())
+                      return (
+                        <Combobox
+                          options={vendorOptions}
+                          value={vendorValue ?? null}
+                          placeholder={t('Select vendor')}
+                          aria-label={`${row.name} · ${t('Vendor')}`}
+                          disabled={!name || vendors === undefined}
+                          showSelectedIcon
+                          onValueChange={(value) => {
+                            const nextCategories = new Map(categories)
+                            if (value && value !== 'none') {
+                              nextCategories.set(name, value)
+                            } else {
+                              nextCategories.delete(name)
+                            }
+                            updateCategories(nextCategories)
+                          }}
+                        />
+                      )
+                    },
                   },
                   {
                     id: 'actions',

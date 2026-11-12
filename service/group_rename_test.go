@@ -137,6 +137,7 @@ func setGroupRenameOptionMap(t *testing.T, values map[string]string) {
 func TestPrepareGroupSettingsUpdateRenamesOptionBackedReferences(t *testing.T) {
 	setGroupRenameOptionMap(t, map[string]string{
 		"GroupRatio":      `{"default":1,"vip":2}`,
+		"GroupCategories": `{"default":"OpenAI","vip":"Internal tools"}`,
 		"GroupGroupRatio": `{"vip":{"default":0.8},"default":{"vip":1.2}}`,
 		"AutoGroups":      `["vip","default"]`,
 		"group_ratio_setting.group_special_usable_group": `{"vip":{"+:vip":"VIP","-:default":""}}`,
@@ -153,6 +154,7 @@ func TestPrepareGroupSettingsUpdateRenamesOptionBackedReferences(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, map[string]string{"vip": "pro"}, renames)
+	assert.JSONEq(t, `{"default":"OpenAI","pro":"Internal tools"}`, updates["GroupCategories"])
 	assert.JSONEq(t, `{"pro":{"default":0.8},"default":{"pro":1.2}}`, updates["GroupGroupRatio"])
 	assert.JSONEq(t, `["pro","default"]`, updates["AutoGroups"])
 	assert.JSONEq(t, `{"pro":{"+:pro":"VIP","-:default":""}}`, updates["group_ratio_setting.group_special_usable_group"])

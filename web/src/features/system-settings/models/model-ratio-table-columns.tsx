@@ -178,13 +178,12 @@ export function buildModelRatioColumns({
               <PriceChangeSummary row={row.original} />
             ) : null}
             {issueText ? (
-              <TruncatedCell
-                tabIndex={0}
-                tooltipContent={issueText}
-                className='text-muted-foreground text-xs'
+              <span
+                className='text-muted-foreground truncate text-xs'
+                title={issueText}
               >
                 {issueText}
-              </TruncatedCell>
+              </span>
             ) : null}
           </div>
         )

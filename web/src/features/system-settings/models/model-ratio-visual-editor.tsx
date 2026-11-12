@@ -57,6 +57,7 @@ import {
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { splitPluginBillingExprKey } from '@/features/pricing/lib/plugin-pricing'
 import { useMediaQuery } from '@/hooks'
+import { cn } from '@/lib/utils'
 
 import { safeJsonParse } from '../utils/json-parser'
 import type { PricingMode } from './model-pricing-core'
@@ -124,10 +125,10 @@ export type ModelRatioVisualEditorHandle = {
 const STORAGE_KEY = 'model-ratio-column-visibility'
 const MODEL_COLUMN_WIDTHS: Record<string, string> = {
   select: 'w-9',
-  name: 'w-[300px]',
+  name: 'w-auto',
   billingMode: 'w-[120px]',
   priceSummary: 'w-[300px]',
-  actions: 'w-auto',
+  actions: 'w-24',
 }
 
 const ModelRatioVisualEditorComponent = forwardRef<
@@ -673,6 +674,8 @@ const ModelRatioVisualEditorComponent = forwardRef<
       return row.original.name.toLowerCase().includes(searchValue)
     },
   })
+  const showBillingMode = table.getColumn('billingMode')?.getIsVisible()
+  const showPriceSummary = table.getColumn('priceSummary')?.getIsVisible()
 
   const persistPricingData = useCallback(
     (data: ModelRatioData, targetNames: string[] = [data.name]) => {
@@ -860,7 +863,12 @@ const ModelRatioVisualEditorComponent = forwardRef<
               table={table}
               containerClassName='min-h-0 flex-1 rounded-md'
               tableContainerClassName='h-full'
-              tableClassName='min-w-[852px] table-fixed'
+              tableClassName={cn('table-fixed', {
+                'min-w-[232px]': !showBillingMode && !showPriceSummary,
+                'min-w-[552px]': showBillingMode && !showPriceSummary,
+                'min-w-[732px]': !showBillingMode && showPriceSummary,
+                'min-w-[852px]': showBillingMode && showPriceSummary,
+              })}
               tableHeaderClassName='[&_tr]:border-b-0'
               splitHeaderScrollClassName='h-full'
               bodyContainerClassName='[scrollbar-gutter:stable]'

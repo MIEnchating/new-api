@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
@@ -1128,6 +1129,55 @@ func TestVendorManagementDatabaseMatrix(t *testing.T) {
 				t.Skip("set " + dialect.env)
 			}
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
+
+			t.Run("user_groups_resolve_vendor_names_and_icons", func(t *testing.T) {
+				oldCategories, err := common.Marshal(setting.GetGroupCategories())
+				require.NoError(t, err)
+				oldRatios := ratio_setting.GroupRatio2JSONString()
+				oldUsable := setting.UserUsableGroups2JSONString()
+				t.Cleanup(func() {
+					require.NoError(t, setting.UpdateGroupCategories(string(oldCategories)))
+					require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(oldRatios))
+					require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(oldUsable))
+				})
+				require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"vip":2,"hidden":1}`))
+				require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default","vip":"VIP"}`))
+				vendor := model.Vendor{Name: "Group Provider", Icon: "OpenAI"}
+				require.NoError(t, vendor.Insert())
+				user := model.User{Username: "vendor-groups-user", Group: "default"}
+				require.NoError(t, db.Create(&user).Error)
+				getVendors := func(userID int, path string) map[string]struct{ Vendor *model.VendorDisplay } {
+					var response struct {
+						Success bool
+						Data    map[string]struct{ Vendor *model.VendorDisplay }
+					}
+					recorder := modelManagementRequest(t, func(c *gin.Context) {
+						if userID > 0 {
+							c.Set("id", userID)
+						}
+						GetUserGroups(c)
+					}, http.MethodGet, path, nil, &response)
+					require.Equal(t, http.StatusOK, recorder.Code)
+					require.True(t, response.Success)
+					return response.Data
+				}
+				require.NoError(t, setting.UpdateGroupCategories(fmt.Sprintf(
+					`{"default":" group provider ","vip":"vendor:%d","hidden":"vendor:%d"}`, vendor.Id, vendor.Id,
+				)))
+				groups := getVendors(user.Id, "/api/user/self/groups")
+				want := &model.VendorDisplay{ID: vendor.Id, Name: "Group Provider", Icon: "OpenAI"}
+				assert.Equal(t, want, groups["default"].Vendor)
+				assert.Equal(t, want, groups["vip"].Vendor)
+				assert.NotContains(t, groups, "hidden")
+				assert.Nil(t, getVendors(0, "/api/user/groups")["default"].Vendor)
+
+				require.NoError(t, setting.UpdateGroupCategories(fmt.Sprintf(`{"vip":"vendor:%d"}`, vendor.Id)))
+				vendor.Name, vendor.Icon = "Renamed Provider", "Claude.Color"
+				require.NoError(t, vendor.Update())
+				assert.Equal(t, &model.VendorDisplay{ID: vendor.Id, Name: vendor.Name, Icon: vendor.Icon}, getVendors(user.Id, "/api/user/self/groups")["vip"].Vendor)
+				require.NoError(t, vendor.Delete())
+				assert.Nil(t, getVendors(user.Id, "/api/user/self/groups")["vip"].Vendor)
+			})
 
 			t.Run("pricing_reads_keep_default_brands_without_writing_vendors", func(t *testing.T) {
 				channel := model.Channel{Name: "Vendor fixture", Type: 1, Status: common.ChannelStatusEnabled}

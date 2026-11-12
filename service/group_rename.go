@@ -22,27 +22,29 @@ type GroupRename struct {
 
 var groupSettingsOptionKeys = map[string]struct{}{
 	"GroupRatio": {},
-	ratio_setting.GroupRatioScheduleOptionKey: {},
-	"TopupGroupRatio":                         {},
-	"GroupDescriptions":                       {},
-	"UserUsableGroups":                        {},
-	"GroupGroupRatio":                         {},
-	"AutoGroups":                              {},
-	"GroupOrder":                              {},
-	"MaxTokenAutoGroups":                      {},
-	"DefaultUseAutoGroup":                     {},
+	ratio_setting.GroupRatioScheduleOptionKey:        {},
+	"TopupGroupRatio":                                {},
+	"GroupDescriptions":                              {},
+	setting.GroupCategoriesOptionKey:                 {},
+	"UserUsableGroups":                               {},
+	"GroupGroupRatio":                                {},
+	"AutoGroups":                                     {},
+	"GroupOrder":                                     {},
+	"MaxTokenAutoGroups":                             {},
+	"DefaultUseAutoGroup":                            {},
 	"group_ratio_setting.group_special_usable_group": {},
 }
 
 var groupReferenceOptionKinds = map[string]string{
 	"GroupRatio": "map",
-	ratio_setting.GroupRatioScheduleOptionKey: "map",
-	"TopupGroupRatio":                         "map",
-	"GroupDescriptions":                       "map",
-	"UserUsableGroups":                        "map",
-	"GroupGroupRatio":                         "nested_map",
-	"AutoGroups":                              "array",
-	"GroupOrder":                              "array",
+	ratio_setting.GroupRatioScheduleOptionKey:        "map",
+	"TopupGroupRatio":                                "map",
+	"GroupDescriptions":                              "map",
+	setting.GroupCategoriesOptionKey:                 "map",
+	"UserUsableGroups":                               "map",
+	"GroupGroupRatio":                                "nested_map",
+	"AutoGroups":                                     "array",
+	"GroupOrder":                                     "array",
 	"group_ratio_setting.group_special_usable_group": "special_map",
 	"ChannelRouteCooldownExcludedGroups":             "array",
 	"ChannelRouteGroupExclusions":                    "map",
@@ -191,6 +193,8 @@ func validateGroupSettingValues(values map[string]string) error {
 			err = ratio_setting.CheckGroupRatioSchedule(value)
 		case "GroupDescriptions":
 			_, err = setting.ParseGroupDescriptions(value)
+		case setting.GroupCategoriesOptionKey:
+			_, err = setting.ParseGroupCategories(value)
 		case "GroupOrder":
 			_, err = setting.ParseGroupOrder(value)
 		case "MaxTokenAutoGroups":

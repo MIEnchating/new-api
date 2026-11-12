@@ -37,6 +37,7 @@ import { GroupRatioForm } from '../group-ratio-form'
 const defaults = {
   GroupRatioSchedule: '{}',
   GroupDescriptions: '{}',
+  GroupCategories: '{}',
   GroupOrder: '[]',
   GroupRatio: '{"default":1,"vip":0.8}',
   TopupGroupRatio: '{"vip":1.2}',
@@ -51,6 +52,7 @@ const defaults = {
 const schema = z.object({
   GroupRatioSchedule: z.string(),
   GroupDescriptions: z.string(),
+  GroupCategories: z.string(),
   GroupOrder: z.string(),
   GroupRatio: z.string(),
   TopupGroupRatio: z.string(),
@@ -77,6 +79,10 @@ function Fixture(props: {
       <div ref={setActions} />
       <GroupRatioForm
         form={form}
+        vendors={[
+          { id: 12, name: 'OpenAI', icon: 'OpenAI' },
+          { id: 13, name: 'Anthropic', icon: 'Claude.Color' },
+        ]}
         onGroupRename={() => {}}
         onSave={props.onSave ?? (async () => {})}
         isSaving={props.isSaving ?? false}
@@ -86,6 +92,67 @@ function Fixture(props: {
 }
 
 describe('group settings workspace', () => {
+  it('selects an existing vendor and saves its ID across editor modes', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (_values: typeof defaults) => {})
+    render(
+      <Fixture
+        onSave={onSave}
+        initial={{ GroupCategories: '{"default":"OpenAI","vip":"openai"}' }}
+      />
+    )
+
+    const vendor = screen.getByRole('combobox', { name: 'vip · Vendor' })
+    expect(vendor).toHaveValue('OpenAI')
+    await user.click(vendor)
+    await user.type(vendor, 'anth')
+    await user.click(await screen.findByRole('option', { name: 'Anthropic' }))
+    await user.click(screen.getByRole('button', { name: 'Switch to JSON' }))
+    await user.click(screen.getByRole('button', { name: 'Switch to Visual' }))
+    expect(screen.getByRole('combobox', { name: 'vip · Vendor' })).toHaveValue(
+      'Anthropic'
+    )
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    const saved = onSave.mock.calls[0][0]
+    expect(JSON.parse(saved.GroupCategories)).toEqual({
+      default: 'OpenAI',
+      vip: 'vendor:13',
+    })
+    expect(saved.GroupRatio).toBe(defaults.GroupRatio)
+    expect(saved.UserUsableGroups).toBe(defaults.UserUsableGroups)
+  })
+
+  it('keeps the vendor assigned when a group is renamed', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (_values: typeof defaults) => {})
+    render(
+      <Fixture
+        onSave={onSave}
+        initial={{ GroupCategories: '{"vip":"vendor:13"}' }}
+      />
+    )
+
+    const name = screen.getByDisplayValue('vip')
+    await user.clear(name)
+    await user.type(name, 'pro')
+    await user.tab()
+    expect(screen.getByRole('combobox', { name: 'pro · Vendor' })).toHaveValue(
+      'Anthropic'
+    )
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
+
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(JSON.parse(onSave.mock.calls[0][0].GroupCategories)).toEqual({
+      pro: 'vendor:13',
+    })
+  })
+
   it('filters by description and clears search without discarding edits', async () => {
     const user = userEvent.setup()
     render(<Fixture />)
