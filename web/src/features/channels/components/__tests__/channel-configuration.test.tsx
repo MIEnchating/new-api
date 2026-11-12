@@ -3435,7 +3435,7 @@ test('a login plugin saves without a key, then logs in on the new channel', asyn
   })
   expect(post).toHaveBeenNthCalledWith(
     1,
-    '/api/channel',
+    '/api/channel/',
     expect.objectContaining({
       mode: 'single',
       channel: expect.objectContaining({ type: 61, key: null }),
