@@ -353,14 +353,14 @@ export function extractUsage(){return {old_units:2};}
 		{
 			name:  "removed usage fact cannot fall back to a cheaper tier",
 			modes: map[string]string{"declared-model": "tiered_expr"},
-			exprs: map[string]string{"declared-model": `tier("base", (u("old_units") ?? 0) * 2)`},
+			exprs: map[string]string{"declared-model": `tier("base", (u("old_units") ?? 0.0) * 2)`},
 		},
 		{
 			name:       "declared optional usage preserves the configured default",
 			modes:      map[string]string{"declared-model": "tiered_expr"},
-			exprs:      map[string]string{"declared-model": `tier("base", (u("old_units") ?? 0) * 2)`},
+			exprs:      map[string]string{"declared-model": `tier("base", (u("old_units") ?? 0.0) * 2)`},
 			wantTiered: true,
-			wantExpr:   `tier("base", (u("old_units") ?? 0) * 2)`,
+			wantExpr:   `tier("base", (u("old_units") ?? 0.0) * 2)`,
 			source:     strings.Replace(billingFallbackPlugin, `fetchMode:"per_task"`, `fetchMode:"per_task", usageSchema:{old_units:{type:"number",unit:"count"}}`, 1),
 		},
 		{
