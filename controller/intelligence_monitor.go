@@ -1029,6 +1029,11 @@ func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID 
 	isStream := config.Stream == nil || *config.Stream
 	requestCtx, cancel := intelligenceRequestContext(ctx, isStream)
 	defer cancel()
+	if requestCtx.Err() != nil {
+		row.Error = intelligenceFailureReason(requestCtx, testResult{}, false)
+		row.noRetry = true
+		return row
+	}
 	response := testChannelWithProbe(requestCtx, channel, userID, config.Model, config.Endpoint, isStream, &channelTestProbe{RequestID: row.RequestID, Group: config.Group, Prompt: question.Prompt})
 	if response.context != nil {
 		row.UpstreamRequestID = response.context.GetString(common.UpstreamRequestIdKey)
@@ -1039,7 +1044,7 @@ func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID 
 		(outcome.EndReason != relaycommon.StreamEndReasonNone && outcome.EndReason != relaycommon.StreamEndReasonDone && outcome.EndReason != relaycommon.StreamEndReasonEOF && outcome.EndReason != relaycommon.StreamEndReasonHandlerStop) ||
 		(outcome.Response != relaycommon.ResponseOutcomeUnknown && outcome.Response != relaycommon.ResponseOutcomeCompleted) ||
 		(outcome.ExpectsTerminal && outcome.Response != relaycommon.ResponseOutcomeCompleted))
-	if response.localErr != nil || response.newAPIError != nil || streamFailed {
+	if requestCtx.Err() != nil || response.localErr != nil || response.newAPIError != nil || streamFailed {
 		// Never persist upstream errors, which may contain credentials or internal URLs.
 		row.Error = intelligenceFailureReason(requestCtx, response, streamFailed)
 		row.noRetry = requestCtx.Err() != nil ||

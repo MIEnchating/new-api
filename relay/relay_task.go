@@ -306,11 +306,20 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		} else {
 			facts = provider.ExtractUsageFacts(c, info)
 		}
-		// A saved expression may outlive a provider meter. Retired fields must
-		// still be supplied; declared optional facts retain expression defaults.
-		if pinnedPlugin.Plugin != nil {
+		// These built-in plugins replaced their legacy video meters. A stored
+		// expression still using one needs an explicit price update if the
+		// executing profile and request no longer provide it.
+		switch pluginKey {
+		case "vertex-ai", "doubao", "kling", "vidu", "sora":
+			if pinnedPlugin.Plugin == nil {
+				break
+			}
 			schema, _ := pinnedPlugin.Plugin.Meta.UsageForModels(info.UpstreamModelName, modelName)
-			for key := range billingexpr.UsedUsageKeys(exprStr) {
+			usedKeys := billingexpr.UsedUsageKeys(exprStr)
+			for _, key := range []string{"seconds", "resolution"} {
+				if !usedKeys[key] {
+					continue
+				}
 				_, declared := schema[key]
 				if value, present := facts[key]; !declared && (!present || value == nil) {
 					return nil, service.TaskErrorWrapperLocal(fmt.Errorf("task pricing requires unavailable usage fact %s; update the provider expression", key), "model_price_error", http.StatusBadRequest)

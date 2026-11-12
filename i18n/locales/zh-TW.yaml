@@ -348,5 +348,4 @@ invoice.ready_body: "您的發票已開立。抬頭：{{.Title}}；發票號碼�
 invoice.ready_intro: "您的發票已開立，請前往開票申請頁面，開啟申請詳情並點選「下載發票」。"
 invoice.ready_hint: "本通知不附帶發票檔案，請登入您的帳戶手動下載。"
 
-relay.legacy_second_price_needs_migration: "舊版按秒價格需要遷移，請聯絡站點管理員。"
 channel.notify_scheduled_subject: "渠道「{{.Name}}」(#{{.Id}}) 外掛通知"

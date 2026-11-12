@@ -348,5 +348,4 @@ invoice.ready_body: "您的发票已开具。抬头：{{.Title}}；发票号码�
 invoice.ready_intro: "您的发票已开具，请前往开票申请页面，打开申请详情并点击“下载发票”。"
 invoice.ready_hint: "本通知不附带发票文件，请登录您的账户手动下载。"
 
-relay.legacy_second_price_needs_migration: "旧版按秒价格需要迁移，请联系站点管理员。"
 channel.notify_scheduled_subject: "渠道“{{.Name}}” (#{{.Id}}) 插件通知"

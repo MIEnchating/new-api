@@ -351,9 +351,10 @@ export function extractUsage(){return {old_units:2};}
 `,
 		},
 		{
-			name:  "removed usage fact cannot fall back to a cheaper tier",
-			modes: map[string]string{"declared-model": "tiered_expr"},
-			exprs: map[string]string{"declared-model": `tier("base", (u("old_units") ?? 0.0) * 2)`},
+			name:   "removed usage fact cannot fall back to a cheaper tier",
+			modes:  map[string]string{"declared-model": "tiered_expr"},
+			exprs:  map[string]string{"declared-model": `tier("base", (u("seconds") ?? 0.0) * 2)`},
+			source: strings.Replace(billingFallbackPlugin, `key:"bill-fallback"`, `key:"kling"`, 1),
 		},
 		{
 			name:       "declared optional usage preserves the configured default",

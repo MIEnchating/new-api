@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"math"
 	"strconv"
 	"strings"
 )
@@ -31,8 +32,12 @@ type OpenAIVideo struct {
 }
 
 func (m *OpenAIVideo) SetProgressStr(progress string) {
-	progress = strings.TrimSuffix(progress, "%")
-	m.Progress, _ = strconv.Atoi(progress)
+	progress = strings.TrimSuffix(strings.TrimSpace(progress), "%")
+	value, err := strconv.ParseFloat(progress, 64)
+	m.Progress = 0
+	if err == nil && !math.IsNaN(value) && !math.IsInf(value, 0) {
+		m.Progress = int(math.Round(min(100, max(0, value))))
+	}
 }
 func (m *OpenAIVideo) SetMetadata(k string, v any) {
 	if m.Metadata == nil {
