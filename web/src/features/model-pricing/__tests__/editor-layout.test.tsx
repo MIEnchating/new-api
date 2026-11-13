@@ -374,18 +374,19 @@ function renderModelList(modelNames?: string[]) {
   return client
 }
 
-it('keeps upstream table sizing and visible column alignment when optional columns are shown', async () => {
+it('sizes the table to its visible columns and keeps headers aligned when optional columns change', async () => {
   renderModelList()
   const user = userEvent.setup()
   const table = screen.getByRole('table')
-  expect(table).toHaveClass('min-w-[852px]', 'table-fixed')
+  expect(table).toHaveClass('min-w-[232px]', 'table-fixed')
   expect(table.querySelectorAll('col')).toHaveLength(3)
   expect(within(table).getAllByRole('columnheader')).toHaveLength(3)
   await user.click(screen.getByRole('button', { name: 'View' }))
   await user.click(screen.getByRole('menuitemcheckbox', { name: 'Mode' }))
   await user.keyboard('{Escape}')
   expect(table.querySelectorAll('col')).toHaveLength(4)
-  expect(table).toHaveClass('min-w-[852px]')
+  expect(within(table).getAllByRole('columnheader')).toHaveLength(4)
+  expect(table).toHaveClass('min-w-[552px]')
   await user.click(screen.getByRole('button', { name: 'View' }))
   await user.click(
     screen.getByRole('menuitemcheckbox', { name: 'Price summary' })
@@ -394,6 +395,20 @@ it('keeps upstream table sizing and visible column alignment when optional colum
   expect(table.querySelectorAll('col')).toHaveLength(5)
   expect(within(table).getAllByRole('columnheader')).toHaveLength(5)
   expect(table).toHaveClass('min-w-[852px]')
+  await user.click(screen.getByRole('button', { name: 'View' }))
+  await user.click(screen.getByRole('menuitemcheckbox', { name: 'Mode' }))
+  await user.keyboard('{Escape}')
+  expect(table.querySelectorAll('col')).toHaveLength(4)
+  expect(within(table).getAllByRole('columnheader')).toHaveLength(4)
+  expect(table).toHaveClass('min-w-[732px]')
+  await user.click(screen.getByRole('button', { name: 'View' }))
+  await user.click(
+    screen.getByRole('menuitemcheckbox', { name: 'Price summary' })
+  )
+  await user.keyboard('{Escape}')
+  expect(table.querySelectorAll('col')).toHaveLength(3)
+  expect(within(table).getAllByRole('columnheader')).toHaveLength(3)
+  expect(table).toHaveClass('min-w-[232px]')
 })
 
 it('reveals the complete model identifier on keyboard focus without widening the list', async () => {

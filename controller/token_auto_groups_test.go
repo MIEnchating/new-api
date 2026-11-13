@@ -338,6 +338,43 @@ func TestUserCanManageOwnSmartRoutingTemplates(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "personal", effective.RoutingTemplateID)
 	assert.Equal(t, "default", effective.GetGroupRoutes()[0].Group)
+
+	stored, err := model.GetUserSetting(user.Id, true)
+	require.NoError(t, err)
+	require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{
+		"enabled":   "false",
+		"templates": `[{"id":"reserved","name":"Global","enabled":false}]`,
+	}))
+	for _, tc := range []struct {
+		name  string
+		id    string
+		group string
+	}{
+		{"unauthorized group", "forbidden", "missing"},
+		{"global identifier collision", "reserved", "default"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := map[string]any{"templates": []any{map[string]any{
+				"id": tc.id, "name": "Rejected", "enabled": true,
+				"group_routes": []any{map[string]any{"group": tc.group, "priority": 1, "cooldown_seconds": 60}},
+			}}}
+			ctx, recorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodPut, "/api/token/smart-routing-templates", request, user.Id)
+			UpdateUserSmartRoutingTemplates(ctx)
+			assert.False(t, decodeAPIResponse(t, recorder).Success)
+			after, err := model.GetUserSetting(user.Id, true)
+			require.NoError(t, err)
+			assert.JSONEq(t, stored.SmartRoutingTemplates, after.SmartRoutingTemplates)
+		})
+	}
+
+	other := model.User{Username: "other-template-user", Group: "default", AffCode: "other-template-user"}
+	require.NoError(t, model.DB.Create(&other).Error)
+	ctx, recorder = newTokenAutoGroupsAuthenticatedContext(t, http.MethodGet, "/api/token/smart-routing-templates?owned=true", nil, other.Id)
+	GetTokenSmartRoutingTemplates(ctx)
+	response = decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	require.NoError(t, common.Unmarshal(response.Data, &ownedResponse))
+	assert.Empty(t, ownedResponse.Templates, "one user's templates must not be visible to another user")
 }
 
 func TestUpdateTokenGroupRoutesOnlyChangesRouteConfig(t *testing.T) {

@@ -173,6 +173,15 @@ func TestDoubaoImageSubmission(t *testing.T) {
 		{"5.0 flash layer decomposition at 1.5K", "doubao-seedream-5-0-flash-260915",
 			map[string]any{"image": reference, "layer_decomposition": true, "size": "1.5K", "output_format": "png"},
 			"image_to_image", nil, facts(map[string]any{"images_up_to_1_5k": float64(17), "input_images": float64(1), "layer_decomposition": true})},
+		{"5.5 generates a transparent image from text", "doubao-seedream-5-5-261028",
+			map[string]any{"prompt": "a glass cat", "background": "transparent", "size": "1K"},
+			"text_to_image", nil, facts(map[string]any{"images_up_to_1_5k": float64(1)})},
+		{"5.5 layer decomposition reserves the default max_images", "doubao-seedream-5-5-261028",
+			map[string]any{"image": reference, "layer_decomposition": true},
+			"image_to_image", nil, facts(map[string]any{"images_above_1_5k": float64(30), "input_images": float64(1), "layer_decomposition": true})},
+		{"5.5 layer decomposition reserves the requested max_images", "doubao-seedream-5-5-261028",
+			map[string]any{"image": reference, "layer_decomposition": true, "size": "1K", "layer_decomposition_options": map[string]any{"max_images": 100}},
+			"image_to_image", nil, facts(map[string]any{"images_up_to_1_5k": float64(100), "input_images": float64(1), "layer_decomposition": true})},
 		{"endpoint ids use the permissive profile", "ep-20260918-seedream",
 			map[string]any{"prompt": "a cat", "size": "4K", "sequential_image_generation": "auto"},
 			"text_to_image", nil, facts(map[string]any{"images_above_1_5k": float64(15)})},
@@ -240,6 +249,7 @@ func TestDoubaoImageSubmission(t *testing.T) {
 		layered := []string{"images_up_to_1_5k", "images_above_1_5k", "input_images", "layer_decomposition"}
 		oneTier := []string{"images_above_1_5k", "input_images"}
 		for name, usageKeys := range map[string][]string{
+			"doubao-seedream-5-5-261028":       layered,
 			"doubao-seedream-5-0-pro-260628":   layered,
 			"doubao-seedream-5-0-flash-260915": layered,
 			"doubao-seedream-5-0-lite-260128":  oneTier,
@@ -516,6 +526,8 @@ func TestDoubaoImageValidation(t *testing.T) {
 		{"output_format is an enum", pro, map[string]any{"prompt": "a cat", "output_format": "webp"}, "output_format must be png or jpeg"},
 		{"output_format follows the model", v40, map[string]any{"prompt": "a cat", "output_format": "png"}, "output_format is not supported"},
 		{"background is a string enum", pro, map[string]any{"prompt": "a cat", "image": reference, "background": true}, "background must be opaque or transparent"},
+		{"background auto needs native transparency", pro, map[string]any{"prompt": "a cat", "background": "auto"}, "background must be opaque or transparent"},
+		{"5.5 layer max_images is bounded", "doubao-seedream-5-5-261028", map[string]any{"image": reference, "layer_decomposition": true, "layer_decomposition_options": map[string]any{"max_images": 101}}, "max_images must be an integer between 2 and 100"},
 		{"transparent background needs exactly one input image", pro, map[string]any{"prompt": "a cat", "background": "transparent"}, "requires exactly one input image"},
 		{"transparent background rejects jpeg output", pro, map[string]any{"prompt": "a cat", "image": reference, "background": "transparent", "output_format": "jpeg"}, "cannot be combined with output_format jpeg"},
 		{"tools must be objects with a type", lite, map[string]any{"prompt": "a cat", "tools": []any{map[string]any{}}}, "tools must be an array of objects with a string type"},
@@ -723,6 +735,43 @@ func TestDoubaoImageResults(t *testing.T) {
 					assert.Equal(t, map[string]any{"images_up_to_1_5k": tc.want, "images_above_1_5k": float64(0)}, alibabaObject(t, value))
 				}
 			})
+		}
+	})
+
+	t.Run("layer output limits follow the selected model without double billing split payloads", func(t *testing.T) {
+		for _, tc := range []struct {
+			model   string
+			count   int
+			wantErr bool
+		}{
+			{pro, 18, true},
+			{"doubao-seedream-5-5-261028", 30, false},
+			{"doubao-seedream-5-5-261028", 100, false},
+			{"doubao-seedream-5-5-261028", 101, true},
+		} {
+			ctx := map[string]any{"model": tc.model, "upstreamModel": tc.model, "action": "image_to_image"}
+			images := make([]any, 0, tc.count*2)
+			for range tc.count {
+				images = append(images,
+					map[string]any{"url": first, "size": "1024x1024"},
+					map[string]any{"b64_json": "aW1hZ2U=", "size": "1024x1024"},
+				)
+			}
+			body := map[string]any{"data": images, "usage": map[string]any{"generated_images": tc.count}}
+			value, err := plugin.Engine.Call(t.Context(), "extractUsageOnSubmit", ctx, body)
+			if tc.wantErr {
+				require.Error(t, err, "%s count %d", tc.model, tc.count)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, map[string]any{"image_count": float64(tc.count)}, alibabaObject(t, value))
+			}
+			value, err = plugin.Engine.Call(t.Context(), "extractUsageOnComplete", ctx, map[string]any{"status": "SUCCESS"}, body)
+			if tc.wantErr {
+				require.Error(t, err, "%s count %d", tc.model, tc.count)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, map[string]any{"images_up_to_1_5k": float64(tc.count), "images_above_1_5k": float64(0)}, alibabaObject(t, value))
+			}
 		}
 	})
 

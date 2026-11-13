@@ -223,9 +223,21 @@ export function RatioSettingsCard({
   const [confirmOpen, setConfirmOpen] = useState(false)
   const pendingGroupRenames = useRef<GroupRenameRequest[]>([])
   const vendorsQuery = useQuery({
-    queryKey: vendorsQueryKeys.list(),
-    queryFn: async () =>
-      requireServerSuccess(await getVendors({ page_size: 1000 })),
+    queryKey: vendorsQueryKeys.list({ scope: 'group-categories' }),
+    queryFn: async () => {
+      const response = requireServerSuccess(
+        await getVendors({ p: 1, page_size: 100 })
+      )
+      const items = [...(response.data?.items ?? [])]
+      const pages = Math.ceil((response.data?.total ?? 0) / 100)
+      for (let page = 2; page <= pages; page++) {
+        const next = requireServerSuccess(
+          await getVendors({ p: page, page_size: 100 })
+        )
+        items.push(...(next.data?.items ?? []))
+      }
+      return items
+    },
     enabled: visibleTabs.includes('groups'),
   })
 
@@ -623,7 +635,7 @@ export function RatioSettingsCard({
           form={groupForm}
           onSave={saveGroupRatios}
           onGroupRename={trackGroupRename}
-          vendors={vendorsQuery.data?.data?.items}
+          vendors={vendorsQuery.data}
           isSaving={updateGroupSettings.isPending}
         />
       )

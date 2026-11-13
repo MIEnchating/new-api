@@ -55,16 +55,26 @@ import {
 import { useSidebarData } from '../use-sidebar-data'
 import { useSidebarView } from '../use-sidebar-view'
 
+const clients: QueryClient[] = []
+
 beforeEach(() => {
   vi.stubGlobal('localStorage', {
     getItem: () => null,
     setItem: () => undefined,
     removeItem: () => undefined,
   })
+  // Every root sidebar reads custom menu pages, including the visibility-only
+  // fixtures. Keep those requests local so a late unauthenticated response
+  // cannot reset the user installed by the next test.
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: [] },
+  })
 })
 
 afterEach(() => {
   cleanup()
+  for (const client of clients) client.clear()
+  clients.length = 0
   vi.unstubAllGlobals()
   useAuthStore.getState().auth.reset()
 })
@@ -73,6 +83,7 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  clients.push(client)
   client.setQueryData(['status'], {
     SidebarModulesAdmin: admin ? JSON.stringify(admin) : '',
   })
@@ -329,15 +340,16 @@ describe('model pricing badge', () => {
     role: number,
     issues: () => ModelPricingIssue[]
   ) {
-    const get = vi.spyOn(api, 'get').mockImplementation(async (url) => ({
+    const get = vi.mocked(api.get).mockImplementation(async (url) => ({
       data: {
         success: true,
-        data: url === '/api/option/model_pricing/issues' ? issues() : {},
+        data: url === '/api/option/model_pricing/issues' ? issues() : [],
       },
     }))
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })
+    clients.push(client)
     client.setQueryData(['status'], { SidebarModulesAdmin: '' })
     useAuthStore.getState().auth.setUser({ id: 1, username: 'root', role })
     const router = createRouter({
