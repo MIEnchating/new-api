@@ -129,6 +129,32 @@ func (token *Token) ResolveRoutingTemplate() (*Token, error) {
 	if token.RoutingTemplateID == "" {
 		return &effective, nil
 	}
+	if userSetting, err := GetUserSetting(token.UserId, false); err == nil && userSetting.SmartRoutingTemplates != "" {
+		var templates []operation_setting.SmartRoutingTemplate
+		if common.UnmarshalJsonStr(userSetting.SmartRoutingTemplates, &templates) == nil {
+			for _, template := range templates {
+				if template.ID != token.RoutingTemplateID || !template.Enabled {
+					continue
+				}
+				data, marshalErr := common.Marshal(template.GroupRoutes)
+				if marshalErr != nil {
+					return nil, marshalErr
+				}
+				config, routes, normalizeErr := NormalizeTokenGroupRouteConfig(string(data))
+				if normalizeErr != nil || len(EnabledTokenGroupRoutes(routes)) == 0 {
+					break
+				}
+				effective.Group = ""
+				effective.AutoGroups = ""
+				effective.CrossGroupRetry = false
+				effective.GroupRouteConfig = config
+				effective.GroupRouteSticky = template.GroupRouteSticky
+				effective.ModelLimitsEnabled = len(template.ModelLimits) > 0
+				effective.ModelLimits = strings.Join(template.ModelLimits, ",")
+				return &effective, nil
+			}
+		}
+	}
 	setting := operation_setting.CurrentSmartRoutingSetting()
 	if setting.Enabled {
 		for _, template := range setting.Templates {

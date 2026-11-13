@@ -13,6 +13,8 @@ import (
 )
 
 const SmartRoutingTemplateMaxCooldownSeconds = 31_536_000
+const DefaultMaxUserSmartRoutingTemplates = 10
+const MaxUserSmartRoutingTemplates = 100
 
 type SmartRoutingGroupRoute struct {
 	Group           string `json:"group"`
@@ -33,16 +35,19 @@ type SmartRoutingTemplate struct {
 	GroupRoutes      []SmartRoutingGroupRoute `json:"group_routes"`
 	GroupRouteSticky bool                     `json:"group_route_sticky"`
 	ModelLimits      []string                 `json:"model_limits,omitempty"`
+	UserOwned        bool                     `json:"user_owned,omitempty"`
 }
 
 type SmartRoutingSetting struct {
-	Enabled   bool                   `json:"enabled"`
-	Templates []SmartRoutingTemplate `json:"templates"`
+	Enabled          bool                   `json:"enabled"`
+	Templates        []SmartRoutingTemplate `json:"templates"`
+	MaxUserTemplates int                    `json:"max_user_templates"`
 }
 
 var smartRoutingSetting = SmartRoutingSetting{
-	Enabled:   false,
-	Templates: []SmartRoutingTemplate{},
+	Enabled:          false,
+	Templates:        []SmartRoutingTemplate{},
+	MaxUserTemplates: DefaultMaxUserSmartRoutingTemplates,
 }
 
 var smartRoutingRuntime atomic.Pointer[SmartRoutingSetting]
@@ -111,6 +116,16 @@ func UpdateSmartRoutingSetting(configMap map[string]string) error {
 			return errors.New("智能路由模板必须是 JSON 数组")
 		}
 		next.Templates = templates
+	}
+	if rawMaxUserTemplates, ok := configMap["max_user_templates"]; ok {
+		maxUserTemplates, err := strconv.Atoi(strings.TrimSpace(rawMaxUserTemplates))
+		if err != nil || maxUserTemplates < 1 || maxUserTemplates > MaxUserSmartRoutingTemplates {
+			return fmt.Errorf("用户智能路由模板数量必须在 1 到 %d 之间", MaxUserSmartRoutingTemplates)
+		}
+		next.MaxUserTemplates = maxUserTemplates
+	}
+	if next.MaxUserTemplates < 1 {
+		next.MaxUserTemplates = DefaultMaxUserSmartRoutingTemplates
 	}
 	if err := ValidateSmartRoutingTemplates(next.Templates); err != nil {
 		return err

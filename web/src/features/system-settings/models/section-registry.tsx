@@ -75,6 +75,8 @@ const MODELS_SECTIONS = [
             settings['smart_routing_setting.enabled'],
           'smart_routing_setting.templates':
             settings['smart_routing_setting.templates'],
+          'smart_routing_setting.max_user_templates':
+            settings['smart_routing_setting.max_user_templates'],
         }}
       />
     ),

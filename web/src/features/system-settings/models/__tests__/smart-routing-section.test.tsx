@@ -50,6 +50,7 @@ describe('smart routing template editor', () => {
             defaultValues={{
               'smart_routing_setting.enabled': false,
               'smart_routing_setting.templates': '[]',
+              'smart_routing_setting.max_user_templates': 10,
             }}
           />
         </SettingsPageProvider>

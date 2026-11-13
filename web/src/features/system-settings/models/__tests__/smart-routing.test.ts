@@ -30,6 +30,7 @@ const translate = (key: string) => key
 function values(enabled: boolean): SmartRoutingFormValues {
   return {
     enabled: true,
+    max_user_templates: 10,
     templates: [
       {
         id: 'claude',

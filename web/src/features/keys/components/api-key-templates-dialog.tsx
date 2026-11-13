@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -32,16 +32,21 @@ import { ROLE } from '@/lib/roles'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { getSmartRoutingTemplates } from '../api'
-import { TemplateKeysCopyButton } from './template-keys-copy-button'
+import {
+  getSmartRoutingTemplates,
+  getUserSmartRoutingTemplates,
+  updateUserSmartRoutingTemplates,
+} from '../api'
 
 const defaults = {
   'smart_routing_setting.enabled': false,
   'smart_routing_setting.templates': '[]',
+  'smart_routing_setting.max_user_templates': 10,
 }
 
 export function ApiKeyTemplatesDialog() {
   const { t } = useTranslation()
+  const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [actions, setActions] = useState<HTMLDivElement | null>(null)
   const canManage = useAuthStore(
@@ -55,13 +60,45 @@ export function ApiKeyTemplatesDialog() {
   })
   const templates = useQuery({
     queryKey: ['token-smart-routing-templates'],
-    queryFn: async () => requireServerSuccess(await getSmartRoutingTemplates()),
+    queryFn: async () =>
+      requireServerSuccess(
+        await (canManage
+          ? getSmartRoutingTemplates()
+          : getUserSmartRoutingTemplates())
+      ),
     enabled: open && !canManage,
     staleTime: 0,
+  })
+  const updateTemplates = useMutation({
+    mutationFn: async (value: string) => {
+      const parsed = JSON.parse(value) as Parameters<
+        typeof updateUserSmartRoutingTemplates
+      >[0]
+      return requireServerSuccess(await updateUserSmartRoutingTemplates(parsed))
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: ['token-smart-routing-templates'],
+      })
+    },
   })
   const values = useMemo(
     () => getOptionValue(options.data?.data, defaults),
     [options.data]
+  )
+  const userTemplateData = Array.isArray(templates.data?.data)
+    ? undefined
+    : templates.data?.data
+  const userValues = useMemo(
+    () => ({
+      'smart_routing_setting.enabled': true,
+      'smart_routing_setting.templates': JSON.stringify(
+        userTemplateData?.templates ?? []
+      ),
+      'smart_routing_setting.max_user_templates':
+        userTemplateData?.max_user_templates ?? 10,
+    }),
+    [userTemplateData]
   )
   const query = canManage ? options : templates
   return (
@@ -78,39 +115,28 @@ export function ApiKeyTemplatesDialog() {
         </Button>
       }
       contentClassName='sm:max-w-4xl'
-      footer={canManage ? <div ref={setActions} /> : undefined}
+      footer={<div ref={setActions} />}
     >
       {query.isPending && <LoadingState />}
       {query.isError && <ErrorState onRetry={() => query.refetch()} />}
       {open && query.isSuccess && canManage && (
         <SettingsPageProvider actionsContainer={actions}>
-          <SmartRoutingSection defaultValues={values} />
+          <SmartRoutingSection defaultValues={values} showCopy={false} />
         </SettingsPageProvider>
       )}
       {open && query.isSuccess && !canManage && (
-        <div className='space-y-3'>
-          {(templates.data?.data || []).map((template) => (
-            <div
-              key={template.id}
-              className='flex flex-wrap items-center justify-between gap-3 rounded-md border p-3'
-            >
-              <div className='min-w-0 break-words'>
-                <p className='font-medium'>{template.name}</p>
-                <p className='text-muted-foreground text-sm'>
-                  {template.description}
-                </p>
-                <p className='text-muted-foreground text-xs'>
-                  {template.group_routes
-                    .filter((route) => route.enabled !== false)
-                    .map((route) => route.group)
-                    .join(' → ')}
-                </p>
-              </div>
-              <TemplateKeysCopyButton templateID={template.id} />
-            </div>
-          ))}
-          {!templates.data?.data?.length && <p>{t('No routing templates')}</p>}
-        </div>
+        <SettingsPageProvider actionsContainer={actions}>
+          <SmartRoutingSection
+            defaultValues={userValues}
+            saveTemplates={async (value) => {
+              await updateTemplates.mutateAsync(value)
+            }}
+            isSaving={updateTemplates.isPending}
+            showEnabled={false}
+            showCopy
+            userMode
+          />
+        </SettingsPageProvider>
       )}
     </Dialog>
   )

@@ -84,6 +84,14 @@ func buildMaskedTokenResponse(token *model.Token) *tokenResponse {
 	}
 	response := &tokenResponse{Token: &maskedToken, AutoGroups: autoGroups, RoutingTemplateAvailable: resolveErr == nil}
 	if token.RoutingTemplateID != "" {
+		if templates, userErr := getUserRoutingTemplates(token.UserId); userErr == nil {
+			for _, template := range templates {
+				if template.ID == token.RoutingTemplateID {
+					response.RoutingTemplateName = template.Name
+					return response
+				}
+			}
+		}
 		for _, template := range operation_setting.CurrentSmartRoutingSetting().Templates {
 			if template.ID == token.RoutingTemplateID {
 				response.RoutingTemplateName = template.Name
@@ -172,36 +180,144 @@ func normalizeTokenGroupForUser(userID int, group string) (string, error) {
 }
 
 func GetTokenSmartRoutingTemplates(c *gin.Context) {
-	setting := operation_setting.CurrentSmartRoutingSetting()
-	if !setting.Enabled {
-		common.ApiSuccess(c, []operation_setting.SmartRoutingTemplate{})
-		return
-	}
-
-	userGroup, err := model.GetUserGroup(c.GetInt("id"), false)
+	userID := c.GetInt("id")
+	userGroup, err := model.GetUserGroup(userID, false)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	templates := make([]operation_setting.SmartRoutingTemplate, 0, len(setting.Templates))
+	userTemplates, err := getUserRoutingTemplates(userID)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if c.Query("owned") == "true" {
+		common.ApiSuccess(c, gin.H{
+			"templates":          userTemplates,
+			"max_user_templates": userSmartRoutingTemplateLimit(),
+		})
+		return
+	}
+
+	templates := make([]operation_setting.SmartRoutingTemplate, 0, len(userTemplates))
+	for _, template := range userTemplates {
+		if !template.Enabled || len(template.GroupRoutes) == 0 || !userTemplateUsesUsableGroups(userGroup, template) {
+			continue
+		}
+		templates = append(templates, template)
+	}
+	setting := operation_setting.CurrentSmartRoutingSetting()
+	if !setting.Enabled {
+		common.ApiSuccess(c, templates)
+		return
+	}
 	for _, template := range setting.Templates {
 		if !template.Enabled || len(template.GroupRoutes) == 0 {
 			continue
 		}
-		available := true
-		for _, route := range template.GroupRoutes {
-			if !service.IsUserSelectableGroup(userGroup, route.Group) {
-				available = false
-				break
-			}
-		}
-		if available {
+		if userTemplateUsesUsableGroups(userGroup, template) {
 			templates = append(templates, template)
 		}
 	}
 
 	common.ApiSuccess(c, templates)
+}
+
+func userSmartRoutingTemplateLimit() int {
+	limit := operation_setting.CurrentSmartRoutingSetting().MaxUserTemplates
+	if limit < 1 {
+		return operation_setting.DefaultMaxUserSmartRoutingTemplates
+	}
+	return limit
+}
+
+func getUserRoutingTemplates(userID int) ([]operation_setting.SmartRoutingTemplate, error) {
+	settings, err := model.GetUserSetting(userID, false)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(settings.SmartRoutingTemplates) == "" {
+		return []operation_setting.SmartRoutingTemplate{}, nil
+	}
+	var templates []operation_setting.SmartRoutingTemplate
+	if err := common.UnmarshalJsonStr(settings.SmartRoutingTemplates, &templates); err != nil {
+		return nil, fmt.Errorf("用户路由模板格式错误: %w", err)
+	}
+	for index := range templates {
+		templates[index].UserOwned = true
+	}
+	return templates, nil
+}
+
+func userTemplateUsesUsableGroups(userGroup string, template operation_setting.SmartRoutingTemplate) bool {
+	for _, route := range template.GroupRoutes {
+		if route.IsEnabled() && !service.IsUserSelectableGroup(userGroup, route.Group) {
+			return false
+		}
+	}
+	return true
+}
+
+func UpdateUserSmartRoutingTemplates(c *gin.Context) {
+	var request struct {
+		Templates []operation_setting.SmartRoutingTemplate `json:"templates"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	if err := operation_setting.ValidateSmartRoutingTemplates(request.Templates); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if len(request.Templates) > userSmartRoutingTemplateLimit() {
+		common.ApiErrorT(c, "A user can create at most {{max}} routing templates", map[string]any{
+			"max": userSmartRoutingTemplateLimit(),
+		})
+		return
+	}
+	userID := c.GetInt("id")
+	userGroup, err := model.GetUserGroup(userID, false)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	global := operation_setting.CurrentSmartRoutingSetting()
+	globalIDs := make(map[string]struct{}, len(global.Templates))
+	for _, template := range global.Templates {
+		globalIDs[template.ID] = struct{}{}
+	}
+	for index := range request.Templates {
+		template := &request.Templates[index]
+		template.UserOwned = false
+		if _, exists := globalIDs[template.ID]; exists {
+			common.ApiErrorT(c, "Template identifiers must be unique")
+			return
+		}
+		for _, route := range template.GroupRoutes {
+			if route.IsEnabled() && !service.IsUserSelectableGroup(userGroup, route.Group) {
+				common.ApiErrorT(c, "No permission to access {{group}} group", map[string]any{"group": route.Group})
+				return
+			}
+		}
+	}
+	encoded, err := common.Marshal(request.Templates)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	settings, err := model.GetUserSetting(userID, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	settings.SmartRoutingTemplates = string(encoded)
+	if err := model.UpdateUserSetting(userID, settings); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, request.Templates)
 }
 
 func getTokenRequestUserGroup(c *gin.Context) (string, error) {

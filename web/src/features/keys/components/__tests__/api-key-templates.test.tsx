@@ -61,11 +61,24 @@ const template = {
   model_limits: ['model-a'],
 }
 
-test('ordinary users see available templates and copy all linked keys only on click', async () => {
+test('ordinary users can edit their own templates and copy linked keys only on click', async () => {
   const user = userEvent.setup()
-  const get = vi
-    .spyOn(api, 'get')
-    .mockResolvedValue({ data: { success: true, data: [template] } })
+  const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/user/self/groups') {
+      return {
+        data: {
+          success: true,
+          data: { default: { desc: 'Default', ratio: 1 } },
+        },
+      }
+    }
+    return {
+      data: {
+        success: true,
+        data: { templates: [template], max_user_templates: 10 },
+      },
+    }
+  })
   const post = vi.spyOn(api, 'post').mockResolvedValue({
     data: {
       success: true,
@@ -77,10 +90,10 @@ test('ordinary users see available templates and copy all linked keys only on cl
   expect(get).not.toHaveBeenCalled()
   await user.click(screen.getByRole('button', { name: 'Routing templates' }))
   expect(await screen.findByText('Claude')).toBeVisible()
-  expect(get).toHaveBeenCalledWith('/api/token/smart-routing-templates')
-  expect(
-    screen.queryByRole('button', { name: 'Add template' })
-  ).not.toBeInTheDocument()
+  expect(get).toHaveBeenCalledWith(
+    '/api/token/smart-routing-templates?owned=true'
+  )
+  expect(screen.getByRole('button', { name: 'Add template' })).toBeVisible()
   expect(post).not.toHaveBeenCalled()
   await user.click(screen.getByRole('button', { name: 'Copy linked keys' }))
   await waitFor(() => expect(copy).toHaveBeenCalledWith('sk-first\nsk-second'))
@@ -115,6 +128,9 @@ test('root users edit the existing global template and save model restrictions',
   renderTemplates(ROLE.SUPER_ADMIN)
   await user.click(screen.getByRole('button', { name: 'Routing templates' }))
   const input = await screen.findByRole('textbox', { name: 'Template name' })
+  expect(
+    screen.queryByRole('button', { name: 'Copy linked keys' })
+  ).not.toBeInTheDocument()
   await user.clear(input)
   await user.type(input, 'Updated template')
   const models = screen.getByRole('combobox', {
@@ -140,12 +156,19 @@ test('root users edit the existing global template and save model restrictions',
   ])
 })
 
-test('an empty template list renders an empty state', async () => {
+test('an empty user template list renders an empty state', async () => {
   const user = userEvent.setup()
-  vi.spyOn(api, 'get').mockResolvedValue({ data: { success: true, data: [] } })
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: { templates: [], max_user_templates: 10 },
+    },
+  })
   renderTemplates()
   await user.click(screen.getByRole('button', { name: 'Routing templates' }))
-  expect(await screen.findByText('No routing templates')).toBeVisible()
+  expect(
+    await screen.findByText('No routing templates configured')
+  ).toBeVisible()
 })
 
 test('failed template loading renders retry and no editor', async () => {

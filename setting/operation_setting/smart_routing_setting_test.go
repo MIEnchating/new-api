@@ -100,8 +100,9 @@ func TestUpdateSmartRoutingSettingReplacesTemplateRoutes(t *testing.T) {
 		data, err := common.Marshal(original.Templates)
 		require.NoError(t, err)
 		require.NoError(t, UpdateSmartRoutingSetting(map[string]string{
-			"enabled":   strconv.FormatBool(original.Enabled),
-			"templates": string(data),
+			"enabled":            strconv.FormatBool(original.Enabled),
+			"templates":          string(data),
+			"max_user_templates": strconv.Itoa(original.MaxUserTemplates),
 		}))
 	})
 

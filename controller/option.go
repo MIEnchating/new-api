@@ -172,6 +172,7 @@ var routingReliabilityBulkOptionKeys = map[string]struct{}{
 	"request_error_routing_setting.rules":       {},
 	"smart_routing_setting.enabled":             {},
 	"smart_routing_setting.templates":           {},
+	"smart_routing_setting.max_user_templates":  {},
 }
 
 func optionValueToString(value any) string {
@@ -214,6 +215,11 @@ func validateRoutingReliabilityOption(key string, value string) error {
 		return operation_setting.ValidateRequestErrorRoutingRulesJSON(value)
 	case "smart_routing_setting.templates":
 		return operation_setting.ValidateSmartRoutingTemplatesJSON(value)
+	case "smart_routing_setting.max_user_templates":
+		maxUserTemplates, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || maxUserTemplates < 1 || maxUserTemplates > operation_setting.MaxUserSmartRoutingTemplates {
+			return fmt.Errorf("用户智能路由模板数量必须在 1 到 %d 之间", operation_setting.MaxUserSmartRoutingTemplates)
+		}
 	}
 	return nil
 }

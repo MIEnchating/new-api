@@ -92,6 +92,7 @@ const defaultModelSettings: ModelSettings = {
     DEFAULT_REQUEST_ERROR_ROUTING_RULES_JSON,
   'smart_routing_setting.enabled': false,
   'smart_routing_setting.templates': '[]',
+  'smart_routing_setting.max_user_templates': 10,
   'channel_affinity_setting.enabled': false,
   'channel_affinity_setting.switch_on_success': true,
   'channel_affinity_setting.keep_on_channel_disabled': false,

@@ -65,4 +65,16 @@ func TestPrepareRoutingReliabilityOptionUpdatesValidatesSmartRoutingTemplates(t 
 	require.Error(t, err)
 	assert.Nil(t, updates)
 	assert.Contains(t, err.Error(), "冷却时间")
+
+	updates, err = prepareRoutingReliabilityOptionUpdates([]OptionUpdateRequest{
+		{Key: "smart_routing_setting.max_user_templates", Value: 10},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "10", updates["smart_routing_setting.max_user_templates"])
+
+	updates, err = prepareRoutingReliabilityOptionUpdates([]OptionUpdateRequest{
+		{Key: "smart_routing_setting.max_user_templates", Value: 0},
+	})
+	require.Error(t, err)
+	assert.Nil(t, updates)
 }

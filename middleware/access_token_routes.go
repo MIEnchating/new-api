@@ -352,6 +352,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"POST /api/option/group":                                accessTokenScopeRule("option:write"),
 	"POST /api/option/bulk":                                 accessTokenScopeRule("option:write"),
 	"GET /api/token/smart-routing-templates":                accessTokenScopeRule("api_key:read"),
+	"PUT /api/token/smart-routing-templates":                accessTokenScopeRule("api_key:write"),
 	"GET /api/token/:id/models":                             accessTokenScopeRule("api_key:read"),
 	"GET /api/token/:id/route/status":                       accessTokenScopeRule("api_key:read"),
 	"PUT /api/token/:id/route":                              accessTokenScopeRule("api_key:write"),

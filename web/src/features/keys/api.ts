@@ -107,6 +107,23 @@ export async function getSmartRoutingTemplates(): Promise<
   return res.data
 }
 
+export async function getUserSmartRoutingTemplates(): Promise<
+  ApiResponse<{
+    templates: SmartRoutingTemplate[]
+    max_user_templates: number
+  }>
+> {
+  const res = await api.get('/api/token/smart-routing-templates?owned=true')
+  return res.data
+}
+
+export async function updateUserSmartRoutingTemplates(
+  templates: SmartRoutingTemplate[]
+): Promise<ApiResponse<SmartRoutingTemplate[]>> {
+  const res = await api.put('/api/token/smart-routing-templates', { templates })
+  return res.data
+}
+
 // Create a new API key
 export async function createApiKey(
   data: ApiKeyFormData

@@ -37,6 +37,7 @@ export type SmartRoutingTemplateForm = {
 
 export type SmartRoutingFormValues = {
   enabled: boolean
+  max_user_templates: number
   templates: SmartRoutingTemplateForm[]
 }
 
@@ -109,6 +110,11 @@ export function createSmartRoutingSchema(t: Translator) {
   return z
     .object({
       enabled: z.boolean(),
+      max_user_templates: z
+        .number()
+        .int()
+        .min(1, t('Maximum user templates must be at least 1'))
+        .max(100, t('Maximum user templates cannot exceed 100')),
       templates: z.array(templateSchema).max(100),
     })
     .superRefine((values, context) => {

@@ -243,8 +243,9 @@ func TestGetTokenSmartRoutingTemplatesOnlyReturnsUsableEnabledTemplates(t *testi
 		data, err := common.Marshal(original.Templates)
 		require.NoError(t, err)
 		require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{
-			"enabled":   fmt.Sprintf("%t", original.Enabled),
-			"templates": string(data),
+			"enabled":            fmt.Sprintf("%t", original.Enabled),
+			"templates":          string(data),
+			"max_user_templates": fmt.Sprintf("%d", original.MaxUserTemplates),
 		}))
 	})
 	require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{
@@ -269,6 +270,74 @@ func TestGetTokenSmartRoutingTemplatesOnlyReturnsUsableEnabledTemplates(t *testi
 		templates[0].GroupRoutes[0].Group,
 		templates[0].GroupRoutes[1].Group,
 	})
+}
+
+func TestUserCanManageOwnSmartRoutingTemplates(t *testing.T) {
+	configureTokenAutoGroupsTest(t, "5", `[]`)
+	user := setupTokenAutoGroupsControllerTest(t)
+	originalRouting := operation_setting.CurrentSmartRoutingSetting()
+	t.Cleanup(func() {
+		data, err := common.Marshal(originalRouting.Templates)
+		require.NoError(t, err)
+		require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{
+			"enabled":            fmt.Sprintf("%t", originalRouting.Enabled),
+			"templates":          string(data),
+			"max_user_templates": fmt.Sprintf("%d", originalRouting.MaxUserTemplates),
+		}))
+	})
+	require.NoError(t, operation_setting.UpdateSmartRoutingSetting(map[string]string{
+		"max_user_templates": "1",
+	}))
+	original, err := model.GetUserSetting(user.Id, true)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, model.UpdateUserSetting(user.Id, original)) })
+
+	body := map[string]any{"templates": []any{
+		map[string]any{
+			"id": "personal", "name": "Personal", "enabled": true,
+			"group_routes":       []any{map[string]any{"group": "default", "priority": 1, "cooldown_seconds": 60}},
+			"group_route_sticky": false,
+		},
+	}}
+	tooMany := map[string]any{"templates": []any{
+		map[string]any{
+			"id": "personal", "name": "Personal", "enabled": true,
+			"group_routes": []any{map[string]any{"group": "default", "priority": 1, "cooldown_seconds": 60}},
+		},
+		map[string]any{"id": "second", "name": "Second", "enabled": false},
+	}}
+	ctx, recorder := newTokenAutoGroupsAuthenticatedContext(t, http.MethodPut, "/api/token/smart-routing-templates", tooMany, user.Id)
+	UpdateUserSmartRoutingTemplates(ctx)
+	response := decodeAPIResponse(t, recorder)
+	assert.False(t, response.Success)
+	ctx, recorder = newTokenAutoGroupsAuthenticatedContext(t, http.MethodPut, "/api/token/smart-routing-templates", body, user.Id)
+	UpdateUserSmartRoutingTemplates(ctx)
+	response = decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+
+	ctx, recorder = newTokenAutoGroupsAuthenticatedContext(t, http.MethodGet, "/api/token/smart-routing-templates?owned=true", nil, user.Id)
+	GetTokenSmartRoutingTemplates(ctx)
+	response = decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, response.Message)
+	var templates []operation_setting.SmartRoutingTemplate
+	var ownedResponse struct {
+		Templates []operation_setting.SmartRoutingTemplate `json:"templates"`
+		Max       int                                      `json:"max_user_templates"`
+	}
+	require.NoError(t, common.Unmarshal(response.Data, &ownedResponse))
+	templates = ownedResponse.Templates
+	require.Len(t, templates, 1)
+	assert.Equal(t, "personal", templates[0].ID)
+	assert.True(t, templates[0].UserOwned)
+	assert.Equal(t, 1, ownedResponse.Max)
+
+	token := seedToken(t, model.DB, user.Id, "personal-template-key", "personal-template-key")
+	token.RoutingTemplateID = "personal"
+	require.NoError(t, token.Update())
+	effective, err := model.ValidateUserToken(token.Key)
+	require.NoError(t, err)
+	assert.Equal(t, "personal", effective.RoutingTemplateID)
+	assert.Equal(t, "default", effective.GetGroupRoutes()[0].Group)
 }
 
 func TestUpdateTokenGroupRoutesOnlyChangesRouteConfig(t *testing.T) {

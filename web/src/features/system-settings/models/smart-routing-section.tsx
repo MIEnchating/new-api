@@ -66,6 +66,7 @@ import {
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { TemplateKeysCopyButton } from '@/features/keys/components/template-keys-copy-button'
+import { getUserGroups } from '@/lib/api'
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
@@ -92,7 +93,13 @@ type SmartRoutingSectionProps = {
   defaultValues: {
     'smart_routing_setting.enabled': boolean
     'smart_routing_setting.templates': string
+    'smart_routing_setting.max_user_templates': number
   }
+  saveTemplates?: (templates: string) => Promise<void>
+  isSaving?: boolean
+  showEnabled?: boolean
+  showCopy?: boolean
+  userMode?: boolean
 }
 
 type TemplateEditorProps = {
@@ -100,6 +107,7 @@ type TemplateEditorProps = {
   index: number
   groupNames: string[]
   onRemove: () => void
+  showCopy: boolean
 }
 
 function newSmartRoutingTemplate(): SmartRoutingTemplateForm {
@@ -119,6 +127,7 @@ function buildFormDefaults(
 ): SmartRoutingFormValues {
   return {
     enabled: defaults['smart_routing_setting.enabled'],
+    max_user_templates: defaults['smart_routing_setting.max_user_templates'],
     templates: parseSmartRoutingTemplates(
       defaults['smart_routing_setting.templates']
     ),
@@ -128,6 +137,7 @@ function buildFormDefaults(
 function normalizeFormValues(values: SmartRoutingFormValues) {
   return {
     'smart_routing_setting.enabled': values.enabled,
+    'smart_routing_setting.max_user_templates': values.max_user_templates,
     'smart_routing_setting.templates': serializeSmartRoutingTemplates(
       values.templates
     ),
@@ -159,7 +169,7 @@ function SmartRoutingTemplateEditor(props: TemplateEditorProps) {
             t('Routing template #{{number}}', { number: props.index + 1 })}
         </CardTitle>
         <CardAction className='flex flex-wrap items-center gap-3'>
-          <TemplateKeysCopyButton templateID={templateID} />
+          {props.showCopy && <TemplateKeysCopyButton templateID={templateID} />}
           <FormField
             control={props.form.control}
             name={`templates.${props.index}.enabled`}
@@ -429,13 +439,23 @@ export function SmartRoutingSection(props: SmartRoutingSectionProps) {
   const { t } = useTranslation()
   const updateOptions = useUpdateOptionsBulk()
   const groupsQuery = useQuery({
-    queryKey: ['smart-routing-groups'],
-    queryFn: async () => requireServerSuccess(await getSmartRoutingGroups()),
+    queryKey: props.userMode
+      ? ['smart-routing-groups', 'user']
+      : ['smart-routing-groups'],
+    queryFn: async () => {
+      if (props.userMode) {
+        const response = requireServerSuccess(await getUserGroups())
+        return Object.keys(response.data ?? {})
+      }
+      return requireServerSuccess(await getSmartRoutingGroups()).data ?? []
+    },
     staleTime: 60_000,
   })
-  const groupNames = (groupsQuery.data?.data || []).filter(
-    (group) => group !== 'auto'
-  )
+  const groupNames = (
+    Array.isArray(groupsQuery.data)
+      ? groupsQuery.data
+      : ((groupsQuery.data as { data?: string[] } | undefined)?.data ?? [])
+  ).filter((group) => group !== 'auto')
   const formSchema = useMemo(() => createSmartRoutingSchema(t), [t])
   const formDefaults = useMemo(
     () => buildFormDefaults(props.defaultValues),
@@ -469,9 +489,13 @@ export function SmartRoutingSection(props: SmartRoutingSectionProps) {
     }
 
     try {
-      await updateOptions.mutateAsync({
-        options: updates.map((key) => ({ key, value: normalized[key] })),
-      })
+      if (props.saveTemplates) {
+        await props.saveTemplates(normalized['smart_routing_setting.templates'])
+      } else {
+        await updateOptions.mutateAsync({
+          options: updates.map((key) => ({ key, value: normalized[key] })),
+        })
+      }
     } catch (error) {
       handleServerError(error, t('Failed to update setting'))
       return
@@ -482,7 +506,11 @@ export function SmartRoutingSection(props: SmartRoutingSectionProps) {
     toast.success(t('Setting updated successfully'))
   }
 
-  const addTemplate = () => templateFields.append(newSmartRoutingTemplate())
+  const maxUserTemplates = form.watch('max_user_templates')
+  const addTemplate = () => {
+    if (templateFields.fields.length >= maxUserTemplates) return
+    templateFields.append(newSmartRoutingTemplate())
+  }
 
   return (
     <SettingsSection title={t('Smart Routing')}>
@@ -490,29 +518,61 @@ export function SmartRoutingSection(props: SmartRoutingSectionProps) {
         <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
           <SettingsPageFormActions
             onSave={form.handleSubmit(onSubmit)}
-            isSaving={updateOptions.isPending}
+            isSaving={updateOptions.isPending || props.isSaving}
           />
 
-          <FormField
-            control={form.control}
-            name='enabled'
-            render={({ field }) => (
-              <SettingsSwitchItem>
-                <SettingsSwitchContent>
-                  <FormLabel>{t('Enable API key smart routing')}</FormLabel>
-                  <FormDescription>
-                    {t('Provide routing templates when users create API keys.')}
-                  </FormDescription>
-                </SettingsSwitchContent>
-                <FormControl>
-                  <Switch
-                    checked={field.value}
-                    onCheckedChange={field.onChange}
-                  />
-                </FormControl>
-              </SettingsSwitchItem>
-            )}
-          />
+          {props.showEnabled !== false && (
+            <>
+              <FormField
+                control={form.control}
+                name='enabled'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Enable API key smart routing')}</FormLabel>
+                      <FormDescription>
+                        {t(
+                          'Provide routing templates when users create API keys.'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='max_user_templates'
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>{t('Maximum user routing templates')}</FormLabel>
+                    <FormDescription>
+                      {t(
+                        'Limit how many routing templates each user can create.'
+                      )}
+                    </FormDescription>
+                    <FormControl>
+                      <Input
+                        type='number'
+                        min={1}
+                        max={100}
+                        {...field}
+                        onChange={(event) =>
+                          field.onChange(event.target.valueAsNumber)
+                        }
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </>
+          )}
 
           <div className='space-y-4'>
             {templateFields.fields.length === 0 ? (
@@ -541,6 +601,7 @@ export function SmartRoutingSection(props: SmartRoutingSectionProps) {
                     index={index}
                     groupNames={groupNames}
                     onRemove={() => templateFields.remove(index)}
+                    showCopy={props.showCopy === true}
                   />
                 ))}
 
@@ -549,7 +610,7 @@ export function SmartRoutingSection(props: SmartRoutingSectionProps) {
                   variant='outline'
                   className='border-dashed'
                   onClick={addTemplate}
-                  disabled={templateFields.fields.length >= 100}
+                  disabled={templateFields.fields.length >= maxUserTemplates}
                 >
                   <Plus data-icon='inline-start' />
                   {t('Add template')}

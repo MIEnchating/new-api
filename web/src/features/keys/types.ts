@@ -39,6 +39,7 @@ export interface SmartRoutingTemplate {
   group_routes: ApiKeyGroupRoute[]
   group_route_sticky: boolean
   model_limits?: string[]
+  user_owned?: boolean
 }
 
 const routeStatusSchema = z.object({
