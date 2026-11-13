@@ -98,7 +98,8 @@ export function parseCustomMenuPages(value: unknown): CustomMenuPage[] {
           openMode:
             page.section === 'header' ||
             page.openMode === 'external' ||
-            requiresTopLevelNavigation(page.url)
+            (typeof page.url === 'string' &&
+              requiresTopLevelNavigation(page.url))
               ? 'external'
               : 'iframe',
           enabled: page.enabled !== false,
