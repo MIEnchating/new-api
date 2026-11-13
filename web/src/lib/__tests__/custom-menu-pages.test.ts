@@ -93,6 +93,20 @@ describe('custom menu pages', () => {
     assert.equal(pages[0]?.openMode, 'external')
   })
 
+  test('opens SSO start pages at the top level', () => {
+    const pages = parseCustomMenuPages([
+      {
+        id: 'page_sso001',
+        name: 'Media workspace',
+        url: 'https://image.example.com/auth/sso/start?issuer={origin}',
+        visibility: 'public',
+        openMode: 'iframe',
+      },
+    ])
+
+    assert.equal(pages[0]?.openMode, 'external')
+  })
+
   test('resolves the current origin placeholder in external URLs', () => {
     const url = 'https://image.example.com/auth/sso/start?issuer={origin}'
 

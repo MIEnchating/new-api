@@ -49,6 +49,14 @@ function isValidPageURL(value: unknown) {
   }
 }
 
+function requiresTopLevelNavigation(rawURL: string) {
+  try {
+    return new URL(rawURL).pathname === '/auth/sso/start'
+  } catch {
+    return false
+  }
+}
+
 export function isValidCustomMenuIcon(value: string) {
   if (value.length > 32 * 1024) return false
   if (!value || value.startsWith('data:image/svg+xml;base64,')) return true
@@ -88,7 +96,9 @@ export function parseCustomMenuPages(value: unknown): CustomMenuPage[] {
         {
           ...(page as CustomMenuPage),
           openMode:
-            page.section === 'header' || page.openMode === 'external'
+            page.section === 'header' ||
+            page.openMode === 'external' ||
+            requiresTopLevelNavigation(page.url)
               ? 'external'
               : 'iframe',
           enabled: page.enabled !== false,
