@@ -147,6 +147,7 @@ type GroupRatioVisualEditorProps = {
   groupDescriptions: string
   groupCategories: string
   vendors?: readonly GroupVendor[]
+  automaticVendors?: Record<string, GroupVendor>
   userUsableGroups: string
   groupGroupRatio: string
   autoGroups: string
@@ -351,6 +352,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   groupDescriptions,
   groupCategories,
   vendors,
+  automaticVendors,
   userUsableGroups,
   groupGroupRatio,
   autoGroups,
@@ -453,6 +455,7 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
           groupDescriptions={groupDescriptions}
           groupCategories={groupCategories}
           vendors={vendors}
+          automaticVendors={automaticVendors}
           groupOrder={groupOrder}
           onGroupRename={onGroupRename}
           userUsableGroups={userUsableGroups}
@@ -565,6 +568,7 @@ type GroupPricingTableProps = {
   groupDescriptions: string
   groupCategories: string
   vendors?: readonly GroupVendor[]
+  automaticVendors?: Record<string, GroupVendor>
   userUsableGroups: string
   topupGroupRatio: string
   groupOrder: string
@@ -579,6 +583,7 @@ function GroupPricingTable({
   groupDescriptions,
   groupCategories,
   vendors,
+  automaticVendors,
   userUsableGroups,
   topupGroupRatio,
   groupOrder,
@@ -615,10 +620,7 @@ function GroupPricingTable({
       icon: getLobeIcon(vendor.icon || vendor.name, 16),
     }))
     return {
-      vendorOptions: [
-        { value: 'none', label: t('No vendor') },
-        ...vendorOptions,
-      ],
+      vendorOptions,
       vendorValuesByName: new Map(
         vendorOptions.map((option) => [
           option.label.toLowerCase(),
@@ -626,7 +628,7 @@ function GroupPricingTable({
         ])
       ),
     }
-  }, [t, vendors])
+  }, [vendors])
   const updateCategories = useCallback(
     (next: Map<string, string>) => {
       onChange(
@@ -812,6 +814,11 @@ function GroupPricingTable({
               {t(
                 'Drag rows to control the order shown when users create API keys. Special usable group rules can hide any group for specific users.'
               )}
+              <span className='mt-1 block'>
+                {t(
+                  'Groups with models from a single vendor are classified automatically. Select a vendor to override.'
+                )}
+              </span>
             </CardDescription>
           </div>
           <Button onClick={addRow} size='sm' className='sm:self-start'>
@@ -1024,10 +1031,27 @@ function GroupPricingTable({
                             (option) => option.value === assignment
                           )?.value
                         : vendorValuesByName.get(assignment.toLowerCase())
+                      const automaticVendor = automaticVendors?.[name]
+                      const automaticOption = {
+                        value: 'none',
+                        label: automaticVendor
+                          ? t('Automatic ({{vendor}})', {
+                              vendor: automaticVendor.name,
+                            })
+                          : t('Automatic'),
+                        icon: automaticVendor
+                          ? getLobeIcon(
+                              automaticVendor.icon || automaticVendor.name,
+                              16
+                            )
+                          : undefined,
+                      }
                       return (
                         <Combobox
-                          options={vendorOptions}
-                          value={vendorValue ?? null}
+                          options={[automaticOption, ...vendorOptions]}
+                          value={
+                            assignment ? (vendorValue ?? assignment) : 'none'
+                          }
                           placeholder={t('Select vendor')}
                           aria-label={`${row.name} · ${t('Vendor')}`}
                           disabled={!name || vendors === undefined}

@@ -32,6 +32,19 @@ func GetGroups(c *gin.Context) {
 	})
 }
 
+// GetAutomaticGroupVendors exposes inferred defaults to the admin group editor.
+func GetAutomaticGroupVendors(c *gin.Context) {
+	vendors, err := model.GetAutomaticGroupVendors(service.GetOrderedGroupNames())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if vendors == nil {
+		vendors = make(map[string]model.VendorDisplay)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": vendors})
+}
+
 func GetUserGroups(c *gin.Context) {
 	usableGroups := make(map[string]map[string]any)
 	userGroup := ""
@@ -62,14 +75,11 @@ func GetUserGroups(c *gin.Context) {
 		}
 	}
 	if userId > 0 {
-		categories := setting.GetGroupCategories()
-		assignments := make(map[string]string)
+		groups := make([]string, 0, len(usableGroups))
 		for group := range usableGroups {
-			if category := categories[group]; category != "" {
-				assignments[group] = category
-			}
+			groups = append(groups, group)
 		}
-		vendors, err := model.GetGroupVendors(assignments)
+		vendors, err := model.GetResolvedGroupVendors(groups, setting.GetGroupCategories())
 		if err != nil {
 			common.SysError(common.LogText("failed to load group vendors: %s", err.Error()))
 		}

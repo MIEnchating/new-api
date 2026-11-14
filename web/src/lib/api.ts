@@ -63,6 +63,15 @@ export type GroupVendor = {
   icon?: string
 }
 
+export async function getAutomaticGroupVendors(): Promise<{
+  success: boolean
+  message?: string
+  data?: Record<string, GroupVendor>
+}> {
+  const res = await api.get('/api/group/vendors')
+  return res.data
+}
+
 export async function getUserGroups(): Promise<{
   success: boolean
   message?: string

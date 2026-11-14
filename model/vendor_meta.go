@@ -85,6 +85,88 @@ func GetGroupVendors(assignments map[string]string) (map[string]VendorDisplay, e
 	return resolved, nil
 }
 
+// GetAutomaticGroupVendors classifies configured groups only when every model
+// resolves to the same vendor. Disabled abilities remain part of the group so
+// temporary channel outages cannot change its category.
+func GetAutomaticGroupVendors(groups []string) (map[string]VendorDisplay, error) {
+	aliases := make(map[string][]string, len(groups))
+	var lookup []string
+	for _, group := range groups {
+		if group == "auto" {
+			continue
+		}
+		for _, alias := range common.GroupNames(group) {
+			aliases[alias] = append(aliases[alias], group)
+			lookup = append(lookup, alias)
+		}
+	}
+	if len(lookup) == 0 {
+		return map[string]VendorDisplay{}, nil
+	}
+	var abilities []Ability
+	if err := DB.Model(&Ability{}).Select(commonGroupCol, "model").
+		Where(map[string]any{"group": lookup}).Distinct().Find(&abilities).Error; err != nil {
+		return nil, err
+	}
+	var metadata []Model
+	if err := DB.Select("id", "model_name", "name_rule", "vendor_id").Order("id").Find(&metadata).Error; err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(abilities))
+	for _, ability := range abilities {
+		names = append(names, ability.Model)
+	}
+	resolved := resolveModelMetadata(metadata, names)
+	vendorIDs := make(map[string]int)
+	ambiguous := make(map[string]bool)
+	for _, ability := range abilities {
+		vendorID := 0
+		if record := resolved[ability.Model]; record != nil {
+			vendorID = record.VendorID
+		}
+		for _, group := range aliases[ability.Group] {
+			if vendorID <= 0 || vendorIDs[group] != 0 && vendorIDs[group] != vendorID {
+				ambiguous[group] = true
+			}
+			vendorIDs[group] = vendorID
+		}
+	}
+	assignments := make(map[string]string)
+	for group, id := range vendorIDs {
+		if !ambiguous[group] {
+			assignments[group] = "vendor:" + strconv.Itoa(id)
+		}
+	}
+	return GetGroupVendors(assignments)
+}
+
+// GetResolvedGroupVendors gives explicit assignments precedence over inferred
+// categories and restricts both to the requested groups.
+func GetResolvedGroupVendors(groups []string, assignments map[string]string) (map[string]VendorDisplay, error) {
+	inferred, err := GetAutomaticGroupVendors(groups)
+	if err != nil {
+		return nil, err
+	}
+	if inferred == nil {
+		inferred = make(map[string]VendorDisplay)
+	}
+	explicit := make(map[string]string)
+	for _, group := range groups {
+		if assignment := assignments[group]; assignment != "" {
+			explicit[group] = assignment
+			delete(inferred, group)
+		}
+	}
+	vendors, err := GetGroupVendors(explicit)
+	if err != nil {
+		return nil, err
+	}
+	for group, vendor := range vendors {
+		inferred[group] = vendor
+	}
+	return inferred, nil
+}
+
 // Insert 创建新的供应商记录
 func (v *Vendor) Insert() error {
 	v.Id = 0

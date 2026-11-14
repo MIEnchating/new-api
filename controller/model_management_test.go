@@ -1179,6 +1179,97 @@ func TestVendorManagementDatabaseMatrix(t *testing.T) {
 				assert.Nil(t, getVendors(user.Id, "/api/user/self/groups")["vip"].Vendor)
 			})
 
+			t.Run("group_vendors_infer_single_provider_and_preserve_overrides", func(t *testing.T) {
+				first := model.Vendor{Name: "Auto First", Icon: "OpenAI"}
+				second := model.Vendor{Name: "Auto Second", Icon: "Claude.Color"}
+				require.NoError(t, db.Create(&first).Error)
+				require.NoError(t, db.Create(&second).Error)
+				metadata := []model.Model{
+					{ModelName: "auto-", NameRule: model.NameRulePrefix, VendorID: first.Id, Status: 1},
+					{ModelName: "auto-second", VendorID: second.Id, Status: 1},
+					{ModelName: "auto-unassigned", Status: 1},
+				}
+				require.NoError(t, db.Create(&metadata).Error)
+				abilities := []model.Ability{
+					{Group: "single", Model: "auto-one", ChannelId: 9001, Enabled: true},
+					{Group: "single", Model: "auto-two", ChannelId: 9001, Enabled: false},
+					{Group: "mixed", Model: "auto-one", ChannelId: 9001, Enabled: true},
+					{Group: "mixed", Model: "auto-second", ChannelId: 9001, Enabled: false},
+					{Group: "unknown", Model: "auto-one", ChannelId: 9001, Enabled: true},
+					{Group: "unknown", Model: "no-metadata", ChannelId: 9001, Enabled: true},
+					{Group: "unassigned", Model: "auto-one", ChannelId: 9001, Enabled: true},
+					{Group: "unassigned", Model: "auto-unassigned", ChannelId: 9001, Enabled: true},
+					{Group: "auto", Model: "auto-one", ChannelId: 9001, Enabled: true},
+				}
+				require.NoError(t, db.Create(&abilities).Error)
+				t.Cleanup(func() {
+					require.NoError(t, db.Where("channel_id = ?", 9001).Delete(&model.Ability{}).Error)
+					require.NoError(t, db.Unscoped().Where("vendor_id IN ? OR model_name = ?", []int{first.Id, second.Id}, "auto-unassigned").Delete(&model.Model{}).Error)
+					require.NoError(t, db.Unscoped().Delete(&first).Error)
+					require.NoError(t, db.Unscoped().Delete(&second).Error)
+				})
+
+				oldCategories, err := common.Marshal(setting.GetGroupCategories())
+				require.NoError(t, err)
+				oldRatios := ratio_setting.GroupRatio2JSONString()
+				oldUsable := setting.UserUsableGroups2JSONString()
+				t.Cleanup(func() {
+					require.NoError(t, setting.UpdateGroupCategories(string(oldCategories)))
+					require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(oldRatios))
+					require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(oldUsable))
+				})
+				require.NoError(t, setting.UpdateGroupCategories("{}"))
+				require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"single":1,"mixed":1}`))
+				require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"single":"Single","mixed":"Mixed"}`))
+				user := model.User{Username: "automatic-groups-user", Group: "single", AffCode: "autovendor"}
+				require.NoError(t, db.Create(&user).Error)
+				t.Cleanup(func() { require.NoError(t, db.Unscoped().Delete(&user).Error) })
+				var response struct {
+					Success bool
+					Data    map[string]struct{ Vendor *model.VendorDisplay }
+				}
+				modelManagementRequest(t, func(c *gin.Context) {
+					c.Set("id", user.Id)
+					GetUserGroups(c)
+				}, http.MethodGet, "/api/user/self/groups", nil, &response)
+				require.True(t, response.Success)
+				assert.Equal(t, &model.VendorDisplay{ID: first.Id, Name: first.Name, Icon: first.Icon}, response.Data["single"].Vendor)
+				assert.Nil(t, response.Data["mixed"].Vendor)
+				var defaults struct {
+					Success bool
+					Data    map[string]model.VendorDisplay
+				}
+				modelManagementRequest(t, GetAutomaticGroupVendors, http.MethodGet, "/api/group/vendors", nil, &defaults)
+				require.True(t, defaults.Success)
+				assert.Equal(t, map[string]model.VendorDisplay{"single": {ID: first.Id, Name: first.Name, Icon: first.Icon}}, defaults.Data)
+
+				groups := []string{"single", "mixed", "unknown", "unassigned", "empty", "auto"}
+				inferred, err := model.GetAutomaticGroupVendors(groups)
+				require.NoError(t, err)
+				assert.Equal(t, map[string]model.VendorDisplay{
+					"single": {ID: first.Id, Name: first.Name, Icon: first.Icon},
+				}, inferred)
+				resolved, err := model.GetResolvedGroupVendors(groups, map[string]string{
+					"single": fmt.Sprintf("vendor:%d", second.Id),
+					"mixed":  fmt.Sprintf("vendor:%d", first.Id),
+					"hidden": fmt.Sprintf("vendor:%d", first.Id),
+				})
+				require.NoError(t, err)
+				assert.Equal(t, map[string]model.VendorDisplay{
+					"single": {ID: second.Id, Name: second.Name, Icon: second.Icon},
+					"mixed":  {ID: first.Id, Name: first.Name, Icon: first.Icon},
+				}, resolved)
+				require.NoError(t, db.Model(&model.Model{}).Where("model_name = ?", "auto-").Update("vendor_id", second.Id).Error)
+				inferred, err = model.GetAutomaticGroupVendors(groups)
+				require.NoError(t, err)
+				assert.Equal(t, second.Id, inferred["single"].ID)
+				assert.Equal(t, second.Id, inferred["mixed"].ID)
+				require.NoError(t, db.Delete(&second).Error)
+				inferred, err = model.GetAutomaticGroupVendors(groups)
+				require.NoError(t, err)
+				assert.Empty(t, inferred)
+			})
+
 			t.Run("pricing_reads_keep_default_brands_without_writing_vendors", func(t *testing.T) {
 				channel := model.Channel{Name: "Vendor fixture", Type: 1, Status: common.ChannelStatusEnabled}
 				require.NoError(t, db.Create(&channel).Error)

@@ -39,6 +39,7 @@ import { pricingOptions } from '@/features/model-pricing/pricing'
 import { getVendors } from '@/features/models/api'
 import { vendorsQueryKeys } from '@/features/models/lib/query-keys'
 import { useMediaQuery } from '@/hooks'
+import { getAutomaticGroupVendors } from '@/lib/api'
 import { handleServerError } from '@/lib/handle-server-error'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
@@ -222,6 +223,12 @@ export function RatioSettingsCard({
   const updateGroupSettings = useUpdateGroupSettings()
   const [confirmOpen, setConfirmOpen] = useState(false)
   const pendingGroupRenames = useRef<GroupRenameRequest[]>([])
+  const automaticVendorsQuery = useQuery({
+    queryKey: ['groups', 'automatic-vendors'],
+    queryFn: async () =>
+      requireServerSuccess(await getAutomaticGroupVendors()).data,
+    enabled: visibleTabs.includes('groups'),
+  })
   const vendorsQuery = useQuery({
     queryKey: vendorsQueryKeys.list({ scope: 'group-categories' }),
     queryFn: async () => {
@@ -636,6 +643,7 @@ export function RatioSettingsCard({
           onSave={saveGroupRatios}
           onGroupRename={trackGroupRename}
           vendors={vendorsQuery.data}
+          automaticVendors={automaticVendorsQuery.data}
           isSaving={updateGroupSettings.isPending}
         />
       )

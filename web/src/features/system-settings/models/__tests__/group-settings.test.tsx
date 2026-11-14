@@ -79,6 +79,9 @@ function Fixture(props: {
       <div ref={setActions} />
       <GroupRatioForm
         form={form}
+        automaticVendors={{
+          default: { id: 12, name: 'OpenAI', icon: 'OpenAI' },
+        }}
         vendors={[
           { id: 12, name: 'OpenAI', icon: 'OpenAI' },
           { id: 13, name: 'Anthropic', icon: 'Claude.Color' },
@@ -124,6 +127,30 @@ describe('group settings workspace', () => {
     })
     expect(saved.GroupRatio).toBe(defaults.GroupRatio)
     expect(saved.UserUsableGroups).toBe(defaults.UserUsableGroups)
+  })
+
+  it('shows inferred vendors, allows overrides and restores automatic classification', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (_values: typeof defaults) => {})
+    render(<Fixture onSave={onSave} />)
+    const vendor = screen.getByRole('combobox', { name: 'default · Vendor' })
+    expect(vendor).toHaveValue('Automatic (OpenAI)')
+    expect(screen.getByRole('combobox', { name: 'vip · Vendor' })).toHaveValue(
+      'Automatic'
+    )
+    await user.click(vendor)
+    await user.click(await screen.findByRole('option', { name: 'Anthropic' }))
+    expect(vendor).toHaveValue('Anthropic')
+    await user.click(vendor)
+    await user.click(
+      await screen.findByRole('option', { name: 'Automatic (OpenAI)' })
+    )
+    expect(vendor).toHaveValue('Automatic (OpenAI)')
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(JSON.parse(onSave.mock.calls[0][0].GroupCategories)).toEqual({})
   })
 
   it('keeps the vendor assigned when a group is renamed', async () => {

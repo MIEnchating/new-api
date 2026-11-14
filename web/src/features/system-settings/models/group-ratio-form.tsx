@@ -83,6 +83,7 @@ type GroupFormValues = {
 
 type GroupRatioFormProps = {
   vendors?: readonly GroupVendor[]
+  automaticVendors?: Record<string, GroupVendor>
   form: UseFormReturn<GroupFormValues>
   onSave: (values: GroupFormValues) => Promise<void>
   onGroupRename: (previousName: string, nextName: string) => void
@@ -92,6 +93,7 @@ type GroupRatioFormProps = {
 export const GroupRatioForm = memo(function GroupRatioForm({
   form,
   vendors,
+  automaticVendors,
   onSave,
   onGroupRename,
   isSaving,
@@ -178,6 +180,7 @@ export const GroupRatioForm = memo(function GroupRatioForm({
             groupDescriptions={values.GroupDescriptions ?? ''}
             groupCategories={values.GroupCategories ?? ''}
             vendors={vendors}
+            automaticVendors={automaticVendors}
             groupOrder={values.GroupOrder ?? ''}
             onGroupRename={onGroupRename}
             section={section}
