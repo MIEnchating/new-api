@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { afterEach, expect, test, vi } from 'vitest'
@@ -27,26 +27,35 @@ import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { ApiKeyTemplatesDialog } from '../api-key-templates-dialog'
+import { ApiKeysMutateDrawer } from '../api-keys-mutate-drawer'
+import { ApiKeysProvider } from '../api-keys-provider'
 import { TemplateKeysCopyButton } from '../template-keys-copy-button'
 
 const initialAuth = useAuthStore.getState().auth
 const clients: QueryClient[] = []
 afterEach(() => {
+  cleanup()
   useAuthStore.setState({ auth: initialAuth })
   clients.forEach((client) => client.clear())
   clients.length = 0
   vi.restoreAllMocks()
 })
 
-function renderTemplates(role: number = ROLE.USER) {
+function renderTemplates(role: number = ROLE.USER, withKeyDrawer = false) {
   useAuthStore.getState().auth.setUser({ id: 7, username: 'owner', role })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   clients.push(client)
+  client.setQueryData(['status'], { default_use_auto_group: false })
   render(
     <QueryClientProvider client={client}>
-      <ApiKeyTemplatesDialog />
+      <ApiKeysProvider>
+        <ApiKeyTemplatesDialog />
+        {withKeyDrawer && (
+          <ApiKeysMutateDrawer open={false} onOpenChange={() => undefined} />
+        )}
+      </ApiKeysProvider>
     </QueryClientProvider>
   )
 }
@@ -61,8 +70,9 @@ const template = {
   model_limits: ['model-a'],
 }
 
-test('ordinary users can edit their own templates and copy linked keys only on click', async () => {
+test('ordinary users can manage templates with the key drawer mounted without privileged requests', async () => {
   const user = userEvent.setup()
+  let savedTemplate = template
   const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/user/self/groups') {
       return {
@@ -72,12 +82,15 @@ test('ordinary users can edit their own templates and copy linked keys only on c
         },
       }
     }
-    return {
-      data: {
-        success: true,
-        data: { templates: [template], max_user_templates: 10 },
-      },
+    if (url === '/api/token/smart-routing-templates?owned=true') {
+      return {
+        data: {
+          success: true,
+          data: { templates: [savedTemplate], max_user_templates: 10 },
+        },
+      }
     }
+    throw new Error(`Unexpected GET ${url}`)
   })
   const post = vi.spyOn(api, 'post').mockResolvedValue({
     data: {
@@ -86,14 +99,40 @@ test('ordinary users can edit their own templates and copy linked keys only on c
     },
   })
   const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
-  renderTemplates()
+  const put = vi.spyOn(api, 'put').mockImplementation(async (url, body) => {
+    expect(url).toBe('/api/token/smart-routing-templates')
+    savedTemplate = (body as { templates: (typeof template)[] }).templates[0]
+    return { data: { success: true, data: [savedTemplate] } }
+  })
+  renderTemplates(ROLE.USER, true)
   expect(get).not.toHaveBeenCalled()
   await user.click(screen.getByRole('button', { name: 'Routing templates' }))
   expect(await screen.findByText('Claude')).toBeVisible()
   expect(get).toHaveBeenCalledWith(
     '/api/token/smart-routing-templates?owned=true'
   )
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+  expect(get).toHaveBeenCalledWith('/api/user/self/groups')
   expect(screen.getByRole('button', { name: 'Add template' })).toBeVisible()
+  const name = screen.getByRole('textbox', { name: 'Template name' })
+  await user.clear(name)
+  await user.type(name, 'Personal Claude')
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() =>
+    expect(put).toHaveBeenCalledWith('/api/token/smart-routing-templates', {
+      templates: [
+        {
+          ...template,
+          name: 'Personal Claude',
+          group_routes: [{ ...template.group_routes[0], enabled: true }],
+        },
+      ],
+    })
+  )
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(3))
+  expect(screen.getByRole('textbox', { name: 'Template name' })).toHaveValue(
+    'Personal Claude'
+  )
   expect(post).not.toHaveBeenCalled()
   await user.click(screen.getByRole('button', { name: 'Copy linked keys' }))
   await waitFor(() => expect(copy).toHaveBeenCalledWith('sk-first\nsk-second'))
@@ -171,15 +210,39 @@ test('an empty user template list renders an empty state', async () => {
   ).toBeVisible()
 })
 
-test('failed template loading renders retry and no editor', async () => {
+test('a 401 while loading templates shows retry and recovers without crashing the key page', async () => {
   const user = userEvent.setup()
-  vi.spyOn(api, 'get').mockRejectedValue(new Error('unavailable'))
-  renderTemplates()
+  let unauthorized = true
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/token/smart-routing-templates?owned=true') {
+      if (unauthorized) {
+        unauthorized = false
+        throw Object.assign(new Error('Unauthorized'), {
+          response: { status: 401 },
+        })
+      }
+      return {
+        data: {
+          success: true,
+          data: { templates: [template], max_user_templates: 10 },
+        },
+      }
+    }
+    if (url === '/api/user/self/groups') {
+      return { data: { success: true, data: { default: { ratio: 1 } } } }
+    }
+    throw new Error(`Unexpected GET ${url}`)
+  })
+  renderTemplates(ROLE.USER, true)
   await user.click(screen.getByRole('button', { name: 'Routing templates' }))
   expect(await screen.findByRole('button', { name: 'Retry' })).toBeVisible()
   expect(
     screen.queryByRole('button', { name: 'Add template' })
   ).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Retry' }))
+  expect(
+    await screen.findByRole('textbox', { name: 'Template name' })
+  ).toHaveValue('Claude')
 })
 
 test('copy waits for the server, blocks repeated clicks, and resets after a failure', async () => {

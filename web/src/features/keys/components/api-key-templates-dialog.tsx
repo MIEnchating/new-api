@@ -33,7 +33,6 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
-  getSmartRoutingTemplates,
   getUserSmartRoutingTemplates,
   updateUserSmartRoutingTemplates,
 } from '../api'
@@ -52,6 +51,7 @@ export function ApiKeyTemplatesDialog() {
   const canManage = useAuthStore(
     (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
   )
+  const userID = useAuthStore((state) => state.auth.user?.id)
   const options = useQuery({
     queryKey: ['system-options'],
     queryFn: async () => requireServerSuccess(await getSystemOptions()),
@@ -59,14 +59,10 @@ export function ApiKeyTemplatesDialog() {
     staleTime: 0,
   })
   const templates = useQuery({
-    queryKey: ['token-smart-routing-templates'],
+    queryKey: ['token-smart-routing-templates', 'owned', userID],
     queryFn: async () =>
-      requireServerSuccess(
-        await (canManage
-          ? getSmartRoutingTemplates()
-          : getUserSmartRoutingTemplates())
-      ),
-    enabled: open && !canManage,
+      requireServerSuccess(await getUserSmartRoutingTemplates()),
+    enabled: open && !canManage && userID !== undefined,
     staleTime: 0,
   })
   const updateTemplates = useMutation({
@@ -86,9 +82,7 @@ export function ApiKeyTemplatesDialog() {
     () => getOptionValue(options.data?.data, defaults),
     [options.data]
   )
-  const userTemplateData = Array.isArray(templates.data?.data)
-    ? undefined
-    : templates.data?.data
+  const userTemplateData = templates.data?.data
   const userValues = useMemo(
     () => ({
       'smart_routing_setting.enabled': true,
