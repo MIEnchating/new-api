@@ -54,6 +54,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { useStatus } from '@/hooks/use-status'
+import { useSystemConfig } from '@/hooks/use-system-config'
 import { getBgColorClass } from '@/lib/colors'
 import { DEFAULT_SYSTEM_NAME } from '@/lib/constants'
 import { requireServerSuccess } from '@/lib/server-error-message'
@@ -239,6 +240,7 @@ function CCSwitchComboboxField({
 export function CCSwitchDialog(props: Props) {
   const { t, i18n } = useTranslation()
   const { status } = useStatus()
+  const { logo: configuredLogo } = useSystemConfig()
   const serverAddress = resolveCCSwitchServerAddress(
     status,
     window.location.origin
@@ -346,7 +348,7 @@ export function CCSwitchDialog(props: Props) {
       additionalModels,
       apiKey: key,
       serverAddress,
-      iconUrl: normalizeSystemLogo(status?.logo),
+      iconUrl: normalizeSystemLogo(status?.logo || configuredLogo),
       endpoint: getDefaultCCSwitchEndpoint(app, endpointAddress, apiFormat),
       usageBaseUrl: usageAddress ?? getCCSwitchUsageBaseUrl(endpointAddress),
       language: i18n.resolvedLanguage || i18n.language,
