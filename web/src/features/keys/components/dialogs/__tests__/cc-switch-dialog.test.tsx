@@ -22,9 +22,11 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { STATUS_QUERY_KEY } from '@/lib/status-query'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { CCSwitchDialog } from '../cc-switch-dialog'
 
+const initialSystemConfig = useSystemConfigStore.getState()
 let queryClient: QueryClient
 
 beforeEach(() => {
@@ -37,17 +39,19 @@ beforeEach(() => {
 
 afterEach(() => {
   queryClient.clear()
+  useSystemConfigStore.setState(initialSystemConfig)
 })
 
 function renderDialog(
   models = ['gpt-5.4', 'claude-sonnet-4-6'],
   siteTitle = '测试站点',
-  apiEndpoints: string[] = []
+  apiEndpoints: string[] = [],
+  logo: string | null = '/site-logo.png'
 ) {
   queryClient.setQueryData(STATUS_QUERY_KEY, {
     system_name: siteTitle,
     server_address: 'https://example.com',
-    logo: '/site-logo.png',
+    logo,
     api_info: apiEndpoints.map((url) => ({ url })),
   })
   queryClient.setQueryData(['api-key-models-ccswitch', 42], {
@@ -153,6 +157,19 @@ describe('CC Switch model selection', () => {
     expect(
       new URL(String(open.mock.calls[0][0])).searchParams.get('iconUrl')
     ).toBe('https://example.com/site-logo.png')
+  })
+
+  it('imports the configured site logo when the status response omits it', async () => {
+    useSystemConfigStore.getState().setConfig({ logo: '/configured-logo.png' })
+    renderDialog([], 'Example', [], null)
+    const user = userEvent.setup()
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+
+    await user.click(screen.getByRole('button', { name: 'Open CC Switch' }))
+
+    expect(
+      new URL(String(open.mock.calls[0][0])).searchParams.get('iconUrl')
+    ).toBe('https://example.com/configured-logo.png')
   })
 
   it('uses the default site title when the configured title is blank', () => {

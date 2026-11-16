@@ -143,12 +143,22 @@ const CC_SWITCH_USAGE_SCRIPT = `({
       var labels = data.labels || {};
       var results = [];
       if (data.account && data.account.total_available != null) {
-        results.push({
+        var accountUsed = data.account.total_used;
+        if (accountUsed == null && data.user_quota) {
+          accountUsed = data.user_quota.total_used;
+        }
+        var accountResult = {
           isValid: true,
           planName: labels.account_balance || "Account Balance",
           remaining: toQuota(data.account.total_available),
           unit: "USD"
-        });
+        };
+        if (accountUsed != null) {
+          accountResult.used = toQuota(accountUsed);
+          accountResult.total =
+            accountResult.remaining + accountResult.used;
+        }
+        results.push(accountResult);
       }
       var keyResult = {
         isValid: true,

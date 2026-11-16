@@ -285,6 +285,41 @@ describe('group settings workspace', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
   })
 
+  it('starts special ratio rules collapsed and preserves them after keyboard expansion and save', async () => {
+    const user = userEvent.setup()
+    const onSave = vi.fn(async (_values: typeof defaults) => {})
+    render(
+      <Fixture
+        onSave={onSave}
+        initial={{ GroupGroupRatio: '{"vip":{"default":0.6}}' }}
+      />
+    )
+    await user.click(screen.getByRole('tab', { name: 'Special ratio rules' }))
+    const toggle = screen.getByRole('button', { name: 'Rules for vip' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(
+      screen.queryByRole('columnheader', { name: 'Billing group' })
+    ).toBeNull()
+
+    toggle.focus()
+    await user.keyboard('{Enter}')
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(
+      screen.getByRole('columnheader', { name: 'Billing group' })
+    ).toBeVisible()
+    expect(screen.getByRole('cell', { name: 'default' })).toBeVisible()
+    expect(screen.getByText('0.6')).toBeVisible()
+    await user.keyboard('{Enter}')
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
+    await waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect(JSON.parse(onSave.mock.calls[0][0].GroupGroupRatio)).toEqual({
+      vip: { default: 0.6 },
+    })
+  })
+
   it('reorders and removes auto groups with named controls and saves across sections', async () => {
     const user = userEvent.setup()
     const onSave = vi.fn(async (_values: typeof defaults) => {})

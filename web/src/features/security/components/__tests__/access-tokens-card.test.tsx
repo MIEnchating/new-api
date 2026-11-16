@@ -358,7 +358,9 @@ describe('access tokens card', () => {
         context: { token_id: 7 },
       }),
     ])
-    expect(await screen.findByText('Access token revoked')).toBeVisible()
+    await waitFor(() =>
+      expect(screen.getByText('Access token revoked')).toBeVisible()
+    )
   })
 
   it('does not revoke when identity verification is cancelled', async () => {
@@ -478,7 +480,10 @@ describe('access tokens card', () => {
     await waitFor(() => expect(save).toBeDisabled())
     expect(verifyCalls()).toHaveLength(0)
     complete()
-    expect(await screen.findByText('Saved successfully')).toBeVisible()
+    // Sonner inserts the toast before its mount effect makes it visible.
+    await waitFor(() =>
+      expect(screen.getByText('Saved successfully')).toBeVisible()
+    )
     expect(patch).toHaveBeenCalledTimes(1)
     await waitFor(() =>
       expect(
@@ -519,7 +524,9 @@ describe('access tokens card', () => {
         context: { token_id: 7, scopes },
       }),
     ])
-    expect(await screen.findByText('Saved successfully')).toBeVisible()
+    await waitFor(() =>
+      expect(screen.getByText('Saved successfully')).toBeVisible()
+    )
     await waitFor(() =>
       expect(
         screen.queryByRole('dialog', { name: 'Edit access token' })

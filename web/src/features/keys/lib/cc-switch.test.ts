@@ -437,6 +437,32 @@ describe('CC Switch provider import', () => {
     ])
   })
 
+  test('includes the account total when the usage response exposes account usage', () => {
+    const result = getUsageConfig().extractor({
+      code: true,
+      data: {
+        account: {
+          total_available: 8_000_000,
+        },
+        user_quota: {
+          total_used: 2_000_000,
+        },
+        total_available: 4_000_000,
+        total_granted: 5_000_000,
+        total_used: 1_000_000,
+        unlimited_quota: false,
+      },
+    })
+
+    const plans = structuredClone(result) as Array<Record<string, unknown>>
+    expect(plans[0]).toMatchObject({
+      remaining: 16,
+      used: 4,
+      total: 20,
+      unit: 'USD',
+    })
+  })
+
   test('uses the CC Switch infinity convention for unlimited keys', () => {
     const result = getUsageConfig().extractor({
       code: true,
