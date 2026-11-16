@@ -504,7 +504,10 @@ describe('metadata editing', () => {
     expect(screen.getByText('Gemini.Color')).toBeVisible()
     await user.click(screen.getByRole('button', { name: 'Custom model icon' }))
     const icon = screen.getByRole('combobox', { name: 'Icon' })
-    await user.type(icon, 'Claude.Avatar')
+    await user.click(icon)
+    // Paste the complete key without repeatedly rendering the icon catalog.
+    await user.paste('Claude.Avatar')
+    expect(icon).toHaveValue('Claude.Avatar')
     await user.keyboard('{Escape}')
     expect(screen.getByText('Claude.Avatar')).toBeVisible()
     await user.click(
