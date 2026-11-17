@@ -39,6 +39,27 @@ export default defineConfig({
     // stall startup and unrelated tests when heavy suites run together.
     pool: 'forks',
     maxWorkers: 2,
+    deps: {
+      optimizer: {
+        client: {
+          enabled: true,
+          // Bundle icon barrels once instead of evaluating thousands of modules
+          // in every isolated jsdom worker. Keep the real SVG implementations.
+          include: [
+            '@hugeicons/core-free-icons',
+            'lucide-react',
+            // CodeMirror extensions rely on shared class identities; bundle
+            // every entry point together so they share the same state module.
+            '@codemirror/lang-javascript',
+            '@codemirror/lang-markdown',
+            '@codemirror/language',
+            '@codemirror/state',
+            '@codemirror/view',
+            '@lezer/highlight',
+          ],
+        },
+      },
+    },
     server: {
       // Bun marks Zod's ESM namespace as __esModule, so Vitest's external
       // CJS interop unwraps its default export and loses the named `z` export.
