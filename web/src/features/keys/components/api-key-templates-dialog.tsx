@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -24,9 +25,7 @@ import { Dialog } from '@/components/dialog'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
-import { getSystemOptions } from '@/features/system-settings/api'
 import { SettingsPageProvider } from '@/features/system-settings/components/settings-page-context'
-import { getOptionValue } from '@/features/system-settings/hooks/use-system-options'
 import { SmartRoutingSection } from '@/features/system-settings/models/smart-routing-section'
 import { ROLE } from '@/lib/roles'
 import { requireServerSuccess } from '@/lib/server-error-message'
@@ -37,32 +36,43 @@ import {
   updateUserSmartRoutingTemplates,
 } from '../api'
 
-const defaults = {
-  'smart_routing_setting.enabled': false,
-  'smart_routing_setting.templates': '[]',
-  'smart_routing_setting.max_user_templates': 10,
+export function ApiKeyTemplatesDialog() {
+  const { t } = useTranslation()
+  const canManage = useAuthStore(
+    (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
+  )
+  if (canManage) {
+    return (
+      <Button
+        variant='outline'
+        size='sm'
+        nativeButton={false}
+        role='link'
+        render={
+          <Link
+            to='/system-settings/models/$section'
+            params={{ section: 'smart-routing' }}
+          />
+        }
+      >
+        {t('Routing templates')}
+      </Button>
+    )
+  }
+  return <UserApiKeyTemplatesDialog />
 }
 
-export function ApiKeyTemplatesDialog() {
+function UserApiKeyTemplatesDialog() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [actions, setActions] = useState<HTMLDivElement | null>(null)
-  const canManage = useAuthStore(
-    (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
-  )
   const userID = useAuthStore((state) => state.auth.user?.id)
-  const options = useQuery({
-    queryKey: ['system-options'],
-    queryFn: async () => requireServerSuccess(await getSystemOptions()),
-    enabled: open && canManage,
-    staleTime: 0,
-  })
   const templates = useQuery({
     queryKey: ['token-smart-routing-templates', 'owned', userID],
     queryFn: async () =>
       requireServerSuccess(await getUserSmartRoutingTemplates()),
-    enabled: open && !canManage && userID !== undefined,
+    enabled: open && userID !== undefined,
     staleTime: 0,
   })
   const updateTemplates = useMutation({
@@ -78,10 +88,6 @@ export function ApiKeyTemplatesDialog() {
       })
     },
   })
-  const values = useMemo(
-    () => getOptionValue(options.data?.data, defaults),
-    [options.data]
-  )
   const userTemplateData = templates.data?.data
   const userValues = useMemo(
     () => ({
@@ -89,12 +95,10 @@ export function ApiKeyTemplatesDialog() {
       'smart_routing_setting.templates': JSON.stringify(
         userTemplateData?.templates ?? []
       ),
-      'smart_routing_setting.max_user_templates':
-        userTemplateData?.max_user_templates ?? 10,
     }),
     [userTemplateData]
   )
-  const query = canManage ? options : templates
+  const query = templates
   return (
     <Dialog
       open={open}
@@ -113,12 +117,7 @@ export function ApiKeyTemplatesDialog() {
     >
       {query.isPending && <LoadingState />}
       {query.isError && <ErrorState onRetry={() => query.refetch()} />}
-      {open && query.isSuccess && canManage && (
-        <SettingsPageProvider actionsContainer={actions}>
-          <SmartRoutingSection defaultValues={values} showCopy={false} />
-        </SettingsPageProvider>
-      )}
-      {open && query.isSuccess && !canManage && (
+      {open && query.isSuccess && (
         <SettingsPageProvider actionsContainer={actions}>
           <SmartRoutingSection
             defaultValues={userValues}
@@ -129,6 +128,7 @@ export function ApiKeyTemplatesDialog() {
             showEnabled={false}
             showCopy
             userMode
+            maxTemplates={userTemplateData?.max_user_templates ?? 10}
           />
         </SettingsPageProvider>
       )}

@@ -73,6 +73,8 @@ const SECURITY_SECTIONS = [
         defaultValues={{
           'token_setting.max_user_tokens':
             settings['token_setting.max_user_tokens'],
+          'smart_routing_setting.max_user_templates':
+            settings['smart_routing_setting.max_user_templates'],
         }}
       />
     ),

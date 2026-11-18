@@ -17,11 +17,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { afterEach, expect, test, vi } from 'vitest'
 
+import { SettingsPageProvider } from '@/features/system-settings/components/settings-page-context'
+import { SmartRoutingSection } from '@/features/system-settings/models/smart-routing-section'
 import { api } from '@/lib/api'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
@@ -142,7 +150,7 @@ test('ordinary users can manage templates with the key drawer mounted without pr
   expect(screen.queryByText('sk-first')).not.toBeInTheDocument()
 })
 
-test('root users edit the existing global template and save model restrictions', async () => {
+test('the global template editor saves model restrictions without a user quota or key copy action', async () => {
   const user = userEvent.setup()
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/option/') {
@@ -164,9 +172,32 @@ test('root users edit the existing global template and save model restrictions',
   const post = vi
     .spyOn(api, 'post')
     .mockResolvedValue({ data: { success: true } })
-  renderTemplates(ROLE.SUPER_ADMIN)
-  await user.click(screen.getByRole('button', { name: 'Routing templates' }))
+  const client = new QueryClient({
+    defaultOptions: { mutations: { retry: false } },
+  })
+  clients.push(client)
+  const actions = document.createElement('div')
+  render(
+    <QueryClientProvider client={client}>
+      <div
+        ref={(node) => {
+          node?.append(actions)
+        }}
+      />
+      <SettingsPageProvider actionsContainer={actions}>
+        <SmartRoutingSection
+          defaultValues={{
+            'smart_routing_setting.enabled': true,
+            'smart_routing_setting.templates': JSON.stringify([template]),
+          }}
+        />
+      </SettingsPageProvider>
+    </QueryClientProvider>
+  )
   const input = await screen.findByRole('textbox', { name: 'Template name' })
+  expect(
+    screen.queryByRole('spinbutton', { name: 'Maximum user routing templates' })
+  ).not.toBeInTheDocument()
   expect(
     screen.queryByRole('button', { name: 'Copy linked keys' })
   ).not.toBeInTheDocument()
@@ -193,6 +224,24 @@ test('root users edit the existing global template and save model restrictions',
       model_limits: ['model-a', 'model-b'],
     },
   ])
+})
+
+test('root users open global templates through a settings link without a duplicate dialog', async () => {
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 1, username: 'root', role: ROLE.SUPER_ADMIN })
+  const get = vi.spyOn(api, 'get')
+  const router = createRouter({
+    routeTree: createRootRoute({ component: ApiKeyTemplatesDialog }),
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+  })
+  await router.load()
+  render(<RouterProvider router={router} />)
+  expect(
+    await screen.findByRole('link', { name: 'Routing templates' })
+  ).toHaveAttribute('href', '/system-settings/models/smart-routing')
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(get).not.toHaveBeenCalled()
 })
 
 test('an empty user template list renders an empty state', async () => {

@@ -50,6 +50,7 @@ import {
   sideDrawerSwitchItemClassName,
 } from '@/components/drawer-layout'
 import { MultiSelect } from '@/components/multi-select'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
@@ -68,6 +69,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import {
   Select,
   SelectContent,
@@ -504,6 +506,45 @@ export function ApiKeysMutateDrawer({
     (template) => template.id === selectedSmartRoutingTemplateId
   )
   const selectedSmartRoutingTemplateIsApplied = !!selectedSmartRoutingTemplateId
+  let routingMode = 'single'
+  if (selectedSmartRoutingTemplateIsApplied) routingMode = 'template'
+  else if (groupRouteEnabled) routingMode = 'groups'
+  const templateRoutes = [
+    ...(selectedSmartRoutingTemplate?.group_routes ?? groupRoutes),
+  ].sort((a, b) => b.priority - a.priority)
+  const modelLimits = form.watch('model_limits') ?? []
+  const templateModels = selectedSmartRoutingTemplate
+    ? (selectedSmartRoutingTemplate.model_limits ?? [])
+    : modelLimits
+
+  const applySmartRoutingTemplate = (templateId: string) => {
+    const template = smartRoutingTemplates.find(
+      (candidate) => candidate.id === templateId
+    )
+    if (!template) return
+    autoTemplateApplied.current = true
+    form.setValue('routing_template_id', template.id, { shouldDirty: true })
+    form.setValue('model_limits', template.model_limits || [], {
+      shouldDirty: true,
+    })
+    setAutoSortGroupRoutes(false)
+    manualRoutePrioritiesRef.current.clear()
+    enabledRouteCooldownsRef.current.clear()
+    routeFields.replace(
+      template.group_routes.map((route) => ({
+        ...route,
+        enabled: route.enabled !== false,
+      }))
+    )
+    form.setValue('group_route_enabled', true, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+    form.setValue('group_route_sticky', template.group_route_sticky, {
+      shouldDirty: true,
+      shouldValidate: true,
+    })
+  }
 
   // When the administrator has configured templates, a newly created key
   // starts from the first available template. Users can still choose another
@@ -768,68 +809,140 @@ export function ApiKeysMutateDrawer({
 
                 {(!isBatch || batchFields.includes('routing')) && (
                   <>
-                    {(smartRoutingTemplates.length > 0 ||
-                      selectedSmartRoutingTemplateId) && (
-                      <div className='space-y-2'>
-                        <FormLabel>{t('Smart Routing')}</FormLabel>
-                        <Select
-                          value={
-                            selectedSmartRoutingTemplateIsApplied
-                              ? (selectedSmartRoutingTemplateId ?? undefined)
-                              : undefined
+                    <div className='space-y-2'>
+                      <Label id='key-routing-mode-label'>
+                        {t('Routing mode')}
+                      </Label>
+                      <RadioGroup
+                        aria-labelledby='key-routing-mode-label'
+                        value={routingMode}
+                        onValueChange={(value) => {
+                          autoTemplateApplied.current = true
+                          if (value === 'template') {
+                            const template = smartRoutingTemplates[0]
+                            if (template) applySmartRoutingTemplate(template.id)
+                            return
                           }
-                          onValueChange={(templateId) => {
-                            if (templateId === '__custom__') {
-                              form.setValue('routing_template_id', '', {
-                                shouldDirty: true,
-                              })
-                              return
-                            }
-                            if (!templateId) return
-                            const template = smartRoutingTemplates.find(
-                              (candidate) => candidate.id === templateId
-                            )
-                            if (!template) return
-
-                            form.setValue('routing_template_id', template.id)
-                            form.setValue(
-                              'model_limits',
-                              template.model_limits || []
-                            )
-                            setAutoSortGroupRoutes(false)
-                            manualRoutePrioritiesRef.current.clear()
-                            enabledRouteCooldownsRef.current.clear()
-                            routeFields.replace(
-                              template.group_routes.map((route) => ({
-                                ...route,
-                                enabled: route.enabled !== false,
-                              }))
-                            )
-                            form.setValue('group_route_enabled', true, {
-                              shouldDirty: true,
-                              shouldValidate: true,
+                          form.setValue('routing_template_id', '', {
+                            shouldDirty: true,
+                          })
+                          form.setValue(
+                            'group_route_enabled',
+                            value === 'groups',
+                            { shouldDirty: true }
+                          )
+                          if (
+                            value === 'groups' &&
+                            routeFields.fields.length === 0
+                          ) {
+                            routeFields.append({
+                              group: '',
+                              priority: 1,
+                              cooldown_seconds: 60,
+                              enabled: true,
                             })
-                            form.setValue(
-                              'group_route_sticky',
-                              template.group_route_sticky,
-                              { shouldDirty: true, shouldValidate: true }
-                            )
+                          }
+                        }}
+                        className={cn(
+                          'grid grid-cols-1 gap-2 sm:grid-cols-2',
+                          (smartRoutingTemplates.length > 0 ||
+                            selectedSmartRoutingTemplateIsApplied) &&
+                            'sm:grid-cols-3'
+                        )}
+                      >
+                        {(smartRoutingTemplates.length > 0 ||
+                          selectedSmartRoutingTemplateIsApplied) && (
+                          <Label
+                            htmlFor='key-routing-template'
+                            className={cn(
+                              'border-border hover:bg-muted/40 focus-within:ring-ring flex min-h-16 min-w-0 cursor-pointer items-center gap-2 rounded-md border px-3 py-3 focus-within:ring-2',
+                              routingMode === 'template' &&
+                                'border-primary bg-primary/5'
+                            )}
+                          >
+                            <RadioGroupItem
+                              id='key-routing-template'
+                              value='template'
+                              className='sr-only'
+                            />
+                            <Sparkles
+                              aria-hidden='true'
+                              className='size-4 shrink-0'
+                            />
+                            <span className='text-sm font-medium'>
+                              {t('Use template')}
+                            </span>
+                          </Label>
+                        )}
+                        <Label
+                          htmlFor='key-routing-single'
+                          className={cn(
+                            'border-border hover:bg-muted/40 focus-within:ring-ring flex min-h-16 min-w-0 cursor-pointer items-center gap-2 rounded-md border px-3 py-3 focus-within:ring-2',
+                            routingMode === 'single' &&
+                              'border-primary bg-primary/5'
+                          )}
+                        >
+                          <RadioGroupItem
+                            id='key-routing-single'
+                            value='single'
+                            className='sr-only'
+                          />
+                          <Layers3
+                            aria-hidden='true'
+                            className='size-4 shrink-0'
+                          />
+                          <span className='text-sm font-medium'>
+                            {t('Single group')}
+                          </span>
+                        </Label>
+                        <Label
+                          htmlFor='key-routing-groups'
+                          className={cn(
+                            'border-border hover:bg-muted/40 focus-within:ring-ring flex min-h-16 min-w-0 cursor-pointer items-center gap-2 rounded-md border px-3 py-3 focus-within:ring-2',
+                            routingMode === 'groups' &&
+                              'border-primary bg-primary/5'
+                          )}
+                        >
+                          <RadioGroupItem
+                            id='key-routing-groups'
+                            value='groups'
+                            className='sr-only'
+                          />
+                          <Network
+                            aria-hidden='true'
+                            className='size-4 shrink-0'
+                          />
+                          <span className='text-sm font-medium'>
+                            {t('Group routing')}
+                          </span>
+                        </Label>
+                      </RadioGroup>
+                    </div>
+                    {selectedSmartRoutingTemplateIsApplied && (
+                      <div className='space-y-2'>
+                        <Label htmlFor='key-routing-template-select'>
+                          {t('Routing template')}
+                        </Label>
+                        <Select
+                          value={selectedSmartRoutingTemplateId ?? undefined}
+                          onValueChange={(templateId) => {
+                            if (templateId) {
+                              applySmartRoutingTemplate(templateId)
+                            }
                           }}
                         >
-                          <SelectTrigger aria-label={t('Smart Routing')}>
+                          <SelectTrigger
+                            id='key-routing-template-select'
+                            aria-label={t('Routing template')}
+                          >
                             <Sparkles className='text-muted-foreground size-4' />
                             <SelectValue>
-                              {selectedSmartRoutingTemplateIsApplied
-                                ? selectedSmartRoutingTemplate?.name ||
-                                  selectedSmartRoutingTemplateId
-                                : t('Smart Routing')}
+                              {selectedSmartRoutingTemplate?.name ||
+                                selectedSmartRoutingTemplateId}
                             </SelectValue>
                           </SelectTrigger>
                           <SelectContent alignItemWithTrigger={false}>
                             <SelectGroup>
-                              <SelectItem value='__custom__'>
-                                {t('Custom routing')}
-                              </SelectItem>
                               {smartRoutingTemplates.map((template) => (
                                 <SelectItem
                                   key={template.id}
@@ -856,7 +969,7 @@ export function ApiKeysMutateDrawer({
                         role='status'
                       >
                         {t(
-                          'Template changes automatically apply to linked keys. Select custom routing to detach.'
+                          'Group routes and model limits stay in sync with this template. Choose another routing mode to configure this key independently.'
                         )}
                         {isUpdate &&
                           apiKeyData?.data?.routing_template_available ===
@@ -864,87 +977,68 @@ export function ApiKeysMutateDrawer({
                           t('Routing template is unavailable')}
                       </p>
                     )}
-                    <fieldset
-                      disabled={!!selectedSmartRoutingTemplateId}
-                      className='contents'
-                    >
-                      <FormField
-                        control={form.control}
-                        name='group_route_enabled'
-                        render={({ field }) => (
-                          <FormItem className='gap-2'>
-                            <FormLabel>{t('Routing mode')}</FormLabel>
-                            <FormControl>
-                              <div
-                                role='radiogroup'
-                                aria-label={t('Routing mode')}
-                                className='grid grid-cols-2 gap-2'
-                              >
-                                <button
-                                  type='button'
-                                  role='radio'
-                                  aria-checked={!field.value}
-                                  onClick={() => field.onChange(false)}
-                                  className={cn(
-                                    'border-border hover:bg-muted/40 focus-visible:ring-ring flex h-16 min-w-0 items-center gap-3 rounded-md border px-3 text-left outline-none transition-colors focus-visible:ring-2',
-                                    !field.value &&
-                                      'border-primary bg-primary/5 hover:bg-primary/5'
-                                  )}
-                                >
-                                  <span
-                                    className={cn(
-                                      'bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md',
-                                      !field.value &&
-                                        'bg-primary/10 text-primary'
-                                    )}
-                                  >
-                                    <Layers3 className='size-4' />
-                                  </span>
-                                  <span className='min-w-0 truncate text-sm font-medium'>
-                                    {t('Single group')}
-                                  </span>
-                                </button>
-                                <button
-                                  type='button'
-                                  role='radio'
-                                  aria-checked={!!field.value}
-                                  onClick={() => {
-                                    field.onChange(true)
-                                    if (routeFields.fields.length === 0) {
-                                      routeFields.append({
-                                        group: '',
-                                        priority: 1,
-                                        cooldown_seconds: 60,
-                                        enabled: true,
-                                      })
-                                    }
-                                  }}
-                                  className={cn(
-                                    'border-border hover:bg-muted/40 focus-visible:ring-ring flex h-16 min-w-0 items-center gap-3 rounded-md border px-3 text-left outline-none transition-colors focus-visible:ring-2',
-                                    field.value &&
-                                      'border-primary bg-primary/5 hover:bg-primary/5'
-                                  )}
-                                >
-                                  <span
-                                    className={cn(
-                                      'bg-muted text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md',
-                                      field.value &&
-                                        'bg-primary/10 text-primary'
-                                    )}
-                                  >
-                                    <Network className='size-4' />
-                                  </span>
-                                  <span className='min-w-0 truncate text-sm font-medium'>
-                                    {t('Group routing')}
-                                  </span>
-                                </button>
-                              </div>
-                            </FormControl>
-                          </FormItem>
-                        )}
-                      />
-
-                      {groupRouteEnabled ? (
+                    {selectedSmartRoutingTemplateIsApplied && (
+                      <section
+                        aria-label={t('Template configuration')}
+                        className='bg-muted/30 min-w-0 space-y-3 rounded-md border p-4'
+                      >
+                        <h3 className='text-sm font-medium'>
+                          {t('Template configuration')}
+                        </h3>
+                        <div
+                          className='flex min-w-0 flex-wrap items-center gap-2'
+                          aria-label={t('Group routing rules')}
+                        >
+                          {templateRoutes.map((route) => (
+                            <Badge
+                              key={route.group}
+                              variant={
+                                route.enabled === false
+                                  ? 'outline'
+                                  : 'secondary'
+                              }
+                              className='max-w-full break-all whitespace-normal'
+                            >
+                              {route.group}
+                              {route.enabled === false && ` · ${t('Disabled')}`}
+                            </Badge>
+                          ))}
+                        </div>
+                        <dl className='space-y-2 text-xs'>
+                          <div className='flex flex-wrap items-start justify-between gap-2'>
+                            <dt className='text-muted-foreground'>
+                              {t('Model Limits')}
+                            </dt>
+                            <dd className='flex min-w-0 flex-wrap gap-1'>
+                              {templateModels.length === 0
+                                ? t('All models')
+                                : templateModels.map((model) => (
+                                    <Badge
+                                      key={model}
+                                      variant='outline'
+                                      className='max-w-full break-all whitespace-normal'
+                                    >
+                                      {model}
+                                    </Badge>
+                                  ))}
+                            </dd>
+                          </div>
+                          <div className='flex items-center justify-between gap-2'>
+                            <dt className='text-muted-foreground'>
+                              {t('Group affinity')}
+                            </dt>
+                            <dd>
+                              {(selectedSmartRoutingTemplate?.group_route_sticky ??
+                              form.getValues('group_route_sticky'))
+                                ? t('Enabled')
+                                : t('Disabled')}
+                            </dd>
+                          </div>
+                        </dl>
+                      </section>
+                    )}
+                    {!selectedSmartRoutingTemplateIsApplied &&
+                      groupRouteEnabled && (
                         <div className='flex flex-col gap-3'>
                           <SideDrawerSectionHeader
                             title={t('Group routing rules')}
@@ -1221,7 +1315,9 @@ export function ApiKeysMutateDrawer({
                             )}
                           </div>
                         </div>
-                      ) : (
+                      )}
+                    {!selectedSmartRoutingTemplateIsApplied &&
+                      !groupRouteEnabled && (
                         <>
                           <FormField
                             control={form.control}
@@ -1328,7 +1424,6 @@ export function ApiKeysMutateDrawer({
                           )}
                         </>
                       )}
-                    </fieldset>
                   </>
                 )}
 
@@ -1519,37 +1614,38 @@ export function ApiKeysMutateDrawer({
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className='flex flex-col gap-4 pt-2'>
-                      {(!isBatch || batchFields.includes('models')) && (
-                        <FormField
-                          control={form.control}
-                          name='model_limits'
-                          render={({ field }) => (
-                            <FormItem>
-                              <FormLabel>{t('Model Limits')}</FormLabel>
-                              <FormControl>
-                                <MultiSelect
-                                  disabled={!!selectedSmartRoutingTemplateId}
-                                  options={models.map((m) => ({
-                                    label: m,
-                                    value: m,
-                                  }))}
-                                  selected={field.value}
-                                  onChange={field.onChange}
-                                  placeholder={t(
-                                    'Select models (empty for allow all)'
+                      {(!isBatch || batchFields.includes('models')) &&
+                        !selectedSmartRoutingTemplateIsApplied && (
+                          <FormField
+                            control={form.control}
+                            name='model_limits'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Model Limits')}</FormLabel>
+                                <FormControl>
+                                  <MultiSelect
+                                    disabled={!!selectedSmartRoutingTemplateId}
+                                    options={models.map((m) => ({
+                                      label: m,
+                                      value: m,
+                                    }))}
+                                    selected={field.value}
+                                    onChange={field.onChange}
+                                    placeholder={t(
+                                      'Select models (empty for allow all)'
+                                    )}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Limit which models can be used with this key'
                                   )}
-                                />
-                              </FormControl>
-                              <FormDescription>
-                                {t(
-                                  'Limit which models can be used with this key'
-                                )}
-                              </FormDescription>
-                              <FormMessage />
-                            </FormItem>
-                          )}
-                        />
-                      )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        )}
 
                       {(!isBatch || batchFields.includes('ips')) && (
                         <FormField

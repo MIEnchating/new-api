@@ -359,25 +359,34 @@ describe('API keys mutate drawer routing mode', () => {
     await renderCreateDrawer()
 
     const templateTrigger = screen.getByRole('combobox', {
-      name: 'Smart Routing',
+      name: 'Routing template',
     })
     await waitFor(() => expect(templateTrigger).toHaveTextContent('Claude'))
-    expect(document.body).toHaveTextContent('Group routing rules')
+    expect(screen.getByRole('radio', { name: 'Use template' })).toBeChecked()
+    expect(screen.queryByText('Group routing rules')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('region', { name: 'Template configuration' })
+    ).toHaveTextContent('vip')
+    expect(
+      screen.getByRole('region', { name: 'Template configuration' })
+    ).toHaveTextContent('default')
 
     await user.click(templateTrigger)
-    expect(screen.getByRole('option', { name: 'Custom routing' })).toBeVisible()
+    expect(
+      screen.queryByRole('option', { name: 'Custom routing' })
+    ).not.toBeInTheDocument()
     const claudeOption = screen.getByRole('option', { name: 'Claude' })
     await user.click(claudeOption)
 
     await waitFor(() => expect(templateTrigger).toHaveTextContent('Claude'))
-    expect(document.body).toHaveTextContent('Group routing rules')
+    expect(screen.queryByText('Group routing rules')).not.toBeInTheDocument()
     expect(
       document.querySelectorAll(
         'button[aria-label="Remove group routing rule"]'
       )
-    ).toHaveLength(2)
+    ).toHaveLength(0)
 
-    expect(screen.getByRole('radio', { name: 'Single group' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: 'Single group' })).toBeEnabled()
     changeInput(getControlByLabel('Name'), 'templated')
     fireEvent.click(findButton('Save changes', true))
     await waitFor(() => expect(createdPayloads).toHaveLength(1))
@@ -406,17 +415,53 @@ describe('API keys mutate drawer routing mode', () => {
     const payloads: Array<Record<string, unknown>> = []
     installApiFixtures(payloads)
     await renderCreateDrawer()
-    const template = screen.getByRole('combobox', { name: 'Smart Routing' })
+    const template = screen.getByRole('combobox', { name: 'Routing template' })
     await waitFor(() => expect(template).toHaveTextContent('Claude'))
-    await user.click(template)
-    await user.click(screen.getByRole('option', { name: 'Custom routing' }))
     expect(screen.getByRole('radio', { name: 'Single group' })).toBeEnabled()
     await user.click(screen.getByRole('radio', { name: 'Single group' }))
+    expect(
+      screen.queryByRole('combobox', { name: 'Routing template' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('region', { name: 'Template configuration' })
+    ).not.toBeInTheDocument()
     changeInput(getControlByLabel('Name'), 'independent')
     fireEvent.click(findButton('Save changes', true))
     await waitFor(() => expect(payloads).toHaveLength(1))
     expect(payloads[0]?.routing_template_id).toBe('')
     expect(payloads[0]?.group_route_config).toBe('')
+  })
+
+  test('keyboard navigation switches routing modes and reattaches a selected template', async () => {
+    const user = userEvent.setup()
+    installApiFixtures([])
+    await renderCreateDrawer()
+    const template = screen.getByRole('radio', { name: 'Use template' })
+    await waitFor(() => expect(template).toBeChecked())
+    template.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(screen.getByRole('radio', { name: 'Single group' })).toBeChecked()
+    expect(
+      screen.queryByRole('region', { name: 'Template configuration' })
+    ).not.toBeInTheDocument()
+    await user.keyboard('{ArrowRight}')
+    expect(screen.getByRole('radio', { name: 'Group routing' })).toBeChecked()
+    expect(
+      screen.getAllByRole('button', { name: 'Remove group routing rule' })
+    ).toHaveLength(2)
+    await user.click(template)
+    expect(
+      await screen.findByRole('combobox', { name: 'Routing template' })
+    ).toHaveTextContent('Claude')
+    expect(
+      screen.getByRole('region', { name: 'Template configuration' })
+    ).toHaveTextContent('All models')
+    await user.click(screen.getByRole('button', { name: /Advanced Settings/ }))
+    expect(
+      screen.queryByRole('combobox', {
+        name: 'Select models (empty for allow all)',
+      })
+    ).not.toBeInTheDocument()
   })
 
   test.each([true, false])(
@@ -474,20 +519,19 @@ describe('API keys mutate drawer routing mode', () => {
           </I18nextProvider>
         </QueryClientProvider>
       )
-      const selector = await screen.findByRole('combobox', {
-        name: 'Smart Routing',
+      await screen.findByRole('combobox', {
+        name: 'Routing template',
       })
       await waitFor(() =>
         expect(
-          screen.getByRole('radio', { name: 'Single group' })
-        ).toBeDisabled()
+          screen.getByRole('radio', { name: 'Use template' })
+        ).toBeChecked()
       )
       if (!available) {
         expect(screen.getByRole('status')).toHaveTextContent(
           'Routing template is unavailable'
         )
-        await user.click(selector)
-        await user.click(screen.getByRole('option', { name: 'Custom routing' }))
+        await user.click(screen.getByRole('radio', { name: 'Group routing' }))
       }
       changeInput(getControlByLabel('Name'), 'renamed linked key')
       fireEvent.click(findButton('Save changes', true))
@@ -498,6 +542,60 @@ describe('API keys mutate drawer routing mode', () => {
       })
     }
   )
+
+  test('choosing another template updates its summary and submitted model limits', async () => {
+    const user = userEvent.setup()
+    const payloads: Array<Record<string, unknown>> = []
+    installApiFixtures(payloads)
+    await renderCreateDrawer()
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: 'Use template' })).toBeChecked()
+    )
+    act(() => {
+      const client = renderedDrawer?.queryClient
+      if (!client) throw new Error('Expected an initialized key drawer')
+      const data = client.getQueryData<{ success: boolean; data: unknown[] }>([
+        'token-smart-routing-templates',
+      ])
+      if (!data) throw new Error('Expected loaded routing templates')
+      client.setQueryData(['token-smart-routing-templates'], {
+        ...data,
+        data: [
+          ...data.data,
+          {
+            id: 'custom-models',
+            name: 'Restricted models',
+            enabled: true,
+            group_routes: [
+              {
+                group: 'default',
+                priority: 1,
+                cooldown_seconds: 60,
+                enabled: true,
+              },
+            ],
+            group_route_sticky: false,
+            model_limits: ['model-a'],
+          },
+        ],
+      })
+    })
+    await user.click(screen.getByRole('combobox', { name: 'Routing template' }))
+    await user.click(screen.getByRole('option', { name: 'Restricted models' }))
+    const summary = screen.getByRole('region', {
+      name: 'Template configuration',
+    })
+    expect(summary).toHaveTextContent('model-a')
+    expect(summary).not.toHaveTextContent('vip')
+    changeInput(getControlByLabel('Name'), 'restricted key')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(payloads).toHaveLength(1))
+    expect(payloads[0]).toMatchObject({
+      routing_template_id: 'custom-models',
+      model_limits: 'model-a',
+      model_limits_enabled: true,
+    })
+  })
 
   test('disables press scaling on the advanced settings trigger', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
@@ -786,9 +884,10 @@ describe('API key batch editing', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled()
     )
+    expect(screen.getByRole('radio', { name: 'Single group' })).toBeChecked()
     expect(
-      screen.getByRole('combobox', { name: 'Smart Routing' })
-    ).toHaveTextContent('Smart Routing')
+      screen.queryByRole('combobox', { name: 'Routing template' })
+    ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Add group routing rule' })
     ).not.toBeInTheDocument()

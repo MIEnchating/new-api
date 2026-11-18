@@ -25,6 +25,53 @@ import { SettingsPageProvider } from '../../components/settings-page-context'
 import { SmartRoutingSection } from '../smart-routing-section'
 
 describe('smart routing template editor', () => {
+  test.each([true, false])(
+    'userMode %s applies the user quota only to personal templates',
+    async (userMode) => {
+      const user = userEvent.setup()
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      client.setQueryData(
+        userMode ? ['smart-routing-groups', 'user'] : ['smart-routing-groups'],
+        ['default']
+      )
+      render(
+        <QueryClientProvider client={client}>
+          <SmartRoutingSection
+            userMode={userMode}
+            maxTemplates={1}
+            defaultValues={{
+              'smart_routing_setting.enabled': true,
+              'smart_routing_setting.templates': JSON.stringify([
+                { id: 'existing', name: 'Existing', enabled: false },
+              ]),
+            }}
+          />
+        </QueryClientProvider>
+      )
+      expect(
+        screen.getByRole('switch', { name: 'Enable routing template' })
+      ).not.toBeChecked()
+      const add = screen.getByRole('button', { name: 'Add template' })
+      if (userMode) {
+        expect(add).toBeDisabled()
+        await user.click(
+          screen.getByRole('button', { name: 'Remove routing template' })
+        )
+      } else {
+        expect(add).toBeEnabled()
+      }
+      await user.click(screen.getByRole('button', { name: 'Add template' }))
+      const switches = screen.getAllByRole('switch', {
+        name: 'Enable routing template',
+      })
+      expect(switches.at(-1)).toBeChecked()
+      expect(switches).toHaveLength(userMode ? 1 : 2)
+      client.clear()
+    }
+  )
+
   test('adds and removes a routing template from the empty state', async () => {
     const user = userEvent.setup()
     const queryClient = new QueryClient({
@@ -50,7 +97,6 @@ describe('smart routing template editor', () => {
             defaultValues={{
               'smart_routing_setting.enabled': false,
               'smart_routing_setting.templates': '[]',
-              'smart_routing_setting.max_user_templates': 10,
             }}
           />
         </SettingsPageProvider>
@@ -60,6 +106,11 @@ describe('smart routing template editor', () => {
     expect(
       screen.getByText('No routing templates configured')
     ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('spinbutton', {
+        name: 'Maximum user routing templates',
+      })
+    ).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Add template' }))
 
@@ -67,7 +118,7 @@ describe('smart routing template editor', () => {
     expect(screen.getByRole('textbox', { name: 'Template name' })).toBeVisible()
     expect(
       screen.getByRole('switch', { name: 'Enable routing template' })
-    ).not.toBeChecked()
+    ).toBeChecked()
 
     await user.click(screen.getByRole('button', { name: 'Add route group' }))
 

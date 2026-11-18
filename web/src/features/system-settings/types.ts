@@ -306,7 +306,6 @@ export type ModelSettings = {
   'request_error_routing_setting.rules': string
   'smart_routing_setting.enabled': boolean
   'smart_routing_setting.templates': string
-  'smart_routing_setting.max_user_templates': number
   'channel_affinity_setting.enabled': boolean
   'channel_affinity_setting.switch_on_success': boolean
   'channel_affinity_setting.keep_on_channel_disabled': boolean
@@ -464,6 +463,7 @@ export type SecuritySettings = {
   'fetch_setting.allowed_ports': number[]
   'fetch_setting.apply_ip_filter_for_domain': boolean
   'token_setting.max_user_tokens': number
+  'smart_routing_setting.max_user_templates': number
 }
 
 export type UpstreamChannel = {

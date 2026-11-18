@@ -106,6 +106,11 @@ export function useUpdateOption() {
     onSuccess: (_data, variables) => {
       // Always refresh system-options
       queryClient.invalidateQueries({ queryKey: ['system-options'] })
+      if (variables.key === 'smart_routing_setting.max_user_templates') {
+        queryClient.invalidateQueries({
+          queryKey: ['token-smart-routing-templates'],
+        })
+      }
 
       if (variables.key === 'CustomMenuPages') {
         queryClient.invalidateQueries({ queryKey: ['custom-menu-pages'] })

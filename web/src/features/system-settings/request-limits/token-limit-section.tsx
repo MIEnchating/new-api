@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import * as z from 'zod'
@@ -38,17 +38,26 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 
-const tokenLimitSchema = z.object({
-  token_setting: z.object({
-    max_user_tokens: z.number().min(1),
-  }),
-})
+const createTokenLimitSchema = (t: (key: string) => string) =>
+  z.object({
+    token_setting: z.object({
+      max_user_tokens: z.number().min(1),
+    }),
+    smart_routing_setting: z.object({
+      max_user_templates: z
+        .number()
+        .int()
+        .min(1, t('Maximum user templates must be at least 1'))
+        .max(100, t('Maximum user templates cannot exceed 100')),
+    }),
+  })
 
-type TokenLimitFormValues = z.output<typeof tokenLimitSchema>
-type TokenLimitFormInput = z.input<typeof tokenLimitSchema>
+type TokenLimitFormValues = z.output<ReturnType<typeof createTokenLimitSchema>>
+type TokenLimitFormInput = z.input<ReturnType<typeof createTokenLimitSchema>>
 
 type NormalizedTokenLimitValues = {
   'token_setting.max_user_tokens': number
+  'smart_routing_setting.max_user_templates': number
 }
 
 type TokenLimitSectionProps = {
@@ -61,16 +70,22 @@ const buildFormDefaults = (
   token_setting: {
     max_user_tokens: defaults['token_setting.max_user_tokens'],
   },
+  smart_routing_setting: {
+    max_user_templates: defaults['smart_routing_setting.max_user_templates'],
+  },
 })
 
 const normalizeFormValues = (
   values: TokenLimitFormValues
 ): NormalizedTokenLimitValues => ({
   'token_setting.max_user_tokens': values.token_setting.max_user_tokens,
+  'smart_routing_setting.max_user_templates':
+    values.smart_routing_setting.max_user_templates,
 })
 
 export function TokenLimitSection({ defaultValues }: TokenLimitSectionProps) {
   const { t } = useTranslation()
+  const tokenLimitSchema = useMemo(() => createTokenLimitSchema(t), [t])
   const updateOption = useUpdateOption()
   const form = useForm<TokenLimitFormInput, unknown, TokenLimitFormValues>({
     resolver: zodResolver(tokenLimitSchema),
@@ -83,11 +98,18 @@ export function TokenLimitSection({ defaultValues }: TokenLimitSectionProps) {
   }, [defaultValues, form])
 
   const onSubmit = async (values: TokenLimitFormValues) => {
-    const key = 'token_setting.max_user_tokens' as const
     const normalized = normalizeFormValues(values)
-    const value = normalized[key]
-    if (value !== defaultValues[key]) {
-      await updateOption.mutateAsync({ key, value })
+    try {
+      for (const key of Object.keys(normalized) as Array<
+        keyof typeof normalized
+      >) {
+        const value = normalized[key]
+        if (value !== defaultValues[key]) {
+          await updateOption.mutateAsync({ key, value })
+        }
+      }
+    } catch {
+      // The mutation reports the server error and leaves the form available for retry.
     }
   }
 
@@ -97,7 +119,7 @@ export function TokenLimitSection({ defaultValues }: TokenLimitSectionProps) {
         <SettingsForm onSubmit={form.handleSubmit(onSubmit)}>
           <SettingsPageFormActions
             onSave={form.handleSubmit(onSubmit)}
-            isSaving={updateOption.isPending}
+            isSaving={form.formState.isSubmitting}
             saveLabel='Save token limits'
           />
           <FormField
@@ -121,6 +143,32 @@ export function TokenLimitSection({ defaultValues }: TokenLimitSectionProps) {
                   {t(
                     'Maximum number of tokens each user can create. Default 1000. Setting too large may affect performance.'
                   )}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name='smart_routing_setting.max_user_templates'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t('Maximum user routing templates')}</FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    min={1}
+                    max={100}
+                    step={1}
+                    {...field}
+                    value={Number.isNaN(field.value) ? '' : field.value}
+                    onChange={(event) =>
+                      field.onChange(event.target.valueAsNumber)
+                    }
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t('Limit how many routing templates each user can create.')}
                 </FormDescription>
                 <FormMessage />
               </FormItem>
