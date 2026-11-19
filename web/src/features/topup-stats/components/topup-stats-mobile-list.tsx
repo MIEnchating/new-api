@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Database, Eye, ReceiptText, Undo2 } from 'lucide-react'
+import { Database, Eye, ReceiptText, Undo2, Wallet } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
@@ -47,6 +47,7 @@ type TopUpStatsMobileListProps = {
   emptyDescription: string
   onInvoiceAction: (item: TopUpStatsItem, action: InvoiceAction) => void
   onViewDetails: (item: TopUpStatsItem) => void
+  onRefund: (item: TopUpStatsItem) => void
   updatingKey?: string
   selectedIds: Set<string>
   onToggleSelected: (id: string, selected: boolean) => void
@@ -81,6 +82,7 @@ export function TopUpStatsMobileList({
   emptyDescription,
   onInvoiceAction,
   onViewDetails,
+  onRefund,
   updatingKey,
   selectedIds,
   onToggleSelected,
@@ -248,6 +250,18 @@ export function TopUpStatsMobileList({
                     showDot
                     copyable={false}
                   />
+                )}
+                {row.refund_supported && (
+                  <Button
+                    type='button'
+                    variant='destructive'
+                    size='sm'
+                    onClick={() => onRefund(row)}
+                    disabled={updatingKey === row.id}
+                  >
+                    <Wallet data-icon='inline-start' />
+                    {t('Refund')}
+                  </Button>
                 )}
               </div>
               <div className='flex items-center gap-1.5'>

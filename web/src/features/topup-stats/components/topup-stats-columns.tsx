@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { Eye, ReceiptText, Undo2 } from 'lucide-react'
+import { Eye, ReceiptText, Undo2, Wallet } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -35,12 +35,14 @@ import type { InvoiceAction, TopUpStatsItem } from '../types'
 type TopUpStatsColumnsOptions = {
   onInvoiceAction: (item: TopUpStatsItem, action: InvoiceAction) => void
   onViewDetails: (item: TopUpStatsItem) => void
+  onRefund: (item: TopUpStatsItem) => void
   updatingKey?: string
 }
 
 export function useTopUpStatsColumns({
   onInvoiceAction,
   onViewDetails,
+  onRefund,
   updatingKey,
 }: TopUpStatsColumnsOptions): ColumnDef<TopUpStatsItem>[] {
   const { t } = useTranslation()
@@ -289,6 +291,18 @@ export function useTopUpStatsColumns({
                   {label}
                 </Button>
               )}
+              {item.refund_supported && (
+                <Button
+                  type='button'
+                  variant='destructive'
+                  size='sm'
+                  onClick={() => onRefund(item)}
+                  disabled={updatingKey === item.id}
+                >
+                  <Wallet data-icon='inline-start' />
+                  {t('Refund')}
+                </Button>
+              )}
             </div>
           )
         },
@@ -297,6 +311,6 @@ export function useTopUpStatsColumns({
         meta: { pinned: 'right' as const },
       },
     ],
-    [onInvoiceAction, onViewDetails, t, updatingKey]
+    [onInvoiceAction, onRefund, onViewDetails, t, updatingKey]
   )
 }

@@ -85,6 +85,7 @@ const baseItem: TopUpStatsItem = {
   invoice_returned_at: 0,
   invoice_returned_by: 0,
   invoice_eligible: true,
+  refund_supported: false,
   excluded_from_stats: false,
 }
 

@@ -44,7 +44,12 @@ import dayjs from '@/lib/dayjs'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
 
-import { getTopUpStats, updateTopUpInvoice, updateTopUpInvoices } from './api'
+import {
+  getTopUpStats,
+  refundStripeTopUp,
+  updateTopUpInvoice,
+  updateTopUpInvoices,
+} from './api'
 import { useTopUpStatsColumns } from './components/topup-stats-columns'
 import { TopUpStatsDetailsDialog } from './components/topup-stats-details-dialog'
 import { TopUpStatsMobileList } from './components/topup-stats-mobile-list'
@@ -170,6 +175,7 @@ export function TopUpStats() {
     action: InvoiceAction
   } | null>(null)
   const [returnConfirmed, setReturnConfirmed] = useState(false)
+  const [refundTarget, setRefundTarget] = useState<TopUpStatsItem | null>(null)
   const [detailsTarget, setDetailsTarget] = useState<TopUpStatsItem | null>(
     null
   )
@@ -226,18 +232,45 @@ export function TopUpStats() {
     },
     []
   )
+  const refundMutation = useMutation({
+    mutationFn: async (item: TopUpStatsItem) => {
+      if (!item.topup_id || !item.refund_supported) {
+        throw new Error(t('This order cannot be refunded'))
+      }
+      const response = await refundStripeTopUp(item.topup_id)
+      if (!response.success) {
+        throw createServerError(response, t('Failed to refund order'))
+      }
+      return item
+    },
+    onSuccess: async () => {
+      toast.success(t('Order refunded successfully'))
+      setRefundTarget(null)
+      setRowSelection({})
+      await queryClient.invalidateQueries({ queryKey: ['admin-topup-stats'] })
+      await queryClient.invalidateQueries({
+        queryKey: ['admin-topup-daily-stats'],
+      })
+    },
+    onError: (error) => handleServerError(error, t('Failed to refund order')),
+  })
   const handleInvoiceAction = useCallback(
     (item: TopUpStatsItem, action: InvoiceAction) => {
       openInvoiceConfirmation([item], action)
     },
     [openInvoiceConfirmation]
   )
+  let updatingKey: string | undefined
+  if (invoiceMutation.isPending) {
+    updatingKey = invoiceMutation.variables?.items[0]?.id
+  } else if (refundMutation.isPending) {
+    updatingKey = refundMutation.variables?.id
+  }
   const columns = useTopUpStatsColumns({
     onInvoiceAction: handleInvoiceAction,
+    onRefund: setRefundTarget,
     onViewDetails: setDetailsTarget,
-    updatingKey: invoiceMutation.isPending
-      ? invoiceMutation.variables?.items[0]?.id
-      : undefined,
+    updatingKey,
   })
 
   const startTime = Math.floor(appliedFilters.range.start.getTime() / 1000)
@@ -500,10 +533,12 @@ export function TopUpStats() {
                       : t('Try adjusting your search')
                   }
                   onInvoiceAction={handleInvoiceAction}
+                  onRefund={setRefundTarget}
                   onViewDetails={setDetailsTarget}
                   updatingKey={
-                    invoiceMutation.isPending
-                      ? invoiceMutation.variables?.items[0]?.id
+                    invoiceMutation.isPending || refundMutation.isPending
+                      ? (invoiceMutation.variables?.items[0]?.id ??
+                        refundMutation.variables?.id)
                       : undefined
                   }
                   selectedIds={selectedIds}
@@ -630,6 +665,8 @@ export function TopUpStats() {
                       className='min-w-0 justify-start max-sm:w-full sm:min-w-[180px] sm:flex-1'
                       options={[
                         { label: t('Success'), value: 'success' },
+                        { label: t('Refund pending'), value: 'refund_pending' },
+                        { label: t('Refunded'), value: 'refunded' },
                         { label: t('Pending'), value: 'pending' },
                         { label: t('Failed'), value: 'failed' },
                         { label: t('Expired'), value: 'expired' },
@@ -732,6 +769,23 @@ export function TopUpStats() {
           </label>
         )}
       </ConfirmDialog>
+      <ConfirmDialog
+        open={refundTarget !== null}
+        onOpenChange={(open) => {
+          if (!open && !refundMutation.isPending) setRefundTarget(null)
+        }}
+        title={t('Refund order')}
+        desc={t(
+          'Refund the full Stripe payment for {{tradeNo}} and remove the credited quota from the user account? This action cannot be undone.',
+          { tradeNo: refundTarget?.reference ?? '' }
+        )}
+        confirmText={t('Confirm refund')}
+        destructive
+        isLoading={refundMutation.isPending}
+        handleConfirm={() => {
+          if (refundTarget) refundMutation.mutate(refundTarget)
+        }}
+      />
       <TopUpStatsDetailsDialog
         item={detailsTarget}
         onOpenChange={(open) => {

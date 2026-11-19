@@ -50,6 +50,14 @@ const STATUS_CONFIG: Record<TopupStatus, StatusConfig> = {
     variant: 'danger',
     label: 'Expired',
   },
+  refund_pending: {
+    variant: 'warning',
+    label: 'Refund pending',
+  },
+  refunded: {
+    variant: 'danger',
+    label: 'Refunded',
+  },
 }
 
 /**

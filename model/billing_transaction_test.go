@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -97,6 +98,76 @@ func TestGetBillingHistoryMergesSourcesAndFilters(t *testing.T) {
 	require.Equal(t, int64(1), total)
 	require.Len(t, items, 1)
 	require.Equal(t, userTwoID, items[0].UserId)
+}
+
+func TestCompleteStripeTopUpRefundReversesQuotaOnce(t *testing.T) {
+	verifyRefund := func(t *testing.T) {
+		t.Helper()
+		userId, _ := setupBillingHistoryTest(t)
+		tradeNo := fmt.Sprintf("stripe-refund-%d", common.GetTimestamp())
+		topUp := &TopUp{
+			UserId: userId, Amount: 20, Money: 2, TradeNo: tradeNo,
+			PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe,
+			CreateTime: common.GetTimestamp(), CompleteTime: common.GetTimestamp(),
+			Status: common.TopUpStatusSuccess,
+		}
+		require.NoError(t, DB.Create(topUp).Error)
+		creditedQuota := calculateTopUpCreditedQuota(topUp.PaymentProvider, topUp.Amount, topUp.Money)
+		require.NoError(t, DB.Model(&User{}).Where("id = ?", userId).Update("quota", -common.MaxWalletQuota).Error)
+		_, err := StartStripeTopUpRefund(topUp.Id)
+		require.Error(t, err)
+		var unchanged TopUp
+		require.NoError(t, DB.First(&unchanged, topUp.Id).Error)
+		assert.Equal(t, common.TopUpStatusSuccess, unchanged.Status)
+		require.NoError(t, DB.Model(&User{}).Where("id = ?", userId).Update("quota", creditedQuota+1000).Error)
+
+		started, err := StartStripeTopUpRefund(topUp.Id)
+		require.NoError(t, err)
+		assert.Equal(t, TopUpStatusRefundPending, started.Status)
+		require.NoError(t, CompleteStripeTopUpRefund(topUp.Id, 99))
+		require.NoError(t, CompleteStripeTopUpRefund(topUp.Id, 100))
+
+		var user User
+		require.NoError(t, DB.First(&user, userId).Error)
+		assert.Equal(t, 1000, user.Quota)
+		var updated TopUp
+		require.NoError(t, DB.First(&updated, topUp.Id).Error)
+		assert.Equal(t, TopUpStatusRefunded, updated.Status)
+		var refunds int64
+		require.NoError(t, DB.Model(&BillingTransaction{}).Where("event_key = ?", fmt.Sprintf("topup-refund:%d", topUp.Id)).Count(&refunds).Error)
+		assert.EqualValues(t, 1, refunds)
+	}
+
+	t.Run("sqlite", verifyRefund)
+	for _, testCase := range []struct {
+		name string
+		env  string
+	}{
+		{name: "mysql", env: "TEST_MYSQL_DSN"},
+		{name: "postgres", env: "TEST_POSTGRES_DSN"},
+	} {
+		dsn := os.Getenv(testCase.env)
+		if dsn == "" {
+			t.Logf("skipping %s refund verification: %s is not configured", testCase.name, testCase.env)
+			continue
+		}
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Setenv("TOPUP_REFUND_TEST_DSN", dsn)
+			testDB, databaseType, err := chooseDB("TOPUP_REFUND_TEST_DSN", false)
+			require.NoError(t, err)
+			sqlDB, err := testDB.DB()
+			require.NoError(t, err)
+			previousDB, previousType := DB, common.MainDatabaseType()
+			DB = testDB
+			common.SetMainDatabaseType(databaseType)
+			t.Cleanup(func() {
+				DB = previousDB
+				common.SetMainDatabaseType(previousType)
+				assert.NoError(t, sqlDB.Close())
+			})
+			verifyRefund(t)
+		})
+	}
 }
 
 func TestGetBillingHistoryIncludesLotteryRewards(t *testing.T) {

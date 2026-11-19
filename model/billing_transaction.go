@@ -69,6 +69,7 @@ type BillingHistoryItem struct {
 	InvoiceReturnedAt int64   `json:"invoice_returned_at,omitempty"`
 	InvoiceReturnedBy int     `json:"invoice_returned_by,omitempty"`
 	InvoiceEligible   bool    `json:"invoice_eligible"`
+	RefundSupported   bool    `json:"refund_supported"`
 	ExcludedFromStats bool    `json:"excluded_from_stats"`
 }
 
@@ -425,6 +426,7 @@ func queryOnlineTopups(filter BillingHistoryFilter, limit int) ([]BillingHistory
 			InvoicedBy: topup.InvoicedBy, InvoiceReturnedAt: topup.InvoiceReturnedAt,
 			InvoiceReturnedBy: topup.InvoiceReturnedBy,
 			InvoiceEligible:   topup.Status == common.TopUpStatusSuccess,
+			RefundSupported:   topup.PaymentProvider == PaymentProviderStripe && (topup.Status == common.TopUpStatusSuccess || topup.Status == TopUpStatusRefundPending),
 		})
 	}
 	return items, total, quotaTotal, nil

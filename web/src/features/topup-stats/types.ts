@@ -16,7 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-type TopUpStatus = 'success' | 'pending' | 'failed' | 'expired'
+type TopUpStatus =
+  | 'success'
+  | 'pending'
+  | 'failed'
+  | 'expired'
+  | 'refund_pending'
+  | 'refunded'
 export type InvoiceStatus = 0 | 1 | 2
 export type InvoiceAction = 'issue' | 'return'
 export type BillingRecordType =
@@ -48,6 +54,7 @@ export type TopUpStatsItem = {
   invoice_returned_at: number
   invoice_returned_by: number
   invoice_eligible: boolean
+  refund_supported: boolean
   excluded_from_stats: boolean
   operator_user_id?: number
   detail?: string

@@ -38,6 +38,8 @@ const (
 
 	TopUpInvoiceActionIssue  = "issue"
 	TopUpInvoiceActionReturn = "return"
+	TopUpStatusRefundPending = "refund_pending"
+	TopUpStatusRefunded      = "refunded"
 )
 
 const (
@@ -74,6 +76,19 @@ func calculateTopUpCreditedQuota(paymentProvider string, amount int64, money flo
 	return creditedQuota
 }
 
+func stripeTopUpRefundQuota(topUp *TopUp) (int, error) {
+	if topUp == nil {
+		return 0, ErrInvalidTopUpQuota
+	}
+	quota, err := common.WalletQuotaFromDecimalStrict(
+		decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
+	)
+	if err != nil || quota <= 0 {
+		return 0, ErrInvalidTopUpQuota
+	}
+	return quota, nil
+}
+
 var (
 	ErrPaymentMethodMismatch = errors.New("payment method mismatch")
 	ErrTopUpNotFound         = errors.New("topup not found")
@@ -85,6 +100,8 @@ var (
 	ErrTopUpInvoiceAction             = errors.New("invalid invoice action")
 	ErrTopUpInvoiceStatus             = errors.New("invalid invoice status")
 	ErrTopUpInvoiceBatch              = errors.New("invalid invoice batch")
+	ErrTopUpRefundUnsupported         = errors.New("top-up refund is not supported for this provider")
+	ErrTopUpRefundStatus              = errors.New("top-up order cannot be refunded in its current status")
 )
 
 type inviteRechargeRebateResult struct {
@@ -306,6 +323,111 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 		topUp.Status = targetStatus
 		return tx.Save(topUp).Error
 	})
+}
+
+func StartStripeTopUpRefund(id int) (*TopUp, error) {
+	if id <= 0 {
+		return nil, ErrTopUpNotFound
+	}
+	topUp := &TopUp{}
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).First(topUp, id).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if topUp.PaymentProvider != PaymentProviderStripe {
+			return ErrTopUpRefundUnsupported
+		}
+		if topUp.Status == TopUpStatusRefunded {
+			return nil
+		}
+		if topUp.Status != common.TopUpStatusSuccess && topUp.Status != TopUpStatusRefundPending {
+			return ErrTopUpRefundStatus
+		}
+		quota, err := stripeTopUpRefundQuota(topUp)
+		if err != nil {
+			return err
+		}
+		var user User
+		if err := lockForUpdate(tx).First(&user, topUp.UserId).Error; err != nil {
+			return err
+		}
+		if _, err := common.WalletQuotaFromDecimalStrict(decimal.NewFromInt(int64(user.Quota)).Sub(decimal.NewFromInt(int64(quota)))); err != nil {
+			return ErrWalletQuotaLimitExceeded
+		}
+		if topUp.Status == common.TopUpStatusSuccess {
+			topUp.Status = TopUpStatusRefundPending
+			return tx.Model(topUp).Update("status", topUp.Status).Error
+		}
+		return nil
+	})
+	return topUp, err
+}
+
+func CompleteStripeTopUpRefund(id int, operatorId int) error {
+	if id <= 0 || operatorId <= 0 {
+		return ErrTopUpNotFound
+	}
+	var quotaDelta int
+	var userId int
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		topUp := &TopUp{}
+		if err := lockForUpdate(tx).First(topUp, id).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if topUp.PaymentProvider != PaymentProviderStripe {
+			return ErrTopUpRefundUnsupported
+		}
+		if topUp.Status == TopUpStatusRefunded {
+			return nil
+		}
+		if topUp.Status != TopUpStatusRefundPending {
+			return ErrTopUpRefundStatus
+		}
+
+		quota, err := stripeTopUpRefundQuota(topUp)
+		if err != nil {
+			return err
+		}
+		var user User
+		if err := lockForUpdate(tx).First(&user, topUp.UserId).Error; err != nil {
+			return err
+		}
+		userId = user.Id
+		newQuota, err := common.WalletQuotaFromDecimalStrict(decimal.NewFromInt(int64(user.Quota)).Sub(decimal.NewFromInt(int64(quota))))
+		if err != nil {
+			return err
+		}
+		quotaDelta = newQuota - user.Quota
+		eventKey := fmt.Sprintf("topup-refund:%d", topUp.Id)
+		if err := tx.Create(&BillingTransaction{
+			EventKey:       eventKey,
+			UserId:         topUp.UserId,
+			Type:           BillingTypeAdminAdjustment,
+			Quota:          quotaDelta,
+			Money:          -topUp.Money,
+			Reference:      topUp.TradeNo,
+			PaymentMethod:  PaymentProviderStripe,
+			Status:         common.TopUpStatusSuccess,
+			OperatorUserId: operatorId,
+			CreatedAt:      common.GetTimestamp(),
+			Detail:         "Stripe top-up refund",
+		}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&User{}).Where("id = ?", user.Id).Update("quota", newQuota).Error; err != nil {
+			return err
+		}
+		return tx.Model(topUp).Update("status", TopUpStatusRefunded).Error
+	})
+	if err != nil {
+		return err
+	}
+	if quotaDelta != 0 {
+		if err := cacheIncrUserQuota(userId, int64(quotaDelta)); err != nil {
+			common.SysLog(common.LogText("failed to sync user quota after Stripe top-up refund %d: %s", id, err.Error()))
+		}
+	}
+	return nil
 }
 
 // RechargeEpay 原子完成易支付订单：订单行锁、状态校验、成功更新与用户额度增加

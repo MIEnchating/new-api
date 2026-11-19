@@ -20,6 +20,7 @@ import (
 	"github.com/shopspring/decimal"
 	"github.com/stripe/stripe-go/v81"
 	"github.com/stripe/stripe-go/v81/checkout/session"
+	"github.com/stripe/stripe-go/v81/refund"
 	"github.com/stripe/stripe-go/v81/webhook"
 	"github.com/thanhpk/randstr"
 )
@@ -165,6 +166,80 @@ func RequestStripePay(c *gin.Context) {
 		return
 	}
 	stripeAdaptor.RequestPay(c, &req)
+}
+
+func AdminRefundStripeTopUp(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorMsg(c, "Invalid order")
+		return
+	}
+	if setting.StripeApiSecret == "" {
+		common.ApiErrorMsg(c, "Stripe is not configured")
+		return
+	}
+	stripe.Key = setting.StripeApiSecret
+	topUp, err := model.StartStripeTopUpRefund(id)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if topUp.Status == model.TopUpStatusRefunded {
+		common.ApiSuccess(c, gin.H{"status": topUp.Status})
+		return
+	}
+
+	params := &stripe.CheckoutSessionListParams{
+		Status: stripe.String("complete"),
+	}
+	params.Context = c.Request.Context()
+	params.Limit = stripe.Int64(100)
+	params.CreatedRange = &stripe.RangeQueryParams{
+		GreaterThanOrEqual: topUp.CreateTime - 300,
+		LesserThanOrEqual:  topUp.CreateTime + 86400,
+	}
+	var paymentIntentID string
+	iterator := session.List(params)
+	for iterator.Next() {
+		checkoutSession := iterator.CheckoutSession()
+		if checkoutSession.ClientReferenceID != topUp.TradeNo || checkoutSession.PaymentStatus != stripe.CheckoutSessionPaymentStatusPaid {
+			continue
+		}
+		expectedAmount := decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromInt(100)).IntPart()
+		if checkoutSession.AmountTotal != expectedAmount || checkoutSession.PaymentIntent == nil || checkoutSession.PaymentIntent.ID == "" {
+			common.ApiErrorMsg(c, "Stripe payment details do not match the order")
+			return
+		}
+		paymentIntentID = checkoutSession.PaymentIntent.ID
+		break
+	}
+	if err := iterator.Err(); err != nil {
+		logger.LogError(c.Request.Context(), common.LogText("Stripe refund lookup failed order_id=%d error=%q", id, err.Error()))
+		common.ApiErrorMsg(c, "Failed to retrieve Stripe payment details")
+		return
+	}
+	if paymentIntentID == "" {
+		common.ApiErrorMsg(c, "Paid Stripe checkout session not found")
+		return
+	}
+
+	refundParams := &stripe.RefundParams{
+		PaymentIntent: stripe.String(paymentIntentID),
+		Reason:        stripe.String(string(stripe.RefundReasonRequestedByCustomer)),
+	}
+	refundParams.Context = c.Request.Context()
+	refundParams.SetIdempotencyKey("topup-refund-" + strconv.Itoa(id))
+	if _, err := refund.New(refundParams); err != nil {
+		logger.LogError(c.Request.Context(), common.LogText("Stripe top-up refund failed order_id=%d payment_intent=%q error=%q", id, paymentIntentID, err.Error()))
+		common.ApiErrorMsg(c, "Stripe refund failed")
+		return
+	}
+	if err := model.CompleteStripeTopUpRefund(id, c.GetInt("id")); err != nil {
+		logger.LogError(c.Request.Context(), common.LogText("Stripe refund succeeded but local settlement failed order_id=%d error=%q", id, err.Error()))
+		common.ApiErrorMsg(c, "Refund succeeded but local quota adjustment failed; retry this action")
+		return
+	}
+	common.ApiSuccess(c, gin.H{"status": model.TopUpStatusRefunded})
 }
 
 func StripeWebhook(c *gin.Context) {

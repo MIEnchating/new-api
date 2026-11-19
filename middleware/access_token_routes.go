@@ -342,6 +342,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/user/aff/rewards/all":                         accessTokenScopeRule("billing:read"),
 	"GET /api/user/group_names":                             accessTokenScopeRule("user:read"),
 	"GET /api/user/topup/stats":                             accessTokenScopeRule("billing:read"),
+	"POST /api/user/topup/:id/refund":                        accessTokenScopeRule("billing:write"),
 	"PUT /api/user/topup/invoice/batch":                     accessTokenScopeRule("billing:write"),
 	"PUT /api/user/topup/:id/invoice":                       accessTokenScopeRule("billing:write"),
 	"GET /api/user/lottery/config":                          accessTokenScopeRule("billing:read"),
