@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
-import { Eye, ReceiptText, Undo2, Wallet } from 'lucide-react'
+import { Eye, Wallet } from 'lucide-react'
 import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -25,22 +25,19 @@ import { CopyButton } from '@/components/copy-button'
 import { LongText } from '@/components/long-text'
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { getStatusConfig } from '@/features/wallet/lib/billing'
 import { formatNumber, formatQuota, formatTimestamp } from '@/lib/format'
 
 import { getBillingTypeConfig, getInvoiceStatusConfig } from '../lib'
-import type { InvoiceAction, TopUpStatsItem } from '../types'
+import type { TopUpStatsItem } from '../types'
 
 type TopUpStatsColumnsOptions = {
-  onInvoiceAction: (item: TopUpStatsItem, action: InvoiceAction) => void
   onViewDetails: (item: TopUpStatsItem) => void
   onRefund: (item: TopUpStatsItem) => void
   updatingKey?: string
 }
 
 export function useTopUpStatsColumns({
-  onInvoiceAction,
   onViewDetails,
   onRefund,
   updatingKey,
@@ -49,30 +46,6 @@ export function useTopUpStatsColumns({
 
   return useMemo(
     () => [
-      {
-        id: 'select',
-        header: ({ table }) => (
-          <Checkbox
-            checked={table.getIsAllPageRowsSelected()}
-            indeterminate={table.getIsSomePageRowsSelected()}
-            onCheckedChange={(value) =>
-              table.toggleAllPageRowsSelected(!!value)
-            }
-            aria-label={t('Select all')}
-          />
-        ),
-        cell: ({ row }) =>
-          row.getCanSelect() ? (
-            <Checkbox
-              checked={row.getIsSelected()}
-              onCheckedChange={(value) => row.toggleSelected(!!value)}
-              aria-label={t('Select row')}
-            />
-          ) : null,
-        enableSorting: false,
-        enableHiding: false,
-        size: 44,
-      },
       {
         accessorKey: 'reference',
         header: t('Order number / reference'),
@@ -259,10 +232,6 @@ export function useTopUpStatsColumns({
         header: () => <div className='text-center'>{t('Actions')}</div>,
         cell: ({ row }) => {
           const item = row.original
-          const isIssued = item.invoice_status === 1
-          const action: InvoiceAction = isIssued ? 'return' : 'issue'
-          const label = isIssued ? t('Return invoice') : t('Mark as invoiced')
-          const Icon = isIssued ? Undo2 : ReceiptText
           return (
             <div className='flex items-center justify-center gap-1.5'>
               <Button
@@ -274,23 +243,6 @@ export function useTopUpStatsColumns({
                 <Eye data-icon='inline-start' />
                 {t('Details')}
               </Button>
-              {item.invoice_eligible && (
-                <Button
-                  type='button'
-                  variant={isIssued ? 'outline' : 'default'}
-                  size='sm'
-                  className={
-                    isIssued
-                      ? 'border-warning/40 text-warning hover:bg-warning/10 hover:text-warning'
-                      : undefined
-                  }
-                  onClick={() => onInvoiceAction(item, action)}
-                  disabled={updatingKey === item.id}
-                >
-                  <Icon data-icon='inline-start' />
-                  {label}
-                </Button>
-              )}
               {item.refund_supported && (
                 <Button
                   type='button'
@@ -306,11 +258,11 @@ export function useTopUpStatsColumns({
             </div>
           )
         },
-        size: 260,
+        size: 150,
         enableHiding: false,
         meta: { pinned: 'right' as const },
       },
     ],
-    [onInvoiceAction, onRefund, onViewDetails, t, updatingKey]
+    [onRefund, onViewDetails, t, updatingKey]
   )
 }

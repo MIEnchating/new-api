@@ -100,32 +100,59 @@ func TestGetBillingHistoryMergesSourcesAndFilters(t *testing.T) {
 	require.Equal(t, userTwoID, items[0].UserId)
 }
 
-func TestCompleteStripeTopUpRefundReversesQuotaOnce(t *testing.T) {
-	verifyRefund := func(t *testing.T) {
+func TestCompleteTopUpRefundReversesQuotaOnce(t *testing.T) {
+	verifyRefund := func(t *testing.T, provider string) {
 		t.Helper()
 		userId, _ := setupBillingHistoryTest(t)
-		tradeNo := fmt.Sprintf("stripe-refund-%d", common.GetTimestamp())
+		tradeNo := fmt.Sprintf("%s-refund-%d", provider, common.GetTimestamp())
 		topUp := &TopUp{
 			UserId: userId, Amount: 20, Money: 2, TradeNo: tradeNo,
-			PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe,
+			PaymentMethod: provider, PaymentProvider: provider,
 			CreateTime: common.GetTimestamp(), CompleteTime: common.GetTimestamp(),
 			Status: common.TopUpStatusSuccess,
 		}
 		require.NoError(t, DB.Create(topUp).Error)
 		creditedQuota := calculateTopUpCreditedQuota(topUp.PaymentProvider, topUp.Amount, topUp.Money)
 		require.NoError(t, DB.Model(&User{}).Where("id = ?", userId).Update("quota", -common.MaxWalletQuota).Error)
-		_, err := StartStripeTopUpRefund(topUp.Id)
+		_, err := StartTopUpRefund(topUp.Id)
 		require.Error(t, err)
 		var unchanged TopUp
 		require.NoError(t, DB.First(&unchanged, topUp.Id).Error)
 		assert.Equal(t, common.TopUpStatusSuccess, unchanged.Status)
 		require.NoError(t, DB.Model(&User{}).Where("id = ?", userId).Update("quota", creditedQuota+1000).Error)
+		if provider == PaymentProviderEpay {
+			_, err = StartTopUpRefund(topUp.Id)
+			require.NoError(t, err)
+			require.NoError(t, CancelTopUpRefund(topUp.Id))
+			var reset TopUp
+			require.NoError(t, DB.First(&reset, topUp.Id).Error)
+			assert.Equal(t, common.TopUpStatusSuccess, reset.Status)
+		}
 
-		started, err := StartStripeTopUpRefund(topUp.Id)
+		started, err := StartTopUpRefund(topUp.Id)
 		require.NoError(t, err)
 		assert.Equal(t, TopUpStatusRefundPending, started.Status)
-		require.NoError(t, CompleteStripeTopUpRefund(topUp.Id, 99))
-		require.NoError(t, CompleteStripeTopUpRefund(topUp.Id, 100))
+		require.ErrorIs(t, CompleteTopUpRefund(topUp.Id, 99), ErrTopUpRefundStatus)
+		items, _, err := GetBillingHistory(BillingHistoryFilter{
+			UserId: userId, Types: []string{BillingTypeOnlineTopup},
+			PageInfo: &common.PageInfo{Page: 1, PageSize: 10},
+		})
+		require.NoError(t, err)
+		require.Len(t, items, 1)
+		assert.Equal(t, provider == PaymentProviderStripe, items[0].RefundSupported)
+		_, retryErr := StartTopUpRefund(topUp.Id)
+		if provider == PaymentProviderEpay {
+			require.Error(t, retryErr, "unresolved Epay requests must not be sent again")
+		} else {
+			require.NoError(t, retryErr)
+		}
+		require.NoError(t, ConfirmTopUpRefund(topUp.Id))
+		confirmed, err := StartTopUpRefund(topUp.Id)
+		require.NoError(t, err)
+		assert.Equal(t, TopUpStatusRefundConfirmed, confirmed.Status)
+		require.NoError(t, ConfirmTopUpRefund(topUp.Id))
+		require.NoError(t, CompleteTopUpRefund(topUp.Id, 99))
+		require.NoError(t, CompleteTopUpRefund(topUp.Id, 100))
 
 		var user User
 		require.NoError(t, DB.First(&user, userId).Error)
@@ -138,7 +165,9 @@ func TestCompleteStripeTopUpRefundReversesQuotaOnce(t *testing.T) {
 		assert.EqualValues(t, 1, refunds)
 	}
 
-	t.Run("sqlite", verifyRefund)
+	for _, provider := range []string{PaymentProviderStripe, PaymentProviderEpay} {
+		t.Run("sqlite/"+provider, func(t *testing.T) { verifyRefund(t, provider) })
+	}
 	for _, testCase := range []struct {
 		name string
 		env  string
@@ -165,7 +194,9 @@ func TestCompleteStripeTopUpRefundReversesQuotaOnce(t *testing.T) {
 				common.SetMainDatabaseType(previousType)
 				assert.NoError(t, sqlDB.Close())
 			})
-			verifyRefund(t)
+			for _, provider := range []string{PaymentProviderStripe, PaymentProviderEpay} {
+				t.Run(provider, func(t *testing.T) { verifyRefund(t, provider) })
+			}
 		})
 	}
 }

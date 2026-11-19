@@ -16,14 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Database, Eye, ReceiptText, Undo2, Wallet } from 'lucide-react'
+import { Database, Eye, Wallet } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
 import { StatusBadge } from '@/components/status-badge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Empty,
   EmptyDescription,
@@ -37,7 +36,7 @@ import { formatNumber, formatQuota, formatTimestamp } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 import { getBillingTypeConfig, getInvoiceStatusConfig } from '../lib'
-import type { InvoiceAction, TopUpStatsItem } from '../types'
+import type { TopUpStatsItem } from '../types'
 
 type TopUpStatsMobileListProps = {
   rows: TopUpStatsItem[]
@@ -45,12 +44,9 @@ type TopUpStatsMobileListProps = {
   isFetching: boolean
   emptyTitle: string
   emptyDescription: string
-  onInvoiceAction: (item: TopUpStatsItem, action: InvoiceAction) => void
   onViewDetails: (item: TopUpStatsItem) => void
   onRefund: (item: TopUpStatsItem) => void
   updatingKey?: string
-  selectedIds: Set<string>
-  onToggleSelected: (id: string, selected: boolean) => void
 }
 
 function MobileListSkeleton() {
@@ -80,12 +76,9 @@ export function TopUpStatsMobileList({
   isFetching,
   emptyTitle,
   emptyDescription,
-  onInvoiceAction,
   onViewDetails,
   onRefund,
   updatingKey,
-  selectedIds,
-  onToggleSelected,
 }: TopUpStatsMobileListProps) {
   const { t } = useTranslation()
 
@@ -123,15 +116,6 @@ export function TopUpStatsMobileList({
         return (
           <article key={row.id} className='px-3 py-2.5'>
             <div className='flex min-w-0 items-center gap-2'>
-              {row.invoice_eligible && (
-                <Checkbox
-                  checked={selectedIds.has(row.id)}
-                  onCheckedChange={(value) =>
-                    onToggleSelected(row.id, value === true)
-                  }
-                  aria-label={t('Select row')}
-                />
-              )}
               <code
                 className='bg-muted/60 min-w-0 flex-1 truncate rounded px-2 py-1.5 font-mono text-xs'
                 title={row.reference}
@@ -274,29 +258,6 @@ export function TopUpStatsMobileList({
                   <Eye data-icon='inline-start' />
                   {t('Details')}
                 </Button>
-                {row.invoice_eligible && (
-                  <Button
-                    type='button'
-                    variant={row.invoice_status === 1 ? 'outline' : 'ghost'}
-                    size='sm'
-                    onClick={() =>
-                      onInvoiceAction(
-                        row,
-                        row.invoice_status === 1 ? 'return' : 'issue'
-                      )
-                    }
-                    disabled={updatingKey === row.id}
-                  >
-                    {row.invoice_status === 1 ? (
-                      <Undo2 data-icon='inline-start' />
-                    ) : (
-                      <ReceiptText data-icon='inline-start' />
-                    )}
-                    {row.invoice_status === 1
-                      ? t('Return invoice')
-                      : t('Mark as invoiced')}
-                  </Button>
-                )}
               </div>
             </div>
           </article>

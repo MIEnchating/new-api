@@ -426,7 +426,9 @@ func queryOnlineTopups(filter BillingHistoryFilter, limit int) ([]BillingHistory
 			InvoicedBy: topup.InvoicedBy, InvoiceReturnedAt: topup.InvoiceReturnedAt,
 			InvoiceReturnedBy: topup.InvoiceReturnedBy,
 			InvoiceEligible:   topup.Status == common.TopUpStatusSuccess,
-			RefundSupported:   topup.PaymentProvider == PaymentProviderStripe && (topup.Status == common.TopUpStatusSuccess || topup.Status == TopUpStatusRefundPending),
+			RefundSupported: (topup.PaymentProvider == PaymentProviderStripe || topup.PaymentProvider == PaymentProviderEpay) &&
+				(topup.Status == common.TopUpStatusSuccess || topup.Status == TopUpStatusRefundConfirmed ||
+					(topup.PaymentProvider == PaymentProviderStripe && topup.Status == TopUpStatusRefundPending)),
 		})
 	}
 	return items, total, quotaTotal, nil

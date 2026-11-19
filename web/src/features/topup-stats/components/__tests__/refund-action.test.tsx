@@ -88,40 +88,52 @@ const refundOrder: TopUpStatsItem = {
   refund_supported: true,
   excluded_from_stats: false,
 }
+const epayRefundOrder: TopUpStatsItem = {
+  ...refundOrder,
+  id: 'topup:2',
+  topup_id: 2,
+  reference: 'epay-order-2',
+  payment_method: 'alipay',
+  payment_provider: 'epay',
+}
 
-test('shows the Stripe refund action for a refundable order and invokes its handler', async () => {
+test('shows and invokes refund actions for refundable Stripe and Epay orders', async () => {
   const container = document.createElement('div')
   document.body.append(container)
   const root = createRoot(container)
-  let refunded: TopUpStatsItem | null = null
+  const refunded: TopUpStatsItem[] = []
 
   await act(async () =>
     root.render(
       <I18nextProvider i18n={i18n}>
         <TopUpStatsMobileList
-          rows={[refundOrder]}
+          rows={[refundOrder, epayRefundOrder]}
           isLoading={false}
           isFetching={false}
           emptyTitle='Empty'
           emptyDescription='No rows'
-          onInvoiceAction={() => {}}
           onViewDetails={() => {}}
           onRefund={(item) => {
-            refunded = item
+            refunded.push(item)
           }}
-          selectedIds={new Set()}
-          onToggleSelected={() => {}}
         />
       </I18nextProvider>
     )
   )
 
-  const refundButton = [...container.querySelectorAll('button')].find((item) =>
-    item.textContent?.includes('Refund')
+  const refundButtons = [...container.querySelectorAll('button')].filter(
+    (item) => item.textContent?.includes('Refund')
   )
-  assert.ok(refundButton)
-  await act(async () => refundButton.click())
-  assert.equal(refunded, refundOrder)
+  assert.equal(refundButtons.length, 2)
+  assert.equal(
+    [...container.querySelectorAll('button')].some((item) =>
+      item.textContent?.includes('Mark as invoiced')
+    ),
+    false
+  )
+  await act(async () => refundButtons[0]?.click())
+  await act(async () => refundButtons[1]?.click())
+  assert.deepEqual(refunded, [refundOrder, epayRefundOrder])
 
   await act(async () => root.unmount())
   container.remove()

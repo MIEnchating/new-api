@@ -168,26 +168,11 @@ func RequestStripePay(c *gin.Context) {
 	stripeAdaptor.RequestPay(c, &req)
 }
 
-func AdminRefundStripeTopUp(c *gin.Context) {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil || id <= 0 {
-		common.ApiErrorMsg(c, "Invalid order")
-		return
-	}
+func refundStripeTopUp(c *gin.Context, id int, topUp *model.TopUp) error {
 	if setting.StripeApiSecret == "" {
-		common.ApiErrorMsg(c, "Stripe is not configured")
-		return
+		return common.NewMessage("Stripe is not configured")
 	}
 	stripe.Key = setting.StripeApiSecret
-	topUp, err := model.StartStripeTopUpRefund(id)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	if topUp.Status == model.TopUpStatusRefunded {
-		common.ApiSuccess(c, gin.H{"status": topUp.Status})
-		return
-	}
 
 	params := &stripe.CheckoutSessionListParams{
 		Status: stripe.String("complete"),
@@ -207,20 +192,17 @@ func AdminRefundStripeTopUp(c *gin.Context) {
 		}
 		expectedAmount := decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromInt(100)).IntPart()
 		if checkoutSession.AmountTotal != expectedAmount || checkoutSession.PaymentIntent == nil || checkoutSession.PaymentIntent.ID == "" {
-			common.ApiErrorMsg(c, "Stripe payment details do not match the order")
-			return
+			return common.NewMessage("Stripe payment details do not match the order")
 		}
 		paymentIntentID = checkoutSession.PaymentIntent.ID
 		break
 	}
 	if err := iterator.Err(); err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Stripe refund lookup failed order_id=%d error=%q", id, err.Error()))
-		common.ApiErrorMsg(c, "Failed to retrieve Stripe payment details")
-		return
+		return common.NewMessage("Failed to retrieve Stripe payment details")
 	}
 	if paymentIntentID == "" {
-		common.ApiErrorMsg(c, "Paid Stripe checkout session not found")
-		return
+		return common.NewMessage("Paid Stripe checkout session not found")
 	}
 
 	refundParams := &stripe.RefundParams{
@@ -231,15 +213,9 @@ func AdminRefundStripeTopUp(c *gin.Context) {
 	refundParams.SetIdempotencyKey("topup-refund-" + strconv.Itoa(id))
 	if _, err := refund.New(refundParams); err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Stripe top-up refund failed order_id=%d payment_intent=%q error=%q", id, paymentIntentID, err.Error()))
-		common.ApiErrorMsg(c, "Stripe refund failed")
-		return
+		return common.NewMessage("Stripe refund failed")
 	}
-	if err := model.CompleteStripeTopUpRefund(id, c.GetInt("id")); err != nil {
-		logger.LogError(c.Request.Context(), common.LogText("Stripe refund succeeded but local settlement failed order_id=%d error=%q", id, err.Error()))
-		common.ApiErrorMsg(c, "Refund succeeded but local quota adjustment failed; retry this action")
-		return
-	}
-	common.ApiSuccess(c, gin.H{"status": model.TopUpStatusRefunded})
+	return nil
 }
 
 func StripeWebhook(c *gin.Context) {

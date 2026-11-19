@@ -32,6 +32,7 @@ import { InvoiceCopyButton } from '../components/copy-invoice-button'
 import { InvoiceCopySettingsDialog } from '../components/copy-settings'
 import { InvoiceEmailTemplatesDialog } from '../components/email-templates'
 import { InvoiceFileUpload } from '../components/file-upload'
+import { InvoiceOrderManagement } from '../components/invoice-order-management'
 import { InvoiceNotificationDialog } from '../components/notification-settings'
 import { InvoiceOrderPicker } from '../components/order-picker'
 import { InvoiceProcessDialog } from '../components/process-dialog'
@@ -95,6 +96,61 @@ const pending: InvoiceRequest = {
   process_note: '',
   orders: [{ id: 1, trade_no: 'order-one', money: 10 }],
 }
+
+it('lets administrators mark a paid order as invoiced from invoice management', async () => {
+  const user = userEvent.setup()
+  const get = vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        items: [
+          {
+            id: 'topup:10',
+            topup_id: 10,
+            type: 'online_topup',
+            reference: 'invoice-order-10',
+            user_id: 8,
+            username: 'invoice-owner',
+            display_name: 'Invoice Owner',
+            payment_method: 'stripe',
+            payment_provider: 'stripe',
+            quota: 1000,
+            money: 10,
+            status: 'success',
+            created_at: 1,
+            invoice_status: 0,
+            invoiced_at: 0,
+            invoiced_by: 0,
+            invoice_returned_at: 0,
+            invoice_returned_by: 0,
+            invoice_eligible: true,
+            refund_supported: false,
+            excluded_from_stats: false,
+          },
+        ],
+        total: 1,
+      },
+    },
+  })
+  const put = vi.spyOn(api, 'put').mockResolvedValue({
+    data: { success: true, data: null },
+  })
+  renderInvoice(<InvoiceOrderManagement />)
+
+  expect(await screen.findByText('invoice-order-10')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Mark as invoiced' }))
+  await user.click(screen.getByRole('button', { name: 'Confirm invoice' }))
+
+  await waitFor(() => {
+    expect(put).toHaveBeenCalledWith('/api/user/topup/10/invoice', {
+      action: 'issue',
+      type: 'online_topup',
+    })
+  })
+  expect(get).toHaveBeenCalledWith('/api/user/topup/stats', {
+    params: expect.objectContaining({ types: 'online_topup,redemption' }),
+  })
+})
 
 it('searches admin applications by applicant, keyword and date range and resets all filters', async () => {
   const user = userEvent.setup()
@@ -824,7 +880,7 @@ it('opens an application dialog from the list and restores the list after submis
   ).not.toBeInTheDocument()
 })
 
-it('opens administrator processing directly as a page without the application tabs', async () => {
+it('opens administrator invoice applications with a separate order invoice view', async () => {
   const get = vi.spyOn(api, 'get').mockResolvedValue({
     data: { success: true, data: { total: 1, items: [pending] } },
   })
@@ -846,10 +902,11 @@ it('opens administrator processing directly as a page without the application ta
   expect(
     await screen.findByRole('button', { name: 'View details' })
   ).toBeVisible()
-  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   expect(
-    screen.queryByRole('tab', { name: 'Request invoice' })
-  ).not.toBeInTheDocument()
+    screen.getByRole('tab', { name: 'Invoice applications' })
+  ).toHaveAttribute('aria-selected', 'true')
+  expect(screen.getByRole('tab', { name: 'Invoice status' })).toBeVisible()
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   expect(get).toHaveBeenCalledWith(
     '/api/user/invoices',
     expect.objectContaining({

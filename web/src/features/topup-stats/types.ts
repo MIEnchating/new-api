@@ -22,6 +22,7 @@ type TopUpStatus =
   | 'failed'
   | 'expired'
   | 'refund_pending'
+  | 'refund_confirmed'
   | 'refunded'
 export type InvoiceStatus = 0 | 1 | 2
 export type InvoiceAction = 'issue' | 'return'

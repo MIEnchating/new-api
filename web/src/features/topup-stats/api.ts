@@ -56,9 +56,7 @@ export async function updateTopUpInvoices(
   return response.data
 }
 
-export async function refundStripeTopUp(
-  id: number
-): Promise<TopUpInvoiceResponse> {
+export async function refundTopUp(id: number): Promise<TopUpInvoiceResponse> {
   const response = await api.post(`/api/user/topup/${id}/refund`)
   return response.data
 }

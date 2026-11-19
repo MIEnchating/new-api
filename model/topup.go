@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -36,10 +37,11 @@ const (
 	TopUpInvoiceStatusIssued   = 1
 	TopUpInvoiceStatusReturned = 2
 
-	TopUpInvoiceActionIssue  = "issue"
-	TopUpInvoiceActionReturn = "return"
-	TopUpStatusRefundPending = "refund_pending"
-	TopUpStatusRefunded      = "refunded"
+	TopUpInvoiceActionIssue    = "issue"
+	TopUpInvoiceActionReturn   = "return"
+	TopUpStatusRefundPending   = "refund_pending"
+	TopUpStatusRefundConfirmed = "refund_confirmed"
+	TopUpStatusRefunded        = "refunded"
 )
 
 const (
@@ -76,17 +78,24 @@ func calculateTopUpCreditedQuota(paymentProvider string, amount int64, money flo
 	return creditedQuota
 }
 
-func stripeTopUpRefundQuota(topUp *TopUp) (int, error) {
+func topUpRefundQuota(topUp *TopUp) (int, error) {
 	if topUp == nil {
 		return 0, ErrInvalidTopUpQuota
 	}
-	quota, err := common.WalletQuotaFromDecimalStrict(
-		decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit)),
-	)
-	if err != nil || quota <= 0 {
+	var quota decimal.Decimal
+	switch topUp.PaymentProvider {
+	case PaymentProviderStripe:
+		quota = decimal.NewFromFloat(topUp.Money).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+	case PaymentProviderEpay:
+		quota = decimal.NewFromInt(topUp.Amount).Mul(decimal.NewFromFloat(common.QuotaPerUnit))
+	default:
+		return 0, ErrTopUpRefundUnsupported
+	}
+	quotaValue, err := common.WalletQuotaFromDecimalStrict(quota)
+	if err != nil || quotaValue <= 0 {
 		return 0, ErrInvalidTopUpQuota
 	}
-	return quota, nil
+	return quotaValue, nil
 }
 
 var (
@@ -325,7 +334,7 @@ func UpdatePendingTopUpStatus(tradeNo string, expectedPaymentProvider string, ta
 	})
 }
 
-func StartStripeTopUpRefund(id int) (*TopUp, error) {
+func StartTopUpRefund(id int) (*TopUp, error) {
 	if id <= 0 {
 		return nil, ErrTopUpNotFound
 	}
@@ -334,16 +343,27 @@ func StartStripeTopUpRefund(id int) (*TopUp, error) {
 		if err := lockForUpdate(tx).First(topUp, id).Error; err != nil {
 			return ErrTopUpNotFound
 		}
-		if topUp.PaymentProvider != PaymentProviderStripe {
+		if topUp.PaymentProvider != PaymentProviderStripe && topUp.PaymentProvider != PaymentProviderEpay {
 			return ErrTopUpRefundUnsupported
 		}
 		if topUp.Status == TopUpStatusRefunded {
 			return nil
 		}
+		if topUp.Status == TopUpStatusRefundConfirmed {
+			return nil
+		}
+		// Epay's legacy API has no idempotency key. An unresolved request must
+		// never be submitted again, including after a timeout or process restart.
+		if topUp.PaymentProvider == PaymentProviderEpay && topUp.Status == TopUpStatusRefundPending {
+			return common.NewMessage("Epay refund result is unconfirmed; verify it in the payment provider dashboard")
+		}
 		if topUp.Status != common.TopUpStatusSuccess && topUp.Status != TopUpStatusRefundPending {
 			return ErrTopUpRefundStatus
 		}
-		quota, err := stripeTopUpRefundQuota(topUp)
+		if topUp.Money <= 0 || math.IsNaN(topUp.Money) || math.IsInf(topUp.Money, 0) {
+			return ErrInvalidTopUpQuota
+		}
+		quota, err := topUpRefundQuota(topUp)
 		if err != nil {
 			return err
 		}
@@ -355,15 +375,59 @@ func StartStripeTopUpRefund(id int) (*TopUp, error) {
 			return ErrWalletQuotaLimitExceeded
 		}
 		if topUp.Status == common.TopUpStatusSuccess {
+			result := tx.Model(topUp).Where("status = ?", common.TopUpStatusSuccess).Update("status", TopUpStatusRefundPending)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return ErrTopUpRefundStatus
+			}
 			topUp.Status = TopUpStatusRefundPending
-			return tx.Model(topUp).Update("status", topUp.Status).Error
 		}
 		return nil
 	})
 	return topUp, err
 }
 
-func CompleteStripeTopUpRefund(id int, operatorId int) error {
+func ConfirmTopUpRefund(id int) error {
+	if id <= 0 {
+		return ErrTopUpNotFound
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		topUp := &TopUp{}
+		if err := lockForUpdate(tx).First(topUp, id).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if topUp.PaymentProvider != PaymentProviderStripe && topUp.PaymentProvider != PaymentProviderEpay {
+			return ErrTopUpRefundUnsupported
+		}
+		if topUp.Status == TopUpStatusRefundConfirmed || topUp.Status == TopUpStatusRefunded {
+			return nil
+		}
+		if topUp.Status != TopUpStatusRefundPending {
+			return ErrTopUpRefundStatus
+		}
+		return tx.Model(topUp).Update("status", TopUpStatusRefundConfirmed).Error
+	})
+}
+
+func CancelTopUpRefund(id int) error {
+	if id <= 0 {
+		return ErrTopUpNotFound
+	}
+	return DB.Transaction(func(tx *gorm.DB) error {
+		topUp := &TopUp{}
+		if err := lockForUpdate(tx).First(topUp, id).Error; err != nil {
+			return ErrTopUpNotFound
+		}
+		if topUp.PaymentProvider != PaymentProviderEpay || topUp.Status != TopUpStatusRefundPending {
+			return ErrTopUpRefundStatus
+		}
+		return tx.Model(topUp).Update("status", common.TopUpStatusSuccess).Error
+	})
+}
+
+func CompleteTopUpRefund(id int, operatorId int) error {
 	if id <= 0 || operatorId <= 0 {
 		return ErrTopUpNotFound
 	}
@@ -374,17 +438,17 @@ func CompleteStripeTopUpRefund(id int, operatorId int) error {
 		if err := lockForUpdate(tx).First(topUp, id).Error; err != nil {
 			return ErrTopUpNotFound
 		}
-		if topUp.PaymentProvider != PaymentProviderStripe {
+		if topUp.PaymentProvider != PaymentProviderStripe && topUp.PaymentProvider != PaymentProviderEpay {
 			return ErrTopUpRefundUnsupported
 		}
 		if topUp.Status == TopUpStatusRefunded {
 			return nil
 		}
-		if topUp.Status != TopUpStatusRefundPending {
+		if topUp.Status != TopUpStatusRefundConfirmed {
 			return ErrTopUpRefundStatus
 		}
 
-		quota, err := stripeTopUpRefundQuota(topUp)
+		quota, err := topUpRefundQuota(topUp)
 		if err != nil {
 			return err
 		}
@@ -406,11 +470,11 @@ func CompleteStripeTopUpRefund(id int, operatorId int) error {
 			Quota:          quotaDelta,
 			Money:          -topUp.Money,
 			Reference:      topUp.TradeNo,
-			PaymentMethod:  PaymentProviderStripe,
+			PaymentMethod:  topUp.PaymentProvider,
 			Status:         common.TopUpStatusSuccess,
 			OperatorUserId: operatorId,
 			CreatedAt:      common.GetTimestamp(),
-			Detail:         "Stripe top-up refund",
+			Detail:         topUp.PaymentProvider + " top-up refund",
 		}).Error; err != nil {
 			return err
 		}
@@ -424,7 +488,7 @@ func CompleteStripeTopUpRefund(id int, operatorId int) error {
 	}
 	if quotaDelta != 0 {
 		if err := cacheIncrUserQuota(userId, int64(quotaDelta)); err != nil {
-			common.SysLog(common.LogText("failed to sync user quota after Stripe top-up refund %d: %s", id, err.Error()))
+			common.SysLog(common.LogText("failed to sync user quota after top-up refund %d: %s", id, err.Error()))
 		}
 	}
 	return nil

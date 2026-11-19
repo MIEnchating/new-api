@@ -22,12 +22,14 @@ import { useTranslation } from 'react-i18next'
 
 import { SectionPageLayout } from '@/components/layout'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { InvoiceApplicationForm } from './components/application-form'
 import { InvoiceCopySettingsDialog } from './components/copy-settings'
 import { InvoiceEmailTemplatesDialog } from './components/email-templates'
+import { InvoiceOrderManagement } from './components/invoice-order-management'
 import { InvoiceNotificationDialog } from './components/notification-settings'
 import { InvoiceRequestList } from './components/request-list'
 import { InvoiceSettingsDialog } from './components/settings'
@@ -37,6 +39,7 @@ export function InvoicesPage(props: { admin?: boolean }) {
   const user = useAuthStore((state) => state.auth.user)
   const viewAll = Boolean(props.admin) || (user?.role ?? 0) >= ROLE.ADMIN
   const [applying, setApplying] = useState(false)
+  const [adminView, setAdminView] = useState('applications')
   return (
     <SectionPageLayout fixedContent>
       <SectionPageLayout.Title>
@@ -66,11 +69,36 @@ export function InvoicesPage(props: { admin?: boolean }) {
         )}
       </SectionPageLayout.Actions>
       <SectionPageLayout.Content>
-        <InvoiceRequestList
-          key={viewAll ? 'all' : 'self'}
-          admin={viewAll}
-          defaultStatus={props.admin ? 'pending' : ''}
-        />
+        {viewAll ? (
+          <Tabs
+            value={adminView}
+            onValueChange={(value) => {
+              if (value) setAdminView(value)
+            }}
+            className='flex h-full min-h-0 flex-col'
+          >
+            <TabsList aria-label={t('Invoice management')}>
+              <TabsTrigger value='applications'>
+                {t('Invoice applications')}
+              </TabsTrigger>
+              <TabsTrigger value='orders'>{t('Invoice status')}</TabsTrigger>
+            </TabsList>
+            <TabsContent value='applications' className='min-h-0 flex-1'>
+              {adminView === 'applications' && (
+                <InvoiceRequestList
+                  key='all'
+                  admin
+                  defaultStatus={props.admin ? 'pending' : ''}
+                />
+              )}
+            </TabsContent>
+            <TabsContent value='orders' className='min-h-0 flex-1'>
+              {adminView === 'orders' && <InvoiceOrderManagement />}
+            </TabsContent>
+          </Tabs>
+        ) : (
+          <InvoiceRequestList key='self' admin={false} />
+        )}
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

@@ -302,6 +302,7 @@ export type TopupStatus =
   | 'failed'
   | 'expired'
   | 'refund_pending'
+  | 'refund_confirmed'
   | 'refunded'
 
 /**
