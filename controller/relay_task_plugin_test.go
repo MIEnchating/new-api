@@ -211,6 +211,43 @@ func TestExecuteTaskSubmissionSettlementFailureStaysDurableAndWritesNothing(t *t
 	assert.False(t, c.Writer.Written())
 }
 
+func TestExecuteTaskSubmissionRetriesWithoutLeakingAttemptHeaders(t *testing.T) {
+	events := make([]string, 0, 3)
+	setupTaskSubmissionDatabase(t, true, &events)
+	previousRetries, previousRouting := common.RetryTimes, common.ChannelRouteCooldownEnabled
+	previousConsumeLogs := common.LogConsumeEnabled
+	common.RetryTimes, common.ChannelRouteCooldownEnabled = 1, false
+	common.LogConsumeEnabled = false
+	t.Cleanup(func() {
+		common.RetryTimes, common.ChannelRouteCooldownEnabled = previousRetries, previousRouting
+		common.LogConsumeEnabled = previousConsumeLogs
+	})
+	c := taskSubmissionTestContext()
+	billing := &taskSubmissionTestBilling{events: &events}
+	info := taskSubmissionRelayInfo(billing)
+	info.LockedChannel.(*model.Channel).Key = "test-key"
+	attempts := 0
+	outcome, taskErr := executeTaskSubmissionWith(c, info, func(c *gin.Context, info *relaycommon.RelayInfo) (*relay.TaskSubmitResult, *dto.TaskError) {
+		assert.Equal(t, attempts, info.RetryIndex)
+		assert.Nil(t, info.RuntimeHeadersOverride)
+		assert.False(t, info.UseRuntimeHeadersOverride)
+		assert.Empty(t, c.GetString(common.UpstreamRequestIdKey))
+		attempts++
+		if attempts == 1 {
+			info.RuntimeHeadersOverride = map[string]any{"X-Attempt": "first"}
+			info.UseRuntimeHeadersOverride = true
+			c.Set(common.UpstreamRequestIdKey, "first-attempt-id")
+			return nil, service.TaskErrorWrapperLocal(errors.New("temporary submission failure"), "submit_unavailable", http.StatusServiceUnavailable)
+		}
+		return &relay.TaskSubmitResult{UpstreamTaskID: "retried-task", Platform: "plugin"}, nil
+	})
+	require.Nil(t, taskErr)
+	require.NotNil(t, outcome)
+	assert.Equal(t, 2, attempts)
+	assert.Equal(t, []string{"reserve", "insert", "settle"}, events)
+	assert.Zero(t, billing.refunds)
+}
+
 func TestExecuteTaskSubmissionPersistsPinnedPluginProvenance(t *testing.T) {
 	events := make([]string, 0, 3)
 	database := setupTaskSubmissionDatabase(t, true, &events)

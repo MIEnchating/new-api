@@ -93,7 +93,8 @@ jobs:
     name: Frontend typecheck and test
     if: github.event.action != 'closed' || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Allow the isolated jsdom files to run serially on shared runners.
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: web

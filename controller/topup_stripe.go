@@ -211,8 +211,24 @@ func refundStripeTopUp(c *gin.Context, id int, topUp *model.TopUp) error {
 	}
 	refundParams.Context = c.Request.Context()
 	refundParams.SetIdempotencyKey("topup-refund-" + strconv.Itoa(id))
-	if _, err := refund.New(refundParams); err != nil {
+	result, err := refund.New(refundParams)
+	if err != nil {
 		logger.LogError(c.Request.Context(), common.LogText("Stripe top-up refund failed order_id=%d payment_intent=%q error=%q", id, paymentIntentID, err.Error()))
+		return common.NewMessage("Stripe refund failed")
+	}
+	// A successful API call may only have queued the refund. An idempotent
+	// retry returns the original response, so read the current refund state
+	// before deciding whether local quota can be reversed.
+	if result != nil && result.ID != "" && result.Status != stripe.RefundStatusSucceeded {
+		lookupParams := &stripe.RefundParams{}
+		lookupParams.Context = c.Request.Context()
+		result, err = refund.Get(result.ID, lookupParams)
+		if err != nil {
+			logger.LogError(c.Request.Context(), common.LogText("Stripe refund status lookup failed order_id=%d error=%q", id, err.Error()))
+			return common.NewMessage("Stripe refund failed")
+		}
+	}
+	if result == nil || result.ID == "" || result.Status != stripe.RefundStatusSucceeded {
 		return common.NewMessage("Stripe refund failed")
 	}
 	return nil

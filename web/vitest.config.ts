@@ -38,7 +38,10 @@ export default defineConfig({
     // Keep jsdom suites in separate Node.js processes: thread workers can
     // stall startup and unrelated tests when heavy suites run together.
     pool: 'forks',
-    maxWorkers: 2,
+    // Serialize files on shared runners: concurrent jsdom startup can exceed
+    // the pool's fixed worker-start timeout before any test runs. This also
+    // takes precedence over CLI maxWorkers, while preserving file isolation.
+    fileParallelism: false,
     deps: {
       optimizer: {
         client: {

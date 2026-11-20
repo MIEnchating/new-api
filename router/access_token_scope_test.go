@@ -149,6 +149,12 @@ func TestAccessTokenRouteRulesCoverEveryDashboardRoute(t *testing.T) {
 		assert.Equal(t, "scope", rule.Kind(), key)
 		assert.Equal(t, service.AccessTokenScopeOf(permission), rule.Scope(), key)
 	}
+	for _, key := range []string{"POST /api/user/topup/:id/refund", "DELETE /api/user/invoices/:id/file"} {
+		rule, ok := middleware.AccessTokenRouteRule(key)
+		require.True(t, ok, key)
+		assert.Equal(t, "scope", rule.Kind(), key)
+		assert.Equal(t, "billing:write", rule.Scope(), "financial writes must require the billing write grant: %s", key)
+	}
 }
 
 func TestAccessTokenCatalogCoversEveryPermission(t *testing.T) {

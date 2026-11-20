@@ -20,8 +20,85 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stripe/stripe-go/v81"
 	"gorm.io/gorm"
 )
+
+type refundTestTransport func(*http.Request) (*http.Response, error)
+
+func (transport refundTestTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	return transport(request)
+}
+
+func TestStripeRefundRequiresCompletedProviderRefund(t *testing.T) {
+	previousBackend, previousKey, previousSecret := stripe.GetBackend(stripe.APIBackend), stripe.Key, setting.StripeApiSecret
+	t.Cleanup(func() {
+		stripe.SetBackend(stripe.APIBackend, previousBackend)
+		stripe.Key, setting.StripeApiSecret = previousKey, previousSecret
+	})
+	setting.StripeApiSecret = "sk_test_refund"
+	for _, tc := range []struct {
+		name, initial, current string
+		lookupFailure          bool
+		completed              bool
+	}{
+		{name: "completed", initial: "succeeded", completed: true},
+		{name: "pending", initial: "pending", current: "pending"},
+		{name: "failed", initial: "failed", current: "failed"},
+		{name: "canceled", initial: "canceled", current: "canceled"},
+		{name: "requires action", initial: "requires_action", current: "requires_action"},
+		{name: "missing status"},
+		{name: "idempotent retry after completion", initial: "pending", current: "succeeded", completed: true},
+		{name: "status lookup failed", initial: "pending", lookupFailure: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var creations, lookups int
+			transport := refundTestTransport(func(request *http.Request) (*http.Response, error) {
+				body := ""
+				status := http.StatusOK
+				switch request.Method + " " + request.URL.Path {
+				case "GET /v1/checkout/sessions":
+					body = `{"object":"list","data":[{"id":"cs_refund","client_reference_id":"refund-order","payment_status":"paid","amount_total":200,"payment_intent":"pi_refund"}],"has_more":false}`
+				case "POST /v1/refunds":
+					creations++
+					assert.Equal(t, "topup-refund-42", request.Header.Get("Idempotency-Key"))
+					encoded, err := io.ReadAll(request.Body)
+					require.NoError(t, err)
+					form, err := url.ParseQuery(string(encoded))
+					require.NoError(t, err)
+					assert.Equal(t, "pi_refund", form.Get("payment_intent"))
+					body = fmt.Sprintf(`{"id":"re_refund","status":%q}`, tc.initial)
+				case "GET /v1/refunds/re_refund":
+					lookups++
+					body = fmt.Sprintf(`{"id":"re_refund","status":%q}`, tc.current)
+					if tc.lookupFailure {
+						status, body = http.StatusBadGateway, `{"error":{"type":"api_error","message":"unavailable"}}`
+					}
+				default:
+					t.Fatalf("unexpected Stripe request: %s %s", request.Method, request.URL.Path)
+				}
+				return &http.Response{StatusCode: status, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: request}, nil
+			})
+			stripe.SetBackend(stripe.APIBackend, stripe.GetBackendWithConfig(stripe.APIBackend, &stripe.BackendConfig{
+				HTTPClient: &http.Client{Transport: transport}, MaxNetworkRetries: stripe.Int64(0),
+			}))
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/refund", nil)
+			err := refundStripeTopUp(c, 42, &model.TopUp{Id: 42, TradeNo: "refund-order", Money: 2, CreateTime: 1000})
+			if tc.completed {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err, "unconfirmed refunds must not reach local quota settlement")
+			}
+			assert.Equal(t, 1, creations)
+			if tc.initial == "succeeded" {
+				assert.Zero(t, lookups)
+			} else {
+				assert.Equal(t, 1, lookups)
+			}
+		})
+	}
+}
 
 func confirmPaymentComplianceForTest(t *testing.T) {
 	t.Helper()

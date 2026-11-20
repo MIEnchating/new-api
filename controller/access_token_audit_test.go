@@ -834,13 +834,16 @@ func (releasedAuditLog) TableName() string { return "logs" }
 func newAuditTestDatabase(t *testing.T, kind, dsn string) (*gorm.DB, string) {
 	t.Helper()
 	if kind == "sqlite" {
-		path := t.TempDir() + "/audit.db"
-		db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
+		// These disposable files cover SQL behavior and reopening during migrations,
+		// not crash durability. Avoid an fsync for every fixture table/index/write.
+		// Keep the pragma in the DSN so reopened and pooled connections also use it.
+		dsn := t.TempDir() + "/audit.db?_pragma=synchronous(OFF)"
+		db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 		require.NoError(t, err)
 		connection, err := db.DB()
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, connection.Close()) })
-		return db, path
+		return db, dsn
 	}
 	require.NotEmpty(t, dsn)
 	name := fmt.Sprintf("newapi_audit_%d", time.Now().UnixNano())
