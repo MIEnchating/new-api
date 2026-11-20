@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Download } from 'lucide-react'
 import { useState, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -257,6 +258,17 @@ export function InvoiceRequestDetails(props: {
                   <InvoiceFilePreview
                     requestId={request.id}
                     title={request.title}
+                    actions={
+                      <Button
+                        variant='outline'
+                        size='sm'
+                        disabled={download.isPending}
+                        onClick={() => download.mutate()}
+                      >
+                        <Download aria-hidden='true' />
+                        {t('Download invoice')}
+                      </Button>
+                    }
                   />
                 )}
               <div
@@ -274,16 +286,6 @@ export function InvoiceRequestDetails(props: {
                     {t('View invoice')}
                   </a>
                 )}
-                {(props.admin || request.status === 'issued') &&
-                  request.invoice_url.startsWith('invoice-file:') && (
-                    <Button
-                      variant='outline'
-                      disabled={download.isPending}
-                      onClick={() => download.mutate()}
-                    >
-                      {t('Download invoice')}
-                    </Button>
-                  )}
                 {request.status === 'issued' && request.invoice_url && (
                   <Button
                     variant='outline'

@@ -56,6 +56,22 @@ func UploadInvoiceFile(c *gin.Context) {
 	common.ApiSuccess(c, gin.H{"invoice_url": request.InvoiceURL, "invoice_number": service.RecognizeInvoiceNumber(c.Request.Context(), request.InvoiceURL)})
 }
 
+func DeleteInvoiceFile(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiError(c, model.ErrInvoiceRequestInput)
+		return
+	}
+	request, previous, err := model.DetachInvoiceFile(id)
+	if err != nil {
+		common.ApiError(c, model.ErrInvoiceRequestProcessed)
+		return
+	}
+	service.RemoveInvoiceFile(previous)
+	recordManageAuditFor(c, request.UserId, "invoice.file_delete", map[string]any{"request_id": id})
+	common.ApiSuccess(c, nil)
+}
+
 func DownloadInvoiceFile(c *gin.Context) {
 	id, _ := strconv.Atoi(c.Param("id"))
 	request, err := model.GetInvoiceForDelivery(id, c.GetInt("id"), c.GetInt("role") >= common.RoleAdminUser)

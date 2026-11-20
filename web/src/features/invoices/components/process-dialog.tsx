@@ -155,6 +155,10 @@ export function InvoiceProcessDialog(props: {
                 }
                 form.setValue('invoice_url', '', { shouldValidate: true })
               }}
+              onDeleted={() => {
+                setUploaded(false)
+                setRecognition('idle')
+              }}
             />
             <div className='space-y-2'>
               <Label htmlFor='invoice-number'>{t('Invoice number')}</Label>

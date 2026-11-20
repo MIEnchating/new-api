@@ -329,6 +329,49 @@ it('disables completion during upload and retains the uploaded file when issuing
   )
 })
 
+it('lets administrators remove an uploaded invoice before completing the application', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        invoice_url: 'invoice-file:stored.pdf',
+        invoice_number: '12345678901234567890',
+      },
+    },
+  })
+  const del = vi.spyOn(api, 'delete').mockResolvedValue({
+    data: { success: true, data: null },
+  })
+  renderInvoice(
+    <InvoiceProcessDialog request={pending} action='issued' onClose={vi.fn()} />
+  )
+
+  await user.upload(
+    screen.getByLabelText('Invoice file'),
+    new File(['%PDF-1.7 invoice'], 'invoice.pdf', { type: 'application/pdf' })
+  )
+  await waitFor(() =>
+    expect(
+      screen.getByRole('button', { name: 'Delete invoice file' })
+    ).toBeVisible()
+  )
+  await user.click(screen.getByRole('button', { name: 'Delete invoice file' }))
+  const deleteDialog = screen.getByRole('alertdialog', {
+    name: 'Delete invoice file?',
+  })
+  expect(deleteDialog).toBeVisible()
+  await user.click(within(deleteDialog).getByRole('button', { name: 'Delete' }))
+
+  await waitFor(() =>
+    expect(del).toHaveBeenCalledWith('/api/user/invoices/4/file')
+  )
+  expect(screen.getByLabelText('Invoice file')).toBeVisible()
+  expect(
+    screen.queryByRole('button', { name: 'Delete invoice file' })
+  ).not.toBeInTheDocument()
+})
+
 it('offers issued invoice download and sends mail without accepting a destination override', async () => {
   const user = userEvent.setup()
   vi.spyOn(api, 'get').mockResolvedValue({
@@ -1307,7 +1350,7 @@ it('keeps issued invoice orders at their natural height inside the scrolling dra
   const actions = within(content).getByRole('group', { name: 'Actions' })
   expect(actions).toHaveClass('flex', 'flex-wrap')
   expect(
-    within(actions).getByRole('button', { name: 'Download invoice' })
+    within(content).getByRole('button', { name: 'Download invoice' })
   ).toBeVisible()
   expect(
     within(actions).getByRole('button', { name: 'Send to email' })

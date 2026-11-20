@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
+import { FileText } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -30,6 +31,7 @@ import { InvoiceFilePreviewDialog } from './file-preview-dialog'
 export function InvoiceFilePreview(props: {
   requestId: number
   title: string
+  actions?: React.ReactNode
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -53,16 +55,22 @@ export function InvoiceFilePreview(props: {
   const url = preview?.blob === query.data?.blob ? preview?.url : undefined
   return (
     <div className='bg-muted/20 min-w-0 space-y-3 rounded-lg border p-4'>
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <div className='min-w-0 flex-1'>
-          <p className='text-sm font-medium break-all'>
-            {query.data?.filename || props.title}
-          </p>
-          <p className='text-muted-foreground mt-1 text-xs'>
-            {t('Invoice uploaded')}
-          </p>
+      <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+        <div className='flex min-w-0 items-start gap-2.5'>
+          <div className='bg-primary/10 text-primary mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md'>
+            <FileText aria-hidden='true' className='size-4' />
+          </div>
+          <div className='min-w-0 flex-1'>
+            <p className='text-sm font-medium break-all'>
+              {query.data?.filename || props.title}
+            </p>
+            <p className='text-muted-foreground mt-1 text-xs'>
+              {t('Invoice uploaded')}
+            </p>
+          </div>
         </div>
-        <div className='flex flex-wrap items-center gap-2'>
+        <div className='flex flex-wrap items-center gap-2 sm:shrink-0'>
+          {props.actions}
           {open && url && !query.isError && query.data && (
             <InvoiceFilePreviewDialog
               key={url}

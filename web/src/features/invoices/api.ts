@@ -114,6 +114,13 @@ export async function uploadInvoiceFile(
   return requireServerSuccess(response.data).data
 }
 
+export async function deleteInvoiceFile(id: number) {
+  const response = await api.delete<Response<null>>(
+    `/api/user/invoices/${id}/file`
+  )
+  requireServerSuccess(response.data)
+}
+
 export async function getInvoiceFile(id: number, signal?: AbortSignal) {
   const response = await api.get<Blob>(`/api/user/invoices/${id}/file`, {
     responseType: 'blob',

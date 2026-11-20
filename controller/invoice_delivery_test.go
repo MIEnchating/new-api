@@ -106,6 +106,28 @@ func TestInvoiceFileDelivery(t *testing.T) {
 		files, err := os.ReadDir(storage)
 		require.NoError(t, err)
 		assert.Len(t, files, 1)
+		response := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(response)
+		c.Set("id", 7)
+		c.Set("role", common.RoleAdminUser)
+		c.Params = gin.Params{{Key: "id", Value: strconv.Itoa(application.Id)}}
+		c.Request = httptest.NewRequest(http.MethodDelete, "/api/user/invoices/1/file", nil)
+		DeleteInvoiceFile(c)
+		var deleted struct {
+			Success bool `json:"success"`
+		}
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &deleted))
+		assert.True(t, deleted.Success)
+		var detached model.InvoiceRequest
+		require.NoError(t, db.First(&detached, application.Id).Error)
+		assert.Empty(t, detached.InvoiceURL)
+		_, err = os.Stat(filepath.Join(storage, strings.TrimPrefix(replacement, "invoice-file:")))
+		assert.ErrorIs(t, err, os.ErrNotExist)
+		replacement, err = service.StoreInvoiceFile(bytes.NewReader(pdf))
+		require.NoError(t, err)
+		_, _, err = model.AttachInvoiceFile(application.Id, replacement)
+		require.NoError(t, err)
+		application.InvoiceURL = replacement
 	})
 
 	t.Run("download requires ownership and issued status or administrator access", func(t *testing.T) {

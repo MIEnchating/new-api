@@ -78,6 +78,7 @@ var auditContentTemplates = map[string]string{
 	"redemption.invoice_return": "Returned invoice marker for redemption credit ${reference}",
 	"topup.invoice_issue":       "Marked top-up order ${trade_no} as invoiced",
 	"topup.invoice_return":      "Returned invoice marker for top-up order ${trade_no}",
+	"invoice.file_delete":       "Removed uploaded invoice file from application ${request_id}",
 
 	"subscription.plan_reset":       "Reset active subscriptions for plan ${plan_id}",
 	"subscription.user_plan_reset":  "Reset active plan ${plan_id} subscriptions for user ${target_user_id}",

@@ -17,10 +17,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { RefreshCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -29,7 +31,7 @@ import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { uploadInvoiceFile } from '../api'
+import { deleteInvoiceFile, uploadInvoiceFile } from '../api'
 import type { InvoiceUploadResult } from '../types'
 import { InvoiceFilePreview } from './file-preview'
 
@@ -39,6 +41,7 @@ export function InvoiceFileUpload(props: {
   uploaded: boolean
   disabled?: boolean
   onUploaded?: (result: InvoiceUploadResult) => void
+  onDeleted?: () => void
   onUploadingChange?: (uploading: boolean) => void
 }) {
   const { t, i18n } = useTranslation()
@@ -46,6 +49,7 @@ export function InvoiceFileUpload(props: {
   const client = useQueryClient()
   const [filename, setFilename] = useState('')
   const [replacing, setReplacing] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [progress, setProgress] = useState<number | null>(null)
   const mutation = useMutation({
     mutationFn: (file: File) =>
@@ -83,21 +87,79 @@ export function InvoiceFileUpload(props: {
     onError: (error) => handleServerError(error),
     onSettled: () => props.onUploadingChange?.(false),
   })
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteInvoiceFile(props.requestId),
+    onSuccess: () => {
+      setFilename('')
+      setReplacing(false)
+      setDeleting(false)
+      void client.invalidateQueries({
+        queryKey: ['invoices', 'file', props.requestId],
+      })
+      void client.invalidateQueries({ queryKey: ['invoices', 'requests'] })
+      props.onDeleted?.()
+      toast.success(t('Invoice file deleted'))
+    },
+    onError: (error) => handleServerError(error),
+  })
   const id = `invoice-file-${props.requestId}`
   if ((props.uploaded || filename) && !replacing) {
     return (
-      <div className='space-y-2'>
-        <InvoiceFilePreview requestId={props.requestId} title={props.title} />
-        <Button
-          type='button'
-          variant='ghost'
-          size='sm'
-          disabled={props.disabled || mutation.isPending}
-          onClick={() => setReplacing(true)}
-        >
-          {t('Replace invoice file')}
-        </Button>
-      </div>
+      <>
+        <div>
+          <InvoiceFilePreview
+            requestId={props.requestId}
+            title={props.title}
+            actions={
+              <>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  disabled={
+                    props.disabled ||
+                    mutation.isPending ||
+                    deleteMutation.isPending
+                  }
+                  onClick={() => setReplacing(true)}
+                >
+                  <RefreshCw aria-hidden='true' />
+                  {t('Replace invoice file')}
+                </Button>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='sm'
+                  className='text-destructive hover:bg-destructive/10 hover:text-destructive'
+                  disabled={
+                    props.disabled ||
+                    mutation.isPending ||
+                    deleteMutation.isPending
+                  }
+                  onClick={() => setDeleting(true)}
+                >
+                  <Trash2 aria-hidden='true' />
+                  {t('Delete invoice file')}
+                </Button>
+              </>
+            }
+          />
+        </div>
+        <ConfirmDialog
+          open={deleting}
+          onOpenChange={(open) => {
+            if (!open && !deleteMutation.isPending) setDeleting(false)
+          }}
+          title={t('Delete invoice file?')}
+          desc={t(
+            'The uploaded invoice file will be removed from this pending application.'
+          )}
+          confirmText={t('Delete')}
+          destructive
+          isLoading={deleteMutation.isPending}
+          handleConfirm={() => deleteMutation.mutate()}
+        />
+      </>
     )
   }
   return (

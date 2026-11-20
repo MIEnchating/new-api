@@ -198,6 +198,7 @@ func SetApiRouter(router *gin.Engine) {
 				adminRoute.GET("/invoices/notifications", middleware.DisableCache(), controller.GetInvoiceNotificationSettings)
 				adminRoute.PUT("/invoices/notifications", middleware.CriticalRateLimit(), controller.SetInvoiceNotificationSettings)
 				adminRoute.POST("/invoices/:id/file", middleware.CriticalRateLimit(), controller.UploadInvoiceFile)
+				adminRoute.DELETE("/invoices/:id/file", middleware.CriticalRateLimit(), controller.DeleteInvoiceFile)
 				adminRoute.PUT("/invoices/:id", middleware.CriticalRateLimit(), controller.ProcessInvoiceRequest)
 				adminRoute.GET("/aff/rewards/all", controller.GetAllAffiliateRewards)
 				adminRoute.GET("/lottery/config", controller.GetLotteryConfig)

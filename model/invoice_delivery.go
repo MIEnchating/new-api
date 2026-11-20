@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/shopspring/decimal"
@@ -141,6 +142,25 @@ func AttachInvoiceFile(id int, reference string) (*InvoiceRequest, string, error
 		previous = request.InvoiceURL
 		request.InvoiceURL = reference
 		return tx.Model(request).Update("invoice_url", reference).Error
+	})
+	return request, previous, err
+}
+
+// DetachInvoiceFile removes an uploaded file from a pending application.
+// The caller removes the returned storage reference after the database update.
+func DetachInvoiceFile(id int) (*InvoiceRequest, string, error) {
+	request := &InvoiceRequest{}
+	var previous string
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where("id = ? AND status = ?", id, InvoiceRequestPending).First(request).Error; err != nil {
+			return err
+		}
+		if !strings.HasPrefix(request.InvoiceURL, "invoice-file:") {
+			return nil
+		}
+		previous = request.InvoiceURL
+		request.InvoiceURL = ""
+		return tx.Model(request).Update("invoice_url", "").Error
 	})
 	return request, previous, err
 }
