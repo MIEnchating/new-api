@@ -25,6 +25,8 @@ import zh from '@/i18n/locales/zh.json'
 import contract from '../../../../../../pkg/billingexpr/testdata/frontend_simulation.json'
 import {
   combineBillingExpr,
+  buildRequestRuleExpr,
+  tryParseRequestRuleExpr,
   splitBillingExprAndRequestRules,
 } from '../billing-expr'
 import { formatBillingCondition } from '../billing-expression/condition-display'
@@ -706,4 +708,53 @@ describe('visual billing document', () => {
       )
     ).toBeNull()
   })
+})
+
+test('channel tier rules round-trip and ignore conflicting client parameters', () => {
+  const rules = [
+    {
+      conditions: [
+        {
+          source: 'channel' as const,
+          path: 'service_tier',
+          mode: 'eq',
+          value: 'ultrafast',
+        },
+      ],
+      multiplier: '3',
+    },
+  ]
+  const source = combineBillingExpr(
+    'tier("base", p * 2)',
+    buildRequestRuleExpr(rules)
+  )
+  const split = splitBillingExprAndRequestRules(source)
+  expect(tryParseRequestRuleExpr(split.requestRuleExpr)).toEqual(rules)
+  expect(
+    evaluateBillingExpression(source, {
+      tokens: { p: 100 },
+      request: { body: { service_tier: 'ultrafast' } },
+    }).status
+  ).toBe('missing_context')
+  for (const [tier, cost, matched] of [
+    ['ultrafast', 600, true],
+    ['standard', 200, false],
+    ['', 200, false],
+  ] as const) {
+    expect(
+      evaluateBillingExpression(source, {
+        tokens: { p: 100 },
+        channel: { service_tier: tier },
+        request: {
+          body: {
+            service_tier: tier === 'ultrafast' ? 'standard' : 'ultrafast',
+          },
+        },
+      })
+    ).toMatchObject({
+      status: 'success',
+      cost,
+      requestRules: [{ multiplier: 3, matched }],
+    })
+  }
 })

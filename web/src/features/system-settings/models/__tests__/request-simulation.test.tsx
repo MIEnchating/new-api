@@ -252,3 +252,30 @@ describe('request simulation', () => {
     expect(onRequestRuleExprChange).not.toHaveBeenCalled()
   })
 })
+
+test('simulates a channel-forced UltraFast tier independently of the request body', async () => {
+  const user = userEvent.setup()
+  render(
+    <RequestSimulation
+      expression='tier("base", p * 2) * (channel("service_tier") == "ultrafast" ? 3 : 1)'
+      tokens={{ p: 1000000 }}
+      mode='token'
+      currency={USD_PRICING_CURRENCY}
+    />
+  )
+  await user.click(screen.getByRole('button', { name: 'Request simulation' }))
+  fireEvent.input(
+    screen.getByRole('textbox', { name: 'Simulated request body' }),
+    { target: { value: '{"service_tier":"ultrafast"}' } }
+  )
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'Simulated request cost: $2'
+  )
+  await user.click(
+    screen.getByRole('combobox', { name: 'Fixed billing service tier' })
+  )
+  await user.click(screen.getByRole('option', { name: 'UltraFast' }))
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'Simulated request cost: $6'
+  )
+})

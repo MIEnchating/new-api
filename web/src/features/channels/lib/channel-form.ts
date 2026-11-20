@@ -285,6 +285,9 @@ export const channelFormSchema = z
     azure_responses_version: z.string().optional(), // Azure specific
     // Field passthrough controls (stored in settings JSON)
     allow_service_tier: z.boolean().optional(), // OpenAI/Anthropic
+    billing_service_tier: z
+      .enum(['', 'standard', 'priority', 'flex', 'ultrafast'])
+      .optional(),
     disable_store: z.boolean().optional(), // OpenAI only
     allow_safety_identifier: z.boolean().optional(), // OpenAI only
     allow_include_obfuscation: z.boolean().optional(), // OpenAI: include usage obfuscation
@@ -488,6 +491,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   azure_responses_version: '',
   // Field passthrough controls
   allow_service_tier: false,
+  billing_service_tier: '',
   disable_store: false,
   allow_safety_identifier: false,
   allow_include_obfuscation: false,
@@ -572,6 +576,7 @@ export function transformChannelToFormDefaults(
   let isEnterpriseAccount = false
   let awsKeyType: 'ak_sk' | 'api_key' = 'ak_sk'
   let awsApiType: 'invoke_model' | 'mantle' = 'invoke_model'
+  let billingServiceTier: ChannelFormValues['billing_service_tier'] = ''
   let allowServiceTier = false
   let disableStore = false
   let allowSafetyIdentifier = false
@@ -598,6 +603,10 @@ export function transformChannelToFormDefaults(
       isEnterpriseAccount = parsed.openrouter_enterprise === true
       awsKeyType = parsed.aws_key_type || 'ak_sk'
       awsApiType = parsed.aws_api_type || 'invoke_model'
+      billingServiceTier =
+        channelFormSchema.shape.billing_service_tier.safeParse(
+          parsed.billing_service_tier
+        ).data ?? ''
       allowServiceTier = parsed.allow_service_tier === true
       disableStore = parsed.disable_store === true
       allowSafetyIdentifier = parsed.allow_safety_identifier === true
@@ -665,6 +674,7 @@ export function transformChannelToFormDefaults(
     aws_key_type: awsKeyType,
     aws_api_type: awsApiType,
     allow_service_tier: allowServiceTier,
+    billing_service_tier: billingServiceTier,
     disable_store: disableStore,
     allow_include_obfuscation: allowIncludeObfuscation,
     allow_inference_geo: allowInferenceGeo,
@@ -794,6 +804,15 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     settingsObj.allow_service_tier = formData.allow_service_tier === true
   } else if ('allow_service_tier' in settingsObj) {
     delete settingsObj.allow_service_tier
+  }
+
+  if (
+    OPENAI_FIELD_PASSTHROUGH_TYPES.has(formData.type) &&
+    formData.billing_service_tier
+  ) {
+    settingsObj.billing_service_tier = formData.billing_service_tier
+  } else {
+    delete settingsObj.billing_service_tier
   }
 
   if (OPENAI_FIELD_PASSTHROUGH_TYPES.has(formData.type)) {

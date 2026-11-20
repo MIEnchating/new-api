@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -175,13 +176,49 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	}
 }
 
-func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.BillingSnapshot, error) {
+func refreshTieredBillingContext(c *gin.Context, relayInfo *relaycommon.RelayInfo) (*billingexpr.BillingSnapshot, error) {
 	if relayInfo == nil {
 		return nil, nil
 	}
 	snap := relayInfo.TieredBillingSnapshot
 	if snap == nil || snap.BillingMode != "tiered_expr" {
 		return nil, nil
+	}
+	// A retry can select a channel with a different fixed upstream tier even
+	// within the same group. Reprice with the frozen expression and request;
+	// only the trusted channel context changes.
+	if c != nil && !snap.TaskUsageBilling {
+		settings, ok := common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)
+		if ok && snap.ChannelServiceTier != settings.BillingServiceTier {
+			input := billingexpr.RequestInput{}
+			if relayInfo.BillingRequestInput != nil {
+				input = *relayInfo.BillingRequestInput
+			}
+			input.ChannelServiceTier = settings.BillingServiceTier
+			if billingexpr.UsedVarsByHash(snap.ExprString, snap.ExprHash)["channel"] {
+				cost, trace, err := billingexpr.RunExprByHashWithRequest(snap.ExprString, snap.ExprHash, billingexpr.TokenParams{
+					P: float64(snap.EstimatedPromptTokens), C: float64(snap.EstimatedCompletionTokens), Len: float64(snap.EstimatedPromptTokens),
+				}, input)
+				if err != nil {
+					return nil, err
+				}
+				beforeGroup := cost / 1_000_000 * snap.QuotaPerUnit
+				if trace.BillingUnit != billingexpr.BillingUnitRequest && snap.PreConsumeMultiplier > 0 {
+					beforeGroup *= snap.PreConsumeMultiplier
+				}
+				quota, err := billingexpr.QuotaRoundStrict(beforeGroup * relayInfo.PriceData.GroupRatioInfo.GroupRatio)
+				if err != nil {
+					return nil, err
+				}
+				snap.EstimatedQuotaBeforeGroup = beforeGroup
+				snap.EstimatedQuotaAfterGroup = quota
+				snap.EstimatedTier = trace.MatchedTier
+				snap.EstimatedBillingUnit = trace.BillingUnit
+				snap.EstimatedFixedPrice = trace.FixedPrice
+			}
+			snap.ChannelServiceTier = settings.BillingServiceTier
+			relayInfo.BillingRequestInput = &input
+		}
 	}
 
 	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
@@ -200,11 +237,11 @@ func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.B
 }
 
 // PrepareTieredBillingForSelectedGroup refreshes routing-dependent billing
-// state before an upstream attempt. An existing session reserves any higher
+// state (group and fixed channel tier) before an upstream attempt. An existing session reserves any higher
 // estimate before sending. If the initial group was free and skipped
 // pre-consume, switching to a paid group creates the session at that point.
 func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
-	snap, err := refreshTieredBillingGroup(relayInfo)
+	snap, err := refreshTieredBillingContext(c, relayInfo)
 	if err != nil {
 		return types.NewErrorWithStatusCode(
 			err,
@@ -251,6 +288,7 @@ func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenP
 	if relayInfo.BillingRequestInput != nil {
 		requestInput = *relayInfo.BillingRequestInput
 	}
+	requestInput.ChannelServiceTier = snap.ChannelServiceTier
 	if relayInfo.BillingImageCount != nil {
 		requestInput.ImageCount = relayInfo.BillingImageCount
 	} else if snap.EstimatedImageCount != nil {

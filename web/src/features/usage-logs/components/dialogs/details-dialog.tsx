@@ -257,6 +257,12 @@ function BillingBreakdown(props: {
   const baseInputUSD = other.model_ratio != null ? other.model_ratio * 2.0 : 0
 
   if (isTieredExpr) {
+    if (other.billing_service_tier) {
+      rows.push({
+        label: t('Fixed billing service tier'),
+        value: other.billing_service_tier,
+      })
+    }
     rows.push({
       label: t('Billing Mode'),
       value: t('Dynamic Pricing'),

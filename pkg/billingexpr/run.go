@@ -105,6 +105,12 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, usedVars map[
 		"header": func(key string) string {
 			return headers[strings.ToLower(strings.TrimSpace(key))]
 		},
+		"channel": func(key string) string {
+			if strings.TrimSpace(key) == "service_tier" {
+				return request.ChannelServiceTier
+			}
+			return ""
+		},
 		"param": func(path string) any {
 			path = strings.TrimSpace(path)
 			if path == "" || len(request.Body) == 0 {

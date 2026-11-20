@@ -45,6 +45,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import type { TaskPluginOption } from '../../api'
 import {
   CHANNEL_TYPE_OLLAMA,
+  CHANNEL_TYPE_SUB2API,
   CHANNEL_TYPE_SGLANG,
   CHANNEL_TYPE_VLLM,
 } from '../../constants'
@@ -3886,3 +3887,37 @@ test.each([true, false])(
     }
   }
 )
+
+test('editing a forced UltraFast channel preserves model names and saves a keyboard-selected billing tier', async () => {
+  editingChannel = {
+    ...editingChannel,
+    type: CHANNEL_TYPE_SUB2API,
+    models: 'gpt-6.2-sol',
+    settings: '{"billing_service_tier":"ultrafast","custom_option":true}',
+  }
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  const requestTab = await screen.findByRole('tab', {
+    name: /Request & Response/,
+  })
+  expect(requestTab).toHaveAccessibleName(/Configured/)
+  await user.click(requestTab)
+  const tier = screen.getByRole('combobox', {
+    name: 'Fixed billing service tier',
+  })
+  expect(tier).toHaveTextContent('UltraFast')
+  tier.focus()
+  await user.keyboard('{Enter}')
+  await user.click(screen.getByRole('option', { name: 'Standard' }))
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+  await waitFor(() => expect(put).toHaveBeenCalled())
+  const payload = put.mock.calls[0]?.[1] as { models: string; settings: string }
+  expect(payload.models).toBe('gpt-6.2-sol')
+  expect(JSON.parse(payload.settings)).toMatchObject({
+    billing_service_tier: 'standard',
+    custom_option: true,
+  })
+})

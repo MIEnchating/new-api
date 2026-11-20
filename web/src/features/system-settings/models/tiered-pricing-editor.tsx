@@ -66,6 +66,7 @@ import {
   MATCH_LTE,
   MATCH_RANGE,
   SOURCE_HEADER,
+  SOURCE_CHANNEL,
   SOURCE_PARAM,
   SOURCE_TIME,
   buildRequestRuleExpr,
@@ -210,6 +211,62 @@ const PRESET_GROUPS: PresetGroup[] = [
           },
         ],
       },
+      // OpenAI pricing, 2026-11-21. GPT-6.2's 3x promotion ends on
+      // 2027-02-28 Pacific time; administrators retain control of saved prices.
+      {
+        key: 'gpt-6.1-sol-channel-ultrafast',
+        label: 'GPT-6.1 Sol UltraFast',
+        expr: 'len <= 272000 ? tier("standard", p * 2 + c * 10 + cr * 0.1 + cc * 2.5 + cc12h * 5) : tier("long_context", p * 4 + c * 15 + cr * 0.2 + cc * 5 + cc12h * 10)',
+        requestRules: [
+          {
+            conditions: [
+              {
+                source: SOURCE_CHANNEL as 'channel',
+                path: 'service_tier',
+                mode: MATCH_EQ,
+                value: 'ultrafast',
+              },
+            ],
+            multiplier: '6',
+          },
+        ],
+      },
+      {
+        key: 'gpt-6.2-sol-channel-ultrafast',
+        label: 'GPT-6.2 Sol UltraFast',
+        expr: 'len <= 272000 ? tier("standard", p * 2 + c * 10 + cr * 0.1 + cc * 2.5 + cc12h * 5) : tier("long_context", p * 4 + c * 15 + cr * 0.2 + cc * 5 + cc12h * 10)',
+        requestRules: [
+          {
+            conditions: [
+              {
+                source: SOURCE_CHANNEL as 'channel',
+                path: 'service_tier',
+                mode: MATCH_EQ,
+                value: 'ultrafast',
+              },
+            ],
+            multiplier: '3',
+          },
+        ],
+      },
+      {
+        key: 'gpt-6.2-astra-channel-ultrafast',
+        label: 'GPT-6.2 Astra UltraFast',
+        expr: 'len <= 272000 ? tier("standard", p * 8 + c * 40 + cr * 0.4 + cc * 10 + cc12h * 20) : tier("long_context", p * 16 + c * 60 + cr * 0.8 + cc * 20 + cc12h * 40)',
+        requestRules: [
+          {
+            conditions: [
+              {
+                source: SOURCE_CHANNEL as 'channel',
+                path: 'service_tier',
+                mode: MATCH_EQ,
+                value: 'ultrafast',
+              },
+            ],
+            multiplier: '3',
+          },
+        ],
+      },
       {
         key: 'gpt-5.4-tiers',
         label: 'GPT-5.4 Priority/Flex',
@@ -329,7 +386,7 @@ function RawExprEditor({ exprString, onChange }: RawExprEditorProps) {
             <code>fixed(amount)</code>, <code>max</code>, <code>min</code>,{' '}
             <code>ceil</code>, <code>floor</code>, <code>abs</code>,{' '}
             <code>header(name)</code>, <code>param(path)</code>,{' '}
-            <code>has(source, text)</code>
+            <code>channel("service_tier")</code>, <code>has(source, text)</code>
           </div>
           <div>
             {t(
@@ -393,14 +450,22 @@ function RuleConditionRow({
   let sourceLabel = t('Time')
   if (condition.source === SOURCE_PARAM) sourceLabel = t('Body param')
   else if (condition.source === SOURCE_HEADER) sourceLabel = t('Header')
+  else if (condition.source === SOURCE_CHANNEL) {
+    sourceLabel = t('Channel setting')
+  }
 
   const handleSourceChange = (source: string) => {
     if (source === SOURCE_TIME) {
       onChange(createEmptyTimeCondition())
-    } else if (source === SOURCE_HEADER || source === SOURCE_PARAM) {
+    } else if (
+      source === SOURCE_HEADER ||
+      source === SOURCE_PARAM ||
+      source === SOURCE_CHANNEL
+    ) {
       onChange({
         ...createEmptyCondition(),
-        source: source as 'param' | 'header',
+        source: source as 'param' | 'header' | 'channel',
+        path: source === SOURCE_CHANNEL ? 'service_tier' : '',
       })
     }
   }
@@ -511,6 +576,7 @@ function RuleConditionRow({
         items={[
           { value: SOURCE_PARAM, label: t('Body param') },
           { value: SOURCE_HEADER, label: t('Header') },
+          { value: SOURCE_CHANNEL, label: t('Channel setting') },
           { value: SOURCE_TIME, label: t('Time') },
         ]}
         value={condition.source}
@@ -523,6 +589,9 @@ function RuleConditionRow({
           <SelectGroup>
             <SelectItem value={SOURCE_PARAM}>{t('Body param')}</SelectItem>
             <SelectItem value={SOURCE_HEADER}>{t('Header')}</SelectItem>
+            <SelectItem value={SOURCE_CHANNEL}>
+              {t('Channel setting')}
+            </SelectItem>
             <SelectItem value={SOURCE_TIME}>{t('Time')}</SelectItem>
           </SelectGroup>
         </SelectContent>

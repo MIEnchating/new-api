@@ -371,3 +371,24 @@ describe('usage facts billing details', () => {
     expect(screen.getByText('Total Cost')).toBeInTheDocument()
   })
 })
+
+test('shows the captured fixed upstream tier in expression billing details', () => {
+  const queryClient = renderDetails({
+    billing_mode: 'tiered_expr',
+    billing_service_tier: 'ultrafast',
+    expr_b64: btoa(
+      'tier("base", p * 2) * (channel("service_tier") == "ultrafast" ? 3 : 1)'
+    ),
+    matched_tier: 'base',
+    group_ratio: 1,
+    request_rules: [
+      {
+        cond: 'channel("service_tier") == "ultrafast"',
+        multiplier: 3,
+        matched: true,
+      },
+    ],
+  })
+  expect(rowValue('Fixed billing service tier')).toBe('ultrafast')
+  queryClient.clear()
+})
