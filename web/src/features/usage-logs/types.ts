@@ -331,6 +331,7 @@ export interface LogOtherData {
   image_count?: number
   expr_b64?: string
   matched_tier?: string
+  billing_service_tier?: string
   request_rules?: RequestRuleTrace[]
   usage_facts?: Record<string, string | number>
   reasoning_effort?: string

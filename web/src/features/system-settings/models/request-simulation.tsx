@@ -75,6 +75,8 @@ export function RequestSimulation(props: RequestSimulationProps) {
   const { t, i18n } = useTranslation()
   const bodyId = useId()
   const headersId = useId()
+  const channelTierId = useId()
+  const [channelTier, setChannelTier] = useState('unset')
   const timeId = useId()
   const imageCountId = useId()
   const [imageCount, setImageCount] = useState('1')
@@ -171,6 +173,7 @@ export function RequestSimulation(props: RequestSimulationProps) {
     }
     return evaluateBillingExpression(props.expression, {
       imageCount: Number(imageCount),
+      channel: { service_tier: channelTier === 'unset' ? '' : channelTier },
       tokens: props.tokens,
       usage,
       now,
@@ -182,6 +185,7 @@ export function RequestSimulation(props: RequestSimulationProps) {
   }, [
     open,
     imageCount,
+    channelTier,
     body,
     headers,
     timeMode,
@@ -284,6 +288,35 @@ export function RequestSimulation(props: RequestSimulationProps) {
             </Field>
           )
         })}
+        {compiled.status === 'ready' && compiled.functions.has('channel') && (
+          <Field>
+            <FieldLabel htmlFor={channelTierId}>
+              {t('Fixed billing service tier')}
+            </FieldLabel>
+            <Select
+              value={channelTier}
+              onValueChange={(value) => value !== null && setChannelTier(value)}
+              items={[
+                { value: 'unset', label: t('Not configured') },
+                { value: 'standard', label: 'Standard' },
+                { value: 'priority', label: 'Fast / Priority' },
+                { value: 'flex', label: 'Flex' },
+                { value: 'ultrafast', label: 'UltraFast' },
+              ]}
+            >
+              <SelectTrigger id={channelTierId}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent alignItemWithTrigger={false}>
+                <SelectItem value='unset'>{t('Not configured')}</SelectItem>
+                <SelectItem value='standard'>Standard</SelectItem>
+                <SelectItem value='priority'>Fast / Priority</SelectItem>
+                <SelectItem value='flex'>Flex</SelectItem>
+                <SelectItem value='ultrafast'>UltraFast</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
         <div className='grid gap-4 sm:grid-cols-2'>
           <Field>
             <FieldLabel htmlFor={bodyId}>

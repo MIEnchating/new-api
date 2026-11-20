@@ -8,9 +8,11 @@ import (
 )
 
 type RequestInput struct {
-	Headers map[string]string
-	Body    []byte
-	Usage   map[string]any
+	// ChannelServiceTier is trusted channel configuration, never client input.
+	ChannelServiceTier string
+	Headers            map[string]string
+	Body               []byte
+	Usage              map[string]any
 	// ImageCount is a validated billing quantity, separate from the frozen
 	// request's n. Settlement can replace it with the actual returned count.
 	ImageCount *int
@@ -59,10 +61,11 @@ type TraceResult struct {
 }
 
 // BillingSnapshot captures billing state at pre-consume time. Expression and
-// request fields stay frozen; group-dependent fields are refreshed before an
-// auto-group retry and settlement. It is fully serializable and contains no
-// compiled program pointers.
+// client request fields stay frozen; channel tier and group-dependent fields
+// are refreshed before a retry and captured for settlement. It is fully
+// serializable and contains no compiled program pointers.
 type BillingSnapshot struct {
+	ChannelServiceTier        string         `json:"channel_service_tier,omitempty"`
 	EstimatedImageCount       *int           `json:"estimated_image_count,omitempty"`
 	BillingMode               string         `json:"billing_mode"`
 	ModelName                 string         `json:"model_name"`

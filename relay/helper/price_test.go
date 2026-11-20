@@ -1,6 +1,7 @@
 package helper
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -793,14 +795,23 @@ func TestInputPreConsumeMultiplierLegacyAndRequestPrices(t *testing.T) {
 	}
 }
 
-// priceTestReservation observes the reservation requested before image submission.
-type priceTestReservation struct{ held int }
+// priceTestReservation observes the reservation requested before upstream submission.
+type priceTestReservation struct {
+	held int
+	err  error
+}
 
 func (s *priceTestReservation) Settle(int) error         { return nil }
 func (s *priceTestReservation) Refund(*gin.Context)      {}
 func (s *priceTestReservation) NeedsRefund() bool        { return false }
 func (s *priceTestReservation) GetPreConsumedQuota() int { return s.held }
-func (s *priceTestReservation) Reserve(quota int) error  { s.held = max(s.held, quota); return nil }
+func (s *priceTestReservation) Reserve(quota int) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.held = max(s.held, quota)
+	return nil
+}
 
 func (s *priceTestReservation) ReserveBeforeSubmit(quota int) error { return s.Reserve(quota) }
 
@@ -839,6 +850,117 @@ func TestHandleGroupRatioUsesFinalTokenRouteAndScheduledPrice(t *testing.T) {
 			assert.Equal(t, "route-final", info.UsingGroup)
 			assert.Equal(t, tc.ratio, ratio.GroupRatio)
 			assert.Equal(t, tc.special, ratio.HasSpecialRatio)
+		})
+	}
+}
+
+func TestFixedChannelServiceTierBilling(t *testing.T) {
+	require.Error(t, billing_setting.SmokeTestExpr(`channel("service_tier") == "ultrafast" ? tier("invalid", p * -1) : tier("base", p)`))
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() { require.NoError(t, config.GlobalConfig.LoadFromDB(saved)) })
+	for _, tc := range []struct {
+		model      string
+		multiplier int
+	}{
+		{"gpt-6.1-sol", 6},
+		{"gpt-6.2-sol", 3},
+	} {
+		t.Run(tc.model, func(t *testing.T) {
+			expression := fmt.Sprintf(`tier("base", p * 2 + c * 10 + cr * 0.1) * (channel("service_tier") == "ultrafast" ? %d : 1)`, tc.multiplier)
+			modes, err := common.Marshal(map[string]string{tc.model: "tiered_expr"})
+			require.NoError(t, err)
+			expressions, err := common.Marshal(map[string]string{tc.model: expression})
+			require.NoError(t, err)
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+				"billing_setting.billing_mode":         string(modes),
+				"billing_setting.billing_expr":         string(expressions),
+				"group_ratio_setting.group_ratio":      `{"default":1}`,
+				"quota_setting.pre_consume_multiplier": "2",
+			}))
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{BillingServiceTier: "ultrafast"})
+			// Client fields cannot suppress the channel's fixed tier or impersonate
+			// trusted channel metadata. No model alias or outgoing parameter is used.
+			body := []byte(`{}`)
+			info := &relaycommon.RelayInfo{
+				OriginModelName: tc.model, UserGroup: "default", UsingGroup: "default",
+				BillingRequestInput: &billingexpr.RequestInput{Body: body},
+			}
+			price, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{})
+			require.NoError(t, err)
+			assert.Equal(t, 2000*tc.multiplier, price.QuotaToPreConsume)
+			assert.Empty(t, price.OtherRatios(), "the expression must be the only source of the multiplier")
+			assert.Equal(t, body, info.BillingRequestInput.Body)
+			assert.Equal(t, tc.model, info.OriginModelName)
+			conflicting := &relaycommon.RelayInfo{
+				OriginModelName: tc.model,
+				UserGroup:       "default",
+				UsingGroup:      "default",
+				BillingRequestInput: &billingexpr.RequestInput{
+					Body: []byte(`{"service_tier":"standard","channel":{"service_tier":"standard"}}`),
+				},
+			}
+			conflictingPrice, err := ModelPriceHelper(ctx, conflicting, 1000, &types.TokenCountMeta{})
+			require.NoError(t, err)
+			assert.Equal(t, price.QuotaToPreConsume, conflictingPrice.QuotaToPreConsume)
+
+			billing := &priceTestReservation{held: price.QuotaToPreConsume}
+			info.Billing = billing
+			info.FinalPreConsumedQuota = billing.held
+
+			params := service.BuildTieredTokenParams(&dto.Usage{
+				PromptTokens: 1000, CompletionTokens: 100,
+				PromptTokensDetails: dto.InputTokenDetails{CachedTokens: 200},
+			}, false, billingexpr.UsedVarsByHash(expression, billingexpr.ExprHashString(expression)))
+			ok, quota, result := service.TryTieredSettle(info, params)
+			require.True(t, ok)
+			require.NotNil(t, result)
+			assert.Equal(t, 1310*tc.multiplier, quota)
+			require.Len(t, result.RequestRules, 1)
+			assert.True(t, result.RequestRules[0].Matched)
+			assert.Equal(t, float64(tc.multiplier), result.RequestRules[0].Multiplier)
+			other := model.NewLogOther()
+			service.InjectTieredBillingInfo(other, info, result)
+			assert.Equal(t, "ultrafast", other.Snapshot()["billing_service_tier"])
+
+			// Same-group retries must clear the previous channel's forced tier.
+			common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{})
+			require.Nil(t, service.PrepareTieredBillingForSelectedGroup(ctx, info))
+			assert.Equal(t, 2000, info.TieredBillingSnapshot.EstimatedQuotaAfterGroup)
+			assert.Equal(t, 2000*tc.multiplier, billing.held, "a cheaper retry refunds only at settlement")
+			ok, quota, result = service.TryTieredSettle(info, params)
+			require.True(t, ok)
+			require.NotNil(t, result)
+			assert.Equal(t, 1310, quota)
+			assert.False(t, result.RequestRules[0].Matched)
+
+			// A more expensive retry raises the reservation using the frozen
+			// expression and original pre-consume multiplier, even if settings change.
+			billing.held = 2000
+			operation_setting.GetQuotaSetting().PreConsumeMultiplier = 10
+			common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{BillingServiceTier: "ultrafast"})
+			require.Nil(t, service.PrepareTieredBillingForSelectedGroup(ctx, info))
+			assert.Equal(t, 2000*tc.multiplier, billing.held)
+			// Settlement must not reread mutable channel configuration.
+			common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{BillingServiceTier: "standard"})
+			ok, quota, result = service.TryTieredSettle(info, params)
+			require.True(t, ok)
+			require.NotNil(t, result)
+			assert.Equal(t, 1310*tc.multiplier, quota)
+			common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{})
+			require.Nil(t, service.PrepareTieredBillingForSelectedGroup(ctx, info))
+			billing.held = 2000
+			billing.err = errors.New("insufficient quota")
+			common.SetContextKey(ctx, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{BillingServiceTier: "ultrafast"})
+			apiErr := service.PrepareTieredBillingForSelectedGroup(ctx, info)
+			require.NotNil(t, apiErr)
+			assert.Contains(t, apiErr.Error(), "insufficient quota")
+			assert.Equal(t, 2000, billing.held, "a failed reservation must stop the expensive retry")
 		})
 	}
 }

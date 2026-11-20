@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table'
+import { ReceiptText } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -178,8 +179,19 @@ export function InvoiceOrderPicker(props: {
       isLoading={query.isPending}
       isFetching={query.isFetching}
       emptyTitle={t('No eligible orders')}
+      emptyDescription={
+        Object.values(search).some(Boolean)
+          ? t('No records found. Try adjusting your filters.')
+          : t(
+              'Orders currently invoiced or awaiting processing cannot be selected again.'
+            )
+      }
+      emptyIcon={<ReceiptText className='size-6' aria-hidden='true' />}
+      emptyCellClassName='h-64'
       mobileProps={{ enableRowSelection: true }}
-      className='h-[min(48dvh,460px)]'
+      className='h-auto min-h-0 lg:flex-1'
+      tableClassName='min-h-64'
+      showPagination={(query.data?.total ?? 0) > 0}
       paginationInFooter={false}
       toolbarProps={{
         customSearch: (

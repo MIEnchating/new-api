@@ -345,6 +345,7 @@ const SENSITIVE_FORM_FIELDS = [
   'system_prompt',
   'system_prompt_override',
   'allow_service_tier',
+  'billing_service_tier',
   'disable_store',
   'allow_safety_identifier',
   'allow_include_obfuscation',
@@ -3109,6 +3110,55 @@ export function ChannelMutateDrawer({
 
           {OPENAI_FIELD_PASSTHROUGH_TYPES.has(currentType) && (
             <>
+              <FormField
+                control={form.control}
+                name='billing_service_tier'
+                render={({ field }) => (
+                  <FormItem className='space-y-2 px-4 py-3'>
+                    <FormLabel>{t('Fixed billing service tier')}</FormLabel>
+                    <Select
+                      disabled={sensitiveLocked}
+                      value={field.value || 'unset'}
+                      onValueChange={(value) =>
+                        value !== null &&
+                        field.onChange(value === 'unset' ? '' : value)
+                      }
+                      items={[
+                        { value: 'unset', label: t('Not configured') },
+                        { value: 'standard', label: 'Standard' },
+                        { value: 'priority', label: 'Fast / Priority' },
+                        { value: 'flex', label: 'Flex' },
+                        { value: 'ultrafast', label: 'UltraFast' },
+                      ]}
+                    >
+                      <FormControl>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent alignItemWithTrigger={false}>
+                        <SelectGroup>
+                          <SelectItem value='unset'>
+                            {t('Not configured')}
+                          </SelectItem>
+                          <SelectItem value='standard'>Standard</SelectItem>
+                          <SelectItem value='priority'>
+                            Fast / Priority
+                          </SelectItem>
+                          <SelectItem value='flex'>Flex</SelectItem>
+                          <SelectItem value='ultrafast'>UltraFast</SelectItem>
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FormDescription>
+                      {t(
+                        'Match the tier forced by your upstream. Model expressions read channel("service_tier"); this setting does not change requests or add a multiplier automatically.'
+                      )}
+                    </FormDescription>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
               <FormField
                 control={form.control}
                 name='disable_store'

@@ -102,6 +102,9 @@ export type DataTablePageProps<TData> = {
    */
   emptyDescription?: string
 
+  /** Override the desktop empty row height for compact embedded tables. */
+  emptyCellClassName?: string
+
   /**
    * Empty-state icon override (desktop only; mobile uses default Database icon).
    */
@@ -534,6 +537,7 @@ function renderDesktop<TData>(
       table={props.table}
       isLoading={props.isLoading}
       emptyTitle={props.emptyTitle}
+      emptyCellClassName={props.emptyCellClassName}
       emptyDescription={props.emptyDescription}
       emptyIcon={props.emptyIcon}
       emptyAction={props.emptyAction}

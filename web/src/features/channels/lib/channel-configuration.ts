@@ -76,6 +76,7 @@ const CONFIGURATION_BLOCKS = {
     section: 'request',
     fields: [
       'allow_service_tier',
+      'billing_service_tier',
       'disable_store',
       'allow_safety_identifier',
       'allow_include_obfuscation',
@@ -183,7 +184,8 @@ export function getChannelConfigurationState(
       ((openaiPassthrough || claudePassthrough) &&
         (values.allow_service_tier || values.allow_inference_geo)) ||
       (openaiPassthrough &&
-        (values.disable_store ||
+        (values.billing_service_tier ||
+          values.disable_store ||
           values.allow_safety_identifier ||
           values.allow_include_obfuscation)) ||
       (claudePassthrough &&

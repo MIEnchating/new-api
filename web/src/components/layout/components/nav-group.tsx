@@ -145,7 +145,11 @@ function SidebarMenuLink({ item, href }: { item: NavLink; href: string }) {
         }
       >
         {item.iconSrc ? (
-          <img src={item.iconSrc} alt='' className='size-4 shrink-0' />
+          <img
+            src={item.iconSrc}
+            alt=''
+            className='size-4 shrink-0 brightness-0 dark:invert'
+          />
         ) : (
           item.icon && <item.icon className='shrink-0' />
         )}
@@ -192,7 +196,11 @@ function SidebarMenuCollapsible({
         render={<SidebarMenuButton tooltip={item.title} />}
       >
         {item.iconSrc ? (
-          <img src={item.iconSrc} alt='' className='size-4 shrink-0' />
+          <img
+            src={item.iconSrc}
+            alt=''
+            className='size-4 shrink-0 brightness-0 dark:invert'
+          />
         ) : (
           item.icon && <item.icon className='shrink-0' />
         )}
@@ -218,7 +226,7 @@ function SidebarMenuCollapsible({
                   <img
                     src={subItem.iconSrc}
                     alt=''
-                    className='size-4 shrink-0'
+                    className='size-4 shrink-0 brightness-0 dark:invert'
                   />
                 ) : (
                   subItem.icon && <subItem.icon className='shrink-0' />
@@ -257,7 +265,11 @@ function SidebarMenuCollapsedDropdown({
           }
         >
           {item.iconSrc ? (
-            <img src={item.iconSrc} alt='' className='size-4 shrink-0' />
+            <img
+              src={item.iconSrc}
+              alt=''
+              className='size-4 shrink-0 brightness-0 dark:invert'
+            />
           ) : (
             item.icon && <item.icon className='shrink-0' />
           )}

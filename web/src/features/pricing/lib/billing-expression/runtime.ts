@@ -445,6 +445,22 @@ class BillingRuntime {
         }
         return { value: readRequestPath(this.context.request.body, path) }
       }
+      case 'channel': {
+        const key = this.string(args[0]).trim()
+        if (!this.context.channel) {
+          throw new BillingExpressionError({
+            code: 'missing_context',
+            detail: 'channel service tier',
+            position: node.start,
+          })
+        }
+        return {
+          value:
+            key === 'service_tier'
+              ? (this.context.channel.service_tier ?? '')
+              : '',
+        }
+      }
       case 'header': {
         const name = this.string(args[0]).trim().toLowerCase()
         if (!this.context.request) {

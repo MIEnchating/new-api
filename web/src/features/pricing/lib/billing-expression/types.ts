@@ -46,6 +46,7 @@ export const BILLING_FUNCTIONS: Readonly<Record<string, number>> = {
   fixed: 1,
   param: 1,
   header: 1,
+  channel: 1,
   has: 2,
   u: 1,
   hour: 1,
@@ -126,6 +127,7 @@ export type ExpressionFailure = {
 }
 export type CompilationResult = CompiledBillingExpression | ExpressionFailure
 export type BillingSimulationContext = {
+  channel?: { service_tier?: string }
   imageCount?: number
   /** Already normalized billable counts; no implicit cache subtraction. */
   tokens?: Partial<Record<TokenVariable, number>>

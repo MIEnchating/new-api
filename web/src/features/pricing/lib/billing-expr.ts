@@ -194,6 +194,7 @@ export const OPENAI_CACHE_CREATION_12H_MULTIPLIER = 2
 
 export const SOURCE_PARAM = 'param'
 export const SOURCE_HEADER = 'header'
+export const SOURCE_CHANNEL = 'channel'
 export const SOURCE_TIME = 'time'
 
 export const MATCH_EQ = 'eq'
@@ -228,7 +229,7 @@ export const COMMON_TIMEZONES: { value: string; label: string }[] = [
 const NUMERIC_LITERAL_REGEX = /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/
 
 export type ParamHeaderCondition = {
-  source: 'param' | 'header'
+  source: 'param' | 'header' | 'channel'
   path: string
   mode: string
   value: string
@@ -452,6 +453,9 @@ function tryParseRequestCondition(expr: string): RequestCondition | null {
   let m = expr.match(/^header\("([^"]+)"\) != ""$/)
   if (m) return { source: 'header', path: m[1], mode: MATCH_EXISTS, value: '' }
 
+  m = expr.match(/^channel\("([^"]+)"\) != ""$/)
+  if (m) return { source: 'channel', path: m[1], mode: MATCH_EXISTS, value: '' }
+
   m = expr.match(/^param\("([^"]+)"\) != nil$/)
   if (m) return { source: 'param', path: m[1], mode: MATCH_EXISTS, value: '' }
 
@@ -459,6 +463,16 @@ function tryParseRequestCondition(expr: string): RequestCondition | null {
   if (m) {
     return {
       source: 'header',
+      path: m[1],
+      mode: MATCH_CONTAINS,
+      value: JSON.parse(m[2]) as string,
+    }
+  }
+
+  m = expr.match(/^has\(channel\("([^"]+)"\), ((?:"(?:[^"\\]|\\.)*"))\)$/)
+  if (m) {
+    return {
+      source: 'channel',
       path: m[1],
       mode: MATCH_CONTAINS,
       value: JSON.parse(m[2]) as string,
@@ -490,12 +504,12 @@ function tryParseRequestCondition(expr: string): RequestCondition | null {
     return { source: 'param', path: m[1], mode: opMap[m[3]], value: m[4] }
   }
 
-  m = expr.match(/^(param|header)\("([^"]+)"\) == (.+)$/)
+  m = expr.match(/^(param|header|channel)\("([^"]+)"\) == (.+)$/)
   if (m) {
     const parsedValue = parseExprLiteral(m[3])
     if (parsedValue === null) return null
     return {
-      source: m[1] as 'param' | 'header',
+      source: m[1] as 'param' | 'header' | 'channel',
       path: m[2],
       mode: MATCH_EQ,
       value: String(parsedValue),
@@ -697,7 +711,7 @@ export function getRequestRuleMatchOptions(source: string): MatchOption[] {
     { value: MATCH_CONTAINS, labelKey: 'Contains' },
     { value: MATCH_EXISTS, labelKey: 'Exists' },
   ]
-  if (source === SOURCE_HEADER) return base
+  if (source === SOURCE_HEADER || source === SOURCE_CHANNEL) return base
   return [
     ...base,
     { value: MATCH_GT, labelKey: 'Greater than' },
@@ -721,8 +735,8 @@ function normalizeCondition(
   let source: RequestCondition['source'] = 'param'
   if (cond?.source === 'time') {
     source = 'time'
-  } else if (cond?.source === 'header') {
-    source = 'header'
+  } else if (cond?.source === 'header' || cond?.source === 'channel') {
+    source = cond.source
   }
 
   if (source === 'time') {
@@ -809,18 +823,15 @@ export function buildRequestConditionExpr(cond: RequestCondition): string {
   const path = normalized.path.trim()
   if (!path) return ''
 
-  const sourceExpr =
-    normalized.source === 'header'
-      ? `header(${JSON.stringify(path)})`
-      : `param(${JSON.stringify(path)})`
+  const sourceExpr = `${normalized.source}(${JSON.stringify(path)})`
 
   switch (normalized.mode) {
     case MATCH_EXISTS:
-      return normalized.source === 'header'
+      return normalized.source !== 'param'
         ? `${sourceExpr} != ""`
         : `${sourceExpr} != nil`
     case MATCH_CONTAINS:
-      return normalized.source === 'header'
+      return normalized.source !== 'param'
         ? `has(${sourceExpr}, ${buildExprLiteral(normalized.mode, normalized.value)})`
         : `${sourceExpr} != nil && has(${sourceExpr}, ${buildExprLiteral(normalized.mode, normalized.value)})`
     case MATCH_GT:
