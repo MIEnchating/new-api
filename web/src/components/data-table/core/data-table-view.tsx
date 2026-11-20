@@ -302,6 +302,7 @@ function renderEmptyState<TData>(
   return (
     <TableEmpty
       colSpan={colSpan}
+      cellClassName={props.emptyCellClassName}
       title={props.emptyTitle}
       description={props.emptyDescription}
       icon={props.emptyIcon}

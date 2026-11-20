@@ -18,7 +18,14 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Send } from 'lucide-react'
+import {
+  ChevronDown,
+  CircleAlert,
+  FileText,
+  ListChecks,
+  ReceiptText,
+  Send,
+} from 'lucide-react'
 import { useEffect, useId, useState, type ReactElement } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -146,7 +153,14 @@ export function InvoiceApplicationForm(props: {
   ] as const
   return (
     <Dialog
-      title={t('Request invoice')}
+      title={
+        <span className='flex items-center gap-2.5'>
+          <span className='bg-primary/10 text-primary flex size-9 items-center justify-center rounded-lg'>
+            <ReceiptText aria-hidden='true' className='size-5' />
+          </span>
+          {t('Request invoice')}
+        </span>
+      }
       open={props.open ?? true}
       trigger={props.trigger}
       onOpenChange={(open) => {
@@ -155,39 +169,49 @@ export function InvoiceApplicationForm(props: {
         setSelectedOrders([])
         props.onOpenChange?.(open)
       }}
-      contentClassName='sm:max-w-[min(1200px,calc(100vw-3rem))] overflow-hidden'
+      contentClassName='sm:max-w-[min(1120px,calc(100vw-3rem))] overflow-hidden'
       headerClassName='border-b pb-4 pr-8'
       showCloseButton={!mutation.isPending}
-      footerClassName='flex-col sm:items-center sm:justify-between'
+      footerClassName='flex-col gap-4 sm:items-center sm:justify-between sm:py-4'
       footer={
         <>
-          <div className='space-y-1' aria-live='polite'>
+          <div
+            className='flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2'
+            aria-live='polite'
+          >
             <div className='flex items-baseline gap-3'>
               <span className='text-muted-foreground text-sm'>
                 {t('Invoice amount')}
               </span>
               <output
                 aria-label={t('Invoice amount')}
-                className='text-2xl font-semibold tabular-nums'
+                className='text-2xl leading-none font-semibold tracking-tight tabular-nums'
               >
                 {formatNumber(invoiceAmount, locale)}
               </output>
             </div>
-            {minimumAmount !== undefined && (
+            {minimumAmount !== undefined && !meetsMinimum && (
               <p
-                className={
-                  meetsMinimum
-                    ? 'text-muted-foreground text-xs'
-                    : 'text-destructive text-xs'
-                }
+                role='alert'
+                className='flex items-center gap-1.5 text-sm font-medium text-amber-700 dark:text-amber-400'
               >
+                <CircleAlert className='size-3.5 shrink-0' aria-hidden='true' />
+                <span>
+                  {t('Minimum invoice amount: {{amount}}', {
+                    amount: formatNumber(minimumAmount, locale),
+                  })}
+                </span>
+              </p>
+            )}
+            {minimumAmount !== undefined && meetsMinimum && (
+              <p className='text-muted-foreground text-xs'>
                 {t('Minimum invoice amount: {{amount}}', {
                   amount: formatNumber(minimumAmount, locale),
                 })}
               </p>
             )}
           </div>
-          <div className='flex items-center justify-end gap-2'>
+          <div className='flex w-full items-center justify-end gap-2 sm:w-auto'>
             <Button
               variant='outline'
               disabled={mutation.isPending}
@@ -199,7 +223,12 @@ export function InvoiceApplicationForm(props: {
             >
               {t('Cancel')}
             </Button>
-            <Button type='submit' form={formId} disabled={!canSubmit}>
+            <Button
+              type='submit'
+              form={formId}
+              disabled={!canSubmit}
+              className='min-w-0 flex-1 whitespace-normal sm:flex-none'
+            >
               <Send className='size-4' aria-hidden='true' />
               {t('Submit invoice application')}
             </Button>
@@ -209,15 +238,36 @@ export function InvoiceApplicationForm(props: {
     >
       <form
         id={formId}
-        className='grid min-w-0 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_300px]'
+        className='grid min-w-0 items-stretch gap-5 lg:grid-cols-[minmax(0,1fr)_360px]'
         onSubmit={form.handleSubmit((input) => {
           if (canSubmit) mutation.mutate(input)
         })}
       >
-        <section aria-label={t('Select orders')} className='min-w-0 space-y-3'>
-          <h3 className='text-sm font-semibold'>{t('Select orders')}</h3>
+        <section
+          aria-label={t('Select orders')}
+          className='flex min-h-0 min-w-0 flex-col gap-3 rounded-xl border p-4 sm:p-5'
+        >
+          <div className='flex flex-wrap items-center justify-between gap-2'>
+            <h3 className='flex items-center gap-2 text-sm font-semibold'>
+              <ListChecks
+                className='text-muted-foreground size-4'
+                aria-hidden='true'
+              />
+              {t('Select orders')}
+            </h3>
+            {selectedOrders.length > 0 && (
+              <span
+                className='bg-primary/10 text-primary rounded-md px-2 py-1 text-xs font-medium tabular-nums'
+                aria-live='polite'
+              >
+                {t('Selected orders: {{count}}', {
+                  count: formatNumber(selectedOrders.length, locale),
+                })}
+              </span>
+            )}
+          </div>
           {settings.data && (
-            <p className='text-muted-foreground text-xs'>
+            <p className='text-muted-foreground text-xs leading-relaxed'>
               {settings.data.application_days > 0
                 ? t(
                     'Apply within {{days}} days after payment. Orders currently invoiced or awaiting processing cannot be selected again.',
@@ -251,16 +301,29 @@ export function InvoiceApplicationForm(props: {
         </section>
         <section
           aria-label={t('Invoice details')}
-          className='min-w-0 space-y-4 border-t pt-5 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6'
+          className='bg-muted/20 min-w-0 space-y-4 rounded-xl border p-4 sm:p-5'
         >
-          <h3 className='text-sm font-semibold'>{t('Invoice details')}</h3>
+          <h3 className='flex items-center gap-2 text-sm font-semibold'>
+            <FileText
+              className='text-muted-foreground size-4'
+              aria-hidden='true'
+            />
+            {t('Invoice details')}
+          </h3>
           {fields.map((field) => (
             <div key={field.name} className='space-y-2'>
-              <Label htmlFor={`invoice-${field.name}`}>{field.label}</Label>
+              <div className='flex items-center gap-1'>
+                <Label htmlFor={`invoice-${field.name}`}>{field.label}</Label>
+                <span className='text-destructive' aria-hidden='true'>
+                  *
+                </span>
+              </div>
               <Input
                 id={`invoice-${field.name}`}
                 type={field.type}
                 maxLength={field.maxLength}
+                className='bg-background'
+                aria-required='true'
                 {...form.register(field.name)}
                 disabled={mutation.isPending}
                 aria-invalid={Boolean(form.formState.errors[field.name])}
@@ -274,8 +337,12 @@ export function InvoiceApplicationForm(props: {
                 <p
                   id={`invoice-${field.name}-error`}
                   role='alert'
-                  className='text-destructive text-sm'
+                  className='text-destructive bg-destructive/10 flex items-start gap-2 rounded-md px-2.5 py-2 text-sm'
                 >
+                  <CircleAlert
+                    className='mt-0.5 size-4 shrink-0'
+                    aria-hidden='true'
+                  />
                   {t('Invalid invoice application details')}
                 </p>
               )}
@@ -326,8 +393,12 @@ export function InvoiceApplicationForm(props: {
                       <p
                         id={`invoice-${field.name}-error`}
                         role='alert'
-                        className='text-destructive text-sm'
+                        className='text-destructive bg-destructive/10 flex items-start gap-2 rounded-md px-2.5 py-2 text-sm'
                       >
+                        <CircleAlert
+                          className='mt-0.5 size-4 shrink-0'
+                          aria-hidden='true'
+                        />
                         {t('Invalid invoice application details')}
                       </p>
                     )}
@@ -336,11 +407,11 @@ export function InvoiceApplicationForm(props: {
               </div>
             </CollapsibleContent>
           </Collapsible>
-          <div className='grid gap-2 border-t pt-4'>
+          <div className='grid gap-2'>
             <Label htmlFor='invoice-remark'>{t('Remarks')}</Label>
             <Textarea
               id='invoice-remark'
-              className='min-h-20 resize-y'
+              className='bg-background min-h-20 resize-y'
               maxLength={1000}
               {...form.register('remark')}
               disabled={mutation.isPending}

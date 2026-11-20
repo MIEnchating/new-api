@@ -558,6 +558,44 @@ it('loads administrator notification recipients and saves the selected administr
   )
 })
 
+it('aligns the application sections and prominently explains the minimum when no orders are selected', async () => {
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: { success: true, data: { total: 0, items: [] } },
+  })
+  renderInvoice(<InvoiceApplicationForm onSubmitted={vi.fn()} />, 1000)
+  await screen.findByText('No eligible orders')
+  expect(
+    screen.queryByRole('button', { name: 'Go to next page' })
+  ).not.toBeInTheDocument()
+  const warning = screen.getByRole('alert')
+  expect(warning).toHaveTextContent('Minimum invoice amount: 1,000')
+  expect(warning).toHaveClass('font-medium', 'text-amber-700')
+  expect(warning).not.toHaveClass('bg-destructive/10', 'border-destructive/30')
+  expect(warning.closest('[data-slot="alert"]')).toBeNull()
+  expect(screen.getByRole('region', { name: 'Invoice details' })).toHaveClass(
+    'rounded-xl',
+    'border'
+  )
+  expect(screen.getByRole('dialog')).toHaveClass(
+    'sm:max-w-[min(1120px,calc(100vw-3rem))]'
+  )
+  expect(screen.getByRole('region', { name: 'Select orders' })).toHaveClass(
+    'flex',
+    'flex-col',
+    'rounded-xl',
+    'border'
+  )
+  expect(
+    screen.getByRole('region', { name: 'Select orders' }).closest('form')
+  ).not.toHaveClass('items-start')
+  expect(screen.getByText('No eligible orders').closest('td')).toHaveClass(
+    'h-64'
+  )
+  expect(
+    screen.getByRole('button', { name: 'Submit invoice application' })
+  ).toBeDisabled()
+})
+
 it('keeps selections across pages and submits all selected orders with validated company details', async () => {
   const user = userEvent.setup()
   vi.spyOn(api, 'get').mockImplementation(async (_url, config) => {
@@ -624,6 +662,7 @@ it('keeps selections across pages and submits all selected orders with validated
     await screen.findByRole('checkbox', { name: 'Select order order-eleven' })
   )
   expect(screen.getByLabelText('Invoice amount')).toHaveTextContent('30.35')
+  expect(screen.getByText('Selected orders: 2')).toBeVisible()
   await user.click(
     screen.getByRole('checkbox', { name: 'Select order order-eleven' })
   )
