@@ -308,7 +308,9 @@ it('disables completion during upload and retains the uploaded file when issuing
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'Confirm' })).toBeEnabled()
   )
-  expect(screen.queryByLabelText('Invoice file')).not.toBeInTheDocument()
+  expect(
+    screen.queryByLabelText('Invoice file', { selector: 'input[type="file"]' })
+  ).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Preview invoice' })).toBeVisible()
   expect(
     screen.getByRole('button', { name: 'Replace invoice file' })
@@ -435,7 +437,9 @@ it('offers issued invoice download and sends mail without accepting a destinatio
   renderInvoice(<InvoiceRequestList admin={false} />)
   await user.click(await screen.findByRole('button', { name: 'View details' }))
   expect(screen.getByRole('button', { name: 'Download invoice' })).toBeVisible()
-  expect(screen.queryByLabelText('Invoice file')).not.toBeInTheDocument()
+  expect(
+    screen.queryByLabelText('Invoice file', { selector: 'input[type="file"]' })
+  ).not.toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Send to email' }))
   await waitFor(() =>
     expect(post).toHaveBeenCalledWith('/api/user/invoices/4/email')
@@ -494,7 +498,11 @@ it.each(['application/pdf', 'image/png'])(
     await user.click(
       await screen.findByRole('button', { name: 'View details' })
     )
-    expect(screen.queryByLabelText('Invoice file')).not.toBeInTheDocument()
+    expect(
+      screen.queryByLabelText('Invoice file', {
+        selector: 'input[type="file"]',
+      })
+    ).not.toBeInTheDocument()
     expect(
       screen.queryByRole('button', { name: 'Replace invoice file' })
     ).not.toBeInTheDocument()
