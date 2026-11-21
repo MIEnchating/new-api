@@ -37,13 +37,17 @@ import { useUpdateOption } from '../hooks/use-update-option'
 
 const EMPTY_VENDORS: PricingVendor[] = []
 
-export function ModelSquareSettingsSection(props: {
-  vendorOrder: string[]
-}) {
+export function ModelSquareSettingsSection(props: { vendorOrder: string[] }) {
   const { t } = useTranslation()
-  const { data: vendors = EMPTY_VENDORS, isLoading, error, refetch } = useQuery({
+  const {
+    data: vendors = EMPTY_VENDORS,
+    isLoading,
+    error,
+    refetch,
+  } = useQuery({
     queryKey: ['model-square-vendors'],
-    queryFn: async () => requireServerSuccess(await getModelSquareVendors()).data,
+    queryFn: async () =>
+      requireServerSuccess(await getModelSquareVendors()).data,
   })
   const updateOption = useUpdateOption()
   const { form, handleSubmit, handleReset, isDirty, isSubmitting } =
@@ -86,8 +90,13 @@ export function ModelSquareSettingsSection(props: {
       ) : orderedVendors.length > 0 ? (
         <ol aria-label={t('Supplier display order')} className='divide-y'>
           {orderedVendors.map((vendor, index) => (
-            <li key={vendor.id} className='flex min-w-0 items-center justify-between gap-3 py-2'>
-              <span className='min-w-0 wrap-break-word text-sm'>{vendor.name}</span>
+            <li
+              key={vendor.id}
+              className='flex min-w-0 items-center justify-between gap-3 py-2'
+            >
+              <span className='min-w-0 text-sm wrap-break-word'>
+                {vendor.name}
+              </span>
               <GroupOrderControls
                 group={vendor.name}
                 index={index}
@@ -99,8 +108,12 @@ export function ModelSquareSettingsSection(props: {
 
                   const next = orderedVendors.map((item) => item.name)
                   ;[next[index], next[target]] = [next[target], next[index]]
-                  const unavailable = vendorOrder.filter((name) => !next.includes(name))
-                  form.setValue('vendorOrder', [...next, ...unavailable], { shouldDirty: true })
+                  const unavailable = vendorOrder.filter(
+                    (name) => !next.includes(name)
+                  )
+                  form.setValue('vendorOrder', [...next, ...unavailable], {
+                    shouldDirty: true,
+                  })
                 }}
               />
             </li>

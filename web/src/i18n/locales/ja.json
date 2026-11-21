@@ -7516,6 +7516,8 @@
     "Super admin": "スーパー管理者",
     "Super Admin": "スーパー管理者",
     "Super Large": "極大",
+    "Supplier display order": "ベンダーの表示順",
+    "Supplier order must be a list of unique names": "ベンダーの並び順には重複しない名前のリストを指定してください",
     "Support for high concurrency with automatic load balancing": "自動ロードバランシングによる高並行性のサポート",
     "Supported Applications": "サポートされているアプリケーション",
     "Supported endpoints": "対応エンドポイント",

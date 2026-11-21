@@ -7516,6 +7516,8 @@
     "Super admin": "Super admin",
     "Super Admin": "Super Admin",
     "Super Large": "Super Large",
+    "Supplier display order": "Supplier display order",
+    "Supplier order must be a list of unique names": "Supplier order must be a list of unique names",
     "Support for high concurrency with automatic load balancing": "Support for high concurrency with automatic load balancing",
     "Supported Applications": "Supported Applications",
     "Supported endpoints": "Supported endpoints",

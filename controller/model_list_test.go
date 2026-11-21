@@ -7,10 +7,12 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
@@ -169,6 +171,140 @@ func pricingByModelName(pricings []model.Pricing) map[string]model.Pricing {
 		byName[pricing.ModelName] = pricing
 	}
 	return byName
+}
+
+func modelSquareData[T any](t *testing.T, handler gin.HandlerFunc, path, userGroup string) T {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, path, nil)
+	if userGroup != "" {
+		common.SetContextKey(ctx, constant.ContextKeyUserGroup, userGroup)
+	}
+	handler(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var response struct {
+		Success bool `json:"success"`
+		Data    T    `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	return response.Data
+}
+
+func TestModelSquareGroupVisibility(t *testing.T) {
+	originalGroups := setting.UserUsableGroups2JSONString()
+	originalRatios := ratio_setting.GroupRatio2JSONString()
+	originalSchedules := ratio_setting.GroupRatioSchedule2JSONString()
+	originalOverrides := ratio_setting.GroupGroupRatio2JSONString()
+	originalOrder := setting.GroupOrder2JSONString()
+	specialGroups := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup
+	originalSpecialGroups := specialGroups.ReadAll()
+	t.Cleanup(func() {
+		require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(originalGroups))
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(originalRatios))
+		require.NoError(t, ratio_setting.UpdateGroupRatioScheduleByJSONString(originalSchedules))
+		require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(originalOverrides))
+		require.NoError(t, setting.UpdateGroupOrderByJSONString(originalOrder))
+		specialGroups.Clear()
+		specialGroups.AddAll(originalSpecialGroups)
+	})
+	require.NoError(t, ratio_setting.UpdateGroupRatioScheduleByJSONString(`{"default":{"enabled":true,"periods":[{"start":"00:00","end":"23:59","ratio":0.5}]}}`))
+	require.NoError(t, ratio_setting.UpdateGroupGroupRatioByJSONString(`{"internal":{"default":0.25}}`))
+	require.NoError(t, setting.UpdateGroupOrderByJSONString(`["internal","default"]`))
+	specialGroups.Clear()
+	specialGroups.Set("internal", map[string]string{"+:internal": "Private"})
+
+	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			if dialect.env != "" && os.Getenv(dialect.env) == "" {
+				t.Skip("set " + dialect.env + " to run this database")
+			}
+			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
+			require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Public"}`))
+			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"internal":2}`))
+			require.NoError(t, db.Create(&[]model.Ability{
+				{Model: "shared", Group: "default", ChannelId: 1, Enabled: true},
+				{Model: "shared", Group: "internal", ChannelId: 1, Enabled: true},
+				{Model: "private-only", Group: "internal", ChannelId: 1, Enabled: true},
+				{Model: "wildcard", Group: "all", ChannelId: 1, Enabled: true},
+				{Model: "wildcard", Group: "internal", ChannelId: 1, Enabled: true},
+			}).Error)
+			model.InvalidatePricingCache()
+			t.Cleanup(model.InvalidatePricingCache)
+
+			guest := pricingByModelName(modelSquareData[[]model.Pricing](t, GetPricing, "/api/pricing", ""))
+			assert.Equal(t, []string{"default"}, guest["shared"].EnableGroup)
+			assert.Equal(t, []string{"all"}, guest["wildcard"].EnableGroup)
+			assert.NotContains(t, guest, "private-only")
+			member := pricingByModelName(modelSquareData[[]model.Pricing](t, GetPricing, "/api/pricing", "internal"))
+			assert.ElementsMatch(t, []string{"default", "internal"}, member["shared"].EnableGroup)
+			assert.Equal(t, []string{"internal"}, member["private-only"].EnableGroup)
+
+			type pricingResponse struct {
+				GroupRatio  map[string]float64 `json:"group_ratio"`
+				UsableGroup map[string]struct {
+					Desc  string `json:"desc"`
+					Order int    `json:"order"`
+				} `json:"usable_group"`
+			}
+			for _, tc := range []struct {
+				group     string
+				wantRatio map[string]float64
+				wantOrder int
+			}{
+				{"", map[string]float64{"default": 0.5}, 0},
+				{"internal", map[string]float64{"default": 0.25, "internal": 2}, 1},
+			} {
+				recorder := httptest.NewRecorder()
+				ctx, _ := gin.CreateTestContext(recorder)
+				ctx.Request = httptest.NewRequest(http.MethodGet, "/api/pricing", nil)
+				common.SetContextKey(ctx, constant.ContextKeyUserGroup, tc.group)
+				GetPricing(ctx)
+				require.Equal(t, http.StatusOK, recorder.Code)
+				var response pricingResponse
+				require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+				assert.Equal(t, tc.wantRatio, response.GroupRatio)
+				assert.Equal(t, "Public", response.UsableGroup["default"].Desc)
+				assert.Equal(t, tc.wantOrder, response.UsableGroup["default"].Order)
+				if tc.group == "" {
+					assert.NotContains(t, response.UsableGroup, "internal")
+				}
+			}
+
+			require.NoError(t, db.AutoMigrate(&model.PerfMetric{}))
+			ts := time.Now().Add(-time.Hour).Unix()
+			require.NoError(t, db.Create(&[]model.PerfMetric{
+				{ModelName: "shared", Group: "default", BucketTs: ts, RequestCount: 1, SuccessCount: 1},
+				{ModelName: "shared", Group: "internal", BucketTs: ts, RequestCount: 1},
+				{ModelName: "private-only", Group: "internal", BucketTs: ts, RequestCount: 1},
+			}).Error)
+			const detailPath = "/api/perf-metrics?model=shared"
+			const summaryPath = "/api/perf-metrics/summary?recent_model=private-only"
+			detail := modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath, "")
+			require.Len(t, detail.Groups, 1)
+			assert.Equal(t, "default", detail.Groups[0].Group)
+			denied := modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath+"&group=internal", "")
+			assert.Empty(t, denied.Groups)
+			summary := modelSquareData[perfmetrics.SummaryAllResult](t, GetPerfMetricsSummary, summaryPath, "")
+			require.Len(t, summary.Models, 1)
+			assert.Equal(t, "shared", summary.Models[0].ModelName)
+			assert.Equal(t, 100.0, summary.Models[0].SuccessRate)
+			assert.NotContains(t, summary.RecentSuccessSeries, "private-only")
+			allowed := modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath+"&group=internal", "internal")
+			require.Len(t, allowed.Groups, 1)
+			assert.Equal(t, "internal", allowed.Groups[0].Group)
+
+			require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{}`))
+			assert.Empty(t, modelSquareData[[]model.Pricing](t, GetPricing, "/api/pricing", ""))
+			assert.Empty(t, modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath, "").Groups)
+			assert.Empty(t, modelSquareData[perfmetrics.SummaryAllResult](t, GetPerfMetricsSummary, summaryPath, "").Models)
+			dashboard := modelSquareData[perfmetrics.SummaryAllResult](t, GetDashboardPerfMetricsSummary, "/api/data/perf-metrics/summary", "")
+			assert.Len(t, dashboard.Models, 2)
+			require.NotNil(t, dashboard.Summary)
+			assert.Equal(t, 33.33, dashboard.Summary.SuccessRate)
+		})
+	}
 }
 
 func decodeUserModelsResponse(t *testing.T, recorder *httptest.ResponseRecorder) []string {
