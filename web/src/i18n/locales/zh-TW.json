@@ -7516,6 +7516,8 @@
     "Super admin": "超級管理員",
     "Super Admin": "超級管理員",
     "Super Large": "超大",
+    "Supplier display order": "供應商顯示順序",
+    "Supplier order must be a list of unique names": "供應商順序必須是名稱不重複的清單",
     "Support for high concurrency with automatic load balancing": "支援高並發和自動負載平衡",
     "Supported Applications": "常用套用支援",
     "Supported endpoints": "支援的端點",

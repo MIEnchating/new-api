@@ -7516,6 +7516,8 @@
     "Super admin": "Суперадминистратор",
     "Super Admin": "Суперадмин",
     "Super Large": "Очень крупная",
+    "Supplier display order": "Порядок отображения поставщиков",
+    "Supplier order must be a list of unique names": "Укажите список поставщиков с уникальными названиями",
     "Support for high concurrency with automatic load balancing": "Поддержка высокой конкурентности с автоматической балансировкой нагрузки",
     "Supported Applications": "Поддерживаемые приложения",
     "Supported endpoints": "Поддерживаемые конечные точки",

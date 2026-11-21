@@ -7516,6 +7516,8 @@
     "Super admin": "Super administrateur",
     "Super Admin": "Super Administrateur",
     "Super Large": "Très grand",
+    "Supplier display order": "Ordre d’affichage des fournisseurs",
+    "Supplier order must be a list of unique names": "L’ordre des fournisseurs doit contenir des noms uniques",
     "Support for high concurrency with automatic load balancing": "Prise en charge de la haute concurrence avec équilibrage de charge automatique",
     "Supported Applications": "Applications prises en charge",
     "Supported endpoints": "Points de terminaison pris en charge",

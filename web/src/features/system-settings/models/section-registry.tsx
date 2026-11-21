@@ -70,7 +70,9 @@ const MODELS_SECTIONS = [
     id: 'model-square',
     titleKey: 'Model Square',
     build: (settings: ModelSettings) => (
-      <ModelSquareSettingsSection vendorOrder={settings.ModelSquareVendorOrder} />
+      <ModelSquareSettingsSection
+        vendorOrder={settings.ModelSquareVendorOrder}
+      />
     ),
   },
   {

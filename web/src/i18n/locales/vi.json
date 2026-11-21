@@ -7516,6 +7516,8 @@
     "Super admin": "Siêu quản trị viên",
     "Super Admin": "Siêu Quản trị viên",
     "Super Large": "Rất lớn",
+    "Supplier display order": "Thứ tự hiển thị nhà cung cấp",
+    "Supplier order must be a list of unique names": "Thứ tự nhà cung cấp phải là danh sách tên không trùng lặp",
     "Support for high concurrency with automatic load balancing": "Hỗ trợ đồng thời cao với cân bằng tải tự động",
     "Supported Applications": "Ứng dụng được hỗ trợ",
     "Supported endpoints": "Điểm cuối được hỗ trợ",

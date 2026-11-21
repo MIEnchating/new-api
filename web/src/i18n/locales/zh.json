@@ -7516,6 +7516,8 @@
     "Super admin": "超级管理员",
     "Super Admin": "超级管理员",
     "Super Large": "超大",
+    "Supplier display order": "供应商展示顺序",
+    "Supplier order must be a list of unique names": "供应商顺序必须为名称不重复的列表",
     "Support for high concurrency with automatic load balancing": "支持高并发和自动负载均衡",
     "Supported Applications": "常用应用支持",
     "Supported endpoints": "支持的端点",
