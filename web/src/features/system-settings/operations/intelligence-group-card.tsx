@@ -84,7 +84,7 @@ export function IntelligenceGroupCard(props: {
       <TitledCard
         title={<span title={props.title}>{props.title}</span>}
         action={
-          <div className='flex items-center gap-1'>
+          <div className='flex flex-wrap items-center justify-end gap-1'>
             {!props.open && actions}
             <GroupOrderControls
               group={props.title}
@@ -116,20 +116,20 @@ export function IntelligenceGroupCard(props: {
             </CollapsibleTrigger>
           </div>
         }
-        className='min-w-0 border shadow-none ring-0'
+        className='min-w-0 rounded-lg border shadow-none ring-0'
         headerClassName={cn(
-          'bg-muted/30 px-4 py-3! sm:px-4 sm:py-3! [&>div]:flex-row [&>div]:items-center [&>div]:gap-2 [&>div>div:first-child]:min-w-0 [&>div>div:first-child]:flex-1 [&>div>div:last-child]:w-auto',
+          'bg-muted/30 rounded-t-lg px-4 py-2! sm:px-4 sm:py-2! [&>div]:flex-row [&>div]:items-center [&>div]:justify-between [&>div]:gap-2 [&>div>div:last-child]:w-auto',
           !props.open && 'border-b-0'
         )}
-        titleClassName='truncate text-sm sm:text-sm'
+        titleClassName='truncate text-sm font-semibold tracking-normal sm:text-sm'
         contentClassName='p-0 sm:p-0'
         disableHoverEffect
       >
         <CollapsibleContent keepMounted>
-          <div className='flex min-w-0 flex-col gap-4 p-4'>
+          <div className='flex min-w-0 flex-col gap-3 px-4 py-3'>
             {props.children}
             {props.open && (
-              <div className='flex flex-wrap items-center justify-between gap-3 border-t pt-4'>
+              <div className='flex flex-wrap items-center justify-between gap-2 border-t pt-2.5'>
                 {actions}
               </div>
             )}

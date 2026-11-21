@@ -42,6 +42,8 @@ export const intelligenceConfigSchema = z
           .object({
             group: z.string().trim().min(1).max(64),
             model: z.string().trim().max(255).optional(),
+            mode: z.enum(['local', 'external']).optional(),
+            benchmark: z.enum(['candy', 'pelican', 'creative']).optional(),
             models: z
               .array(z.string().trim().min(1).max(255))
               .max(50)
@@ -54,11 +56,10 @@ export const intelligenceConfigSchema = z
             ]),
             question_indexes: z
               .array(z.number().int().min(0))
-              .min(1)
               .max(5)
               .nullable()
               .optional(),
-            stream: z.boolean().optional(),
+            reasoning_effort: z.enum(['', 'low', 'medium', 'high']).optional(),
             enabled: z.boolean(),
             times: z
               .array(z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/))
@@ -88,7 +89,9 @@ export const intelligenceConfigSchema = z
       const selected = group.question_indexes
       if (
         selected &&
-        (new Set(selected).size !== selected.length ||
+        group.mode !== 'external' &&
+        (selected.length === 0 ||
+          new Set(selected).size !== selected.length ||
           selected.some((question) => question >= config.questions.length))
       ) {
         ctx.addIssue({
@@ -106,6 +109,18 @@ export type IntelligenceAttempt = {
   latency_ms: number
   http_status?: number
   error: string
+}
+export type IntelligenceExternalResult = {
+  benchmark: string
+  status: string
+  phase?: string
+  answer?: string
+  duration_ms?: number
+  input_tokens?: number
+  output_tokens?: number
+  quality?: string
+  label?: string
+  reason?: string
 }
 export type IntelligenceRetryTarget = {
   group: string
@@ -153,6 +168,8 @@ export type IntelligenceTask = {
       question_index: number
       question_name: string
       html?: string
+      has_html?: boolean
+      external_result?: IntelligenceExternalResult
       latency_ms: number
       error: string
     }[]

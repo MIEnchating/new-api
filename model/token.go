@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type Token struct {
@@ -43,6 +44,8 @@ type Token struct {
 }
 
 const TokenGroupRouteMaxCooldownSeconds = 31_536_000
+
+const ManxueTestTokenPrefix = "manxuetest"
 
 type TokenGroupRoute struct {
 	Group           string `json:"group"`
@@ -445,7 +448,8 @@ func GetTokenById(id int) (*Token, error) {
 }
 
 func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
-	if !fromDB && common.RedisEnabled {
+	temporary := strings.HasPrefix(key, ManxueTestTokenPrefix)
+	if !fromDB && !temporary && common.RedisEnabled {
 		// Try Redis first
 		token, err := cacheGetTokenByKey(key)
 		if err == nil {
@@ -454,6 +458,14 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 		// Don't return error - fall through to DB
 	}
 	token = &Token{}
+	if temporary {
+		// Read the database on every request so revocation takes effect even with Redis enabled.
+		err = DB.Session(&gorm.Session{Logger: logger.Discard}).Where(map[string]any{"key": key}).First(token).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrDatabase
+		}
+		return token, err
+	}
 	if err = DB.Where(commonKeyCol+" = ?", key).First(token).Error; err != nil {
 		return nil, err
 	}

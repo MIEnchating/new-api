@@ -111,6 +111,94 @@ it.each([
   }
 )
 
+it('shows the answer returned by an external intelligence test', () => {
+  const task = historyTask(1)
+  if (!task.result) throw new Error('Expected a result fixture')
+  const channel = {
+    ...task.result.channels[0],
+    error: '',
+    external_result: {
+      benchmark: 'candy',
+      status: 'passed',
+      answer: '21',
+    },
+  }
+  const client = new QueryClient({
+    defaultOptions: { queries: { enabled: false, retry: false } },
+  })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <IntelligenceResultCard
+        id='external-result'
+        task={task}
+        channel={channel}
+        group={task.group}
+        model={task.model}
+        status='succeeded'
+        showGroup={false}
+        onGroupSelect={() => {}}
+      />
+    </QueryClientProvider>
+  )
+  try {
+    expect(screen.getByText('21')).toBeVisible()
+  } finally {
+    view.unmount()
+    client.clear()
+  }
+})
+
+it.each([
+  { error: '', label: 'Suspected degradation' },
+  { error: 'External intelligence test request failed', label: '' },
+])(
+  'keeps the generated preview visible after Manxue classification ($label)',
+  ({ error, label }) => {
+    const task = historyTask(1)
+    if (!task.result) throw new Error('Expected a result fixture')
+    const channel = {
+      ...task.result.channels[0],
+      group: task.group,
+      model: task.model,
+      error,
+      has_html: true,
+      html: '<!doctype html><html><body><svg></svg></body></html>',
+      external_result: label
+        ? { benchmark: 'html', status: 'succeeded', label }
+        : undefined,
+    }
+    task.result.channels = [channel]
+    const client = new QueryClient()
+    client.setQueryData(
+      ['status-monitor', 'intelligence-result', task.task_id],
+      task
+    )
+    const view = render(
+      <QueryClientProvider client={client}>
+        <IntelligenceResultCard
+          id='classified-result'
+          task={task}
+          channel={channel}
+          group={task.group}
+          model={task.model}
+          status={error ? 'failed' : 'succeeded'}
+          showGroup={false}
+          onGroupSelect={() => {}}
+        />
+      </QueryClientProvider>
+    )
+    try {
+      expect(
+        screen.getByRole('button', { name: 'Enlarge preview' })
+      ).toBeVisible()
+      expect(screen.getByText(error || `Manxue AI · ${label}`)).toBeVisible()
+    } finally {
+      view.unmount()
+      client.clear()
+    }
+  }
+)
+
 it('keeps cached cards and group tabs available when refresh fails, and recovers on retry', async () => {
   const user = userEvent.setup()
   const task = historyTask(1)

@@ -31,15 +31,12 @@ import { LoadingState } from '@/components/loading-state'
 import { MultiSelect } from '@/components/multi-select'
 import { TimePicker } from '@/components/time-picker'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Field,
   FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
-  FieldSet,
-  FieldLegend,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
@@ -65,6 +62,7 @@ import {
   getIntelligenceEndpointOptions,
   getIntelligenceQuestionName,
 } from '@/features/status-monitor/intelligence-labels'
+import { cn } from '@/lib/utils'
 
 import {
   SettingsControlGroup,
@@ -110,6 +108,16 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
   >({})
   const queryClient = useQueryClient()
   const endpoints = getIntelligenceEndpointOptions(t)
+  const benchmarks = [
+    { value: 'candy', label: t('Candy test') },
+    { value: 'pelican', label: t('Pelican test') },
+    { value: 'creative', label: t('Creative test') },
+  ]
+  const reasoningOptions = [
+    { value: 'low', label: t('Low') },
+    { value: 'medium', label: t('Medium') },
+    { value: 'high', label: t('High') },
+  ]
   const groupOptions = (
     props.data.group_order ?? Object.keys(props.data.catalog).sort()
   ).map((value) => ({ value, label: value }))
@@ -124,7 +132,6 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
           : group.model
             ? [group.model]
             : [],
-        stream: group.stream ?? true,
         question_indexes:
           group.question_indexes ??
           props.data.config.questions.map((_, index) => index),
@@ -135,6 +142,12 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
   const groups = useFieldArray({ control: form.control, name: 'groups' })
   const selectedGroups = form.watch('groups')
   const selectedQuestions = form.watch('questions')
+  const questionOptions = selectedQuestions.map((question, index) => ({
+    value: String(index),
+    label:
+      getIntelligenceQuestionName(question.name, t) ||
+      t('Question {{number}}', { number: index + 1 }),
+  }))
   const save = useMutation({
     mutationFn: saveIntelligenceConfig,
     onSuccess: (config) => {
@@ -156,7 +169,14 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
   })
   const pending = save.isPending || run.isPending
   const onSubmit = form.handleSubmit(
-    (config) => save.mutate(config),
+    (config) =>
+      save.mutate({
+        ...config,
+        groups: config.groups.map((group) => ({
+          ...group,
+          reasoning_effort: group.reasoning_effort || 'low',
+        })),
+      }),
     (errors) => {
       setCollapsedGroups({})
       setActiveTab(errors.questions ? 'questions' : 'settings')
@@ -229,15 +249,18 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
             keepMounted
             className='min-w-0 space-y-4'
           >
-            <p className='text-muted-foreground text-xs leading-relaxed'>
-              {t(
-                'Send your questions to every enabled channel matching each selected group and model. Compare HTML previews manually. Upstream API usage may incur charges.'
-              )}
-            </p>
-
             <section aria-label={t('Test groups')} className='min-w-0'>
-              <div className='mb-4 flex flex-wrap items-center justify-between gap-3'>
-                <h3 className='text-base font-semibold'>{t('Test groups')}</h3>
+              <div className='mb-3 flex flex-wrap items-center justify-between gap-3'>
+                <div className='min-w-0 space-y-1'>
+                  <h3 className='text-base font-semibold'>
+                    {t('Test groups')}
+                  </h3>
+                  <FieldDescription className='text-xs'>
+                    {t(
+                      'Model requests from intelligence tests may incur charges.'
+                    )}
+                  </FieldDescription>
+                </div>
                 <Button
                   type='button'
                   variant='outline'
@@ -250,7 +273,7 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                       model: '',
                       models: [],
                       endpoint: 'openai-response',
-                      stream: true,
+                      mode: 'local',
                       enabled: false,
                       times: ['09:00'],
                       question_indexes: selectedQuestions.map(
@@ -268,7 +291,12 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                   {t('Add test group')}
                 </Button>
               </div>
-              <div className='grid min-w-0 items-start gap-4 @min-[70rem]:grid-cols-2'>
+              <div
+                className={cn(
+                  'grid min-w-0 items-start gap-4',
+                  groups.fields.length > 1 && '@min-[70rem]:grid-cols-2'
+                )}
+              >
                 {groups.fields.map((entry, index) => (
                   <div
                     key={entry.id}
@@ -295,7 +323,9 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                         pending ||
                         form.formState.isDirty ||
                         !selectedGroups[index].group ||
-                        selectedGroups[index].question_indexes?.length === 0 ||
+                        (selectedGroups[index].mode !== 'external' &&
+                          selectedGroups[index].question_indexes?.length ===
+                            0) ||
                         !(
                           selectedGroups[index].models?.length ||
                           selectedGroups[index].model
@@ -312,7 +342,49 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                         )
                       }
                     >
-                      <div className='grid min-w-0 grid-cols-1 gap-3 @min-[28rem]:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]'>
+                      <div className='grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 @min-[28rem]:grid-cols-2'>
+                        <Field>
+                          <FieldLabel htmlFor={`intelligence-mode-${entry.id}`}>
+                            {t('Intelligence test source')}
+                          </FieldLabel>
+                          <Controller
+                            name={`groups.${index}.mode`}
+                            control={form.control}
+                            render={({ field }) => (
+                              <Select
+                                value={field.value ?? 'local'}
+                                items={[
+                                  {
+                                    value: 'local',
+                                    label: t('Local question bank'),
+                                  },
+                                  {
+                                    value: 'external',
+                                    label: t('Manxue AI'),
+                                  },
+                                ]}
+                                onValueChange={(value) =>
+                                  value !== null && field.onChange(value)
+                                }
+                                disabled={pending}
+                              >
+                                <SelectTrigger
+                                  id={`intelligence-mode-${entry.id}`}
+                                >
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent alignItemWithTrigger={false}>
+                                  <SelectItem value='local'>
+                                    {t('Local question bank')}
+                                  </SelectItem>
+                                  <SelectItem value='external'>
+                                    {t('Manxue AI')}
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                            )}
+                          />
+                        </Field>
                         <Field className='min-w-0'>
                           <FieldLabel
                             htmlFor={`intelligence-group-${entry.id}`}
@@ -353,7 +425,55 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                             </SelectContent>
                           </Select>
                         </Field>
-                        <Field>
+                      </div>
+                      <div className='grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 @min-[28rem]:grid-cols-2'>
+                        <Field
+                          className='min-w-0'
+                          data-invalid={Boolean(
+                            form.formState.errors.groups?.[index]?.models
+                          )}
+                        >
+                          <FieldLabel
+                            htmlFor={`intelligence-models-${entry.id}`}
+                          >
+                            {t('Models')}
+                          </FieldLabel>
+                          <Controller
+                            name={`groups.${index}.models`}
+                            control={form.control}
+                            render={({ field }) => (
+                              <MultiSelect
+                                id={`intelligence-models-${entry.id}`}
+                                className='[&_[data-slot=combobox-chip]]:max-w-full'
+                                options={(
+                                  props.data.catalog[
+                                    selectedGroups[index].group
+                                  ] ?? []
+                                ).map((value) => ({ value, label: value }))}
+                                selected={field.value ?? []}
+                                onChange={(values) => {
+                                  field.onChange(values)
+                                  form.setValue(`groups.${index}.model`, '', {
+                                    shouldDirty: true,
+                                  })
+                                }}
+                                placeholder={t('Select models')}
+                                emptyText={t('No models found')}
+                                maxVisibleChips={3}
+                                disabled={
+                                  pending || !selectedGroups[index].group
+                                }
+                              />
+                            )}
+                          />
+                          <FieldError>
+                            {form.formState.errors.groups?.[index]?.models &&
+                              t(
+                                'Select between 1 and 50 models for intelligence testing'
+                              )}
+                          </FieldError>
+                        </Field>
+                        <Field className='min-w-0'>
                           <FieldLabel
                             htmlFor={`intelligence-endpoint-${entry.id}`}
                           >
@@ -365,14 +485,22 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                             render={({ field }) => (
                               <Select
                                 name={field.name}
-                                value={field.value}
+                                value={
+                                  selectedGroups[index].mode === 'external'
+                                    ? 'openai-response'
+                                    : field.value
+                                }
                                 items={endpoints}
                                 onValueChange={(value) =>
                                   value !== null && field.onChange(value)
                                 }
-                                disabled={pending}
+                                disabled={
+                                  pending ||
+                                  selectedGroups[index].mode === 'external'
+                                }
                               >
                                 <SelectTrigger
+                                  className='py-1.5 data-[size=default]:h-auto data-[size=default]:min-h-8'
                                   id={`intelligence-endpoint-${entry.id}`}
                                   ref={field.ref}
                                   onBlur={field.onBlur}
@@ -381,13 +509,18 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                                       ?.endpoint
                                   )}
                                 >
-                                  <SelectValue />
+                                  <SelectValue className='line-clamp-none! block! min-w-0 wrap-anywhere whitespace-normal' />
                                 </SelectTrigger>
-                                <SelectContent alignItemWithTrigger={false}>
+                                <SelectContent
+                                  align='start'
+                                  alignItemWithTrigger={false}
+                                  className='w-max max-w-(--available-width) min-w-[min(var(--anchor-width),var(--available-width))]'
+                                >
                                   {endpoints.map((endpoint) => (
                                     <SelectItem
                                       key={endpoint.value}
                                       value={endpoint.value}
+                                      className='*:data-[slot=select-item-text]:min-w-0 *:data-[slot=select-item-text]:wrap-anywhere *:data-[slot=select-item-text]:whitespace-normal'
                                     >
                                       {endpoint.label}
                                     </SelectItem>
@@ -398,154 +531,148 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                           />
                         </Field>
                       </div>
-                      <Field
-                        className='min-w-0'
-                        data-invalid={Boolean(
-                          form.formState.errors.groups?.[index]?.models
-                        )}
-                      >
-                        <FieldLabel htmlFor={`intelligence-models-${entry.id}`}>
-                          {t('Models')}
-                        </FieldLabel>
-                        <Controller
-                          name={`groups.${index}.models`}
-                          control={form.control}
-                          render={({ field }) => (
-                            <MultiSelect
-                              id={`intelligence-models-${entry.id}`}
-                              className='[&_[data-slot=combobox-chip]]:max-w-full'
-                              options={(
-                                props.data.catalog[
-                                  selectedGroups[index].group
-                                ] ?? []
-                              ).map((value) => ({ value, label: value }))}
-                              selected={field.value ?? []}
-                              onChange={(values) => {
-                                field.onChange(values)
-                                form.setValue(`groups.${index}.model`, '', {
-                                  shouldDirty: true,
-                                })
-                              }}
-                              placeholder={t('Select models')}
-                              emptyText={t('No models found')}
-                              maxVisibleChips={3}
-                              disabled={pending || !selectedGroups[index].group}
-                            />
-                          )}
-                        />
-                        <FieldError>
-                          {form.formState.errors.groups?.[index]?.models &&
-                            t(
-                              'Select between 1 and 50 models for intelligence testing'
-                            )}
-                        </FieldError>
-                      </Field>
-                      <FieldSet
-                        data-invalid={Boolean(
-                          form.formState.errors.groups?.[index]
-                            ?.question_indexes
-                        )}
-                      >
-                        <FieldLegend variant='label'>
-                          {t('Test questions')}
-                        </FieldLegend>
-                        <div className='grid gap-2 @min-[28rem]:grid-cols-2'>
-                          {selectedQuestions.map((question, questionIndex) => {
-                            const selected =
-                              selectedGroups[index].question_indexes ??
-                              selectedQuestions.map((_, i) => i)
-                            return (
-                              <Field
-                                key={questions.fields[questionIndex].id}
-                                orientation='horizontal'
-                                className='rounded-lg border p-3'
-                              >
-                                <Checkbox
-                                  id={`intelligence-question-${entry.id}-${questionIndex}`}
-                                  checked={selected.includes(questionIndex)}
-                                  aria-invalid={Boolean(
-                                    form.formState.errors.groups?.[index]
-                                      ?.question_indexes
-                                  )}
+                      <div className='grid min-w-0 grid-cols-1 gap-x-4 gap-y-3 @min-[28rem]:grid-cols-2'>
+                        {selectedGroups[index].mode === 'external' ? (
+                          <Field key='benchmark'>
+                            <FieldLabel
+                              htmlFor={`external-benchmark-${entry.id}`}
+                            >
+                              {t('External test type')}
+                            </FieldLabel>
+                            <Controller
+                              name={`groups.${index}.benchmark`}
+                              control={form.control}
+                              render={({ field }) => (
+                                <Select
+                                  value={field.value ?? 'candy'}
+                                  items={benchmarks}
+                                  onValueChange={(value) =>
+                                    value !== null && field.onChange(value)
+                                  }
                                   disabled={pending}
-                                  onCheckedChange={(checked) =>
+                                >
+                                  <SelectTrigger
+                                    id={`external-benchmark-${entry.id}`}
+                                  >
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    {benchmarks.map(({ value, label }) => (
+                                      <SelectItem key={value} value={value}>
+                                        {label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            />
+                          </Field>
+                        ) : (
+                          <Field
+                            key='questions'
+                            data-invalid={Boolean(
+                              form.formState.errors.groups?.[index]
+                                ?.question_indexes
+                            )}
+                          >
+                            <FieldLabel
+                              htmlFor={`intelligence-questions-${entry.id}`}
+                            >
+                              {t('Test questions')}
+                            </FieldLabel>
+                            <Controller
+                              name={`groups.${index}.question_indexes`}
+                              control={form.control}
+                              render={({ field }) => (
+                                <MultiSelect
+                                  id={`intelligence-questions-${entry.id}`}
+                                  placeholder={t('Test questions')}
+                                  options={questionOptions}
+                                  selected={
+                                    field.value?.map(String) ??
+                                    questionOptions.map(({ value }) => value)
+                                  }
+                                  onChange={(values) =>
                                     form.setValue(
-                                      `groups.${index}.question_indexes`,
-                                      checked
-                                        ? [...selected, questionIndex].sort(
-                                            (a, b) => a - b
-                                          )
-                                        : selected.filter(
-                                            (value) => value !== questionIndex
-                                          ),
+                                      field.name,
+                                      values.map(Number).sort((a, b) => a - b),
                                       {
                                         shouldDirty: true,
                                         shouldValidate: true,
                                       }
                                     )
                                   }
+                                  renderSelectedSummary={(values) =>
+                                    t('{{count}} selected', {
+                                      count: values.length,
+                                    })
+                                  }
+                                  disabled={pending}
                                 />
-                                <FieldLabel
-                                  htmlFor={`intelligence-question-${entry.id}-${questionIndex}`}
-                                  className='min-w-0 flex-1 break-words'
+                              )}
+                            />
+                            <FieldError>
+                              {form.formState.errors.groups?.[index]
+                                ?.question_indexes &&
+                                t(
+                                  'Select at least one valid, unique question for each group'
+                                )}
+                            </FieldError>
+                          </Field>
+                        )}
+                        <Field className='min-w-0'>
+                          <FieldLabel
+                            htmlFor={`intelligence-reasoning-${entry.id}`}
+                          >
+                            {t('Reasoning Effort')}
+                          </FieldLabel>
+                          <Controller
+                            name={`groups.${index}.reasoning_effort`}
+                            control={form.control}
+                            render={({ field }) => (
+                              <Select
+                                value={field.value || 'low'}
+                                items={reasoningOptions}
+                                onValueChange={(value) =>
+                                  value !== null && field.onChange(value)
+                                }
+                                disabled={pending}
+                              >
+                                <SelectTrigger
+                                  id={`intelligence-reasoning-${entry.id}`}
                                 >
-                                  {getIntelligenceQuestionName(
-                                    question.name,
-                                    t
-                                  ) ||
-                                    t('Question {{number}}', {
-                                      number: questionIndex + 1,
-                                    })}
-                                </FieldLabel>
-                              </Field>
-                            )
-                          })}
-                        </div>
-                        <FieldError>
-                          {form.formState.errors.groups?.[index]
-                            ?.question_indexes &&
-                            t(
-                              'Select at least one valid, unique question for each group'
-                            )}
-                        </FieldError>
-                      </FieldSet>
-                      <SettingsControlGroup className='bg-muted/20 space-y-4 rounded-xl p-4'>
-                        <div className='flex flex-col gap-4'>
-                          <Controller
-                            name={`groups.${index}.stream`}
-                            control={form.control}
-                            render={({ field }) => (
-                              <SettingsSwitchField
-                                controlId={`intelligence-stream-${entry.id}`}
-                                label={t('Streaming output')}
-                                description={t(
-                                  'Receive output incrementally to reduce gateway timeouts. Enabled by default.'
-                                )}
-                                checked={field.value ?? true}
-                                onCheckedChange={field.onChange}
-                                disabled={pending}
-                                className='py-0'
-                              />
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent alignItemWithTrigger={false}>
+                                  {reasoningOptions.map((option) => (
+                                    <SelectItem
+                                      key={option.value}
+                                      value={option.value}
+                                    >
+                                      {option.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             )}
                           />
-                          <Controller
-                            name={`groups.${index}.enabled`}
-                            control={form.control}
-                            render={({ field }) => (
-                              <SettingsSwitchField
-                                controlId={`intelligence-schedule-${entry.id}`}
-                                label={t('Scheduled intelligence testing')}
-                                className='border-t pt-4 pb-0'
-                                description={t(
-                                  'Daily execution times (Beijing time)'
-                                )}
-                                checked={field.value}
-                                onCheckedChange={field.onChange}
-                                disabled={pending}
-                              />
-                            )}
-                          />
-                        </div>
+                        </Field>
+                      </div>
+                      <SettingsControlGroup className='bg-muted/30 rounded-lg border-0 px-3 py-2'>
+                        <Controller
+                          name={`groups.${index}.enabled`}
+                          control={form.control}
+                          render={({ field }) => (
+                            <SettingsSwitchField
+                              controlId={`intelligence-schedule-${entry.id}`}
+                              label={t('Scheduled intelligence testing')}
+                              className='py-0'
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              disabled={pending}
+                            />
+                          )}
+                        />
                         {selectedGroups[index].enabled && (
                           <Controller
                             name={`groups.${index}.times`}
@@ -634,7 +761,7 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
 
                 <FieldDescription className='col-span-full text-xs leading-relaxed'>
                   {t(
-                    'Each group runs its selected questions for every selected model. Manage questions in the Question bank tab. Missed schedules are skipped while the server is offline.'
+                    'Missed schedules are skipped while the server is offline.'
                   )}
                 </FieldDescription>
               </div>

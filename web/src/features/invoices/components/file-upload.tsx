@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { RefreshCw, Trash2 } from 'lucide-react'
+import { Download, RefreshCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -42,6 +42,8 @@ export function InvoiceFileUpload(props: {
   disabled?: boolean
   onUploaded?: (result: InvoiceUploadResult) => void
   onDeleted?: () => void
+  onDownload?: () => void
+  downloadPending?: boolean
   onUploadingChange?: (uploading: boolean) => void
 }) {
   const { t, i18n } = useTranslation()
@@ -112,10 +114,24 @@ export function InvoiceFileUpload(props: {
             title={props.title}
             actions={
               <>
+                {props.onDownload && (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    className='h-auto min-h-10 min-w-0 justify-center py-1 text-center leading-tight whitespace-normal sm:min-h-8 sm:whitespace-nowrap'
+                    disabled={props.downloadPending}
+                    onClick={props.onDownload}
+                  >
+                    <Download aria-hidden='true' />
+                    {t('Download invoice')}
+                  </Button>
+                )}
                 <Button
                   type='button'
                   variant='outline'
                   size='sm'
+                  className='h-auto min-h-10 min-w-0 justify-center py-1 text-center leading-tight whitespace-normal sm:min-h-8 sm:whitespace-nowrap'
                   disabled={
                     props.disabled ||
                     mutation.isPending ||
@@ -130,7 +146,7 @@ export function InvoiceFileUpload(props: {
                   type='button'
                   variant='ghost'
                   size='sm'
-                  className='text-destructive hover:bg-destructive/10 hover:text-destructive'
+                  className='text-destructive hover:bg-destructive/10 hover:text-destructive h-auto min-h-10 min-w-0 justify-center py-1 text-center leading-tight whitespace-normal sm:min-h-8 sm:whitespace-nowrap'
                   disabled={
                     props.disabled ||
                     mutation.isPending ||

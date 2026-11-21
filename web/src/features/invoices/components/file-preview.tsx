@@ -24,6 +24,7 @@ import { useTranslation } from 'react-i18next'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
+import { useMediaQuery } from '@/hooks'
 
 import { getInvoiceFile } from '../api'
 import { InvoiceFilePreviewDialog } from './file-preview-dialog'
@@ -34,6 +35,7 @@ export function InvoiceFilePreview(props: {
   actions?: React.ReactNode
 }) {
   const { t } = useTranslation()
+  const isMobile = useMediaQuery('(max-width: 640px)')
   const [open, setOpen] = useState(false)
   const query = useQuery({
     queryKey: ['invoices', 'file', props.requestId],
@@ -55,13 +57,13 @@ export function InvoiceFilePreview(props: {
   const url = preview?.blob === query.data?.blob ? preview?.url : undefined
   return (
     <div className='bg-muted/20 min-w-0 space-y-3 rounded-lg border p-4'>
-      <div className='flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+      <div className='space-y-4'>
         <div className='flex min-w-0 items-start gap-2.5'>
           <div className='bg-primary/10 text-primary mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md'>
             <FileText aria-hidden='true' className='size-4' />
           </div>
           <div className='min-w-0 flex-1'>
-            <p className='text-sm font-medium break-all'>
+            <p className='text-sm font-medium break-words'>
               {query.data?.filename || props.title}
             </p>
             <p className='text-muted-foreground mt-1 text-xs'>
@@ -69,9 +71,23 @@ export function InvoiceFilePreview(props: {
             </p>
           </div>
         </div>
-        <div className='flex flex-wrap items-center gap-2 sm:shrink-0'>
+        <div
+          role='group'
+          aria-label={t('Invoice file')}
+          className='grid w-full grid-cols-2 gap-2 border-t pt-3 sm:flex sm:flex-wrap'
+        >
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            className='h-auto min-h-10 min-w-0 justify-center py-1 text-center leading-tight whitespace-normal sm:min-h-8 sm:whitespace-nowrap'
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
+            {t('Preview invoice')}
+          </Button>
           {props.actions}
-          {open && url && !query.isError && query.data && (
+          {open && url && !query.isError && query.data && !isMobile && (
             <InvoiceFilePreviewDialog
               key={url}
               url={url}
@@ -79,15 +95,16 @@ export function InvoiceFilePreview(props: {
               type={query.data.blob.type}
             />
           )}
-          <Button
-            type='button'
-            variant='outline'
-            size='sm'
-            aria-expanded={open}
-            onClick={() => setOpen(!open)}
-          >
-            {t('Preview invoice')}
-          </Button>
+          {open && url && !query.isError && query.data && isMobile && (
+            <InvoiceFilePreviewDialog
+              key={url}
+              url={url}
+              filename={query.data.filename}
+              type={query.data.blob.type}
+              autoOpen
+              onClose={() => setOpen(false)}
+            />
+          )}
         </div>
       </div>
       {open && query.isError && (
@@ -98,30 +115,36 @@ export function InvoiceFilePreview(props: {
         />
       )}
       {open && !query.isError && !url && <LoadingState className='min-h-32' />}
-      {open && url && query.data?.blob.type === 'application/pdf' && (
-        <object
-          title={t('Preview invoice')}
-          aria-label={t('Preview invoice')}
-          data={url}
-          type='application/pdf'
-          className='h-96 w-full rounded-md border bg-white'
-        >
-          <a
-            href={url}
-            download={query.data.filename}
-            className='text-primary underline'
+      {open &&
+        !isMobile &&
+        url &&
+        query.data?.blob.type === 'application/pdf' && (
+          <object
+            title={t('Preview invoice')}
+            aria-label={t('Preview invoice')}
+            data={url}
+            type='application/pdf'
+            className='h-96 w-full rounded-md border bg-white'
           >
-            {t('Download invoice')}
-          </a>
-        </object>
-      )}
-      {open && url && query.data?.blob.type.startsWith('image/') && (
-        <img
-          src={url}
-          alt={t('Preview invoice')}
-          className='max-h-96 w-full rounded-md border object-contain'
-        />
-      )}
+            <a
+              href={url}
+              download={query.data.filename}
+              className='text-primary underline'
+            >
+              {t('Download invoice')}
+            </a>
+          </object>
+        )}
+      {open &&
+        !isMobile &&
+        url &&
+        query.data?.blob.type.startsWith('image/') && (
+          <img
+            src={url}
+            alt={t('Preview invoice')}
+            className='max-h-96 w-full rounded-md border object-contain'
+          />
+        )}
     </div>
   )
 }

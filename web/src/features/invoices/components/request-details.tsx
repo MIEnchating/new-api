@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
-import { useState, type RefObject } from 'react'
+import { useEffect, useState, type RefObject } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -50,6 +50,7 @@ import { invoiceStatusIcons, invoiceStatusVariants } from '../constants'
 import type { InvoiceRequest } from '../types'
 import { InvoiceCopyButton } from './copy-invoice-button'
 import { InvoiceFilePreview } from './file-preview'
+import { InvoiceFileUpload } from './file-upload'
 
 export function InvoiceRequestDetails(props: {
   finalFocus: RefObject<HTMLElement | null>
@@ -63,6 +64,12 @@ export function InvoiceRequestDetails(props: {
   const request = props.request
   const client = useQueryClient()
   const [sent, setSent] = useState(false)
+  const [invoiceFileUploaded, setInvoiceFileUploaded] = useState(
+    request.invoice_url.startsWith('invoice-file:')
+  )
+  useEffect(() => {
+    setInvoiceFileUploaded(request.invoice_url.startsWith('invoice-file:'))
+  }, [request.id, request.invoice_url])
   const download = useMutation({
     mutationFn: () => downloadInvoiceFile(request.id),
   })
@@ -184,9 +191,15 @@ export function InvoiceRequestDetails(props: {
               </div>
             </dl>
             {request.remark && (
-              <p className='text-sm whitespace-pre-wrap'>
-                {t('Remarks')}: {request.remark}
-              </p>
+              <section
+                aria-label={t('Remarks')}
+                className='min-w-0 space-y-3 border-t pt-4'
+              >
+                <SideDrawerSectionHeader title={t('Remarks')} />
+                <p className='bg-muted/30 rounded-lg border px-4 py-3 text-sm leading-7 [overflow-wrap:anywhere] whitespace-pre-wrap'>
+                  {request.remark}
+                </p>
+              </section>
             )}
           </SideDrawerSection>
           <SideDrawerSection>
@@ -253,7 +266,19 @@ export function InvoiceRequestDetails(props: {
                   </p>
                 )}
               </div>
+              {props.admin && request.status === 'pending' && (
+                <InvoiceFileUpload
+                  requestId={request.id}
+                  title={request.title}
+                  uploaded={invoiceFileUploaded}
+                  onUploaded={() => setInvoiceFileUploaded(true)}
+                  onDeleted={() => setInvoiceFileUploaded(false)}
+                  onDownload={() => download.mutate()}
+                  downloadPending={download.isPending}
+                />
+              )}
               {(props.admin || request.status === 'issued') &&
+                !(props.admin && request.status === 'pending') &&
                 request.invoice_url.startsWith('invoice-file:') && (
                   <InvoiceFilePreview
                     requestId={request.id}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,7 +12,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -24,7 +24,6 @@ import (
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
-	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -41,10 +40,19 @@ func TestIntelligenceProtocolRequestsAndOutput(t *testing.T) {
 		{"gemini", "contents.0.parts.0.text", "generationConfig.maxOutputTokens", `{"candidates":[{"content":{"parts":[{"thought":true,"text":"hidden"},{"text":"<html>custom</html>"}]}}]}`},
 	} {
 		t.Run(tc.endpoint, func(t *testing.T) {
-			encoded, err := common.Marshal(buildIntelligenceRequest("model", tc.endpoint, "draw a pelican", false))
+			encoded, err := common.Marshal(buildIntelligenceRequest("model", tc.endpoint, "draw a pelican", "high"))
 			require.NoError(t, err)
 			assert.Equal(t, "draw a pelican", gjson.GetBytes(encoded, tc.promptPath).String())
 			assert.EqualValues(t, 8192, gjson.GetBytes(encoded, tc.limitPath).Int())
+			switch tc.endpoint {
+			case "openai":
+				assert.Equal(t, "high", gjson.GetBytes(encoded, "reasoning_effort").String())
+			case "openai-response":
+				assert.Equal(t, "high", gjson.GetBytes(encoded, "reasoning.effort").String())
+			}
+			if tc.endpoint != "gemini" {
+				assert.True(t, gjson.GetBytes(encoded, "stream").Bool())
+			}
 			assert.Equal(t, "<html>custom</html>", extractIntelligenceOutput([]byte(tc.body), tc.endpoint, false))
 			assert.Empty(t, extractIntelligenceOutput([]byte(`{"error":"unavailable"}`), tc.endpoint, false))
 		})
@@ -58,6 +66,7 @@ func TestIntelligenceConfigValidation(t *testing.T) {
 		func(c *intelligenceConfig) { c.Group = "" },
 		func(c *intelligenceConfig) { c.Model = "" },
 		func(c *intelligenceConfig) { c.Endpoint = "image-generation" },
+		func(c *intelligenceConfig) { c.ReasoningEffort = "invalid" },
 		func(c *intelligenceConfig) { c.IntervalMinutes = 4 },
 		func(c *intelligenceConfig) { c.IntervalMinutes = 10081 },
 		func(c *intelligenceConfig) { c.Questions = nil },
@@ -76,6 +85,23 @@ func TestIntelligenceConfigValidation(t *testing.T) {
 		invalid.Groups = []intelligenceGroup{{Group: "default", Models: models, Endpoint: "openai"}}
 		require.Error(t, invalid.Validate())
 	}
+}
+
+func TestExternalIntelligenceMigratesLegacySettingsWithoutCredentials(t *testing.T) {
+	var config intelligenceConfig
+	require.NoError(t, common.UnmarshalJsonStr(`{
+		"questions":[{"name":"Pelican","prompt":"Draw a pelican"}],
+		"groups":[{"group":"default","models":["gpt-4o-mini"],"endpoint":"openai","mode":"external","question_indexes":[],"external_api":{"base_url":"https://other.example/v1","api_key":"upstream-secret","benchmark":"creative","reasoning_effort":"high"}}]
+	}`, &config))
+	require.NoError(t, config.Validate())
+	single := config.ForGroup(config.Groups[0], "gpt-4o-mini")
+	assert.Equal(t, "high", single.ReasoningEffort)
+	assert.Equal(t, []int{0}, single.SelectedQuestionIndexes())
+	encoded, err := common.Marshal(config)
+	require.NoError(t, err)
+	assert.NotContains(t, string(encoded), "upstream-secret")
+	assert.NotContains(t, string(encoded), "other.example")
+	assert.NotContains(t, string(encoded), "external_api")
 }
 
 func TestIntelligenceGroupQuestionSelection(t *testing.T) {
@@ -107,6 +133,7 @@ func TestIntelligenceGroupQuestionSelection(t *testing.T) {
 			}
 			require.NoError(t, decoded.Validate())
 			single := decoded.ForGroup(decoded.Groups[0], "model")
+			assert.Equal(t, "low", single.ReasoningEffort)
 			assert.Equal(t, tc.want, single.SelectedQuestionIndexes())
 			due := decoded.DueGroups(time.Date(2026, 10, 16, 1, 0, 0, 0, time.UTC))
 			require.Len(t, due.Groups, 1)
@@ -213,7 +240,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	}
 	require.NoError(t, db.Raw(query).Scan(&version).Error)
 	t.Logf("database: %s %s", dialect, version)
-	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Channel{}, &model.User{}, &model.Log{}, &model.AuditLog{}, &model.SystemTask{}, &model.SystemTaskLock{}))
+	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Channel{}, &model.User{}, &model.Log{}, &model.AuditLog{}, &model.SystemTask{}, &model.SystemTaskLock{}, &model.Token{}))
 	oldDB, oldLogDB := model.DB, model.LOG_DB
 	oldMain, oldLog := common.MainDatabaseType(), common.LogDatabaseType()
 	oldRedis, oldMemory, oldConsume := common.RedisEnabled, common.MemoryCacheEnabled, common.LogConsumeEnabled
@@ -230,7 +257,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	})
 	require.NoError(t, db.Create(&model.User{Id: 1, Username: "intelligence-test", Role: common.RoleRootUser, Status: common.UserStatusEnabled, Group: "default", Quota: 1000000}).Error)
 	output := "<!DOCTYPE html><html><body><svg viewBox=\"0 0 10 10\">" + strings.Repeat("<!-- frame -->", 900) + "</svg></body></html>"
-	var streamRequests, jsonRequests atomic.Int32
+	var streamRequests, highEffortRequests atomic.Int32
 	var failRequests atomic.Int32
 	var arrivals atomic.Int32
 	var blockSecondQuestion atomic.Bool
@@ -307,22 +334,18 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 		default:
 			assert.Equal(t, defaultIntelligencePrompt, prompt)
 		}
-		if request["stream"] == true {
-			streamRequests.Add(1)
-			w.Header().Set("Content-Type", "text/event-stream")
-			for _, part := range []string{responseOutput[:len(responseOutput)/2], responseOutput[len(responseOutput)/2:]} {
-				text, _ := common.Marshal(part)
-				fmt.Fprintf(w, "data: {\"id\":\"test\",\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":%s}}]}\n\n", text)
-				w.(http.Flusher).Flush()
-			}
-			fmt.Fprint(w, "data: {\"id\":\"test\",\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20,\"total_tokens\":30}}\n\ndata: [DONE]\n\n")
-			return
+		assert.Equal(t, true, request["stream"])
+		streamRequests.Add(1)
+		if request["reasoning_effort"] == "high" {
+			highEffortRequests.Add(1)
 		}
-		jsonRequests.Add(1)
-		response, err := common.Marshal(map[string]any{"id": "test", "object": "chat.completion", "model": "gpt-4o-mini", "choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": responseOutput}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}})
-		require.NoError(t, err)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(response)
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, part := range []string{responseOutput[:len(responseOutput)/2], responseOutput[len(responseOutput)/2:]} {
+			text, _ := common.Marshal(part)
+			fmt.Fprintf(w, "data: {\"id\":\"test\",\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{\"content\":%s}}]}\n\n", text)
+			w.(http.Flusher).Flush()
+		}
+		fmt.Fprint(w, "data: {\"id\":\"test\",\"model\":\"gpt-4o-mini\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":20,\"total_tokens\":30}}\n\ndata: [DONE]\n\n")
 	}))
 	t.Cleanup(upstream.Close)
 	t.Cleanup(unblockSecondModel)
@@ -334,7 +357,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 		{Id: 3, Type: constant.ChannelTypeOpenAI, Name: "disabled", Status: common.ChannelStatusManuallyDisabled, Group: "vip", Models: "gpt-4o-mini"},
 	}
 	require.NoError(t, db.Create(&channels).Error)
-	config := intelligenceConfig{Groups: []intelligenceGroup{{Group: "vip", Model: "gpt-4o-mini", Endpoint: "openai", Enabled: true, Stream: lo.ToPtr(true), Times: []string{"09:00", "15:00"}}, {Group: "default", Model: "gpt-4o-mini", Endpoint: "openai", Stream: lo.ToPtr(false), Times: []string{"21:00"}}}, Questions: []intelligenceQuestion{{Name: "Pelican", Prompt: defaultIntelligencePrompt}}}
+	config := intelligenceConfig{Groups: []intelligenceGroup{{Group: "vip", Model: "gpt-4o-mini", Endpoint: "openai", Enabled: true, ReasoningEffort: "high", Times: []string{"09:00", "15:00"}}, {Group: "default", Model: "gpt-4o-mini", Endpoint: "openai", Times: []string{"21:00"}}}, Questions: []intelligenceQuestion{{Name: "Pelican", Prompt: defaultIntelligencePrompt}}}
 	call := func(handler gin.HandlerFunc, method string, body any) *httptest.ResponseRecorder {
 		encoded, err := common.Marshal(body)
 		require.NoError(t, err)
@@ -404,8 +427,8 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	finished, err := model.GetSystemTaskByTaskID(task.TaskID)
 	require.NoError(t, err)
 	require.Equal(t, model.SystemTaskStatusSucceeded, finished.Status, finished.Error+finished.Result)
-	assert.EqualValues(t, 2, streamRequests.Load())
-	assert.EqualValues(t, 2, jsonRequests.Load())
+	assert.EqualValues(t, 4, streamRequests.Load())
+	assert.EqualValues(t, 2, highEffortRequests.Load())
 	assert.Equal(t, output, gjson.Get(finished.Result, "channels.0.html").String())
 	assert.Equal(t, "Pelican", gjson.Get(finished.Result, "channels.0.question_name").String())
 	assert.Len(t, gjson.Get(finished.Result, "channels").Array(), 2)
@@ -418,7 +441,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	assert.Equal(t, "default", gjson.Get(finished.Result, "channels.1.group").String())
 	checkParallel.Store(false)
 	require.NoError(t, db.Model(&channels[0]).Update("models", "gpt-4o-mini,second-model").Error)
-	multi := intelligenceConfig{Groups: []intelligenceGroup{{Group: "vip", Models: []string{"gpt-4o-mini", "second-model"}, Endpoint: "openai", Stream: lo.ToPtr(false), Times: []string{"09:00"}}}, Questions: config.Questions}
+	multi := intelligenceConfig{Groups: []intelligenceGroup{{Group: "vip", Models: []string{"gpt-4o-mini", "second-model"}, Endpoint: "openai", Times: []string{"09:00"}}}, Questions: config.Questions}
 	updated := call(UpdateIntelligenceMonitor, http.MethodPut, multi)
 	require.True(t, gjson.GetBytes(updated.Body.Bytes(), "success").Bool(), updated.Body.String())
 	assert.Equal(t, multi.Groups[0].Models, getIntelligenceConfig().Groups[0].Models)
@@ -500,7 +523,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	t.Run("a completed question can retry while another question of the same model runs", func(t *testing.T) {
 		blockSecondQuestion.Store(true)
 		defer blockSecondQuestion.Store(false)
-		cfg := intelligenceConfig{Groups: []intelligenceGroup{{Group: "vip", Models: []string{"gpt-4o-mini"}, Endpoint: "openai", Stream: lo.ToPtr(false)}}, Questions: []intelligenceQuestion{{Name: "First", Prompt: "first selection prompt"}, {Name: "Second", Prompt: "second selection prompt"}}}
+		cfg := intelligenceConfig{Groups: []intelligenceGroup{{Group: "vip", Models: []string{"gpt-4o-mini"}, Endpoint: "openai"}}, Questions: []intelligenceQuestion{{Name: "First", Prompt: "first selection prompt"}, {Name: "Second", Prompt: "second selection prompt"}}}
 		queued, err := model.CreateSystemTask(intelligenceTaskType, cfg, nil)
 		require.NoError(t, err)
 		claimed, acquired, err := model.ClaimSystemTask(queued.ID, queued.Type, "question-runner", time.Now().Add(time.Minute).Unix())
@@ -599,12 +622,12 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, acquired)
 		assert.Equal(t, http.StatusConflict, retryCall(originalID, target).Code)
-		beforeRequests := jsonRequests.Load()
+		beforeRequests := streamRequests.Load()
 		handler.Run(context.Background(), claimed, "model-retry")
 		finished, err := model.GetSystemTaskByTaskID(originalID)
 		require.NoError(t, err)
 		require.Equal(t, model.SystemTaskStatusSucceeded, finished.Status, finished.Error)
-		assert.EqualValues(t, 1, jsonRequests.Load()-beforeRequests)
+		assert.EqualValues(t, 1, streamRequests.Load()-beforeRequests)
 		assert.Equal(t, originalCreatedAt, finished.CreatedAt)
 		var replaced intelligenceResult
 		require.NoError(t, common.UnmarshalJsonStr(finished.Result, &replaced))
@@ -674,7 +697,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	})
 	assert.Equal(t, 1, deadlineAttempts, "local deadlines must not start five more upstream requests")
 	require.Len(t, deadlineResult.Attempts, 1)
-	assert.Equal(t, "Intelligence test exceeded the 180-second request timeout", deadlineResult.Error)
+	assert.Equal(t, "Upstream connection timed out", deadlineResult.Error)
 	scheduled, err := model.CreateSystemTask(intelligenceTaskType, payload, nil)
 	require.NoError(t, err)
 	_, due, err = handler.ScheduledPayload(now.Add(10 * time.Second))
@@ -884,6 +907,110 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 		}
 	}
 
+	t.Run("Manxue uses a temporary Responses key for the selected benchmark", func(t *testing.T) {
+		common.OptionMap["ServerAddress"] = "https://gateway.example"
+		t.Cleanup(func() { delete(common.OptionMap, "ServerAddress") })
+		router := gin.New()
+		accepted := func(c *gin.Context) {
+			assert.Equal(t, "default", common.GetContextKeyString(c, constant.ContextKeyUsingGroup))
+			c.Status(http.StatusNoContent)
+		}
+		router.Use(func(c *gin.Context) { defer common.CleanupBodyStorage(c); c.Next() })
+		router.POST("/v1/responses", middleware.TokenAuth(), accepted)
+		router.GET("/v1/responses", middleware.TokenAuth(), accepted)
+		router.GET("/v1/models", middleware.TokenAuthReadOnly(), accepted)
+		useKey := func(method, path, key, modelName string) int {
+			w := httptest.NewRecorder()
+			r := httptest.NewRequest(method, path, strings.NewReader(fmt.Sprintf(`{"model":%q}`, modelName)))
+			r.Header.Set("Content-Type", "application/json")
+			r.Header.Set("Authorization", "Bearer "+key)
+			router.ServeHTTP(w, r)
+			return w.Code
+		}
+		keys := make(chan string, 4)
+		var fail atomic.Bool
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch r.Method + " " + r.URL.Path {
+			case "POST /api/v1/tests":
+				var payload map[string]any
+				if !assert.NoError(t, common.DecodeJson(r.Body, &payload)) {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				assert.Equal(t, "candy", payload["benchmark"])
+				assert.Equal(t, "high", payload["reasoning_effort"])
+				assert.Equal(t, "https://gateway.example/v1", payload["base_url"])
+				assert.Equal(t, false, payload["public"])
+				assert.NotContains(t, payload, "html")
+				key, _ := payload["api_key"].(string)
+				keys <- key
+				if !assert.True(t, strings.HasPrefix(key, "sk-"+model.ManxueTestTokenPrefix)) {
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				assert.Equal(t, http.StatusNoContent, useKey(http.MethodPost, "/v1/responses", key, "gpt-4o-mini"))
+				assert.Equal(t, http.StatusForbidden, useKey(http.MethodPost, "/v1/responses", key, "other-model"))
+				assert.Equal(t, http.StatusForbidden, useKey(http.MethodPost, "/v1/responses", key+"-1", "gpt-4o-mini"))
+				assert.Equal(t, http.StatusForbidden, useKey(http.MethodGet, "/v1/responses", key, "gpt-4o-mini"))
+				assert.Equal(t, http.StatusUnauthorized, useKey(http.MethodGet, "/v1/models", key, "gpt-4o-mini"))
+				if fail.Load() {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				_, _ = io.WriteString(w, `{"id":"task-id","benchmark":"candy","status":"running"}`)
+			case "GET /api/v1/tests/task-id":
+				_, _ = io.WriteString(w, `{"id":"task-id","benchmark":"candy","status":"succeeded","candy":{"status":"passed","answer":"21"}}`)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		t.Cleanup(server.Close)
+		previousURL, previousClient, previousPollInterval := manxueTestAPI, manxueHTTPClient, manxuePollInterval
+		manxueTestAPI, manxueHTTPClient, manxuePollInterval = server.URL+"/api/v1/tests", server.Client(), time.Millisecond
+		t.Cleanup(func() {
+			manxueTestAPI, manxueHTTPClient, manxuePollInterval = previousURL, previousClient, previousPollInterval
+		})
+		external := config.Groups[1]
+		external.Mode = "external"
+		external.Benchmark = "candy"
+		external.ReasoningEffort = "high"
+		external.Enabled = true
+		updated := call(UpdateIntelligenceMonitor, http.MethodPut, intelligenceConfig{Groups: []intelligenceGroup{external}, Questions: config.Questions})
+		require.True(t, gjson.GetBytes(updated.Body.Bytes(), "success").Bool(), updated.Body.String())
+		for _, failing := range []bool{false, true} {
+			fail.Store(failing)
+			queued := call(RunIntelligenceMonitor, http.MethodPost, nil)
+			require.True(t, gjson.GetBytes(queued.Body.Bytes(), "success").Bool(), queued.Body.String())
+			taskID := gjson.GetBytes(queued.Body.Bytes(), "data.task_id").String()
+			task, err := model.GetSystemTaskByTaskID(taskID)
+			require.NoError(t, err)
+			require.NotNil(t, task)
+			task, acquired, err := model.ClaimSystemTask(task.ID, task.Type, "manxue-runner", time.Now().Add(time.Minute).Unix())
+			require.NoError(t, err)
+			require.True(t, acquired)
+			handler.Run(context.Background(), task, "manxue-runner")
+			task, err = model.GetSystemTaskByTaskID(taskID)
+			require.NoError(t, err)
+			if failing {
+				assert.Equal(t, model.SystemTaskStatusFailed, task.Status)
+			} else {
+				assert.Equal(t, model.SystemTaskStatusSucceeded, task.Status, task.Result)
+				assert.Equal(t, "21", gjson.Get(task.Result, "channels.0.external_result.answer").String())
+			}
+			select {
+			case key := <-keys:
+				assert.Equal(t, http.StatusUnauthorized, useKey(http.MethodPost, "/v1/responses", key, "gpt-4o-mini"))
+				assert.NotContains(t, task.Payload, key)
+				assert.NotContains(t, task.Result, key)
+			default:
+				t.Fatal("expected a Manxue request")
+			}
+		}
+		expired := model.Token{UserId: 1, Key: model.ManxueTestTokenPrefix + "expired", Name: "expired fixture", Status: common.TokenStatusEnabled, Group: "default", ExpiredTime: common.GetTimestamp() - 1, ModelLimitsEnabled: true, ModelLimits: "gpt-4o-mini", UnlimitedQuota: true}
+		require.NoError(t, expired.Insert())
+		assert.Equal(t, http.StatusUnauthorized, useKey(http.MethodPost, "/v1/responses", "sk-"+expired.Key, "gpt-4o-mini"))
+	})
+
 	// Execution slots limit concurrency across independent runners. Extra tasks stay queued.
 	var slotTasks []*model.SystemTask
 	for index := range 5 {
@@ -1042,7 +1169,7 @@ func TestIntelligenceLegacyConfigurationPreservesQuestionsAndTargets(t *testing.
 	common.OptionMap = map[string]string{intelligenceOptionKey: ` {"group":"vip","model":"model","endpoint":"openai-response","enabled":true,"interval_minutes":30,"questions":[{"name":"Custom","prompt":"custom prompt"}]} `}
 	config := getIntelligenceConfig()
 	require.Len(t, config.Groups, 1)
-	assert.Equal(t, intelligenceGroup{Group: "vip", Model: "model", Models: []string{"model"}, Endpoint: "openai-response", Stream: lo.ToPtr(true), Times: []string{"09:00"}}, config.Groups[0])
+	assert.Equal(t, intelligenceGroup{Group: "vip", Model: "model", Models: []string{"model"}, Endpoint: "openai-response", Times: []string{"09:00"}}, config.Groups[0])
 	assert.Equal(t, []intelligenceQuestion{{Name: "Custom", Prompt: "custom prompt"}}, config.Questions)
 }
 
@@ -1091,49 +1218,19 @@ data: {"error":{"message":"private"}}
 			assert.Equal(t, tc.want, extractIntelligenceOutput([]byte(tc.body), tc.endpoint, true))
 		})
 	}
-	for _, endpoint := range []string{"openai", "openai-response", "anthropic", "gemini"} {
-		for _, stream := range []bool{true, false} {
-			request := buildIntelligenceRequest("model", endpoint, "prompt", stream)
-			encoded, err := common.Marshal(request)
-			require.NoError(t, err)
-			if endpoint != "gemini" {
-				assert.Equal(t, stream, gjson.GetBytes(encoded, "stream").Bool())
-			}
-		}
-	}
 }
 
-func TestIntelligenceStreamDefaultsAndSchedule(t *testing.T) {
+func TestIntelligenceScheduleIgnoresLegacyStreamOption(t *testing.T) {
 	old := common.OptionMap
 	t.Cleanup(func() { common.OptionMap = old })
 	common.OptionMap = map[string]string{intelligenceOptionKey: `{"groups":[{"group":"a","model":"m","endpoint":"openai","enabled":true,"times":["09:00"]},{"group":"b","model":"m","endpoint":"openai-response","stream":false,"enabled":true,"times":["09:00"]}],"questions":[{"name":"Q","prompt":"P"}]}`}
 	config := getIntelligenceConfig()
 	require.Len(t, config.Groups, 2)
-	require.NotNil(t, config.Groups[0].Stream)
-	assert.True(t, *config.Groups[0].Stream)
-	require.NotNil(t, config.Groups[1].Stream)
-	assert.False(t, *config.Groups[1].Stream)
 	due := config.DueGroups(time.Date(2026, 10, 10, 1, 0, 0, 0, time.UTC))
 	require.Len(t, due.Groups, 2)
-	assert.True(t, *due.ForGroup(due.Groups[0], due.Groups[0].Model).Stream)
-	assert.False(t, *due.ForGroup(due.Groups[1], due.Groups[1].Model).Stream)
-}
-
-func TestIntelligenceStreamingRequestSurvivesGenerationDeadline(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		parent, stopTask := context.WithCancel(context.Background())
-		defer stopTask()
-		stream, cancelStream := intelligenceRequestContext(parent, true)
-		defer cancelStream()
-		nonStream, cancelNonStream := intelligenceRequestContext(parent, false)
-		defer cancelNonStream()
-		// Virtual time: long generation does not require a three-minute test.
-		time.Sleep(181 * time.Second)
-		require.NoError(t, stream.Err(), "an active stream must not be cut off at 180 seconds")
-		require.ErrorIs(t, nonStream.Err(), context.DeadlineExceeded)
-		stopTask()
-		require.ErrorIs(t, stream.Err(), context.Canceled, "task cancellation must still stop the stream")
-	})
+	encoded, err := common.Marshal(due)
+	require.NoError(t, err)
+	assert.False(t, gjson.GetBytes(encoded, "groups.1.stream").Exists())
 }
 
 func TestIntelligenceRetryAttempts(t *testing.T) {
@@ -1182,7 +1279,7 @@ func TestIntelligenceFailureDiagnostics(t *testing.T) {
 		stream   bool
 		want     string
 	}{
-		{"deadline", testResult{localErr: context.DeadlineExceeded}, false, "Intelligence test exceeded the 180-second request timeout"},
+		{"deadline", testResult{localErr: context.DeadlineExceeded}, false, "Upstream connection timed out"},
 		{"cancelled", testResult{localErr: context.Canceled}, false, "Intelligence test was cancelled"},
 		{"http", testResult{upstreamStatus: 503, localErr: fmt.Errorf("secret-key https://private")}, false, "Upstream returned an HTTP error"},
 		{"stream timeout", testResult{streamOutcome: relaycommon.StreamOutcome{EndReason: relaycommon.StreamEndReasonTimeout}}, true, "Upstream stream timed out while waiting for data"},

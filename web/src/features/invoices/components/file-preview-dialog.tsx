@@ -16,22 +16,34 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Maximize2, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react'
-import { useRef, useState } from 'react'
+import {
+  Download,
+  ExternalLink,
+  Maximize2,
+  RotateCcw,
+  ZoomIn,
+  ZoomOut,
+} from 'lucide-react'
+import { lazy, Suspense, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
+import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
+
+const InvoicePdfPreview = lazy(() => import('./pdf-preview'))
 
 export function InvoiceFilePreviewDialog(props: {
   url: string
   filename: string
   type: string
+  autoOpen?: boolean
+  onClose?: () => void
 }) {
   const { t, i18n } = useTranslation()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(props.autoOpen ?? false)
   const [zoom, setZoom] = useState(100)
   const viewport = useRef<HTMLDivElement>(null)
   const isImage = props.type.startsWith('image/')
@@ -42,18 +54,21 @@ export function InvoiceFilePreviewDialog(props: {
       onOpenChange={(next) => {
         setOpen(next)
         if (next) setZoom(100)
+        if (!next) props.onClose?.()
       }}
       title={t('Preview invoice')}
       description={props.filename}
       descriptionClassName='break-all pr-6'
       contentClassName='w-[calc(100vw-2rem)] max-w-none overflow-hidden sm:max-w-[min(90rem,calc(100vw-2rem))]'
-      contentHeight='75dvh'
+      contentHeight='min(88dvh, 72rem)'
       bodyClassName='flex flex-col gap-3'
       trigger={
-        <Button type='button' variant='outline' size='sm'>
-          <Maximize2 aria-hidden='true' />
-          {t('Enlarge preview')}
-        </Button>
+        props.autoOpen ? undefined : (
+          <Button type='button' variant='outline' size='sm'>
+            <Maximize2 aria-hidden='true' />
+            {t('Enlarge preview')}
+          </Button>
+        )
       }
     >
       {open && (
@@ -112,7 +127,17 @@ export function InvoiceFilePreviewDialog(props: {
                 <a href={props.url} target='_blank' rel='noopener noreferrer' />
               }
             >
+              <ExternalLink aria-hidden='true' />
               {t('Open in new tab')}
+            </Button>
+            <Button
+              role='link'
+              variant='outline'
+              size='sm'
+              render={<a href={props.url} download={props.filename} />}
+            >
+              <Download aria-hidden='true' />
+              {t('Download invoice')}
             </Button>
           </div>
           {isImage ? (
@@ -132,21 +157,9 @@ export function InvoiceFilePreviewDialog(props: {
               </div>
             </div>
           ) : (
-            <object
-              title={t('Preview invoice')}
-              aria-label={t('Preview invoice')}
-              data={`${props.url}#toolbar=1&view=FitH`}
-              type='application/pdf'
-              className='h-full min-h-0 w-full flex-1 rounded-md border bg-white'
-            >
-              <a
-                href={props.url}
-                download={props.filename}
-                className='text-primary underline'
-              >
-                {t('Download invoice')}
-              </a>
-            </object>
+            <Suspense fallback={<LoadingState className='min-h-48' />}>
+              <InvoicePdfPreview url={props.url} />
+            </Suspense>
           )}
         </>
       )}

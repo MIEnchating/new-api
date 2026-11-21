@@ -72,6 +72,14 @@ export default defineConfig(({ envMode }) => {
       proxy: devProxy,
     },
     output: {
+      copy: [
+        { from: './node_modules/pdfjs-dist/cmaps', to: 'static/pdfjs/cmaps' },
+        {
+          from: './node_modules/pdfjs-dist/standard_fonts',
+          to: 'static/pdfjs/standard_fonts',
+        },
+        { from: './node_modules/pdfjs-dist/wasm', to: 'static/pdfjs/wasm' },
+      ],
       // Production optimizations
       minify: isProd,
       target: 'web',

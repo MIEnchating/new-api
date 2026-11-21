@@ -528,6 +528,11 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 		parts := strings.Split(key, "-")
 		key = parts[0]
 
+		if strings.HasPrefix(key, model.ManxueTestTokenPrefix) {
+			common.ApiErrorStatus(c, http.StatusUnauthorized, model.ErrTokenInvalid)
+			c.Abort()
+			return
+		}
 		token, err := model.GetTokenByKey(key, false)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -645,6 +650,18 @@ func TokenAuth() func(c *gin.Context) {
 					common.TranslateMessage(c, i18n.MsgTokenInvalid))
 			}
 			return
+		}
+
+		if strings.HasPrefix(key, model.ManxueTestTokenPrefix) {
+			var request struct {
+				Model string `json:"model"`
+			}
+			if len(parts) != 1 || c.Request.Method != http.MethodPost || c.FullPath() != "/v1/responses" ||
+				common.UnmarshalBodyReusable(c, &request) != nil || request.Model != token.ModelLimits {
+				// Keep the temporary credential out of rejection diagnostics.
+				abortWithOpenAiMessage(c, http.StatusForbidden, common.TranslateMessage(c, i18n.MsgTokenInvalid))
+				return
+			}
 		}
 
 		allowIps := token.GetIpLimits()

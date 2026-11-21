@@ -812,13 +812,8 @@ function GroupPricingTable({
             <CardTitle>{t('Pricing groups')}</CardTitle>
             <CardDescription>
               {t(
-                'Drag rows to control the order shown when users create API keys. Special usable group rules can hide any group for specific users.'
+                'All group names live here. Ratio applies when calls are billed as this group; top-up ratio applies to users whose account is in this group.'
               )}
-              <span className='mt-1 block'>
-                {t(
-                  'Groups with models from a single vendor are classified automatically. Select a vendor to override.'
-                )}
-              </span>
             </CardDescription>
           </div>
           <Button onClick={addRow} size='sm' className='sm:self-start'>

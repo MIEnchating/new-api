@@ -5,9 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -18,17 +20,23 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 const intelligenceOptionKey = "IntelligenceMonitorConfig"
 const intelligenceTaskType = model.SystemTaskTypeIntelligenceTest
+const manxueTestTimeout = 10 * time.Minute
 
 const defaultIntelligencePrompt = "请生成可直接运行的单文件HTML，使用内联SVG绘制鹈鹕骑自行车的二维循环动画。画面以鹈鹕和自行车为主体，展示清晰的身体结构、踩踏动作和车轮转动，配合协调的背景、配色与层次。动画应流畅自然、衔接连续，并适配不同屏幕尺寸。禁止依赖外部资源，只输出完整HTML，不要代码围栏或解释文字。"
+
+var manxueTestAPI = "https://manxue.ai/api/v1/tests"
 
 type intelligenceQuestion struct {
 	Name   string `json:"name"`
@@ -67,22 +75,83 @@ type intelligenceConfig struct {
 	QuestionIndexes []int                     `json:"question_indexes"`
 	Group           string                    `json:"group"`
 	Model           string                    `json:"model"`
-	Endpoint        string                    `json:"endpoint"`
-	Stream          *bool                     `json:"stream,omitempty"`
-	Enabled         bool                      `json:"enabled"`
-	IntervalMinutes int                       `json:"interval_minutes"`
+	Mode            string                    `json:"mode,omitempty"`
+	Benchmark       string                    `json:"benchmark,omitempty"`
+
+	Endpoint        string `json:"endpoint"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	Enabled         bool   `json:"enabled"`
+	IntervalMinutes int    `json:"interval_minutes"`
 }
 
 type intelligenceGroup struct {
-	Group           string   `json:"group"`
-	Model           string   `json:"model,omitempty"`
-	Models          []string `json:"models,omitempty"`
+	Group     string   `json:"group"`
+	Model     string   `json:"model,omitempty"`
+	Models    []string `json:"models,omitempty"`
+	Mode      string   `json:"mode,omitempty"`
+	Benchmark string   `json:"benchmark,omitempty"`
+
 	Endpoint        string   `json:"endpoint"`
-	Stream          *bool    `json:"stream,omitempty"`
+	ReasoningEffort string   `json:"reasoning_effort,omitempty"`
 	Enabled         bool     `json:"enabled"`
 	Times           []string `json:"times"`
 	QuestionIndexes []int    `json:"question_indexes"`
 }
+
+// Migrate settings saved with the original nested external API fields.
+func (group *intelligenceGroup) UnmarshalJSON(data []byte) error {
+	type groupFields intelligenceGroup
+	decoded := struct {
+		*groupFields
+		ExternalAPI *struct {
+			Benchmark       string `json:"benchmark"`
+			ReasoningEffort string `json:"reasoning_effort"`
+		} `json:"external_api"`
+	}{groupFields: (*groupFields)(group)}
+	if err := common.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	if group.Mode == "external" && decoded.ExternalAPI != nil {
+		if group.Benchmark == "" {
+			group.Benchmark = decoded.ExternalAPI.Benchmark
+		}
+		if group.ReasoningEffort == "" && slices.Contains([]string{"low", "medium", "high"}, decoded.ExternalAPI.ReasoningEffort) {
+			group.ReasoningEffort = decoded.ExternalAPI.ReasoningEffort
+		}
+		if len(group.QuestionIndexes) == 0 {
+			group.QuestionIndexes = nil
+		}
+	}
+	return nil
+}
+
+type manxueTestResponse struct {
+	ID        string `json:"id"`
+	Status    string `json:"status"`
+	Phase     string `json:"phase"`
+	Benchmark string `json:"benchmark"`
+	Candy     *struct {
+		Status     string `json:"status"`
+		Answer     string `json:"answer"`
+		DurationMS int64  `json:"duration_ms"`
+	} `json:"candy,omitempty"`
+	Result *struct {
+		HTML string `json:"html"`
+	} `json:"result,omitempty"`
+	Assessment *struct {
+		Quality string `json:"quality"`
+		Label   string `json:"label"`
+		Reason  string `json:"reason"`
+	} `json:"assessment,omitempty"`
+}
+
+var manxueHTTPClient = &http.Client{
+	Timeout: 10 * time.Minute,
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+var manxuePollInterval = 2 * time.Second
 
 func (config intelligenceConfig) SystemTaskScheduleKey() string {
 	if config.ScheduledAt == 0 {
@@ -102,7 +171,14 @@ func (group intelligenceGroup) SelectedModels() []string {
 }
 
 func (config intelligenceConfig) ForGroup(group intelligenceGroup, modelName string) intelligenceConfig {
-	return intelligenceConfig{Questions: config.Questions, QuestionIndexes: group.QuestionIndexes, Group: group.Group, Model: modelName, Endpoint: group.Endpoint, Stream: group.Stream, IntervalMinutes: 60}
+	single := intelligenceConfig{Questions: config.Questions, QuestionIndexes: group.QuestionIndexes, Group: group.Group, Model: modelName, Mode: group.Mode, Benchmark: group.Benchmark, Endpoint: group.Endpoint, ReasoningEffort: group.ReasoningEffort, IntervalMinutes: 60}
+	if single.ReasoningEffort == "" {
+		single.ReasoningEffort = string(reasoning.EffortLow)
+	}
+	if single.Mode == "external" && single.Benchmark == "" {
+		single.Benchmark = "candy"
+	}
+	return single
 }
 
 func (config intelligenceConfig) SelectedQuestionIndexes() []int {
@@ -119,6 +195,9 @@ func (config intelligenceConfig) SelectedQuestionIndexes() []int {
 
 func (config intelligenceConfig) Validate() error {
 	if len(config.Groups) > 0 {
+		if config.Mode != "" {
+			return errors.New("Configure external intelligence tests in a test group")
+		}
 		if len(config.Groups) > 50 {
 			return errors.New("Configure at most 50 intelligence test groups")
 		}
@@ -156,6 +235,24 @@ func (config intelligenceConfig) Validate() error {
 		}
 		return nil
 	}
+	if config.Mode != "" && config.Mode != "local" && config.Mode != "external" {
+		return errors.New("Select a supported intelligence test mode")
+	}
+	if strings.TrimSpace(config.Group) == "" || strings.TrimSpace(config.Model) == "" || len(config.Group) > 64 || len(config.Model) > 255 {
+		return errors.New("Select a group and model for intelligence testing")
+	}
+	if config.ReasoningEffort != "" && !slices.Contains([]string{"low", "medium", "high"}, config.ReasoningEffort) {
+		return errors.New("Invalid intelligence test configuration")
+	}
+	if config.Mode == "external" {
+		if !slices.Contains([]string{"candy", "pelican", "creative"}, config.Benchmark) {
+			return errors.New("Invalid intelligence test configuration")
+		}
+		if config.Group == "auto" || strings.Contains(config.Model, ",") {
+			return errors.New("Invalid intelligence test configuration")
+		}
+		return nil
+	}
 	if len(config.Questions) < 1 || len(config.Questions) > 5 {
 		return errors.New("Configure between 1 and 5 intelligence test questions")
 	}
@@ -176,9 +273,6 @@ func (config intelligenceConfig) Validate() error {
 		seenQuestions[index] = true
 	}
 
-	if strings.TrimSpace(config.Group) == "" || strings.TrimSpace(config.Model) == "" || len(config.Group) > 64 || len(config.Model) > 255 {
-		return errors.New("Select a group and model for intelligence testing")
-	}
 	if !slices.Contains([]string{string(constant.EndpointTypeOpenAI), string(constant.EndpointTypeOpenAIResponse), string(constant.EndpointTypeAnthropic), string(constant.EndpointTypeGemini)}, config.Endpoint) {
 		return errors.New("Unsupported intelligence test endpoint")
 	}
@@ -200,14 +294,11 @@ func getIntelligenceConfig() intelligenceConfig {
 		}
 	}
 	if len(config.Groups) == 0 {
-		config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, Stream: config.Stream, Times: []string{"09:00"}, QuestionIndexes: config.QuestionIndexes}}
+		config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, ReasoningEffort: config.ReasoningEffort, Times: []string{"09:00"}, QuestionIndexes: config.QuestionIndexes}}
 	}
 	for i := range config.Groups {
 		if len(config.Groups[i].Models) == 0 && config.Groups[i].Model != "" {
 			config.Groups[i].Models = []string{config.Groups[i].Model}
-		}
-		if config.Groups[i].Stream == nil {
-			config.Groups[i].Stream = lo.ToPtr(true)
 		}
 	}
 	return config
@@ -227,6 +318,12 @@ func intelligenceTargets(config intelligenceConfig) ([]*model.Channel, error) {
 	}
 	if len(targets) == 0 {
 		return nil, errors.New("No enabled channels match the selected group and model")
+	}
+	if config.Mode == "external" {
+		if _, err := manxueGatewayBaseURL(); err != nil {
+			return nil, err
+		}
+		return targets, nil
 	}
 	if len(targets)*len(config.SelectedQuestionIndexes()) > 50 {
 		return nil, errors.New("Intelligence testing supports at most 50 channel-question pairs per run")
@@ -258,8 +355,9 @@ func GetIntelligenceMonitor(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	config := getIntelligenceConfig()
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
-		"config":      getIntelligenceConfig(),
+		"config":      config,
 		"catalog":     catalog,
 		"group_order": service.OrderGroupNames(slices.Collect(maps.Keys(catalog))),
 		"history":     history,
@@ -304,6 +402,12 @@ func publishedIntelligenceTask(task *model.SystemTask, includeHTML bool, admin b
 		}
 		if includeHTML && channel.HTML != "" {
 			row["html"] = channel.HTML
+		}
+		if channel.HTML != "" {
+			row["has_html"] = true
+		}
+		if channel.ExternalResult != nil {
+			row["external_result"] = channel.ExternalResult
 		}
 		channels = append(channels, row)
 	}
@@ -377,6 +481,10 @@ func UpdateIntelligenceMonitor(c *gin.Context) {
 	}
 	config.Retry = nil
 	config.QueuedRetries = nil
+	if len(config.Groups) == 0 && config.Mode == "external" {
+		common.ApiErrorT(c, "Configure external intelligence tests in a test group")
+		return
+	}
 	config.Group, config.Model = strings.TrimSpace(config.Group), strings.TrimSpace(config.Model)
 	for i := range config.Groups {
 		config.Groups[i].Group = strings.TrimSpace(config.Groups[i].Group)
@@ -389,9 +497,6 @@ func UpdateIntelligenceMonitor(c *gin.Context) {
 		}
 		if len(config.Groups[i].Models) > 0 {
 			config.Groups[i].Model = ""
-		}
-		if config.Groups[i].Stream == nil {
-			config.Groups[i].Stream = lo.ToPtr(true)
 		}
 	}
 	if err := config.Validate(); err != nil {
@@ -452,7 +557,11 @@ func RunIntelligenceMonitor(c *gin.Context) {
 				common.ApiErrorT(c, err.Error())
 				return
 			}
-			total += len(targets) * len(single.SelectedQuestionIndexes())
+			if single.Mode == "external" {
+				total++
+			} else {
+				total += len(targets) * len(single.SelectedQuestionIndexes())
+			}
 		}
 	}
 	if total > 50 {
@@ -494,7 +603,7 @@ func RetryIntelligenceModel(c *gin.Context) {
 		return
 	}
 	if len(config.Groups) == 0 {
-		config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, Stream: config.Stream, QuestionIndexes: config.QuestionIndexes}}
+		config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, ReasoningEffort: config.ReasoningEffort, QuestionIndexes: config.QuestionIndexes}}
 	}
 	selected := slices.IndexFunc(config.Groups, func(group intelligenceGroup) bool {
 		return group.Group == request.Group && slices.Contains(group.SelectedModels(), request.Model)
@@ -528,7 +637,7 @@ func RetryIntelligenceModel(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"success": false, "message": "This intelligence test cannot be retried"})
 		return
 	}
-	if request.ChannelID != nil && (!slices.Contains(single.SelectedQuestionIndexes(), *request.QuestionIndex) || !slices.ContainsFunc(targets, func(channel *model.Channel) bool { return channel.Id == *request.ChannelID })) {
+	if request.ChannelID != nil && (single.Mode == "external" || !slices.Contains(single.SelectedQuestionIndexes(), *request.QuestionIndex) || !slices.ContainsFunc(targets, func(channel *model.Channel) bool { return channel.Id == *request.ChannelID })) {
 		common.ApiErrorT(c, "Invalid intelligence test configuration")
 		return
 	}
@@ -542,9 +651,11 @@ func RetryIntelligenceModel(c *gin.Context) {
 		}
 		// Legacy model-wide retries require all of that model's work to finish.
 		// A row-specific retry only requires its own completed result above.
-		if request.ChannelID == nil && !slices.ContainsFunc(progress.Models, func(row intelligenceModelProgress) bool {
+		if request.ChannelID == nil && (!slices.ContainsFunc(progress.Models, func(row intelligenceModelProgress) bool {
 			return row.Group == request.Group && row.Model == request.Model && row.Total > 0 && row.Processed == row.Total
-		}) {
+		}) || slices.ContainsFunc(result.Channels, func(row intelligenceChannelResult) bool {
+			return single.Mode == "external" && row.ChannelID != 0 && request.Matches(row, config)
+		})) {
 			c.JSON(http.StatusConflict, gin.H{"success": false, "message": "This intelligence test cannot be retried"})
 			return
 		}
@@ -561,7 +672,7 @@ func RetryIntelligenceModel(c *gin.Context) {
 		config.Retry = &request
 		config.QueuedRetries = nil
 		total := len(targets) * len(single.SelectedQuestionIndexes())
-		if request.ChannelID != nil {
+		if single.Mode == "external" || request.ChannelID != nil {
 			total = 1
 		}
 		state := intelligenceProgress{Models: []intelligenceModelProgress{{Group: request.Group, Model: request.Model, Total: total}}}
@@ -641,18 +752,32 @@ type intelligenceChannelResult struct {
 	Attempts   []intelligenceAttempt `json:"attempts,omitempty"`
 	HTTPStatus int                   `json:"http_status,omitempty"`
 
-	RequestID         string `json:"request_id,omitempty"`
-	UpstreamRequestID string `json:"upstream_request_id,omitempty"`
-	Group             string `json:"group"`
-	Model             string `json:"model"`
-	Endpoint          string `json:"endpoint"`
-	ChannelID         int    `json:"channel_id"`
-	ChannelName       string `json:"channel_name"`
-	QuestionIndex     int    `json:"question_index"`
-	QuestionName      string `json:"question_name"`
-	HTML              string `json:"html,omitempty"`
-	LatencyMs         int64  `json:"latency_ms"`
-	Error             string `json:"error"`
+	RequestID         string                      `json:"request_id,omitempty"`
+	UpstreamRequestID string                      `json:"upstream_request_id,omitempty"`
+	Group             string                      `json:"group"`
+	Model             string                      `json:"model"`
+	Endpoint          string                      `json:"endpoint"`
+	ChannelID         int                         `json:"channel_id"`
+	ChannelName       string                      `json:"channel_name"`
+	QuestionIndex     int                         `json:"question_index"`
+	QuestionName      string                      `json:"question_name"`
+	HTML              string                      `json:"html,omitempty"`
+	ExternalResult    *intelligenceExternalResult `json:"external_result,omitempty"`
+	LatencyMs         int64                       `json:"latency_ms"`
+	Error             string                      `json:"error"`
+}
+
+type intelligenceExternalResult struct {
+	Benchmark    string `json:"benchmark"`
+	Status       string `json:"status"`
+	Phase        string `json:"phase,omitempty"`
+	Answer       string `json:"answer,omitempty"`
+	DurationMS   int64  `json:"duration_ms,omitempty"`
+	InputTokens  int64  `json:"input_tokens,omitempty"`
+	OutputTokens int64  `json:"output_tokens,omitempty"`
+	Quality      string `json:"quality,omitempty"`
+	Label        string `json:"label,omitempty"`
+	Reason       string `json:"reason,omitempty"`
 }
 type intelligenceResult struct {
 	Channels []intelligenceChannelResult `json:"channels"`
@@ -708,7 +833,7 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 		return
 	}
 	if len(config.Groups) == 0 {
-		config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, Stream: config.Stream, QuestionIndexes: config.QuestionIndexes}}
+		config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model, Endpoint: config.Endpoint, ReasoningEffort: config.ReasoningEffort, QuestionIndexes: config.QuestionIndexes}}
 	}
 	type target struct {
 		channel       *model.Channel
@@ -746,17 +871,22 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 				continue
 			}
 			single := config.ForGroup(group, modelName)
-			channels, err := intelligenceTargets(single)
-			if err != nil {
-				finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, retained, err)
-				return
-			}
 			progressIndex := slices.IndexFunc(state.Models, func(progress intelligenceModelProgress) bool {
 				return progress.Group == group.Group && progress.Model == modelName
 			})
 			if progressIndex < 0 {
 				progressIndex = len(state.Models)
 				state.Models = append(state.Models, intelligenceModelProgress{Group: group.Group, Model: modelName})
+			}
+			channels, err := intelligenceTargets(single)
+			if err != nil {
+				finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, retained, err)
+				return
+			}
+			if single.Mode == "external" {
+				state.Models[progressIndex].Total++
+				targets = append(targets, target{config: single, progressIndex: progressIndex})
+				continue
 			}
 			for _, channel := range channels {
 				for _, questionIndex := range single.SelectedQuestionIndexes() {
@@ -814,7 +944,9 @@ func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, 
 				}
 				selected := job.target
 				var row intelligenceChannelResult
-				if selected.channel == nil {
+				if selected.config.Mode == "external" {
+					row = runManxueIntelligenceTest(ctx, selected.config, userID)
+				} else if selected.channel == nil {
 					row = intelligenceChannelResult{RequestID: common.NewRequestId(), Group: selected.config.Group, Model: selected.config.Model, Endpoint: selected.config.Endpoint, ChannelID: job.channelID, QuestionIndex: selected.questionIndex, QuestionName: selected.config.Questions[selected.questionIndex].Name, Error: "Intelligence test request failed"}
 				} else {
 					channel := *selected.channel
@@ -986,7 +1118,7 @@ func intelligenceFailureReason(ctx context.Context, response testResult, streamF
 	var networkError net.Error
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded), errors.Is(response.localErr, context.DeadlineExceeded):
-		return "Intelligence test exceeded the 180-second request timeout"
+		return "Upstream connection timed out"
 	case errors.Is(ctx.Err(), context.Canceled), errors.Is(response.localErr, context.Canceled):
 		return "Intelligence test was cancelled"
 	case errors.As(response.localErr, &networkError) && networkError.Timeout():
@@ -1014,6 +1146,165 @@ func intelligenceFailureReason(ctx context.Context, response testResult, streamF
 	}
 }
 
+func manxueGatewayBaseURL() (string, error) {
+	common.OptionMapRWMutex.RLock()
+	address := strings.TrimSpace(common.OptionMap["ServerAddress"])
+	common.OptionMapRWMutex.RUnlock()
+	parsed, err := url.Parse(address)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil ||
+		parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", errors.New("Set a public HTTPS server address for Manxue AI")
+	}
+	baseURL := strings.TrimRight(parsed.String(), "/")
+	if !strings.HasSuffix(baseURL, "/v1") {
+		baseURL += "/v1"
+	}
+	return baseURL, nil
+}
+
+func runManxueIntelligenceTest(ctx context.Context, config intelligenceConfig, userID int) (row intelligenceChannelResult) {
+	started := time.Now()
+	row = intelligenceChannelResult{RequestID: common.NewRequestId(), Group: config.Group, Model: config.Model, Endpoint: "external"}
+	defer func() { row.LatencyMs = time.Since(started).Milliseconds() }()
+	ctx, cancel := context.WithTimeout(ctx, manxueTestTimeout)
+	defer cancel()
+	baseURL, err := manxueGatewayBaseURL()
+	if err != nil {
+		row.Error = err.Error()
+		return row
+	}
+	user, err := model.GetUserCache(userID)
+	if err != nil || user.Status != common.UserStatusEnabled || !service.IsUserSelectableGroup(user.Group, config.Group) {
+		row.Error = "No enabled channels match the selected group and model"
+		return row
+	}
+	randomKey, err := common.GenerateKey()
+	if err != nil {
+		row.Error = "Failed to generate token"
+		return row
+	}
+	deadline, _ := ctx.Deadline()
+	token := model.Token{
+		UserId: userID, Name: "Manxue AI temporary test", Key: model.ManxueTestTokenPrefix + randomKey,
+		Status: common.TokenStatusEnabled, Group: config.Group,
+		CreatedTime: started.Unix(), AccessedTime: started.Unix(), ExpiredTime: deadline.Unix(),
+		ModelLimitsEnabled: true, ModelLimits: config.Model, UnlimitedQuota: true,
+	}
+	// Keep the usable key out of SQL traces, including when debugging is enabled.
+	if err := model.DB.WithContext(ctx).Session(&gorm.Session{Logger: logger.Discard}).Create(&token).Error; err != nil {
+		row.Error = "Failed to generate token"
+		return row
+	}
+	defer func() {
+		if err := token.Delete(); err != nil {
+			common.SysLog(fmt.Sprintf("Failed to revoke Manxue AI test token %d", token.Id))
+		}
+	}()
+	key := "sk-" + token.GetFullKey()
+	payload := map[string]any{"benchmark": config.Benchmark, "base_url": baseURL, "api_key": key, "model": config.Model, "public": false}
+	if config.ReasoningEffort != "" {
+		payload["reasoning_effort"] = config.ReasoningEffort
+	}
+	body, err := common.Marshal(payload)
+	if err != nil {
+		row.Error = "External intelligence test request failed"
+		return row
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, manxueTestAPI, bytes.NewReader(body))
+	if err != nil {
+		row.Error = "External intelligence test request failed"
+		return row
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", row.RequestID)
+	response, err := manxueHTTPClient.Do(request)
+	if err != nil {
+		row.Error = intelligenceExternalFailure(ctx)
+		return row
+	}
+	var result manxueTestResponse
+	decodeErr := common.DecodeJson(io.LimitReader(response.Body, 2<<20), &result)
+	response.Body.Close()
+	if decodeErr != nil || response.StatusCode < 200 || response.StatusCode >= 300 || result.ID == "" {
+		row.Error = "External intelligence test request failed"
+		return row
+	}
+	for result.Status == "queued" || result.Status == "running" {
+		if err := waitForExternalIntelligencePoll(ctx, manxuePollInterval); err != nil {
+			row.Error = intelligenceExternalFailure(ctx)
+			return row
+		}
+		pollURL := manxueTestAPI + "/" + url.PathEscape(result.ID)
+		pollRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, pollURL, nil)
+		if err != nil {
+			row.Error = "External intelligence test request failed"
+			return row
+		}
+		response, err = manxueHTTPClient.Do(pollRequest)
+		if err != nil {
+			row.Error = intelligenceExternalFailure(ctx)
+			return row
+		}
+		decodeErr := common.DecodeJson(io.LimitReader(response.Body, 2<<20), &result)
+		response.Body.Close()
+		if decodeErr != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
+			row.Error = "External intelligence test request failed"
+			return row
+		}
+	}
+	if result.Benchmark != config.Benchmark {
+		row.Error = "External intelligence test request failed"
+		return row
+	}
+	if result.Status != "succeeded" {
+		row.Error = "External intelligence test did not complete successfully"
+		return row
+	}
+	row.ExternalResult = &intelligenceExternalResult{
+		Benchmark: result.Benchmark, Status: result.Status,
+		Phase: strings.ReplaceAll(result.Phase, token.Key, "[redacted]"),
+	}
+	if result.Candy != nil {
+		row.ExternalResult.Status = strings.ReplaceAll(result.Candy.Status, token.Key, "[redacted]")
+		row.ExternalResult.Answer = strings.ReplaceAll(result.Candy.Answer, token.Key, "[redacted]")
+		row.ExternalResult.DurationMS = result.Candy.DurationMS
+		if result.Candy.Status != "passed" && result.Candy.Status != "incorrect" {
+			row.Error = "External intelligence test did not complete successfully"
+		}
+	} else if result.Assessment != nil {
+		row.ExternalResult.Quality = strings.ReplaceAll(result.Assessment.Quality, token.Key, "[redacted]")
+		row.ExternalResult.Label = strings.ReplaceAll(result.Assessment.Label, token.Key, "[redacted]")
+		row.ExternalResult.Reason = strings.ReplaceAll(result.Assessment.Reason, token.Key, "[redacted]")
+	} else {
+		row.Error = "External intelligence test request failed"
+	}
+	if result.Result != nil && len(result.Result.HTML) <= 131072 {
+		row.HTML = strings.ReplaceAll(result.Result.HTML, token.Key, "[redacted]")
+	}
+	return row
+}
+
+func waitForExternalIntelligencePoll(ctx context.Context, interval time.Duration) error {
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func intelligenceExternalFailure(ctx context.Context) string {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return "Intelligence test was cancelled"
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "External intelligence test exceeded the 10-minute request timeout"
+	}
+	return "External intelligence test request failed"
+}
+
 // Each request owns its context and result; only the coordinator persists progress.
 func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID int, config intelligenceConfig, questionIndex int) (row intelligenceChannelResult) {
 	question := config.Questions[questionIndex]
@@ -1026,33 +1317,33 @@ func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID 
 			row.Error = "Intelligence test encountered an internal error"
 		}
 	}()
-	isStream := config.Stream == nil || *config.Stream
-	requestCtx, cancel := intelligenceRequestContext(ctx, isStream)
-	defer cancel()
-	if requestCtx.Err() != nil {
-		row.Error = intelligenceFailureReason(requestCtx, testResult{}, false)
+	// Use the relay's stream idle timeout and the task's cancellation.
+	if ctx.Err() != nil {
+		row.Error = intelligenceFailureReason(ctx, testResult{}, false)
 		row.noRetry = true
 		return row
 	}
-	response := testChannelWithProbe(requestCtx, channel, userID, config.Model, config.Endpoint, isStream, &channelTestProbe{RequestID: row.RequestID, Group: config.Group, Prompt: question.Prompt})
+	response := testChannelWithProbe(ctx, channel, userID, config.Model, config.Endpoint, true, &channelTestProbe{
+		RequestID: row.RequestID, Group: config.Group, Prompt: question.Prompt, ReasoningEffort: reasoning.Effort(config.ReasoningEffort),
+	})
 	if response.context != nil {
 		row.UpstreamRequestID = response.context.GetString(common.UpstreamRequestIdKey)
 	}
 	row.HTTPStatus = response.upstreamStatus
 	outcome := response.streamOutcome
-	streamFailed := isStream && (outcome.HasErrors ||
+	streamFailed := outcome.HasErrors ||
 		(outcome.EndReason != relaycommon.StreamEndReasonNone && outcome.EndReason != relaycommon.StreamEndReasonDone && outcome.EndReason != relaycommon.StreamEndReasonEOF && outcome.EndReason != relaycommon.StreamEndReasonHandlerStop) ||
 		(outcome.Response != relaycommon.ResponseOutcomeUnknown && outcome.Response != relaycommon.ResponseOutcomeCompleted) ||
-		(outcome.ExpectsTerminal && outcome.Response != relaycommon.ResponseOutcomeCompleted))
-	if requestCtx.Err() != nil || response.localErr != nil || response.newAPIError != nil || streamFailed {
+		(outcome.ExpectsTerminal && outcome.Response != relaycommon.ResponseOutcomeCompleted)
+	if ctx.Err() != nil || response.localErr != nil || response.newAPIError != nil || streamFailed {
 		// Never persist upstream errors, which may contain credentials or internal URLs.
-		row.Error = intelligenceFailureReason(requestCtx, response, streamFailed)
-		row.noRetry = requestCtx.Err() != nil ||
+		row.Error = intelligenceFailureReason(ctx, response, streamFailed)
+		row.noRetry = ctx.Err() != nil ||
 			errors.Is(response.localErr, context.DeadlineExceeded) ||
 			errors.Is(response.localErr, context.Canceled)
 		return row
 	}
-	row.HTML = extractIntelligenceOutput(response.responseBody, config.Endpoint, isStream)
+	row.HTML = extractIntelligenceOutput(response.responseBody, config.Endpoint, true)
 	if row.HTML == "" {
 		row.Error = "Intelligence test returned no output"
 	} else if len(row.HTML) > 131072 {
@@ -1062,31 +1353,25 @@ func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID 
 	return row
 }
 
-// Active streams use the relay's idle timeout rather than a fixed generation
-// deadline. Parent cancellation still stops work when the task loses its lease.
-func intelligenceRequestContext(parent context.Context, isStream bool) (context.Context, context.CancelFunc) {
-	if isStream {
-		return context.WithCancel(parent)
-	}
-	return context.WithTimeout(parent, 3*time.Minute)
-}
-
-func buildIntelligenceRequest(modelName, endpoint, prompt string, isStream bool) dto.Request {
+func buildIntelligenceRequest(modelName, endpoint, prompt string, effort reasoning.Effort) dto.Request {
 	const tokenLimit = uint(8192)
 	switch constant.EndpointType(endpoint) {
 	case constant.EndpointTypeOpenAIResponse:
 		input, _ := common.Marshal(prompt)
-		return &dto.OpenAIResponsesRequest{Model: modelName, Input: input, MaxOutputTokens: lo.ToPtr(tokenLimit), Stream: lo.ToPtr(isStream)}
+		request := &dto.OpenAIResponsesRequest{Model: modelName, Input: input, MaxOutputTokens: lo.ToPtr(tokenLimit), Stream: lo.ToPtr(true)}
+		if effort != "" {
+			request.Reasoning = &dto.Reasoning{Effort: string(effort)}
+		}
+		return request
 	case constant.EndpointTypeAnthropic:
-		return &dto.ClaudeRequest{Model: modelName, Messages: []dto.ClaudeMessage{{Role: "user", Content: prompt}}, MaxTokens: lo.ToPtr(tokenLimit), Stream: lo.ToPtr(isStream)}
+		return &dto.ClaudeRequest{Model: modelName, Messages: []dto.ClaudeMessage{{Role: "user", Content: prompt}}, MaxTokens: lo.ToPtr(tokenLimit), Stream: lo.ToPtr(true)}
 	case constant.EndpointTypeGemini:
 		return &dto.GeminiChatRequest{Contents: []dto.GeminiChatContent{{Role: "user", Parts: []dto.GeminiPart{{Text: prompt}}}}, GenerationConfig: dto.GeminiChatGenerationConfig{MaxOutputTokens: lo.ToPtr(tokenLimit)}}
 	default:
-		request := &dto.GeneralOpenAIRequest{Model: modelName, Messages: []dto.Message{{Role: "user", Content: prompt}}, MaxCompletionTokens: lo.ToPtr(tokenLimit), Stream: lo.ToPtr(isStream)}
-		if isStream {
-			request.StreamOptions = &dto.StreamOptions{IncludeUsage: true}
+		return &dto.GeneralOpenAIRequest{
+			Model: modelName, Messages: []dto.Message{{Role: "user", Content: prompt}}, MaxCompletionTokens: lo.ToPtr(tokenLimit),
+			Stream: lo.ToPtr(true), StreamOptions: &dto.StreamOptions{IncludeUsage: true}, ReasoningEffort: string(effort),
 		}
-		return request
 	}
 }
 

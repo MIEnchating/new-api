@@ -26,6 +26,7 @@ import (
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -38,9 +39,10 @@ import (
 )
 
 type channelTestProbe struct {
-	RequestID string
-	Group     string
-	Prompt    string
+	RequestID       string
+	Group           string
+	Prompt          string
+	ReasoningEffort reasoning.Effort
 }
 
 type testResult struct {
@@ -293,7 +295,7 @@ func testChannelWithProbe(ctx context.Context, channel *model.Channel, testUserI
 
 	request := buildTestRequest(testModel, endpointType, channel, isStream)
 	if probe != nil {
-		request = buildIntelligenceRequest(testModel, endpointType, probe.Prompt, isStream)
+		request = buildIntelligenceRequest(testModel, endpointType, probe.Prompt, probe.ReasoningEffort)
 	}
 
 	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
@@ -324,6 +326,14 @@ func testChannelWithProbe(ctx context.Context, channel *model.Channel, testUserI
 			context:     c,
 			localErr:    err,
 			newAPIError: types.NewError(err, types.ErrorCodeChannelModelMappedError),
+		}
+	}
+	if probe != nil && probe.ReasoningEffort != "" {
+		switch request.(type) {
+		case *dto.ClaudeRequest, *dto.GeminiChatRequest:
+			info.ReasoningConversion = reasoning.StateFromIntent(reasoning.Intent{
+				Mode: reasoning.ModeEnabled, Effort: probe.ReasoningEffort, Source: reasoning.SourceExplicit,
+			})
 		}
 	}
 	if err := helper.ApplyReasoningModelSuffix(c, info, request); err != nil {

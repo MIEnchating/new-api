@@ -65,6 +65,10 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
   if (!props.channel && props.status === 'failed' && !error) {
     error = 'Intelligence test request failed'
   }
+  const hasPreview =
+    props.channel &&
+    (props.channel.has_html || (!error && !props.channel.external_result))
+  const assessment = props.channel?.external_result
 
   return (
     <Card
@@ -159,7 +163,7 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
         aria-busy={active}
         className='bg-muted/30 relative aspect-[6/5] shrink-0 overflow-hidden border-t'
       >
-        {props.channel && !error ? (
+        {props.channel && hasPreview ? (
           <div className='absolute inset-0 overflow-hidden'>
             <IntelligencePreview
               version={props.channel.revision || props.task.retry?.revision}
@@ -176,7 +180,24 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
             className='absolute inset-0 flex flex-col overflow-auto p-4 pb-10'
             role={error ? 'alert' : undefined}
           >
-            {active && !error ? (
+            {props.channel?.external_result && !error ? (
+              <div className='my-auto space-y-2 text-sm'>
+                <p className='font-medium'>
+                  {props.channel.external_result.label ||
+                    props.channel.external_result.status}
+                </p>
+                {props.channel.external_result.reason && (
+                  <p className='text-muted-foreground text-xs'>
+                    {props.channel.external_result.reason}
+                  </p>
+                )}
+                {props.channel.external_result.answer && (
+                  <p className='max-h-40 overflow-auto break-words whitespace-pre-wrap'>
+                    {props.channel.external_result.answer}
+                  </p>
+                )}
+              </div>
+            ) : active && !error ? (
               <LoadingState message={statusLabel} className='min-h-0 flex-1' />
             ) : (
               <div className='my-auto'>
@@ -205,6 +226,21 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
           />
         )}
       </div>
+      {hasPreview && (assessment || error) && (
+        <div className='space-y-1 border-t px-4 py-3 text-xs break-words'>
+          {assessment && (
+            <>
+              <p className='font-medium'>
+                {t('Manxue AI')} · {assessment.label || assessment.status}
+              </p>
+              {assessment.reason && (
+                <p className='text-muted-foreground'>{assessment.reason}</p>
+              )}
+            </>
+          )}
+          {error && <p className='text-destructive'>{t(error)}</p>}
+        </div>
+      )}
     </Card>
   )
 })

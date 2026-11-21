@@ -277,13 +277,33 @@ export function IntelligenceHistoryRun(props: {
                             )}
                           </div>
                         )}
-                        {row.channel_id === 0 && active && (
-                          <p className='text-muted-foreground text-xs'>
-                            {t(
-                              task.status === 'pending' ? 'Pending' : 'Running'
+                        {row.external_result && (
+                          <div className='text-muted-foreground space-y-1 text-xs break-words'>
+                            <p>
+                              {row.external_result.label ||
+                                row.external_result.status}
+                            </p>
+                            {row.external_result.answer && (
+                              <p className='max-h-32 overflow-auto whitespace-pre-wrap'>
+                                {row.external_result.answer}
+                              </p>
                             )}
-                          </p>
+                            {row.external_result.reason && (
+                              <p>{row.external_result.reason}</p>
+                            )}
+                          </div>
                         )}
+                        {row.channel_id === 0 &&
+                          !row.external_result &&
+                          active && (
+                            <p className='text-muted-foreground text-xs'>
+                              {t(
+                                task.status === 'pending'
+                                  ? 'Pending'
+                                  : 'Running'
+                              )}
+                            </p>
+                          )}
                         {retrying && (
                           <p className='text-muted-foreground text-xs'>
                             {t('Running')}
@@ -295,7 +315,9 @@ export function IntelligenceHistoryRun(props: {
                           </p>
                         )}
                         <div className='mt-auto flex flex-wrap justify-end gap-2'>
-                          {(row.channel_id > 0 || !active) && (
+                          {(row.channel_id > 0 ||
+                            row.external_result ||
+                            !active) && (
                             <Button
                               type='button'
                               variant='outline'
@@ -329,7 +351,8 @@ export function IntelligenceHistoryRun(props: {
                               {t('Retry model')}
                             </Button>
                           )}
-                          {!row.error && row.channel_id > 0 && (
+                          {(row.has_html ||
+                            (row.channel_id > 0 && !row.error)) && (
                             <IntelligencePreview
                               version={row.revision || task.retry?.revision}
                               variant='button'

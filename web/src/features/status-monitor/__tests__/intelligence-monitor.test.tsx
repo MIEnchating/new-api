@@ -123,6 +123,122 @@ it('places restrictive CSP before generated scripts and removes embedded pages a
   expect(parsed.querySelector('svg')).not.toBeNull()
 })
 
+it('keeps the selected model and Manxue AI source after saving and reopening', async () => {
+  const data: IntelligenceMonitorData = {
+    config: {
+      groups: [
+        {
+          group: 'default',
+          models: ['test-model'],
+          endpoint: 'openai-response',
+          enabled: false,
+          times: [],
+        },
+      ],
+      questions: [{ name: 'Local prompt', prompt: 'Generate a drawing' }],
+    },
+    catalog: { default: ['test-model'] },
+    history: [],
+  }
+  const get = vi.spyOn(api, 'get').mockImplementation(async () => ({
+    data: { success: true, data },
+  }))
+  const put = vi.spyOn(api, 'put').mockImplementation(async (_url, body) => {
+    const config = intelligenceConfigSchema.parse(body)
+    data.config = config
+    return { data: { success: true, data: config } }
+  })
+  const actions = document.createElement('div')
+  actions.dataset.testActions = ''
+  document.body.append(actions)
+  const client = new QueryClient()
+  const user = userEvent.setup()
+  const page = (
+    <QueryClientProvider client={client}>
+      <SettingsPageProvider actionsContainer={actions}>
+        <IntelligenceSettingsSection />
+      </SettingsPageProvider>
+    </QueryClientProvider>
+  )
+  const view = render(page)
+
+  await screen.findByRole('combobox', {
+    name: 'Test questions',
+  })
+  const endpoint = screen.getByRole('combobox', { name: 'API Endpoint' })
+  expect(endpoint).toBeEnabled()
+  await user.click(
+    screen.getByRole('combobox', { name: 'Intelligence test source' })
+  )
+  await user.click(await screen.findByRole('option', { name: 'Manxue AI' }))
+
+  expect(screen.getByText('test-model')).toBeVisible()
+  expect(screen.getByRole('combobox', { name: 'API Endpoint' })).toBe(endpoint)
+  expect(endpoint).toBeDisabled()
+  expect(endpoint).toHaveTextContent('OpenAI Responses API')
+  expect(
+    screen.getByRole('combobox', { name: 'Reasoning Effort' })
+  ).toHaveTextContent('Low')
+  const benchmark = screen.getByRole('combobox', { name: 'External test type' })
+  expect(benchmark).toHaveTextContent('Candy test')
+  expect(
+    screen.queryByRole('combobox', { name: 'Test questions' })
+  ).not.toBeInTheDocument()
+  expect(
+    screen.queryByLabelText('External model API key')
+  ).not.toBeInTheDocument()
+
+  await user.click(benchmark)
+  await user.click(await screen.findByRole('option', { name: 'Creative test' }))
+  const effort = screen.getByRole('combobox', { name: 'Reasoning Effort' })
+  expect(effort).not.toHaveAttribute('data-placeholder')
+  await user.click(effort)
+  expect(
+    screen.getAllByRole('option').map((option) => option.textContent)
+  ).toEqual(['Low', 'Medium', 'High'])
+  await user.click(screen.getByRole('option', { name: 'Medium' }))
+  await user.click(effort)
+  await user.click(await screen.findByRole('option', { name: 'Low' }))
+  expect(effort).toHaveTextContent('Low')
+  expect(effort).not.toHaveAttribute('data-placeholder')
+  await user.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() =>
+    expect(put).toHaveBeenCalledWith(
+      '/api/status-monitor/intelligence',
+      expect.objectContaining({
+        groups: [
+          expect.objectContaining({
+            mode: 'external',
+            models: ['test-model'],
+            benchmark: 'creative',
+            endpoint: 'openai-response',
+            question_indexes: [0],
+            reasoning_effort: 'low',
+          }),
+        ],
+      })
+    )
+  )
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+  expect(
+    screen.getByRole('combobox', { name: 'Intelligence test source' })
+  ).toHaveTextContent('Manxue AI')
+
+  view.unmount()
+  client.clear()
+  render(page)
+  expect(
+    await screen.findByRole('combobox', { name: 'Intelligence test source' })
+  ).toHaveTextContent('Manxue AI')
+  expect(screen.getByText('test-model')).toBeVisible()
+  expect(
+    screen.getByRole('combobox', { name: 'External test type' })
+  ).toHaveTextContent('Creative test')
+  expect(
+    screen.getByRole('combobox', { name: 'Reasoning Effort' })
+  ).toHaveTextContent('Low')
+})
+
 it('saves edited questions and scheduling settings before allowing a manual run', async () => {
   const data: IntelligenceMonitorData = {
     config: {
@@ -163,11 +279,28 @@ it('saves edited questions and scheduling settings before allowing a manual run'
     </QueryClientProvider>
   )
   const user = userEvent.setup()
-  const streamSwitch = await screen.findByRole('switch', {
-    name: 'Streaming output',
+  const effort = await screen.findByRole('combobox', {
+    name: 'Reasoning Effort',
   })
-  expect(streamSwitch).toBeChecked()
-  await user.click(streamSwitch)
+  const group = screen.getByRole('group', { name: 'default' })
+  expect(group.parentElement).not.toHaveClass('@min-[70rem]:grid-cols-2')
+  const effortField = effort.closest('[data-slot="field"]')
+  expect(effortField?.parentElement).toHaveClass('@min-[28rem]:grid-cols-2')
+  expect(effortField?.parentElement).toContainElement(
+    within(group).getByRole('combobox', { name: 'Test questions' })
+  )
+  const endpoint = screen.getByRole('combobox', { name: 'API Endpoint' })
+  const modelRow = endpoint.closest('[data-slot="field"]')?.parentElement
+  expect(modelRow).toHaveClass('grid-cols-1', '@min-[28rem]:grid-cols-2')
+  expect(modelRow).toContainElement(
+    within(group).getByRole('combobox', { name: 'Select models' })
+  )
+  expect(effort).toHaveTextContent('Low')
+  expect(
+    screen.queryByRole('switch', { name: 'Streaming output' })
+  ).not.toBeInTheDocument()
+  await user.click(effort)
+  await user.click(await screen.findByRole('option', { name: 'High' }))
   await user.click(screen.getByRole('tab', { name: 'Question bank' }))
   await user.clear(await screen.findByLabelText('Prompt'))
   await user.type(
@@ -191,7 +324,7 @@ it('saves edited questions and scheduling settings before allowing a manual run'
         groups: [
           expect.objectContaining({
             endpoint: 'openai-response',
-            stream: false,
+            reasoning_effort: 'high',
             enabled: true,
             times: ['09:00'],
           }),
@@ -494,19 +627,51 @@ it('localizes the built-in question and endpoint menu while preserving user edit
     expect(endpoint).toHaveTextContent('OpenAI 聊天补全')
     endpoint.focus()
     await user.keyboard('{Enter}')
-    expect(
-      await screen.findByRole('option', {
-        name: 'OpenAI 响应接口 · /v1/responses',
-      })
-    ).toBeVisible()
+    const responsesOption = await screen.findByRole('option', {
+      name: 'OpenAI 响应接口 · /v1/responses',
+    })
+    expect(responsesOption).toBeVisible()
+    expect(responsesOption.closest('[data-slot="select-content"]')).toHaveClass(
+      'w-max',
+      'max-w-(--available-width)'
+    )
+    expect(responsesOption).toHaveClass(
+      '*:data-[slot=select-item-text]:whitespace-normal'
+    )
+    expect(endpoint.querySelector('[data-slot="select-value"]')).toHaveClass(
+      'whitespace-normal',
+      'line-clamp-none!'
+    )
     expect(endpoint).toHaveAttribute('aria-expanded', 'true')
     await user.keyboard('{ArrowDown}{Enter}')
     expect(endpoint).toHaveTextContent('OpenAI 响应接口')
     expect(endpoint).toHaveAttribute('aria-expanded', 'false')
+    const effort = screen.getByRole('combobox', { name: '推理强度' })
+    expect(effort).toHaveTextContent('低')
+    await user.click(effort)
+    expect(await screen.findByRole('option', { name: '低' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    await user.click(await screen.findByRole('option', { name: '高' }))
+    const source = screen.getByRole('combobox', { name: '智商检测来源' })
+    await user.click(source)
+    await user.click(await screen.findByRole('option', { name: '满血.AI' }))
+    expect(screen.getByRole('combobox', { name: '推理强度' })).toBe(effort)
+    expect(effort).toHaveTextContent('高')
+    await user.click(screen.getByRole('combobox', { name: '推理强度' }))
+    await user.click(await screen.findByRole('option', { name: '中' }))
+    await user.click(source)
+    await user.click(await screen.findByRole('option', { name: '本机题库' }))
+    expect(
+      screen.getByRole('combobox', { name: '推理强度' })
+    ).toHaveTextContent('中')
     await act(() => i18n.changeLanguage('en'))
+    expect(
+      screen.getByRole('combobox', { name: 'API Endpoint' })
+    ).toHaveTextContent('OpenAI Responses API')
     await user.click(screen.getByRole('tab', { name: 'Question bank' }))
     expect(screen.getByDisplayValue('Pelican riding a bicycle')).toBeVisible()
-    expect(endpoint).toHaveTextContent('OpenAI Responses API')
     const name = screen.getByDisplayValue('Pelican riding a bicycle')
     await user.clear(name)
     await user.type(name, 'My own question')
@@ -637,8 +802,8 @@ it('saves independent daily times for multiple groups and allows more runs while
     )
     await user.click(screen.getByRole('button', { name: 'Add test group' }))
     expect(
-      screen.getAllByRole('switch', { name: 'Streaming output' })[2]
-    ).toBeChecked()
+      screen.getAllByRole('combobox', { name: 'Reasoning Effort' })[2]
+    ).toHaveTextContent('Low')
     expect(
       screen.getAllByRole('combobox', { name: 'API Endpoint' })
     ).toHaveLength(3)
@@ -748,14 +913,22 @@ it('saves independent question selections and preserves their identity when an e
     const first = screen.getByRole('group', { name: 'default' })
     const second = screen.getByRole('group', { name: 'vip' })
     expect(within(first).getByTitle('default')).toBeVisible()
-    expect(within(first).getByRole('checkbox', { name: 'First' })).toBeChecked()
+    const firstQuestions = within(first).getByRole('combobox', {
+      name: 'Test questions',
+    })
+    await user.click(
+      within(second).getByRole('combobox', { name: 'Test questions' })
+    )
     expect(
-      within(second).getByRole('checkbox', { name: 'First' })
-    ).not.toBeChecked()
-    await user.click(within(first).getByRole('checkbox', { name: 'First' }))
-    const third = within(first).getByRole('checkbox', { name: 'Third' })
-    third.focus()
-    await user.keyboard(' ')
+      await screen.findByRole('option', { name: 'First' })
+    ).toHaveAttribute('aria-selected', 'false')
+    await user.keyboard('{Escape}')
+    await user.click(firstQuestions)
+    const firstQuestion = await screen.findByRole('option', { name: 'First' })
+    expect(firstQuestion).toHaveAttribute('aria-selected', 'true')
+    await user.click(firstQuestion)
+    await user.click(await screen.findByRole('option', { name: 'Third' }))
+    await user.keyboard('{Escape}')
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
       expect(put).toHaveBeenLastCalledWith(
@@ -790,17 +963,25 @@ it('saves independent question selections and preserves their identity when an e
       })
     )
     await user.click(screen.getByRole('tab', { name: 'Settings' }))
-    expect(
+    await user.click(
       within(screen.getByRole('group', { name: 'default' })).getByRole(
-        'checkbox',
-        { name: 'Second' }
+        'combobox',
+        { name: 'Test questions' }
       )
-    ).toBeChecked()
+    )
     expect(
-      within(screen.getByRole('group', { name: 'vip' })).getByRole('checkbox', {
-        name: 'Third',
+      await screen.findByRole('option', { name: 'Second' })
+    ).toHaveAttribute('aria-selected', 'true')
+    await user.keyboard('{Escape}')
+    await user.click(
+      within(screen.getByRole('group', { name: 'vip' })).getByRole('combobox', {
+        name: 'Test questions',
       })
-    ).toBeChecked()
+    )
+    expect(
+      await screen.findByRole('option', { name: 'Third' })
+    ).toHaveAttribute('aria-selected', 'true')
+    await user.keyboard('{Escape}')
     await user.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() =>
       expect(put).toHaveBeenLastCalledWith(
@@ -2110,12 +2291,13 @@ it('collapses group settings with quick actions and preserves values across keyb
   try {
     const group = screen.getByRole('group', { name: 'vip' })
     const toggle = within(group).getByRole('button', { name: 'Collapse' })
+    const endpoint = within(group).getByRole('combobox', {
+      name: 'API Endpoint',
+    })
     expect(toggle).toHaveAttribute('aria-expanded', 'true')
     toggle.focus()
     await user.keyboard('{Enter}')
-    expect(
-      within(group).queryByRole('combobox', { name: 'API Endpoint' })
-    ).not.toBeInTheDocument()
+    expect(endpoint).not.toBeVisible()
     expect(
       within(group).getByRole('button', { name: 'Expand' })
     ).toHaveAttribute('aria-expanded', 'false')
@@ -2141,15 +2323,17 @@ it('collapses group settings with quick actions and preserves values across keyb
     expand.focus()
     await user.keyboard(' ')
     expect(expand).toHaveAttribute('aria-expanded', 'true')
-    expect(
-      within(group).getByRole('combobox', { name: 'API Endpoint' })
-    ).toBeVisible()
+    expect(within(group).getByRole('combobox', { name: 'API Endpoint' })).toBe(
+      endpoint
+    )
+    expect(endpoint).toBeVisible()
     expect(
       within(group).getAllByRole('button', { name: 'Run this group' })
     ).toHaveLength(1)
     await user.click(
-      within(group).getByRole('switch', { name: 'Streaming output' })
+      within(group).getByRole('combobox', { name: 'Reasoning Effort' })
     )
+    await user.click(await screen.findByRole('option', { name: 'High' }))
     await user.click(within(group).getByRole('button', { name: 'Collapse' }))
     expect(
       within(group).getByRole('button', { name: 'Run this group' })
@@ -2166,8 +2350,8 @@ it('collapses group settings with quick actions and preserves values across keyb
     ).toHaveAttribute('aria-expanded', 'true')
     await user.click(within(group).getByRole('button', { name: 'Expand' }))
     expect(
-      within(group).getByRole('switch', { name: 'Streaming output' })
-    ).not.toBeChecked()
+      within(group).getByRole('combobox', { name: 'Reasoning Effort' })
+    ).toHaveTextContent('High')
     await user.click(within(group).getByRole('button', { name: 'Collapse' }))
     await user.click(
       within(group).getByRole('button', { name: 'Remove group' })

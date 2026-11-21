@@ -25,6 +25,12 @@ import { api } from '@/lib/api'
 
 import { InvoiceFilePreview } from '../components/file-preview'
 
+const { getDocument } = vi.hoisted(() => ({ getDocument: vi.fn() }))
+vi.mock('pdfjs-dist', () => ({
+  GlobalWorkerOptions: { workerSrc: '' },
+  getDocument,
+}))
+
 const clients: QueryClient[] = []
 afterEach(() => {
   clients.forEach((client) => client.clear())
@@ -32,6 +38,25 @@ afterEach(() => {
 })
 
 function renderPreview(type = 'image/png') {
+  if (type === 'application/pdf') {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(360)
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      {} as CanvasRenderingContext2D
+    )
+    getDocument.mockImplementation(() => ({
+      promise: Promise.resolve({
+        numPages: 2,
+        getPage: vi.fn(async () => ({
+          getViewport: ({ scale }: { scale: number }) => ({
+            width: 600 * scale,
+            height: 800 * scale,
+          }),
+          render: () => ({ promise: Promise.resolve(), cancel: vi.fn() }),
+        })),
+      }),
+      destroy: vi.fn(async () => {}),
+    }))
+  }
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -55,6 +80,10 @@ function renderPreview(type = 'image/png') {
 it('enlarges an image, supports bounded zoom and resets when reopened', async () => {
   const user = userEvent.setup()
   const { get } = renderPreview()
+  expect(screen.getByRole('group', { name: 'Invoice file' })).toHaveClass(
+    'grid-cols-2',
+    'border-t'
+  )
   expect(get).not.toHaveBeenCalled()
   expect(
     screen.queryByRole('button', { name: 'Enlarge preview' })
@@ -94,7 +123,7 @@ it('enlarges an image, supports bounded zoom and resets when reopened', async ()
   expect(get).toHaveBeenCalledTimes(1)
 })
 
-it('opens PDF in a large viewer with native controls and a separate-tab fallback', async () => {
+it('renders PDF pages with pagination, zoom and download actions', async () => {
   const user = userEvent.setup()
   const { unmount, revoke } = renderPreview('application/pdf')
   await user.click(screen.getByRole('button', { name: 'Preview invoice' }))
@@ -102,17 +131,21 @@ it('opens PDF in a large viewer with native controls and a separate-tab fallback
     await screen.findByRole('button', { name: 'Enlarge preview' })
   )
   const dialog = await screen.findByRole('dialog', { name: 'Preview invoice' })
-  expect(within(dialog).getByTitle('Preview invoice')).toHaveAttribute(
-    'data',
-    'blob:invoice-preview#toolbar=1&view=FitH'
+  const canvas = await within(dialog).findByRole('img', {
+    name: 'Preview invoice',
+  })
+  await waitFor(() => expect(canvas).toBeVisible())
+  expect(canvas.tagName).toBe('CANVAS')
+  expect(within(dialog).getByRole('status')).toHaveTextContent('Page 1 / 2')
+  await user.click(
+    within(dialog).getByRole('button', { name: 'Go to next page' })
   )
-  expect(within(dialog).getByTitle('Preview invoice')).toHaveClass(
-    'h-full',
-    'w-full'
-  )
+  expect(within(dialog).getByRole('status')).toHaveTextContent('Page 2 / 2')
   expect(
-    within(dialog).queryByRole('button', { name: 'Zoom in' })
-  ).not.toBeInTheDocument()
+    within(dialog).getByRole('button', { name: 'Go to next page' })
+  ).toBeDisabled()
+  await user.click(within(dialog).getByRole('button', { name: 'Zoom in' }))
+  expect(within(dialog).getByText('125%')).toBeVisible()
   const link = within(dialog).getByRole('link', { name: 'Open in new tab' })
   expect(link).toHaveAttribute('href', 'blob:invoice-preview')
   expect(link).toHaveAttribute('rel', 'noopener noreferrer')
@@ -121,6 +154,62 @@ it('opens PDF in a large viewer with native controls and a separate-tab fallback
   ).toHaveAttribute('download', 'Example Company.pdf')
   unmount()
   expect(revoke).toHaveBeenCalledWith('blob:invoice-preview')
+  expect(getDocument.mock.results.at(-1)?.value.destroy).toHaveBeenCalled()
+})
+
+it('keeps PDF download available after a rendering failure and renders after retry', async () => {
+  const user = userEvent.setup()
+  renderPreview('application/pdf')
+  getDocument.mockImplementationOnce(() => ({
+    promise: Promise.reject(new Error('PDF decoding failed')),
+    destroy: vi.fn(async () => {}),
+  }))
+  await user.click(screen.getByRole('button', { name: 'Preview invoice' }))
+  await user.click(
+    await screen.findByRole('button', { name: 'Enlarge preview' })
+  )
+  const dialog = await screen.findByRole('dialog', { name: 'Preview invoice' })
+  expect(await within(dialog).findByText('Preview unavailable')).toBeVisible()
+  expect(
+    within(dialog).getByRole('link', { name: 'Download invoice' })
+  ).toBeVisible()
+  await user.click(within(dialog).getByRole('button', { name: 'Retry' }))
+  expect(
+    await within(dialog).findByRole('img', { name: 'Preview invoice' })
+  ).toBeVisible()
+})
+
+it('opens a mobile PDF preview directly and returns to the collapsed file card', async () => {
+  const matchMedia = window.matchMedia
+  vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+    ...matchMedia(query),
+    matches: query === '(max-width: 640px)' || matchMedia(query).matches,
+  }))
+  const user = userEvent.setup()
+  renderPreview('application/pdf')
+
+  const previewButton = screen.getByRole('button', { name: 'Preview invoice' })
+  await user.click(previewButton)
+  const dialog = await screen.findByRole('dialog', { name: 'Preview invoice' })
+  expect(
+    await within(dialog).findByRole('img', { name: 'Preview invoice' })
+  ).toBeVisible()
+  expect(dialog.querySelector('iframe, object')).toBeNull()
+  expect(
+    within(dialog).getByRole('link', { name: 'Open in new tab' })
+  ).toBeVisible()
+  expect(
+    within(dialog).getByRole('link', { name: 'Download invoice' })
+  ).toBeVisible()
+
+  await user.click(within(dialog).getByRole('button', { name: 'Close' }))
+  await waitFor(() =>
+    expect(
+      screen.queryByRole('dialog', { name: 'Preview invoice' })
+    ).not.toBeInTheDocument()
+  )
+  expect(previewButton).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.queryByTitle('Preview invoice')).not.toBeInTheDocument()
 })
 
 it('does not offer enlargement when loading fails and recovers on retry', async () => {

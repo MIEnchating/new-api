@@ -372,6 +372,46 @@ it('lets administrators remove an uploaded invoice before completing the applica
   ).not.toBeInTheDocument()
 })
 
+it('shows invoice file replacement and deletion in pending application details', async () => {
+  const user = userEvent.setup()
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: {
+        total: 1,
+        items: [{ ...pending, invoice_url: 'invoice-file:stored.pdf' }],
+      },
+    },
+  })
+  const del = vi.spyOn(api, 'delete').mockResolvedValue({
+    data: { success: true, data: null },
+  })
+  renderInvoice(<InvoiceRequestList admin />)
+
+  await user.click(await screen.findByRole('button', { name: 'View details' }))
+  expect(
+    screen.getByRole('button', { name: 'Replace invoice file' })
+  ).toBeVisible()
+  expect(
+    screen.getByRole('button', { name: 'Delete invoice file' })
+  ).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Download invoice' })).toBeVisible()
+
+  await user.click(screen.getByRole('button', { name: 'Delete invoice file' }))
+  const dialog = screen.getByRole('alertdialog', {
+    name: 'Delete invoice file?',
+  })
+  await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
+
+  await waitFor(() =>
+    expect(del).toHaveBeenCalledWith('/api/user/invoices/4/file')
+  )
+  expect(screen.getByLabelText('Invoice file')).toBeVisible()
+  expect(
+    screen.queryByRole('button', { name: 'Replace invoice file' })
+  ).not.toBeInTheDocument()
+})
+
 it('offers issued invoice download and sends mail without accepting a destination override', async () => {
   const user = userEvent.setup()
   vi.spyOn(api, 'get').mockResolvedValue({
@@ -1351,6 +1391,32 @@ it.each([false, true])(
     }
   }
 )
+
+it('separates multiline remarks from invoice fields and preserves their original text', async () => {
+  const user = userEvent.setup()
+  const remark =
+    'Company: Example Company\nAccount: 0012345678\nBank: Example Bank\n\nAddress: Suite 614, Building 2, Long Business Park Address'
+  vi.spyOn(api, 'get').mockResolvedValue({
+    data: {
+      success: true,
+      data: { total: 1, items: [{ ...pending, remark }] },
+    },
+  })
+  renderInvoice(<InvoiceRequestList admin />)
+  await user.click(await screen.findByRole('button', { name: 'View details' }))
+  const remarks = screen.getByRole('region', { name: 'Remarks' })
+  expect(
+    within(remarks).getByRole('heading', { name: 'Remarks' })
+  ).toBeVisible()
+  const text = within(remarks).getByText(/Company: Example Company/)
+  expect(text.textContent).toBe(remark)
+  expect(text).toHaveClass(
+    'whitespace-pre-wrap',
+    'leading-7',
+    '[overflow-wrap:anywhere]'
+  )
+  expect(within(remarks).queryByText('Invoice email')).not.toBeInTheDocument()
+})
 
 it('keeps issued invoice orders at their natural height inside the scrolling drawer', async () => {
   const user = userEvent.setup()
