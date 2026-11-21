@@ -56,7 +56,7 @@ function Workspace() {
   )
 }
 
-it('keeps the draft after a failed save and publishes the supplier order on retry', async () => {
+function renderSettings() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -64,6 +64,17 @@ it('keeps the draft after a failed save and publishes the supplier order on retr
     routeTree: createRootRoute(),
     history: createMemoryHistory({ initialEntries: ['/'] }),
   })
+  render(
+    <QueryClientProvider client={client}>
+      <RouterContextProvider router={router}>
+        <Workspace />
+      </RouterContextProvider>
+    </QueryClientProvider>
+  )
+  return client
+}
+
+it('keeps the reordered draft after a failed save and publishes it on retry', async () => {
   const get = vi.spyOn(api, 'get').mockResolvedValue({
     data: {
       success: true,
@@ -79,16 +90,9 @@ it('keeps the draft after a failed save and publishes the supplier order on retr
       data: { success: false, message: 'Could not save' },
     })
     .mockResolvedValueOnce({ data: { success: true } })
-  client.setQueryData(['pricing'], { vendor_order: ['OpenAI'] })
-
   const user = userEvent.setup()
-  render(
-    <QueryClientProvider client={client}>
-      <RouterContextProvider router={router}>
-        <Workspace />
-      </RouterContextProvider>
-    </QueryClientProvider>
-  )
+  const client = renderSettings()
+  client.setQueryData(['pricing'], { vendor_order: ['OpenAI'] })
 
   const list = await screen.findByRole('list', {
     name: 'Supplier display order',
@@ -99,8 +103,8 @@ it('keeps the draft after a failed save and publishes the supplier order on retr
   expect(
     within(list).getByRole('button', { name: 'Move OpenAI up' })
   ).toBeDisabled()
-  within(list).getByRole('button', { name: 'Move Doubao up' }).focus()
-  await user.keyboard('{Enter}')
+  within(list).getByRole('button', { name: 'Drag Doubao to reorder' }).focus()
+  await user.keyboard('{ArrowUp}')
   expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('Doubao')
   expect(save).toBeEnabled()
   await user.click(save)
@@ -116,5 +120,58 @@ it('keeps the draft after a failed save and publishes the supplier order on retr
     value: '["Doubao","OpenAI"]',
   })
   expect(client.getQueryState(['pricing'])?.isInvalidated).toBe(true)
+  client.clear()
+})
+
+it('deletes only eligible suppliers after preview and confirmation', async () => {
+  const linked = { id: 2, name: 'OpenAI', can_delete: false }
+  const unused = { id: 1, name: 'Doubao', can_delete: true }
+  const get = vi
+    .spyOn(api, 'get')
+    .mockResolvedValueOnce({ data: { success: true, data: [unused, linked] } })
+    .mockResolvedValueOnce({ data: { success: true, data: [linked] } })
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: { sources: [unused], models: [], version: 'preview-version' },
+      },
+    })
+    .mockResolvedValueOnce({
+      data: {
+        success: true,
+        data: { updated_models: [], deleted_vendors: [unused.id] },
+      },
+    })
+
+  const user = userEvent.setup()
+  const client = renderSettings()
+  const remove = await screen.findByRole('button', { name: 'Delete Doubao' })
+  expect(screen.queryByRole('button', { name: 'Delete OpenAI' })).toBeNull()
+  await user.click(remove)
+  const dialog = await screen.findByRole('dialog', { name: 'Delete vendors' })
+  expect(post).not.toHaveBeenCalled()
+  await user.click(
+    within(dialog).getByRole('button', { name: 'Preview changes' })
+  )
+  await user.click(
+    await within(dialog).findByRole('button', { name: 'Apply changes' })
+  )
+  await waitFor(() => expect(remove).not.toBeInTheDocument())
+  expect(post).toHaveBeenNthCalledWith(
+    1,
+    '/api/vendors/operations/preview',
+    expect.objectContaining({ action: 'delete', vendor_ids: [1] })
+  )
+  expect(post).toHaveBeenLastCalledWith(
+    '/api/vendors/operations',
+    expect.objectContaining({
+      action: 'delete',
+      vendor_ids: [1],
+      expected_version: 'preview-version',
+    })
+  )
+  expect(get).toHaveBeenCalledTimes(2)
   client.clear()
 })

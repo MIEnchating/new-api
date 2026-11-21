@@ -42,8 +42,10 @@ export async function getSystemOptions() {
   return res.data
 }
 
+export type ModelSquareVendor = PricingVendor & { can_delete?: boolean }
+
 export async function getModelSquareVendors() {
-  const res = await api.get<{ success: boolean; data: PricingVendor[] }>(
+  const res = await api.get<{ success: boolean; data: ModelSquareVendor[] }>(
     '/api/option/model_square/vendors'
   )
   return res.data

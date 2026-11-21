@@ -1132,15 +1132,42 @@ func TestModelSquareVendorOrderDatabaseMatrix(t *testing.T) {
 			require.NoError(t, db.AutoMigrate(&model.SystemTask{}))
 			model.InvalidatePricingCache()
 			t.Cleanup(model.InvalidatePricingCache)
-			require.NoError(t, db.Create(&model.Vendor{Name: "Doubao"}).Error)
+			oldCategories := setting.GetGroupCategories()
+			t.Cleanup(func() {
+				value, err := common.Marshal(oldCategories)
+				require.NoError(t, err)
+				require.NoError(t, setting.UpdateGroupCategories(string(value)))
+			})
+			unused := model.Vendor{Name: "Doubao"}
+			linked := model.Vendor{Name: "Linked"}
+			inferred := model.Vendor{Name: "OpenAI"}
+			grouped := model.Vendor{Name: "Grouped"}
+			require.NoError(t, db.Create(&unused).Error)
+			require.NoError(t, db.Create(&linked).Error)
+			require.NoError(t, db.Create(&inferred).Error)
+			require.NoError(t, db.Create(&grouped).Error)
+			require.NoError(t, setting.UpdateGroupCategories(fmt.Sprintf(`{"vip":"vendor:%d"}`, grouped.Id)))
+			require.NoError(t, db.Create(&model.Model{ModelName: "offline-model", VendorID: linked.Id}).Error)
+			channel := model.Channel{Name: "Vendor order fixture", Type: 1, Status: common.ChannelStatusEnabled}
+			require.NoError(t, db.Create(&channel).Error)
+			require.NoError(t, db.Create(&[]model.Ability{
+				{Model: "gpt-vendor-order-fixture", Group: "default", ChannelId: channel.Id, Enabled: true},
+				{Model: "gemini-vendor-order-fixture", Group: "default", ChannelId: channel.Id, Enabled: true},
+			}).Error)
 			var vendors struct {
 				Success bool
-				Data    []model.PricingVendor
+				Data    []struct {
+					Name      string
+					CanDelete bool `json:"can_delete"`
+				}
 			}
 			modelManagementRequest(t, GetModelSquareVendors, http.MethodGet, "/api/option/model_square/vendors", nil, &vendors)
 			require.True(t, vendors.Success)
-			require.Len(t, vendors.Data, 1)
-			assert.Equal(t, "Doubao", vendors.Data[0].Name)
+			deleteEligibility := make(map[string]bool, len(vendors.Data))
+			for _, vendor := range vendors.Data {
+				deleteEligibility[vendor.Name] = vendor.CanDelete
+			}
+			assert.Equal(t, map[string]bool{"Doubao": true, "Linked": false, "OpenAI": false, "Google": false, "Grouped": false}, deleteEligibility)
 
 			readPublicOrder := func() []string {
 				var response struct {

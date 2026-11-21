@@ -183,10 +183,10 @@ function getSortPrice(
   return calculateTokenPrice(model, kind, 1)
 }
 
-export function sortPricingVendors(
-  vendors: readonly PricingVendor[],
+export function sortPricingVendors<T extends PricingVendor>(
+  vendors: readonly T[],
   order: readonly string[]
-): PricingVendor[] {
+): T[] {
   const priority = new Map(order.map((name, index) => [name, index]))
   return [...vendors].sort((a, b) => {
     const rankA = priority.get(a.name) ?? order.length

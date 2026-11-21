@@ -7,6 +7,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
@@ -79,11 +80,36 @@ func GetPricing(c *gin.Context) {
 }
 
 func GetModelSquareVendors(c *gin.Context) {
-	vendors := model.GetVendors()
-	if vendors == nil {
-		vendors = []model.PricingVendor{}
+	counts, err := model.GetVendorModelCounts()
+	if err != nil {
+		common.ApiError(c, err)
+		return
 	}
-	common.ApiSuccess(c, vendors)
+	groupVendors, err := model.GetGroupVendors(setting.GetGroupCategories())
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	used := make(map[int]bool)
+	for _, entry := range model.GetPricing() {
+		used[entry.VendorID] = true
+	}
+	for _, vendor := range groupVendors {
+		used[vendor.ID] = true
+	}
+	type vendorRow struct {
+		model.PricingVendor
+		CanDelete bool `json:"can_delete"`
+	}
+	vendors := model.GetVendors()
+	rows := make([]vendorRow, 0, len(vendors))
+	for _, vendor := range vendors {
+		rows = append(rows, vendorRow{
+			PricingVendor: vendor,
+			CanDelete:     vendor.ID > 0 && counts[int64(vendor.ID)] == 0 && !used[vendor.ID],
+		})
+	}
+	common.ApiSuccess(c, rows)
 }
 
 func ResetModelRatio(c *gin.Context) {

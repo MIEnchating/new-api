@@ -17,17 +17,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { useMemo } from 'react'
+import { Reorder } from 'motion/react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { GroupOrderControls } from '@/components/auto-group-order-item'
+import { AutoGroupOrderItem } from '@/components/auto-group-order-item'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { VendorOperationDialog } from '@/features/models/components/dialogs/vendor-operation-dialog'
 import { sortPricingVendors } from '@/features/pricing/lib/filters'
-import type { PricingVendor } from '@/features/pricing/types'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
-import { getModelSquareVendors } from '../api'
+import { getModelSquareVendors, type ModelSquareVendor } from '../api'
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
 import { SettingsPageFormActions } from '../components/settings-page-context'
@@ -35,17 +38,18 @@ import { SettingsSection } from '../components/settings-section'
 import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
 
-const EMPTY_VENDORS: PricingVendor[] = []
+const EMPTY_VENDORS: ModelSquareVendor[] = []
 
 export function ModelSquareSettingsSection(props: { vendorOrder: string[] }) {
   const { t } = useTranslation()
+  const [deleteVendorID, setDeleteVendorID] = useState<number | null>(null)
   const {
     data: vendors = EMPTY_VENDORS,
     isLoading,
     error,
     refetch,
   } = useQuery({
-    queryKey: ['model-square-vendors'],
+    queryKey: ['vendors', 'model-square'],
     queryFn: async () =>
       requireServerSuccess(await getModelSquareVendors()).data,
   })
@@ -66,7 +70,25 @@ export function ModelSquareSettingsSection(props: { vendorOrder: string[] }) {
     () => sortPricingVendors(vendors, vendorOrder),
     [vendors, vendorOrder]
   )
+  const names = orderedVendors.map((vendor) => vendor.name)
   const isSaving = updateOption.isPending || isSubmitting
+
+  const reorderVendors = (next: string[]) => {
+    if (isSaving) return
+    const knownNames = new Set(next)
+    const unavailable = vendorOrder.filter((name) => !knownNames.has(name))
+    form.setValue('vendorOrder', [...next, ...unavailable], {
+      shouldDirty: true,
+    })
+  }
+
+  const moveVendor = (index: number, direction: 'up' | 'down') => {
+    const target = index + (direction === 'up' ? -1 : 1)
+    if (target < 0 || target >= names.length) return
+    const next = [...names]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    reorderVendors(next)
+  }
 
   return (
     <SettingsSection title={t('Model Square')}>
@@ -88,39 +110,51 @@ export function ModelSquareSettingsSection(props: { vendorOrder: string[] }) {
           onRetry={() => void refetch()}
         />
       ) : orderedVendors.length > 0 ? (
-        <ol aria-label={t('Supplier display order')} className='divide-y'>
+        <Reorder.Group
+          as='ol'
+          axis='y'
+          values={names}
+          onReorder={reorderVendors}
+          aria-label={t('Supplier display order')}
+          className='flex flex-col gap-2'
+        >
           {orderedVendors.map((vendor, index) => (
-            <li
+            <AutoGroupOrderItem
               key={vendor.id}
-              className='flex min-w-0 items-center justify-between gap-3 py-2'
+              group={vendor.name}
+              index={index}
+              count={orderedVendors.length}
+              disabled={isSaving}
+              onMove={moveVendor}
+              actions={
+                vendor.can_delete && (
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='sm'
+                    disabled={isSaving}
+                    aria-label={t('Delete {{name}}', { name: vendor.name })}
+                    onClick={() => setDeleteVendorID(vendor.id)}
+                  >
+                    {t('Delete')}
+                  </Button>
+                )
+              }
             >
-              <span className='min-w-0 text-sm wrap-break-word'>
-                {vendor.name}
-              </span>
-              <GroupOrderControls
-                group={vendor.name}
-                index={index}
-                count={orderedVendors.length}
-                disabled={isSaving}
-                onMove={(direction) => {
-                  const target = index + (direction === 'up' ? -1 : 1)
-                  if (target < 0 || target >= orderedVendors.length) return
-
-                  const next = orderedVendors.map((item) => item.name)
-                  ;[next[index], next[target]] = [next[target], next[index]]
-                  const unavailable = vendorOrder.filter(
-                    (name) => !next.includes(name)
-                  )
-                  form.setValue('vendorOrder', [...next, ...unavailable], {
-                    shouldDirty: true,
-                  })
-                }}
-              />
-            </li>
+              {vendor.can_delete && (
+                <Badge variant='secondary'>{t('Unused')}</Badge>
+              )}
+            </AutoGroupOrderItem>
           ))}
-        </ol>
+        </Reorder.Group>
       ) : (
         <p className='text-muted-foreground text-sm'>{t('No vendors found')}</p>
+      )}
+      {deleteVendorID !== null && (
+        <VendorOperationDialog
+          selection={{ action: 'delete', vendor_ids: [deleteVendorID] }}
+          onClose={() => setDeleteVendorID(null)}
+        />
       )}
     </SettingsSection>
   )
