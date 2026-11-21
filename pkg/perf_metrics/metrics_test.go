@@ -113,7 +113,7 @@ func TestHourlySuccessSeriesWeightsSmallerBuckets(t *testing.T) {
 }
 
 func TestRecentHistoryRejectsOversizedModelLists(t *testing.T) {
-	_, err := QuerySummaryAll(24, nil, make([]string, 51)...)
+	_, err := QuerySummaryAll(24, nil, false, make([]string, 51)...)
 	require.EqualError(t, err, "Invalid parameters")
 }
 
@@ -241,7 +241,7 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 			groups := []string{"a", "b"}
 
 			RecordRelayResult(context.Background(), &relaycommon.RelayInfo{OriginModelName: "test-model", UsingGroup: "b", StartTime: now}, types.InitOpenAIError("unknown", 400))
-			businessRejected, err := QuerySummaryAll(24, groups)
+			businessRejected, err := QuerySummaryAll(24, groups, false)
 			require.NoError(t, err)
 			require.NotNil(t, businessRejected.Summary)
 			assert.Equal(t, 100.0, businessRejected.Summary.SuccessRate)
@@ -259,7 +259,7 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 			assert.InDelta(t, 99.01, before.Series[0].SuccessRate, 0.01)
 			require.Len(t, before.Groups, 2)
 
-			summary, err := QuerySummaryAll(24, groups)
+			summary, err := QuerySummaryAll(24, groups, false)
 			require.NoError(t, err)
 			assert.Equal(t, before.Summary, summary.Summary)
 			require.Len(t, summary.Models, 1)
@@ -290,7 +290,7 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 			assert.Empty(t, empty.Series)
 
 			require.NoError(t, model.UpsertPerfMetric(&model.PerfMetric{ModelName: "second-model", Group: "a", BucketTs: hour, RequestCount: 1}))
-			combined, err := QuerySummaryAll(24, groups)
+			combined, err := QuerySummaryAll(24, groups, false)
 			require.NoError(t, err)
 			assert.Equal(t, 98.04, combined.Summary.SuccessRate)
 			assert.Equal(t, 99.01, combined.Models[0].SuccessRate)
@@ -322,9 +322,9 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 				hiddenFailure.add(Sample{})
 				hotBuckets.Store(bucketKey{model: "history-hidden", group: "inactive", bucketTs: hour}, hiddenFailure)
 
-				window, err := QuerySummaryAll(24, groups)
+				window, err := QuerySummaryAll(24, groups, false)
 				require.NoError(t, err)
-				history, err := QuerySummaryAll(24, groups, "history-model", "history-idle", "history-hidden", "history-hot", "missing")
+				history, err := QuerySummaryAll(24, groups, false, "history-model", "history-idle", "history-hidden", "history-hot", "missing")
 				require.NoError(t, err)
 				assert.Equal(t, window.WindowStart, history.WindowStart)
 				summaries := lo.KeyBy(history.Models, func(m ModelSummary) string { return m.ModelName })
@@ -346,11 +346,11 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 				assert.Empty(t, history.RecentSuccessSeries["history-hidden"])
 				assert.Empty(t, history.RecentSuccessSeries["missing"])
 
-				denied, err := QuerySummaryAll(24, []string{}, "history-model", "history-hidden")
+				denied, err := QuerySummaryAll(24, []string{}, false, "history-model", "history-hidden")
 				require.NoError(t, err)
 				assert.Empty(t, denied.RecentSuccessSeries)
 				flushCompletedBuckets()
-				persisted, err := QuerySummaryAll(24, groups, "history-model", "history-hot")
+				persisted, err := QuerySummaryAll(24, groups, false, "history-model", "history-hot")
 				require.NoError(t, err)
 				assert.Equal(t, points, persisted.RecentSuccessSeries["history-model"])
 				assert.Equal(t, history.RecentSuccessSeries["history-hot"], persisted.RecentSuccessSeries["history-hot"])
@@ -372,7 +372,7 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 				hotBoundary.add(Sample{Success: true})
 				hotBuckets.Store(bucketKey{model: "history-hot-boundary", group: "a", bucketTs: historyStart}, hotBoundary)
 
-				history, err := QuerySummaryAll(24, groups, "history-boundary", "history-expired", "history-hot-expired", "history-hot-boundary")
+				history, err := QuerySummaryAll(24, groups, false, "history-boundary", "history-expired", "history-hot-expired", "history-hot-boundary")
 				require.NoError(t, err)
 				assert.Equal(t, []SuccessRatePoint{{Ts: historyStart, SuccessRate: 100}}, history.RecentSuccessSeries["history-boundary"])
 				assert.Equal(t, []SuccessRatePoint{{Ts: historyStart, SuccessRate: 100}}, history.RecentSuccessSeries["history-hot-boundary"])
@@ -387,7 +387,7 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 				} {
 					require.NoError(t, model.UpsertPerfMetric(&row))
 				}
-				result, err := QueryCache(24, []string{"cache-samples"})
+				result, err := QueryCache(24, []string{"cache-samples"}, false)
 				require.NoError(t, err)
 				require.Len(t, result.Groups, 1)
 				assert.Equal(t, float64(90), result.Summary.CacheHitRate)
@@ -433,14 +433,14 @@ func TestPerformanceAggregationAndFlush(t *testing.T) {
 						require.NotNil(t, result.Summary)
 						assert.Equal(t, float64(50), result.Summary.SuccessRate)
 					case "summary":
-						result, err := QuerySummaryAll(24, []string{group}, "flush-model")
+						result, err := QuerySummaryAll(24, []string{group}, false, "flush-model")
 						require.NoError(t, err)
 						require.NotNil(t, result.Summary)
 						assert.Equal(t, float64(50), result.Summary.SuccessRate)
 						require.Len(t, result.RecentSuccessSeries["flush-model"], 1)
 						assert.Equal(t, float64(50), result.RecentSuccessSeries["flush-model"][0].SuccessRate)
 					default:
-						result, err := QueryCache(24, []string{group})
+						result, err := QueryCache(24, []string{group}, false)
 						require.NoError(t, err)
 						assert.Equal(t, float64(50), result.Summary.CacheHitRate)
 						require.Len(t, result.Groups, 1)

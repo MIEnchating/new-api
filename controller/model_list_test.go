@@ -192,6 +192,10 @@ func modelSquareData[T any](t *testing.T, handler gin.HandlerFunc, path, userGro
 	return response.Data
 }
 
+type legacyModelSquarePerfMetric model.PerfMetric
+
+func (legacyModelSquarePerfMetric) TableName() string { return "perf_metrics" }
+
 func TestModelSquareGroupVisibility(t *testing.T) {
 	originalGroups := setting.UserUsableGroups2JSONString()
 	originalRatios := ratio_setting.GroupRatio2JSONString()
@@ -272,15 +276,32 @@ func TestModelSquareGroupVisibility(t *testing.T) {
 				}
 			}
 
-			require.NoError(t, db.AutoMigrate(&model.PerfMetric{}))
 			ts := time.Now().Add(-time.Hour).Unix()
-			require.NoError(t, db.Create(&[]model.PerfMetric{
-				{ModelName: "shared", Group: "default", BucketTs: ts, RequestCount: 1, SuccessCount: 1},
+			if dialect.kind == "mysql" {
+				require.NoError(t, db.AutoMigrate(&legacyModelSquarePerfMetric{}))
+				require.NoError(t, db.Exec("ALTER TABLE perf_metrics MODIFY COLUMN `group` VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci").Error)
+				// The old unique index combines these groups. DEFAULT is
+				// absent from the active group registry during the upgrade.
+				for _, group := range []string{"default", "DEFAULT"} {
+					for _, name := range []string{"legacy-mixed", "shared"} {
+						require.NoError(t, db.Exec("INSERT INTO perf_metrics (model_name, `group`, bucket_ts, request_count) VALUES (?, ?, ?, 1) ON DUPLICATE KEY UPDATE request_count = request_count + 1", name, group, ts).Error)
+					}
+				}
+			}
+			require.NoError(t, db.AutoMigrate(&model.PerfMetric{}))
+			require.NoError(t, db.AutoMigrate(&model.PerfMetric{}))
+			for _, metric := range []model.PerfMetric{
+				{ModelName: "shared", Group: "default", BucketTs: ts, RequestCount: 1, SuccessCount: 1, TotalLatencyMs: 100},
 				{ModelName: "shared", Group: "internal", BucketTs: ts, RequestCount: 1},
 				{ModelName: "private-only", Group: "internal", BucketTs: ts, RequestCount: 1},
-			}).Error)
+				{ModelName: "shared", Group: "DEFAULT", BucketTs: ts, RequestCount: 1},
+				{ModelName: "case-variant-private", Group: "DEFAULT", BucketTs: ts, RequestCount: 1, SuccessCount: 1},
+				{ModelName: "shared", Group: "default", BucketTs: ts, RequestCount: 1, SuccessCount: 1, TotalLatencyMs: 300},
+			} {
+				require.NoError(t, model.UpsertPerfMetric(&metric))
+			}
 			const detailPath = "/api/perf-metrics?model=shared"
-			const summaryPath = "/api/perf-metrics/summary?recent_model=private-only"
+			const summaryPath = "/api/perf-metrics/summary?recent_model=private-only&recent_model=case-variant-private&recent_model=legacy-mixed"
 			detail := modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath, "")
 			require.Len(t, detail.Groups, 1)
 			assert.Equal(t, "default", detail.Groups[0].Group)
@@ -290,19 +311,45 @@ func TestModelSquareGroupVisibility(t *testing.T) {
 			require.Len(t, summary.Models, 1)
 			assert.Equal(t, "shared", summary.Models[0].ModelName)
 			assert.Equal(t, 100.0, summary.Models[0].SuccessRate)
+			assert.EqualValues(t, 200, summary.Models[0].AvgLatencyMs)
 			assert.NotContains(t, summary.RecentSuccessSeries, "private-only")
+			assert.NotContains(t, summary.RecentSuccessSeries, "case-variant-private")
+			assert.NotContains(t, summary.RecentSuccessSeries, "legacy-mixed")
 			allowed := modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath+"&group=internal", "internal")
 			require.Len(t, allowed.Groups, 1)
 			assert.Equal(t, "internal", allowed.Groups[0].Group)
+
+			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"internal":2,"DEFAULT":3}`))
+			summary = modelSquareData[perfmetrics.SummaryAllResult](t, GetPerfMetricsSummary, summaryPath, "")
+			require.Len(t, summary.Models, 1)
+			assert.Equal(t, "shared", summary.Models[0].ModelName)
+			assert.EqualValues(t, 200, summary.Models[0].AvgLatencyMs)
+			assert.NotContains(t, summary.RecentSuccessSeries, "case-variant-private")
+			if dialect.kind == "mysql" {
+				assert.Empty(t, modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, "/api/perf-metrics?model=legacy-mixed", "").Groups)
+				userCache, err := model.GetPerfMetricCacheBucketsAll(ts, ts, []string{"default"}, false)
+				require.NoError(t, err)
+				require.Len(t, userCache, 1)
+				assert.EqualValues(t, 2, userCache[0].RequestCount)
+				adminCache, err := model.GetPerfMetricCacheBucketsAll(ts, ts, []string{"default"}, true)
+				require.NoError(t, err)
+				require.Len(t, adminCache, 1)
+				assert.EqualValues(t, 6, adminCache[0].RequestCount)
+			}
 
 			require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{}`))
 			assert.Empty(t, modelSquareData[[]model.Pricing](t, GetPricing, "/api/pricing", ""))
 			assert.Empty(t, modelSquareData[perfmetrics.QueryResult](t, GetPerfMetrics, detailPath, "").Groups)
 			assert.Empty(t, modelSquareData[perfmetrics.SummaryAllResult](t, GetPerfMetricsSummary, summaryPath, "").Models)
 			dashboard := modelSquareData[perfmetrics.SummaryAllResult](t, GetDashboardPerfMetricsSummary, "/api/data/perf-metrics/summary", "")
-			assert.Len(t, dashboard.Models, 2)
 			require.NotNil(t, dashboard.Summary)
-			assert.Equal(t, 33.33, dashboard.Summary.SuccessRate)
+			if dialect.kind == "mysql" {
+				assert.Len(t, dashboard.Models, 4)
+				assert.Equal(t, 30.0, dashboard.Summary.SuccessRate)
+			} else {
+				assert.Len(t, dashboard.Models, 3)
+				assert.Equal(t, 50.0, dashboard.Summary.SuccessRate)
+			}
 		})
 	}
 }

@@ -32,14 +32,14 @@ func usablePerfMetricGroups(c *gin.Context) []string {
 }
 
 func GetPerfMetricsSummary(c *gin.Context) {
-	getPerfMetricsSummary(c, usablePerfMetricGroups(c))
+	getPerfMetricsSummary(c, usablePerfMetricGroups(c), false)
 }
 
 func GetDashboardPerfMetricsSummary(c *gin.Context) {
-	getPerfMetricsSummary(c, append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto"))
+	getPerfMetricsSummary(c, append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto"), true)
 }
 
-func getPerfMetricsSummary(c *gin.Context, groups []string) {
+func getPerfMetricsSummary(c *gin.Context, groups []string, includeLegacy bool) {
 	hours := 24
 	if rawHours := c.Query("hours"); rawHours != "" {
 		if parsed, err := strconv.Atoi(rawHours); err == nil {
@@ -52,7 +52,7 @@ func getPerfMetricsSummary(c *gin.Context, groups []string) {
 		common.ApiErrorStatus(c, http.StatusBadRequest, common.NewMessage("Invalid parameters"))
 		return
 	}
-	result, err := perfmetrics.QuerySummaryAll(hours, groups, recentModels...)
+	result, err := perfmetrics.QuerySummaryAll(hours, groups, includeLegacy, recentModels...)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -78,7 +78,8 @@ func GetCacheMetrics(c *gin.Context) {
 	availableGroups := getAvailableCacheGroups()
 	configuredGroups := perf_metrics_setting.GetCacheMonitorGroups()
 	displayGroups := resolveCacheMonitorGroups(availableGroups, configuredGroups)
-	result, err := perfmetrics.QueryCache(hours, displayGroups)
+	countsVisible := c.GetInt("role") >= common.RoleAdminUser
+	result, err := perfmetrics.QueryCache(hours, displayGroups, countsVisible)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"success": false,
@@ -86,7 +87,6 @@ func GetCacheMetrics(c *gin.Context) {
 		})
 		return
 	}
-	countsVisible := c.GetInt("role") >= common.RoleAdminUser
 	if !countsVisible {
 		hideCacheMetricCounts(&result)
 	}

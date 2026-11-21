@@ -21,6 +21,18 @@ func (d mysqlMigrationDialector) Migrator(db *gorm.DB) gorm.Migrator {
 
 type mysqlSchemaMigrator struct{ mysql.Migrator }
 
+func (m mysqlSchemaMigrator) AutoMigrate(values ...any) error {
+	if err := m.Migrator.AutoMigrate(values...); err != nil {
+		return err
+	}
+	for _, value := range values {
+		if _, ok := value.(*PerfMetric); ok {
+			return migrateMySQLPerfMetricGroups(m.DB)
+		}
+	}
+	return nil
+}
+
 func (m mysqlSchemaMigrator) MigrateColumn(value any, field *schema.Field, column gorm.ColumnType) error {
 	if !field.HasDefaultValue || !strings.EqualFold(column.DatabaseTypeName(), "decimal") {
 		return m.Migrator.MigrateColumn(value, field, column)

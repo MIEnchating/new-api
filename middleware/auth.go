@@ -528,11 +528,6 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 		parts := strings.Split(key, "-")
 		key = parts[0]
 
-		if strings.HasPrefix(key, model.ManxueTestTokenPrefix) {
-			common.ApiErrorStatus(c, http.StatusUnauthorized, model.ErrTokenInvalid)
-			c.Abort()
-			return
-		}
 		token, err := model.GetTokenByKey(key, false)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -541,6 +536,11 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 				common.SysLog(common.LogText("TokenAuthReadOnly GetTokenByKey database error: %s", err.Error()))
 				common.ApiErrorStatus(c, http.StatusInternalServerError, errors.New(common.TranslateMessage(c, i18n.MsgDatabaseError)))
 			}
+			c.Abort()
+			return
+		}
+		if token.IsManxueTestToken() {
+			common.ApiErrorStatus(c, http.StatusUnauthorized, model.ErrTokenInvalid)
 			c.Abort()
 			return
 		}
@@ -652,7 +652,7 @@ func TokenAuth() func(c *gin.Context) {
 			return
 		}
 
-		if strings.HasPrefix(key, model.ManxueTestTokenPrefix) {
+		if token.IsManxueTestToken() {
 			var request struct {
 				Model string `json:"model"`
 			}

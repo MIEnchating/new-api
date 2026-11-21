@@ -82,7 +82,7 @@ func TestPerfMetricCacheColumnsUpsertAndGroupAggregation(t *testing.T) {
 		require.NoError(t, UpsertPerfMetric(metric))
 	}
 
-	rows, err := GetPerfMetricCacheBucketsAll(bucketTs, bucketTs, []string{"default"})
+	rows, err := GetPerfMetricCacheBucketsAll(bucketTs, bucketTs, []string{"default"}, true)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	assert.Equal(t, "default", rows[0].Group)
@@ -108,7 +108,7 @@ func TestMonitorThresholdPersistenceAndGroupMetrics(t *testing.T) {
 				if dsn == "" {
 					t.Skip("NEWAPI_MONITOR_MYSQL_DSN is unset")
 				}
-				driver = mysql.Open(dsn)
+				driver = mysqlMigrationDialector{mysql.Dialector{Config: &mysql.Config{DSN: dsn}}}
 				dbType = common.DatabaseTypeMySQL
 			case "postgres":
 				dsn := os.Getenv("NEWAPI_MONITOR_POSTGRES_DSN")
@@ -171,7 +171,7 @@ func TestMonitorThresholdPersistenceAndGroupMetrics(t *testing.T) {
 				{ModelName: "b", Group: "primary", BucketTs: 3600, RequestCount: 60, SuccessCount: 52, TtftCount: 50, TtftSumMs: 250000, CacheRequests: 55, CacheHits: 40},
 				{ModelName: "a", Group: "hidden", BucketTs: 3600, RequestCount: 1},
 			}).Error)
-			buckets, err := GetPerfMetricCacheBucketsAll(3600, 3600, []string{"primary"})
+			buckets, err := GetPerfMetricCacheBucketsAll(3600, 3600, []string{"primary"}, true)
 			require.NoError(t, err)
 			require.Len(t, buckets, 1)
 			assert.EqualValues(t, 100, buckets[0].RequestCount)
@@ -180,7 +180,7 @@ func TestMonitorThresholdPersistenceAndGroupMetrics(t *testing.T) {
 			assert.EqualValues(t, 340000, buckets[0].TtftSumMs)
 			assert.EqualValues(t, 90, buckets[0].CacheRequests)
 			assert.EqualValues(t, 70, buckets[0].CacheHits)
-			empty, err := GetPerfMetricCacheBucketsAll(3600, 3600, []string{})
+			empty, err := GetPerfMetricCacheBucketsAll(3600, 3600, []string{}, true)
 			require.NoError(t, err)
 			assert.Empty(t, empty)
 			// A failed write must leave the active thresholds intact.

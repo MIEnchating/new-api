@@ -1006,7 +1006,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 				t.Fatal("expected a Manxue request")
 			}
 		}
-		expired := model.Token{UserId: 1, Key: model.ManxueTestTokenPrefix + "expired", Name: "expired fixture", Status: common.TokenStatusEnabled, Group: "default", ExpiredTime: common.GetTimestamp() - 1, ModelLimitsEnabled: true, ModelLimits: "gpt-4o-mini", UnlimitedQuota: true}
+		expired := model.Token{UserId: 1, Key: model.ManxueTestTokenPrefix + strings.Repeat("x", 48), Name: "expired fixture", Status: common.TokenStatusEnabled, Group: "default", ExpiredTime: common.GetTimestamp(), ModelLimitsEnabled: true, ModelLimits: "gpt-4o-mini", UnlimitedQuota: true}
 		require.NoError(t, expired.Insert())
 		assert.Equal(t, http.StatusUnauthorized, useKey(http.MethodPost, "/v1/responses", "sk-"+expired.Key, "gpt-4o-mini"))
 	})
@@ -1171,6 +1171,67 @@ func TestIntelligenceLegacyConfigurationPreservesQuestionsAndTargets(t *testing.
 	require.Len(t, config.Groups, 1)
 	assert.Equal(t, intelligenceGroup{Group: "vip", Model: "model", Models: []string{"model"}, Endpoint: "openai-response", Times: []string{"09:00"}}, config.Groups[0])
 	assert.Equal(t, []intelligenceQuestion{{Name: "Custom", Prompt: "custom prompt"}}, config.Questions)
+}
+
+func TestManxueTemporaryTokenAccess(t *testing.T) {
+	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			if dialect.env != "" && os.Getenv(dialect.env) == "" {
+				t.Skip("set " + dialect.env + " to run this database")
+			}
+			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
+			require.NoError(t, db.AutoMigrate(&model.Token{}))
+			user := model.User{Username: "benchmark-owner", Role: common.RoleRootUser, Status: common.UserStatusEnabled, Group: "default"}
+			require.NoError(t, db.Create(&user).Error)
+			regular := model.Token{UserId: user.Id, Name: "regular", Key: model.ManxueTestTokenPrefix + strings.Repeat("b", 38), UnlimitedQuota: true}
+			temporary := model.Token{UserId: user.Id, Name: "benchmark", Key: model.ManxueTestTokenPrefix + strings.Repeat("a", 48), ExpiredTime: time.Now().Add(time.Minute).Unix(), ModelLimitsEnabled: true, ModelLimits: "gpt-4o-mini", UnlimitedQuota: true}
+			require.NoError(t, db.Create(&regular).Error)
+			require.NoError(t, db.Create(&temporary).Error)
+
+			tokens, err := model.GetAllUserTokens(user.Id, 0, 10)
+			require.NoError(t, err)
+			require.Len(t, tokens, 1)
+			assert.Equal(t, regular.Id, tokens[0].Id)
+			count, err := model.CountUserTokens(user.Id)
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, count)
+			_, err = model.GetTokenByIds(temporary.Id, user.Id)
+			assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+			keys, err := model.GetTokenKeysByIds([]int{temporary.Id, regular.Id}, user.Id)
+			require.NoError(t, err)
+			require.Len(t, keys, 1)
+			assert.Equal(t, regular.Id, keys[0].Id)
+			_, err = model.BatchUpdateTokens([]int{temporary.Id}, user.Id, map[string]any{"expired_time": int64(-1)})
+			assert.Error(t, err)
+
+			router := gin.New()
+			router.Use(func(c *gin.Context) { defer common.CleanupBodyStorage(c); c.Next() })
+			accept := func(c *gin.Context) { c.Status(http.StatusNoContent) }
+			router.POST("/v1/responses", middleware.TokenAuth(), accept)
+			router.GET("/api/usage/token/", middleware.TokenAuthReadOnly(), accept)
+			for _, tc := range []struct {
+				method, path, credential, model string
+				status                          int
+			}{
+				{http.MethodPost, "/v1/responses", temporary.Key, "gpt-4o-mini", http.StatusNoContent},
+				{http.MethodPost, "/v1/responses", temporary.Key, "other-model", http.StatusForbidden},
+				{http.MethodPost, "/v1/responses", strings.ToUpper(temporary.Key), "gpt-4o-mini", http.StatusUnauthorized},
+				{http.MethodGet, "/api/usage/token/", temporary.Key, "", http.StatusUnauthorized},
+				{http.MethodGet, "/api/usage/token/", strings.ToUpper(temporary.Key), "", http.StatusUnauthorized},
+				{http.MethodGet, "/api/usage/token/", regular.Key, "", http.StatusNoContent},
+			} {
+				req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(fmt.Sprintf(`{"model":%q}`, tc.model)))
+				req.Header.Set("Content-Type", "application/json")
+				req.Header.Set("Authorization", "Bearer sk-"+tc.credential)
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, req)
+				assert.Equal(t, tc.status, response.Code, "%s %s", tc.method, tc.path)
+			}
+			require.NoError(t, db.Model(&temporary).Update("expired_time", -1).Error)
+			_, err = model.ValidateUserToken(temporary.Key)
+			assert.ErrorIs(t, err, model.ErrTokenInvalid)
+		})
+	}
 }
 
 func TestIntelligenceStreamOutput(t *testing.T) {

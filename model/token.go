@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/bytedance/gopkg/util/gopool"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	"gorm.io/gorm/logger"
 )
 
@@ -46,6 +47,24 @@ type Token struct {
 const TokenGroupRouteMaxCooldownSeconds = 31_536_000
 
 const ManxueTestTokenPrefix = "manxuetest"
+const manxueTestTokenSuffixLength = 48
+
+func (token *Token) IsManxueTestToken() bool {
+	return isManxueTestTokenKey(token.Key)
+}
+
+func isManxueTestTokenKey(key string) bool {
+	return len(key) == len(ManxueTestTokenPrefix)+manxueTestTokenSuffixLength && strings.HasPrefix(key, ManxueTestTokenPrefix)
+}
+
+// User-managed keys exclude credentials issued for external tests.
+func userManagedTokens(db *gorm.DB) *gorm.DB {
+	column := clause.Column{Name: "key"}
+	return db.Where(clause.Or(
+		clause.Eq{Column: column, Value: nil},
+		clause.Not(clause.Like{Column: column, Value: ManxueTestTokenPrefix + strings.Repeat("_", manxueTestTokenSuffixLength)}),
+	))
+}
 
 type TokenGroupRoute struct {
 	Group           string `json:"group"`
@@ -267,7 +286,7 @@ func (token *Token) GetIpLimits() []string {
 func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
 	var tokens []*Token
 	var err error
-	err = DB.Where("user_id = ?", userId).Order("id desc").Limit(num).Offset(startIdx).Find(&tokens).Error
+	err = userManagedTokens(DB).Where("user_id = ?", userId).Order("id desc").Limit(num).Offset(startIdx).Find(&tokens).Error
 	return tokens, err
 }
 
@@ -344,7 +363,7 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 		}
 	}
 
-	baseQuery := DB.Model(&Token{}).Where("user_id = ?", userId)
+	baseQuery := userManagedTokens(DB.Model(&Token{})).Where("user_id = ?", userId)
 
 	// 非空才加 LIKE 条件，空则跳过（不过滤该字段）
 	if keyword != "" {
@@ -394,7 +413,11 @@ func ValidateUserToken(key string) (token *Token, err error) {
 			token.Status != common.TokenStatusEnabled {
 			return token, ErrTokenInvalid
 		}
-		if token.ExpiredTime != -1 && token.ExpiredTime < common.GetTimestamp() {
+		now := common.GetTimestamp()
+		if token.IsManxueTestToken() && token.ExpiredTime <= now {
+			return token, ErrTokenInvalid
+		}
+		if token.ExpiredTime != -1 && token.ExpiredTime < now {
 			if !common.RedisEnabled {
 				token.Status = common.TokenStatusExpired
 				err := token.SelectUpdate()
@@ -433,7 +456,7 @@ func GetTokenByIds(id int, userId int) (*Token, error) {
 	}
 	token := Token{Id: id, UserId: userId}
 	var err error = nil
-	err = DB.First(&token, "id = ? and user_id = ?", id, userId).Error
+	err = userManagedTokens(DB).First(&token, "id = ? and user_id = ?", id, userId).Error
 	return &token, err
 }
 
@@ -448,7 +471,7 @@ func GetTokenById(id int) (*Token, error) {
 }
 
 func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
-	temporary := strings.HasPrefix(key, ManxueTestTokenPrefix)
+	temporary := isManxueTestTokenKey(key)
 	if !fromDB && !temporary && common.RedisEnabled {
 		// Try Redis first
 		token, err := cacheGetTokenByKey(key)
@@ -458,16 +481,20 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 		// Don't return error - fall through to DB
 	}
 	token = &Token{}
-	if temporary {
-		// Read the database on every request so revocation takes effect even with Redis enabled.
-		err = DB.Session(&gorm.Session{Logger: logger.Discard}).Where(map[string]any{"key": key}).First(token).Error
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrDatabase
+	// Suppress credential lookup SQL, including keys submitted with a different spelling.
+	if err = DB.Session(&gorm.Session{Logger: logger.Discard}).Where(map[string]any{"key": key}).First(token).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
 		}
-		return token, err
+		return nil, ErrDatabase
 	}
-	if err = DB.Where(commonKeyCol+" = ?", key).First(token).Error; err != nil {
-		return nil, err
+	if token.IsManxueTestToken() {
+		// Collation may match a variant. Authenticate only the exact issued key
+		// and query the database every time so revocation takes effect immediately.
+		if token.Key != key {
+			return nil, gorm.ErrRecordNotFound
+		}
+		return token, nil
 	}
 	if common.RedisEnabled {
 		// 用数据库快照初始化或修复元数据，Lua 保留正在使用的额度计数。
@@ -544,7 +571,7 @@ func DeleteTokenById(id int, userId int) (err error) {
 		return common.NewMessage("Token ID or user ID is empty")
 	}
 	token := Token{Id: id, UserId: userId}
-	err = DB.Where(token).First(&token).Error
+	err = userManagedTokens(DB).Where(token).First(&token).Error
 	if err != nil {
 		return err
 	}
@@ -614,7 +641,7 @@ func decreaseTokenQuota(id int, quota int) (err error) {
 // CountUserTokens returns total number of tokens for the given user, used for pagination
 func CountUserTokens(userId int) (int64, error) {
 	var total int64
-	err := DB.Model(&Token{}).Where("user_id = ?", userId).Count(&total).Error
+	err := userManagedTokens(DB.Model(&Token{})).Where("user_id = ?", userId).Count(&total).Error
 	return total, err
 }
 
@@ -628,7 +655,7 @@ func BatchUpdateTokens(ids []int, userID int, updates map[string]any) (int, erro
 	}
 	var tokens []Token
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		if err := lockForUpdate(tx).Where("user_id = ? AND id IN ?", userID, ids).Order("id").Find(&tokens).Error; err != nil {
+		if err := userManagedTokens(lockForUpdate(tx)).Where("user_id = ? AND id IN ?", userID, ids).Order("id").Find(&tokens).Error; err != nil {
 			return err
 		}
 		if len(tokens) != len(ids) {
@@ -679,7 +706,7 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 	tx := DB.Begin()
 
 	var tokens []Token
-	if err := tx.Where("user_id = ? AND id IN (?)", userId, ids).Find(&tokens).Error; err != nil {
+	if err := userManagedTokens(tx).Where("user_id = ? AND id IN (?)", userId, ids).Find(&tokens).Error; err != nil {
 		tx.Rollback()
 		return 0, err
 	}
@@ -687,7 +714,7 @@ func BatchDeleteTokens(ids []int, userId int) (int, error) {
 		common.SysLog(common.LogText("failed to invalidate token cache before batch delete: %s", err.Error()))
 	}
 
-	if err := tx.Where("user_id = ? AND id IN (?)", userId, ids).Delete(&Token{}).Error; err != nil {
+	if err := userManagedTokens(tx).Where("user_id = ? AND id IN (?)", userId, ids).Delete(&Token{}).Error; err != nil {
 		tx.Rollback()
 		return 0, err
 	}
@@ -703,13 +730,13 @@ func GetTokenKeysByTemplate(templateID string, userID int) ([]Token, error) {
 		return nil, common.NewMessage("Invalid parameters")
 	}
 	var tokens []Token
-	err := DB.Select("id", commonKeyCol).Where("user_id = ? AND routing_template_id = ?", userID, templateID).Order("id").Find(&tokens).Error
+	err := userManagedTokens(DB).Select("id", commonKeyCol).Where("user_id = ? AND routing_template_id = ?", userID, templateID).Order("id").Find(&tokens).Error
 	return tokens, err
 }
 
 func GetTokenKeysByIds(ids []int, userId int) ([]Token, error) {
 	var tokens []Token
-	err := DB.Select("id", commonKeyCol).
+	err := userManagedTokens(DB).Select("id", commonKeyCol).
 		Where("user_id = ? AND id IN (?)", userId, ids).
 		Find(&tokens).Error
 	return tokens, err

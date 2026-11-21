@@ -184,7 +184,7 @@ func Query(params QueryParams) (QueryResult, error) {
 		allowedGroups := allowedGroupSet(params.AllowedGroups)
 
 		merged := map[bucketKey]counters{}
-		rows, err := model.GetPerfMetrics(params.Model, params.Group, startTs, endTs)
+		rows, err := model.GetPerfMetrics(params.Model, params.Group, startTs, endTs, params.AllowedGroups)
 		if err != nil {
 			return QueryResult{}, err
 		}
@@ -241,7 +241,7 @@ func Query(params QueryParams) (QueryResult, error) {
 	}
 }
 
-func QuerySummaryAll(hours int, groups []string, recentModels ...string) (SummaryAllResult, error) {
+func QuerySummaryAll(hours int, groups []string, includeLegacy bool, recentModels ...string) (SummaryAllResult, error) {
 	for {
 		generation := metricsFlushGeneration()
 		if len(recentModels) > MaxRecentModels {
@@ -262,7 +262,7 @@ func QuerySummaryAll(hours int, groups []string, recentModels ...string) (Summar
 				continue
 			}
 			recentBuckets[name] = map[int64]counters{}
-			buckets, err := model.GetRecentPerfMetricSuccessBuckets(name, recentStartTs, endTs, groups, recentSuccessSampleLimit)
+			buckets, err := model.GetRecentPerfMetricSuccessBuckets(name, recentStartTs, endTs, groups, includeLegacy, recentSuccessSampleLimit)
 			if err != nil {
 				return SummaryAllResult{}, err
 			}
@@ -275,7 +275,7 @@ func QuerySummaryAll(hours int, groups []string, recentModels ...string) (Summar
 			}
 		}
 
-		rows, err := model.GetPerfMetricsSummaryBucketsAll(queryStartTs, endTs, groups)
+		rows, err := model.GetPerfMetricsSummaryBucketsAll(queryStartTs, endTs, groups, includeLegacy)
 		if err != nil {
 			return SummaryAllResult{}, err
 		}
@@ -382,7 +382,7 @@ func QuerySummaryAll(hours int, groups []string, recentModels ...string) (Summar
 	}
 }
 
-func QueryCache(hours int, groups []string) (CacheQueryResult, error) {
+func QueryCache(hours int, groups []string, includeLegacy bool) (CacheQueryResult, error) {
 	for {
 		generation := metricsFlushGeneration()
 		if hours <= 0 {
@@ -396,7 +396,7 @@ func QueryCache(hours int, groups []string) (CacheQueryResult, error) {
 		allowedGroups := allowedGroupSet(groups)
 		groupBuckets := map[string]map[int64]counters{}
 
-		rows, err := model.GetPerfMetricCacheBucketsAll(startTs, endTs, groups)
+		rows, err := model.GetPerfMetricCacheBucketsAll(startTs, endTs, groups, includeLegacy)
 		if err != nil {
 			return CacheQueryResult{}, err
 		}

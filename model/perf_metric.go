@@ -1,6 +1,9 @@
 package model
 
 import (
+	"fmt"
+
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -29,9 +32,34 @@ func (PerfMetric) TableName() string {
 	return "perf_metrics"
 }
 
+type mysqlPerfMetric struct {
+	PerfMetric
+	GroupIdentity []byte `gorm:"column:group_identity"`
+}
+
+func migrateMySQLPerfMetricGroups(db *gorm.DB) error {
+	if db.Migrator().HasColumn(&PerfMetric{}, "group_identity") {
+		return nil
+	}
+	// Old buckets keep the empty identity. Install the new column and
+	// replace the unique index in one DDL statement before writers use it.
+	err := db.Exec("ALTER TABLE perf_metrics ADD COLUMN group_identity VARBINARY(257) NOT NULL DEFAULT '', " +
+		"DROP INDEX idx_perf_model_group_bucket, " +
+		"ADD UNIQUE INDEX idx_perf_model_group_bucket (model_name, `group`, bucket_ts, group_identity)").Error
+	if err != nil {
+		return fmt.Errorf("migrate MySQL performance metric group identities: %w", err)
+	}
+	return nil
+}
+
 func UpsertPerfMetric(metric *PerfMetric) error {
 	if metric == nil || metric.RequestCount == 0 {
 		return nil
+	}
+	var row any = metric
+	if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
+		// The leading byte distinguishes new samples even for an empty group.
+		row = &mysqlPerfMetric{PerfMetric: *metric, GroupIdentity: []byte(":" + metric.Group)}
 	}
 	return DB.Clauses(clause.OnConflict{
 		Columns: []clause.Column{
@@ -53,7 +81,7 @@ func UpsertPerfMetric(metric *PerfMetric) error {
 			"cache_token_read_tokens": gorm.Expr("perf_metrics.cache_token_read_tokens + ?", metric.CacheTokenReadTokens),
 			"cache_token_denominator": gorm.Expr("perf_metrics.cache_token_denominator + ?", metric.CacheTokenDenominator),
 		}),
-	}).Create(metric).Error
+	}).Create(row).Error
 }
 
 type PerfMetricCacheBucket struct {
@@ -73,34 +101,56 @@ type PerfMetricCacheBucket struct {
 	CacheTokenDenominator int64  `json:"cache_token_denominator"`
 }
 
-func GetPerfMetricCacheBucketsAll(startTs int64, endTs int64, groups []string) ([]PerfMetricCacheBucket, error) {
+func GetPerfMetricCacheBucketsAll(startTs int64, endTs int64, groups []string, includeLegacy bool) ([]PerfMetricCacheBucket, error) {
 	var buckets []PerfMetricCacheBucket
+	groupColumn := perfMetricExactGroupColumn()
 	query := DB.Model(&PerfMetric{}).
-		Select(commonGroupCol+" as group_name, bucket_ts, SUM(success_count) as success_count, SUM(ttft_sum_ms) as ttft_sum_ms, SUM(ttft_count) as ttft_count, SUM(request_count) as request_count, SUM(output_tokens) as output_tokens, SUM(generation_ms) as generation_ms, SUM(cache_requests) as cache_requests, SUM(CASE WHEN cache_token_denominator > 0 THEN cache_requests ELSE 0 END) as cache_token_requests, SUM(cache_hits) as cache_hits, SUM(cached_tokens) as cached_tokens, SUM(cache_token_read_tokens) as cache_token_read_tokens, SUM(cache_token_denominator) as cache_token_denominator").
+		Select(groupColumn+" as group_name, bucket_ts, SUM(success_count) as success_count, SUM(ttft_sum_ms) as ttft_sum_ms, SUM(ttft_count) as ttft_count, SUM(request_count) as request_count, SUM(output_tokens) as output_tokens, SUM(generation_ms) as generation_ms, SUM(cache_requests) as cache_requests, SUM(CASE WHEN cache_token_denominator > 0 THEN cache_requests ELSE 0 END) as cache_token_requests, SUM(cache_hits) as cache_hits, SUM(cached_tokens) as cached_tokens, SUM(cache_token_read_tokens) as cache_token_read_tokens, SUM(cache_token_denominator) as cache_token_denominator").
 		Where("bucket_ts >= ? AND bucket_ts <= ?", startTs, endTs)
-	if groups != nil {
-		if len(groups) == 0 {
-			return buckets, nil
-		}
-		query = query.Where(commonGroupCol+" IN ?", groups)
-	}
+	query = scopePerfMetricGroups(query, groups, includeLegacy)
 	err := query.
-		Group(commonGroupCol + ", bucket_ts").
+		Group(groupColumn + ", bucket_ts").
 		Having("SUM(request_count) > 0").
 		Order("bucket_ts ASC").
 		Find(&buckets).Error
 	return buckets, err
 }
 
-func GetPerfMetrics(modelName string, group string, startTs int64, endTs int64) ([]PerfMetric, error) {
+func GetPerfMetrics(modelName string, group string, startTs int64, endTs int64, allowedGroups []string) ([]PerfMetric, error) {
 	var metrics []PerfMetric
 	query := DB.Model(&PerfMetric{}).
 		Where("model_name = ? AND bucket_ts >= ? AND bucket_ts <= ?", modelName, startTs, endTs)
 	if group != "" {
-		query = query.Where(commonGroupCol+" = ?", group)
+		query = query.Where(perfMetricExactGroupColumn()+" = ?", group)
 	}
+	query = scopePerfMetricGroups(query, allowedGroups, allowedGroups == nil)
 	err := query.Order("bucket_ts ASC").Find(&metrics).Error
 	return metrics, err
+}
+
+func perfMetricExactGroupColumn() string {
+	// Match the case-sensitive group permission check used for in-memory metrics.
+	if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
+		return "CAST(CONVERT(" + commonGroupCol + " USING utf8mb4) AS BINARY)"
+	}
+	return commonGroupCol
+}
+
+func scopePerfMetricGroups(query *gorm.DB, groups []string, includeLegacy bool) *gorm.DB {
+	if common.UsingMainDatabase(common.DatabaseTypeMySQL) && !includeLegacy {
+		if groups == nil {
+			return query.Where("group_identity <> ''")
+		}
+		identities := make([][]byte, 0, len(groups))
+		for _, group := range groups {
+			identities = append(identities, []byte(":"+group))
+		}
+		return query.Where("group_identity IN ?", identities)
+	}
+	if groups != nil {
+		query = query.Where(perfMetricExactGroupColumn()+" IN ?", groups)
+	}
+	return query
 }
 
 type PerfMetricSummary struct {
@@ -122,17 +172,12 @@ type PerfMetricSummaryBucket struct {
 	GenerationMs   int64  `json:"generation_ms"`
 }
 
-func GetPerfMetricsSummaryBucketsAll(startTs int64, endTs int64, groups []string) ([]PerfMetricSummaryBucket, error) {
+func GetPerfMetricsSummaryBucketsAll(startTs int64, endTs int64, groups []string, includeLegacy bool) ([]PerfMetricSummaryBucket, error) {
 	var summaries []PerfMetricSummaryBucket
 	query := DB.Model(&PerfMetric{}).
 		Select("model_name, bucket_ts, SUM(request_count) as request_count, SUM(success_count) as success_count, SUM(total_latency_ms) as total_latency_ms, SUM(output_tokens) as output_tokens, SUM(generation_ms) as generation_ms").
 		Where("bucket_ts >= ? AND bucket_ts <= ?", startTs, endTs)
-	if groups != nil {
-		if len(groups) == 0 {
-			return summaries, nil
-		}
-		query = query.Where(commonGroupCol+" IN ?", groups)
-	}
+	query = scopePerfMetricGroups(query, groups, includeLegacy)
 	err := query.
 		Group("model_name, bucket_ts").
 		Having("SUM(request_count) > 0").
@@ -143,7 +188,7 @@ func GetPerfMetricsSummaryBucketsAll(startTs int64, endTs int64, groups []string
 
 // GetRecentPerfMetricSuccessBuckets reads the latest nonempty hours within
 // the supplied history window, independently of the summary's reporting window.
-func GetRecentPerfMetricSuccessBuckets(modelName string, startTs int64, endTs int64, groups []string, limit int) ([]PerfMetricSummaryBucket, error) {
+func GetRecentPerfMetricSuccessBuckets(modelName string, startTs int64, endTs int64, groups []string, includeLegacy bool, limit int) ([]PerfMetricSummaryBucket, error) {
 	if modelName == "" || limit <= 0 || (groups != nil && len(groups) == 0) {
 		return nil, nil
 	}
@@ -151,9 +196,7 @@ func GetRecentPerfMetricSuccessBuckets(modelName string, startTs int64, endTs in
 	query := DB.Model(&PerfMetric{}).
 		Select("model_name, "+hourBucket+" AS bucket_ts, SUM(request_count) AS request_count, SUM(success_count) AS success_count").
 		Where("model_name = ? AND bucket_ts >= ? AND bucket_ts <= ? AND request_count > 0", modelName, startTs, endTs)
-	if groups != nil {
-		query = query.Where(commonGroupCol+" IN ?", groups)
-	}
+	query = scopePerfMetricGroups(query, groups, includeLegacy)
 	var buckets []PerfMetricSummaryBucket
 	err := query.Group("model_name, " + hourBucket).
 		Order("bucket_ts DESC").Limit(limit).Find(&buckets).Error
