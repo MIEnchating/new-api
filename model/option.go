@@ -142,6 +142,7 @@ func InitOptionMap() {
 	common.OptionMap["Chats"] = setting.Chats2JsonString()
 	common.OptionMap["AutoGroups"] = setting.AutoGroups2JsonString()
 	common.OptionMap["GroupOrder"] = setting.GroupOrder2JSONString()
+	common.OptionMap[ModelSquareVendorOrderOption] = defaultModelSquareVendorOrder
 	common.OptionMap["GroupDescriptions"] = setting.GroupDescriptions2JSONString()
 	common.OptionMap[setting.GroupCategoriesOptionKey] = "{}"
 	common.OptionMap["DefaultUseAutoGroup"] = strconv.FormatBool(setting.DefaultUseAutoGroup)
@@ -260,6 +261,10 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == ModelSquareVendorOrderOption {
+		_, err := parseModelSquareVendorOrder(value)
+		return err
+	}
 	if key == setting.GroupCategoriesOptionKey {
 		_, err := setting.ParseGroupCategories(value)
 		return err
@@ -338,7 +343,7 @@ func validateOptionValue(key string, value string) error {
 }
 
 func UpdateOption(key string, value string) error {
-	if key == "GroupRatio" || key == "group_ratio_setting.group_ratio" || key == setting.GroupCategoriesOptionKey {
+	if key == "GroupRatio" || key == "group_ratio_setting.group_ratio" || key == setting.GroupCategoriesOptionKey || key == ModelSquareVendorOrderOption {
 		return UpdateOptionsBulk(map[string]string{key: value})
 	}
 	if IsRequestPolicyOption(key) {

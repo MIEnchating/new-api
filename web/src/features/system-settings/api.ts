@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import type { PricingVendor } from '@/features/pricing/types'
 
 import type {
   ConfirmPaymentComplianceResponse,
@@ -38,6 +39,13 @@ import type {
 
 export async function getSystemOptions() {
   const res = await api.get<SystemOptionsResponse>('/api/option/')
+  return res.data
+}
+
+export async function getModelSquareVendors() {
+  const res = await api.get<{ success: boolean; data: PricingVendor[] }>(
+    '/api/option/model_square/vendors'
+  )
   return res.data
 }
 

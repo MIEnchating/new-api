@@ -35,6 +35,7 @@ import {
 import { EXCLUDED_GROUPS, VIEW_MODES } from './constants'
 import { useFilters } from './hooks/use-filters'
 import { usePricingData } from './hooks/use-pricing-data'
+import { sortPricingVendors } from './lib/filters'
 
 export function Pricing() {
   const { t } = useTranslation()
@@ -45,6 +46,7 @@ export function Pricing() {
   const {
     models,
     vendors,
+    vendorOrder,
     groupRatio,
     usableGroup,
     endpointMap,
@@ -53,6 +55,11 @@ export function Pricing() {
     priceRate,
     usdExchangeRate,
   } = usePricingData()
+
+  const orderedVendors = useMemo(
+    () => sortPricingVendors(vendors, vendorOrder),
+    [vendors, vendorOrder]
+  )
 
   const {
     searchInput,
@@ -81,7 +88,7 @@ export function Pricing() {
     availableTags,
     clearFilters,
     clearSearch,
-  } = useFilters(models || [])
+  } = useFilters(models, orderedVendors)
 
   const handleModelClick = useCallback((modelName: string) => {
     setSelectedModelName(modelName)
@@ -221,7 +228,7 @@ export function Pricing() {
               onVendorChange={setVendorFilter}
               onGroupChange={setGroupFilter}
               onTagChange={setTagFilter}
-              vendors={vendors || []}
+              vendors={orderedVendors}
               groups={availableGroups}
               groupRatios={groupRatio}
               tags={availableTags}
@@ -253,7 +260,7 @@ export function Pricing() {
                 onVendorChange={setVendorFilter}
                 onGroupChange={setGroupFilter}
                 onTagChange={setTagFilter}
-                vendors={vendors || []}
+                vendors={orderedVendors}
                 groups={availableGroups}
                 groupRatios={groupRatio}
                 tags={availableTags}

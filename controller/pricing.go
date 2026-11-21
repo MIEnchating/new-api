@@ -79,12 +79,21 @@ func GetPricing(c *gin.Context) {
 		"success":            true,
 		"data":               pricing,
 		"vendors":            model.GetVendors(),
+		"vendor_order":       model.GetModelSquareVendorOrder(),
 		"group_ratio":        groupRatio,
 		"usable_group":       orderedUsableGroup,
 		"supported_endpoint": model.GetSupportedEndpointMap(),
 		"auto_groups":        service.GetUserAutoGroup(group),
 		"pricing_version":    "a42d372ccf0b5dd13ecf71203521f9d2",
 	})
+}
+
+func GetModelSquareVendors(c *gin.Context) {
+	vendors := model.GetVendors()
+	if vendors == nil {
+		vendors = []model.PricingVendor{}
+	}
+	common.ApiSuccess(c, vendors)
 }
 
 func ResetModelRatio(c *gin.Context) {

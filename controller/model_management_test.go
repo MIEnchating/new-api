@@ -1122,6 +1122,61 @@ func TestMetadataSyncLocaleAndEndpointValidation(t *testing.T) {
 	}
 }
 
+func TestModelSquareVendorOrderDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			if dialect.env != "" && os.Getenv(dialect.env) == "" {
+				t.Skip("set " + dialect.env)
+			}
+			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
+			require.NoError(t, db.AutoMigrate(&model.SystemTask{}))
+			model.InvalidatePricingCache()
+			t.Cleanup(model.InvalidatePricingCache)
+			require.NoError(t, db.Create(&model.Vendor{Name: "Doubao"}).Error)
+			var vendors struct {
+				Success bool
+				Data    []model.PricingVendor
+			}
+			modelManagementRequest(t, GetModelSquareVendors, http.MethodGet, "/api/option/model_square/vendors", nil, &vendors)
+			require.True(t, vendors.Success)
+			require.Len(t, vendors.Data, 1)
+			assert.Equal(t, "Doubao", vendors.Data[0].Name)
+
+			readPublicOrder := func() []string {
+				var response struct {
+					Success     bool
+					VendorOrder []string `json:"vendor_order"`
+				}
+				modelManagementRequest(t, GetPricing, http.MethodGet, "/api/pricing", nil, &response)
+				require.True(t, response.Success)
+				return response.VendorOrder
+			}
+			assert.Equal(t, []string{"OpenAI", "Anthropic"}, readPublicOrder())
+
+			const key = model.ModelSquareVendorOrderOption
+			for _, value := range []string{`["Doubao","OpenAI"]`, `[]`} {
+				var saved struct{ Success bool }
+				modelManagementRequest(t, UpdateOption, http.MethodPut, "/api/option/", OptionUpdateRequest{Key: key, Value: value}, &saved)
+				require.True(t, saved.Success)
+				var want []string
+				require.NoError(t, common.UnmarshalJsonStr(value, &want))
+				assert.Equal(t, want, readPublicOrder())
+				var option model.Option
+				require.NoError(t, db.Where(&model.Option{Key: key}).First(&option).Error)
+				assert.Equal(t, value, option.Value)
+				var rejected struct{ Success bool }
+				modelManagementRequest(t, UpdateOption, http.MethodPut, "/api/option/", OptionUpdateRequest{Key: key, Value: `["Doubao"," Doubao "]`}, &rejected)
+				assert.False(t, rejected.Success)
+				common.OptionMapRWMutex.Lock()
+				delete(common.OptionMap, key)
+				common.OptionMapRWMutex.Unlock()
+				require.NoError(t, model.LoadOptionsFromDatabase())
+				assert.Equal(t, want, readPublicOrder())
+			}
+		})
+	}
+}
+
 func TestVendorManagementDatabaseMatrix(t *testing.T) {
 	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
 		t.Run(dialect.kind, func(t *testing.T) {

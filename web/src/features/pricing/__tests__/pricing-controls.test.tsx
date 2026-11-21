@@ -368,16 +368,21 @@ describe('pricing controls', () => {
     )
   })
 
-  it('selects price sorting from the shared dropdown', async () => {
-    const props = toolbarProps()
-    const user = userEvent.setup()
-    render(<PricingToolbar {...props} />)
-    await user.click(screen.getByRole('button', { name: 'Name' }))
-    await user.click(
-      screen.getByRole('menuitem', { name: 'Input Price: Low to High' })
-    )
-    expect(props.onSortChange).toHaveBeenCalledWith('input-price-low')
-  })
+  it.each([
+    ['Vendor', 'Name', 'name'],
+    ['Name', 'Vendor', 'vendor'],
+    ['Vendor', 'Input Price: Low to High', 'input-price-low'],
+  ])(
+    'switches from %s to %s in the shared dropdown',
+    async (current, label, value) => {
+      const props = toolbarProps()
+      const user = userEvent.setup()
+      render(<PricingToolbar {...props} sortBy={current.toLowerCase()} />)
+      await user.click(screen.getByRole('button', { name: current }))
+      await user.click(screen.getByRole('menuitem', { name: label }))
+      expect(props.onSortChange).toHaveBeenCalledWith(value)
+    }
+  )
 
   it('opens mobile filters from the left, selects a group, and restores focus on close', async () => {
     const props = toolbarProps()

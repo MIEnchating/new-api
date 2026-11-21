@@ -276,6 +276,7 @@ func SetApiRouter(router *gin.Engine) {
 			optionRoute.POST("/group", controller.UpdateGroupSettings)
 			optionRoute.PUT("/passkey/domains", controller.UpdatePasskeyDomains)
 			optionRoute.GET("/model_pricing", controller.GetModelPricingConfig)
+			optionRoute.GET("/model_square/vendors", controller.GetModelSquareVendors)
 			optionRoute.GET("/model_pricing/issues", controller.GetModelPricingIssues)
 			optionRoute.PATCH("/model_pricing", controller.UpdateModelPricingConfig)
 			optionRoute.POST("/model_pricing/convert", controller.PreviewModelPricingConversion)

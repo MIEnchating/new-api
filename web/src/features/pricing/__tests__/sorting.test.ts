@@ -19,7 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { describe, expect, test } from 'vitest'
 
 import { SORT_OPTIONS } from '../constants'
-import { filterAndSortModels } from '../lib/filters'
+import { filterAndSortModels, sortPricingVendors } from '../lib/filters'
 import type { PricingModel } from '../types'
 
 function pricingModel(
@@ -36,6 +36,58 @@ function pricingModel(
     ...overrides,
   }
 }
+
+const catalogVendors = [
+  { id: 1, name: 'DeepSeek' },
+  { id: 2, name: 'Anthropic' },
+  { id: 3, name: 'Alibaba' },
+  { id: 4, name: 'OpenAI' },
+]
+
+test('lists preferred vendors first and sorts remaining vendors by name', () => {
+  const order = ['DeepSeek', 'Missing', 'OpenAI']
+  const expected = ['DeepSeek', 'OpenAI', 'Alibaba', 'Anthropic']
+  expect(sortPricingVendors(catalogVendors, order).map((v) => v.name)).toEqual(
+    expected
+  )
+  expect(
+    sortPricingVendors([...catalogVendors].reverse(), order).map((v) => v.name)
+  ).toEqual(expected)
+})
+
+test.each([
+  [
+    'vendor',
+    ['b-openai', 'z-openai', 'a-anthropic', 'c-alibaba', '0-unassigned'],
+  ],
+  [
+    'name',
+    ['0-unassigned', 'a-anthropic', 'b-openai', 'c-alibaba', 'z-openai'],
+  ],
+])('sorts the catalog by %s', (sortBy, expected) => {
+  const catalogModels = [
+    pricingModel('0-unassigned', {}),
+    pricingModel('z-openai', { vendor_name: 'OpenAI' }),
+    pricingModel('a-anthropic', { vendor_name: 'Anthropic' }),
+    pricingModel('b-openai', { vendor_name: 'OpenAI' }),
+    pricingModel('c-alibaba', { vendor_name: 'Alibaba' }),
+  ]
+
+  const sorted = filterAndSortModels(
+    catalogModels,
+    {
+      search: '',
+      vendor: 'all',
+      group: 'all',
+      quotaType: 'all',
+      endpointType: 'all',
+      tag: 'all',
+      sortBy,
+    },
+    sortPricingVendors(catalogVendors, ['OpenAI', 'Anthropic'])
+  )
+  expect(sorted.map((model) => model.model_name)).toEqual(expected)
+})
 
 const models = [
   pricingModel('legacy-ratio', { model_ratio: 1, completion_ratio: 4 }),

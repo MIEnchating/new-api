@@ -24,6 +24,8 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 
 import { getPricing } from '../api'
 
+const EMPTY_VENDOR_ORDER: string[] = []
+
 export function usePricingData(enabled = true) {
   const { status } = useStatus()
 
@@ -67,6 +69,7 @@ export function usePricingData(enabled = true) {
   return {
     models,
     vendors: data?.vendors ?? [],
+    vendorOrder: data?.vendor_order ?? EMPTY_VENDOR_ORDER,
     groupRatio: data?.group_ratio ?? {},
     usableGroup: data?.usable_group ?? {},
     endpointMap: data?.supported_endpoint ?? {},

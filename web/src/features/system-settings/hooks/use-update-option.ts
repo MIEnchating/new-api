@@ -116,6 +116,10 @@ export function useUpdateOption() {
         queryClient.invalidateQueries({ queryKey: ['custom-menu-pages'] })
       }
 
+      if (variables.key === 'ModelSquareVendorOrder') {
+        queryClient.invalidateQueries({ queryKey: ['pricing'] })
+      }
+
       // If updating frontend-display-related config, also refresh status
       if (shouldRefreshStatusForOption(variables.key)) {
         queryClient.invalidateQueries({ queryKey: ['status'] })

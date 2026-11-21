@@ -25,7 +25,7 @@ import {
   type QuotaTypeOption,
   type SortOption,
 } from '../constants'
-import type { PricingModel } from '../types'
+import type { PricingModel, PricingVendor } from '../types'
 import { compileBillingExpression } from './billing-expression/parser'
 import { visitExpression } from './billing-expression/types'
 import {
@@ -183,10 +183,23 @@ function getSortPrice(
   return calculateTokenPrice(model, kind, 1)
 }
 
-/**
- * Sort models by specified option
- */
-function sortModels(models: PricingModel[], sortBy: string): PricingModel[] {
+export function sortPricingVendors(
+  vendors: readonly PricingVendor[],
+  order: readonly string[]
+): PricingVendor[] {
+  const priority = new Map(order.map((name, index) => [name, index]))
+  return [...vendors].sort((a, b) => {
+    const rankA = priority.get(a.name) ?? order.length
+    const rankB = priority.get(b.name) ?? order.length
+    return rankA - rankB || a.name.localeCompare(b.name) || a.id - b.id
+  })
+}
+
+function sortModels(
+  models: PricingModel[],
+  sortBy: string,
+  orderedVendors: readonly PricingVendor[]
+): PricingModel[] {
   const sorted = [...models]
 
   const priceSort = PRICE_SORTS[sortBy as SortOption]
@@ -207,12 +220,21 @@ function sortModels(models: PricingModel[], sortBy: string): PricingModel[] {
     return sorted
   }
 
-  switch (sortBy) {
-    case SORT_OPTIONS.NAME:
-      sorted.sort((a, b) =>
-        (a.model_name || '').localeCompare(b.model_name || '')
-      )
-      break
+  if (sortBy === SORT_OPTIONS.VENDOR || sortBy === SORT_OPTIONS.NAME) {
+    const vendorRanks =
+      sortBy === SORT_OPTIONS.VENDOR
+        ? new Map(orderedVendors.map((vendor, index) => [vendor.name, index]))
+        : undefined
+    sorted.sort((a, b) => {
+      if (vendorRanks) {
+        const rankA =
+          vendorRanks.get(a.vendor_name ?? '') ?? orderedVendors.length
+        const rankB =
+          vendorRanks.get(b.vendor_name ?? '') ?? orderedVendors.length
+        if (rankA !== rankB) return rankA - rankB
+      }
+      return (a.model_name || '').localeCompare(b.model_name || '')
+    })
   }
 
   return sorted
@@ -231,7 +253,8 @@ export function filterAndSortModels(
     endpointType: string
     tag: string
     sortBy: string
-  }
+  },
+  orderedVendors: readonly PricingVendor[] = []
 ): PricingModel[] {
   let result = filterBySearch(models, filters.search)
   result = filterByVendor(result, filters.vendor)
@@ -239,7 +262,7 @@ export function filterAndSortModels(
   result = filterByQuotaType(result, filters.quotaType)
   result = filterByEndpointType(result, filters.endpointType)
   result = filterByTag(result, filters.tag)
-  result = sortModels(result, filters.sortBy)
+  result = sortModels(result, filters.sortBy, orderedVendors)
 
   return result
 }
