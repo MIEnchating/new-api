@@ -259,9 +259,26 @@ it('saves edited questions and scheduling settings before allowing a manual run'
     history: [],
   }
   vi.spyOn(api, 'get').mockResolvedValue({ data: { success: true, data } })
-  const put = vi.spyOn(api, 'put').mockImplementation(async (_url, config) => ({
-    data: { success: true, data: config },
-  }))
+  const put = vi.spyOn(api, 'put').mockImplementation(async (_url, body) => {
+    const config = intelligenceConfigSchema.parse(body)
+    data.config = {
+      questions: config.questions,
+      groups: config.groups.map((group) => ({
+        group: group.group,
+        models: group.models?.length
+          ? group.models
+          : group.model
+            ? [group.model]
+            : [],
+        endpoint: group.endpoint,
+        question_indexes: group.question_indexes,
+        reasoning_effort: group.reasoning_effort,
+        enabled: group.enabled,
+        times: group.times,
+      })),
+    }
+    return { data: { success: true, data: data.config } }
+  })
   const post = vi
     .spyOn(api, 'post')
     .mockResolvedValue({ data: { success: true, data: { task_id: 'queued' } } })
@@ -338,6 +355,7 @@ it('saves edited questions and scheduling settings before allowing a manual run'
   await waitFor(() =>
     expect(screen.getByRole('button', { name: 'Run all groups' })).toBeEnabled()
   )
+  expect(screen.getByRole('button', { name: 'Run this group' })).toBeEnabled()
   await user.click(screen.getByRole('button', { name: 'Run all groups' }))
   await waitFor(() =>
     expect(post).toHaveBeenCalledWith(

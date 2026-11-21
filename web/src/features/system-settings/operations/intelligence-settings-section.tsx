@@ -94,6 +94,27 @@ export function IntelligenceSettingsSection() {
   return <IntelligenceSettings data={query.data} />
 }
 
+function intelligenceFormValues(
+  config: IntelligenceConfig
+): IntelligenceConfig {
+  const allQuestionIndexes = config.questions.map((_, index) => index)
+  return {
+    ...config,
+    groups: config.groups.map((group) => ({
+      ...group,
+      mode: group.mode ?? 'local',
+      benchmark: group.benchmark ?? 'candy',
+      models: group.models?.length
+        ? group.models
+        : group.model
+          ? [group.model]
+          : [],
+      reasoning_effort: group.reasoning_effort || 'low',
+      question_indexes: group.question_indexes ?? [...allQuestionIndexes],
+    })),
+  }
+}
+
 export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
   const { t } = useTranslation()
   const [activeTab, setActiveTab] = useState<
@@ -123,20 +144,7 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
   ).map((value) => ({ value, label: value }))
   const form = useForm<IntelligenceConfig>({
     resolver: zodResolver(intelligenceConfigSchema),
-    defaultValues: {
-      ...props.data.config,
-      groups: props.data.config.groups.map((group) => ({
-        ...group,
-        models: group.models?.length
-          ? group.models
-          : group.model
-            ? [group.model]
-            : [],
-        question_indexes:
-          group.question_indexes ??
-          props.data.config.questions.map((_, index) => index),
-      })),
-    },
+    defaultValues: intelligenceFormValues(props.data.config),
   })
   const questions = useFieldArray({ control: form.control, name: 'questions' })
   const groups = useFieldArray({ control: form.control, name: 'groups' })
@@ -151,7 +159,7 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
   const save = useMutation({
     mutationFn: saveIntelligenceConfig,
     onSuccess: (config) => {
-      form.reset(config)
+      form.reset(intelligenceFormValues(config))
       toast.success(t('Saved successfully'))
       void queryClient.invalidateQueries({
         queryKey: ['status-monitor', 'intelligence'],
@@ -234,7 +242,7 @@ export function IntelligenceSettings(props: { data: IntelligenceMonitorData }) {
                   disabled={
                     pending ||
                     form.formState.isDirty ||
-                    !props.data.config.groups.every(
+                    !selectedGroups.every(
                       (group) => group.models?.length || group.model
                     )
                   }

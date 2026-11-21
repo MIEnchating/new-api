@@ -213,33 +213,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	if dialect == "" {
 		dialect = "sqlite"
 	}
-	db, _ := newAuditTestDatabase(t, dialect, os.Getenv("TEST_"+strings.ToUpper(dialect)+"_DSN"))
-	if dialect != "sqlite" {
-		databaseName := db.Migrator().CurrentDatabase()
-		t.Cleanup(func() {
-			sqlDB, err := db.DB()
-			require.NoError(t, err)
-			require.NoError(t, sqlDB.Close())
-			var driver gorm.Dialector = postgres.Open(os.Getenv("TEST_POSTGRES_DSN"))
-			if dialect == "mysql" {
-				driver = mysql.Open(os.Getenv("TEST_MYSQL_DSN"))
-			}
-			admin, err := gorm.Open(driver, &gorm.Config{})
-			require.NoError(t, err)
-			require.NoError(t, admin.Exec("DROP DATABASE "+databaseName).Error)
-			connection, err := admin.DB()
-			require.NoError(t, err)
-			require.NoError(t, connection.Close())
-		})
-	}
-
-	var version string
-	query := "SELECT version()"
-	if dialect == "sqlite" {
-		query = "SELECT sqlite_version()"
-	}
-	require.NoError(t, db.Raw(query).Scan(&version).Error)
-	t.Logf("database: %s %s", dialect, version)
+	db := newIntelligenceTestDatabase(t, dialect)
 	require.NoError(t, db.AutoMigrate(&model.Option{}, &model.Channel{}, &model.User{}, &model.Log{}, &model.AuditLog{}, &model.SystemTask{}, &model.SystemTaskLock{}, &model.Token{}))
 	oldDB, oldLogDB := model.DB, model.LOG_DB
 	oldMain, oldLog := common.MainDatabaseType(), common.LogDatabaseType()
@@ -940,7 +914,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 				assert.Equal(t, "candy", payload["benchmark"])
 				assert.Equal(t, "high", payload["reasoning_effort"])
 				assert.Equal(t, "https://gateway.example/v1", payload["base_url"])
-				assert.Equal(t, false, payload["public"])
+				assert.NotContains(t, payload, "public")
 				assert.NotContains(t, payload, "html")
 				key, _ := payload["api_key"].(string)
 				keys <- key
@@ -1081,6 +1055,133 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 	deleted, err := model.DeleteIntelligenceTestResult("missing")
 	require.NoError(t, err)
 	assert.False(t, deleted)
+}
+
+func newIntelligenceTestDatabase(t *testing.T, dialect string) *gorm.DB {
+	t.Helper()
+	dsn := os.Getenv("TEST_" + strings.ToUpper(dialect) + "_DSN")
+	db, _ := newAuditTestDatabase(t, dialect, dsn)
+	if dialect != "sqlite" {
+		databaseName := db.Migrator().CurrentDatabase()
+		t.Cleanup(func() {
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			require.NoError(t, sqlDB.Close())
+			var driver gorm.Dialector = postgres.Open(dsn)
+			if dialect == "mysql" {
+				driver = mysql.Open(dsn)
+			}
+			admin, err := gorm.Open(driver, &gorm.Config{})
+			require.NoError(t, err)
+			require.NoError(t, admin.Exec("DROP DATABASE "+databaseName).Error)
+			connection, err := admin.DB()
+			require.NoError(t, err)
+			require.NoError(t, connection.Close())
+		})
+	}
+	var version string
+	query := "SELECT version()"
+	if dialect == "sqlite" {
+		query = "SELECT sqlite_version()"
+	}
+	require.NoError(t, db.Raw(query).Scan(&version).Error)
+	t.Logf("database: %s %s", dialect, version)
+	return db
+}
+
+func TestIntelligenceHistoryRetention(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			if dialect != "sqlite" && os.Getenv("TEST_"+strings.ToUpper(dialect)+"_DSN") == "" {
+				t.Skip("database DSN is not configured")
+			}
+			db := newIntelligenceTestDatabase(t, dialect)
+			require.NoError(t, db.AutoMigrate(&model.SystemTask{}, &model.SystemTaskLock{}))
+			oldDB := model.DB
+			model.DB = db
+			t.Cleanup(func() { model.DB = oldDB })
+			now := time.Now().Truncate(time.Minute)
+			create := func(id string, status model.SystemTaskStatus, config intelligenceConfig, channels ...intelligenceChannelResult) {
+				t.Helper()
+				encoded, err := common.Marshal(config)
+				require.NoError(t, err)
+				result, err := common.Marshal(intelligenceResult{Channels: channels})
+				require.NoError(t, err)
+				require.NoError(t, db.Create(&model.SystemTask{
+					TaskID: id, Type: intelligenceTaskType, Status: status,
+					Payload: string(encoded), Result: string(result), CreatedAt: now.Unix(),
+				}).Error)
+			}
+			legacy := intelligenceConfig{Group: "regular", Model: "model", Endpoint: "openai"}
+			legacyRow := intelligenceChannelResult{HTML: "<html>legacy result</html>"}
+			create("oldest", model.SystemTaskStatusSucceeded, legacy, legacyRow)
+			for i := range 8 {
+				create(fmt.Sprintf("expired-%02d", i), model.SystemTaskStatusSucceeded, legacy, legacyRow)
+			}
+			create("current-schedule", model.SystemTaskStatusSucceeded, intelligenceConfig{
+				Group: "regular", Model: "model", ScheduledAt: now.Unix(),
+			}, legacyRow)
+			create("manually-deleted", model.SystemTaskStatusSucceeded, legacy, legacyRow)
+			deleted, err := model.DeleteIntelligenceTestResult("manually-deleted")
+			require.NoError(t, err)
+			require.True(t, deleted)
+			create("mixed", model.SystemTaskStatusSucceeded, intelligenceConfig{Groups: []intelligenceGroup{
+				{Group: "regular", Models: []string{"model", "expired-model"}},
+				{Group: "infrequent", Model: "other"},
+			}}, intelligenceChannelResult{Group: "regular", Model: "model", ChannelID: 7, HTML: "<html>keep regular</html>"},
+				intelligenceChannelResult{Group: "regular", Model: "expired-model", ChannelID: 8, HTML: "<html>drop regular</html>"},
+				intelligenceChannelResult{Group: "infrequent", Model: "other", HTML: "<html>keep other group</html>"})
+			for i := range 18 {
+				create(fmt.Sprintf("regular-%02d", i), model.SystemTaskStatusSucceeded, legacy, legacyRow)
+			}
+			create("failed-before-response", model.SystemTaskStatusFailed, legacy)
+			for i := range 5 {
+				create(fmt.Sprintf("other-%02d", i), model.SystemTaskStatusSucceeded,
+					intelligenceConfig{Group: "infrequent", Model: "other"}, legacyRow)
+			}
+			create("pending", model.SystemTaskStatusPending, legacy, legacyRow)
+			create("running", model.SystemTaskStatusRunning, legacy, legacyRow)
+
+			removed, err := pruneIntelligenceHistory(context.Background(), now)
+			require.NoError(t, err)
+			assert.EqualValues(t, 10, removed)
+			for _, id := range []string{"oldest", "manually-deleted"} {
+				task, err := model.GetSystemTaskByTaskID(id)
+				require.NoError(t, err)
+				assert.Nil(t, task)
+			}
+			marker, err := model.GetSystemTaskByTaskID("current-schedule")
+			require.NoError(t, err)
+			require.NotNil(t, marker)
+			assert.True(t, marker.IntelligenceResultDeleted())
+			assert.NotContains(t, marker.Result, "legacy result")
+
+			mixed, err := model.GetSystemTaskByTaskID("mixed")
+			require.NoError(t, err)
+			require.NotNil(t, mixed)
+			assert.NotContains(t, mixed.Result, "drop regular")
+			view, err := publishedIntelligenceTask(mixed, true, true)
+			require.NoError(t, err)
+			rows := view["result"].(gin.H)["channels"].([]gin.H)
+			require.Len(t, rows, 2)
+			assert.Equal(t, "<html>keep regular</html>", rows[0]["html"])
+			assert.Equal(t, "<html>keep other group</html>", rows[1]["html"])
+			assert.Len(t, view["groups"], 2, "the expired model must not reappear as a fallback card")
+			tasks, err := model.ListIntelligenceTestHistory()
+			require.NoError(t, err)
+			require.Len(t, tasks, 27)
+			assert.Equal(t, "running", tasks[0].TaskID)
+			assert.Equal(t, "pending", tasks[1].TaskID)
+			assert.Equal(t, "mixed", tasks[len(tasks)-1].TaskID)
+
+			removed, err = pruneIntelligenceHistory(context.Background(), now.Add(time.Minute))
+			require.NoError(t, err)
+			assert.EqualValues(t, 1, removed)
+			removed, err = pruneIntelligenceHistory(context.Background(), now.Add(time.Minute))
+			require.NoError(t, err)
+			assert.Zero(t, removed)
+		})
+	}
 }
 
 func TestIntelligencePublicResultHidesInternalErrors(t *testing.T) {

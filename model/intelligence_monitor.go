@@ -1,14 +1,23 @@
 package model
 
-import "github.com/QuantumNous/new-api/common"
+import (
+	"context"
+
+	"github.com/QuantumNous/new-api/common"
+	"gorm.io/gorm"
+)
 
 const SystemTaskTypeIntelligenceTest = "intelligence_test"
 const deletedIntelligenceResult = `{"deleted":true}`
 
+func finishedIntelligenceTests(db *gorm.DB) *gorm.DB {
+	return db.Where("type = ? AND status IN ?", SystemTaskTypeIntelligenceTest, []SystemTaskStatus{SystemTaskStatusSucceeded, SystemTaskStatusFailed})
+}
+
 // Preserve the schedule payload so deleting the latest result cannot repeat a
 // scheduled run. Erase generated content and request IDs.
 func DeleteIntelligenceTestResult(taskID string) (bool, error) {
-	result := DB.Model(&SystemTask{}).Where("task_id = ? AND type = ? AND status IN ?", taskID, SystemTaskTypeIntelligenceTest, []SystemTaskStatus{SystemTaskStatusSucceeded, SystemTaskStatusFailed}).
+	result := finishedIntelligenceTests(DB.Model(&SystemTask{})).Where("task_id = ?", taskID).
 		Where("result IS NULL OR result <> ?", deletedIntelligenceResult).
 		Updates(map[string]any{"result": deletedIntelligenceResult, "error": ""})
 	return result.RowsAffected > 0, result.Error
@@ -16,8 +25,59 @@ func DeleteIntelligenceTestResult(taskID string) (bool, error) {
 
 func ListIntelligenceTestHistory() ([]*SystemTask, error) {
 	var tasks []*SystemTask
-	err := DB.Where("type = ?", SystemTaskTypeIntelligenceTest).Where("result IS NULL OR result <> ?", deletedIntelligenceResult).Order("id desc").Limit(20).Find(&tasks).Error
+	err := DB.Where("type = ?", SystemTaskTypeIntelligenceTest).Where("result IS NULL OR result <> ?", deletedIntelligenceResult).Order("id desc").Find(&tasks).Error
 	return tasks, err
+}
+
+// Visit finished runs newest first without loading the entire history into memory.
+func WalkFinishedIntelligenceTests(ctx context.Context, visit func(*SystemTask) error) error {
+	var before int64
+	const batchSize = 32
+	for {
+		query := finishedIntelligenceTests(DB.WithContext(ctx)).Order("id DESC").Limit(batchSize)
+		if before != 0 {
+			query = query.Where("id < ?", before)
+		}
+		var tasks []SystemTask
+		if err := query.Find(&tasks).Error; err != nil {
+			return err
+		}
+		for i := range tasks {
+			if err := visit(&tasks[i]); err != nil {
+				return err
+			}
+			before = tasks[i].ID
+		}
+		if len(tasks) < batchSize {
+			return nil
+		}
+	}
+}
+
+// A retry or a manual deletion may have changed the row since the scan.
+func PruneIntelligenceTest(ctx context.Context, task *SystemTask, payload, state, result any, keepSchedule bool) (bool, error) {
+	query := finishedIntelligenceTests(DB.WithContext(ctx)).Where("id = ? AND status = ? AND updated_at = ?", task.ID, task.Status, task.UpdatedAt).
+		Where("COALESCE(payload, '') = ? AND COALESCE(state, '') = ? AND COALESCE(result, '') = ?", task.Payload, task.State, task.Result)
+	if payload == nil {
+		if keepSchedule {
+			return false, query.Model(&SystemTask{}).UpdateColumns(map[string]any{"state": "", "error": "", "result": deletedIntelligenceResult}).Error
+		}
+		change := query.Delete(&SystemTask{})
+		return change.RowsAffected > 0, change.Error
+	}
+	payloadText, err := marshalSystemTaskJSON(payload)
+	if err != nil {
+		return false, err
+	}
+	stateText, err := marshalSystemTaskJSON(state)
+	if err != nil {
+		return false, err
+	}
+	resultText, err := marshalSystemTaskJSON(result)
+	if err != nil {
+		return false, err
+	}
+	return false, query.Model(&SystemTask{}).UpdateColumns(map[string]any{"payload": payloadText, "state": stateText, "result": resultText}).Error
 }
 
 func (task *SystemTask) IntelligenceResultDeleted() bool {

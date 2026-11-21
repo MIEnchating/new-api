@@ -32,7 +32,10 @@ import (
 
 const intelligenceOptionKey = "IntelligenceMonitorConfig"
 const intelligenceTaskType = model.SystemTaskTypeIntelligenceTest
+const intelligenceResultsPerGroup = 20
 const manxueTestTimeout = 10 * time.Minute
+
+var intelligenceRetentionMu sync.Mutex
 
 const defaultIntelligencePrompt = "请生成可直接运行的单文件HTML，使用内联SVG绘制鹈鹕骑自行车的二维循环动画。画面以鹈鹕和自行车为主体，展示清晰的身体结构、踩踏动作和车轮转动，配合协调的背景、配色与层次。动画应流畅自然、衔接连续，并适配不同屏幕尺寸。禁止依赖外部资源，只输出完整HTML，不要代码围栏或解释文字。"
 
@@ -457,6 +460,127 @@ func intelligenceHistory(admin bool) ([]gin.H, error) {
 	return history, nil
 }
 
+// A saved result is one model/channel/question outcome. A run that failed
+// before producing a row still contributes one outcome per affected model.
+func pruneIntelligenceHistory(ctx context.Context, now time.Time) (int64, error) {
+	intelligenceRetentionMu.Lock()
+	defer intelligenceRetentionMu.Unlock()
+
+	type groupModel struct{ group, model string }
+	counts := make(map[string]int)
+	var deleted int64
+	scheduleMinute := now.Truncate(time.Minute).Unix()
+	err := model.WalkFinishedIntelligenceTests(ctx, func(task *model.SystemTask) error {
+		var config intelligenceConfig
+		if err := task.DecodePayload(&config); err != nil {
+			return err
+		}
+		keepSchedule := config.ScheduledAt != 0 && config.ScheduledAt >= scheduleMinute
+		if task.IntelligenceResultDeleted() {
+			if keepSchedule {
+				return nil
+			}
+			changed, err := model.PruneIntelligenceTest(ctx, task, nil, nil, nil, false)
+			if changed {
+				deleted++
+			}
+			return err
+		}
+		var result intelligenceResult
+		if task.Result != "" {
+			if err := common.UnmarshalJsonStr(task.Result, &result); err != nil {
+				return err
+			}
+		}
+		hasRows := make(map[groupModel]bool)
+		kept := make(map[groupModel]int)
+		failed := make(map[groupModel]int)
+		trimmed := false
+		result.Channels = slices.DeleteFunc(result.Channels, func(row intelligenceChannelResult) bool {
+			key := groupModel{row.Group, row.Model}
+			if key.group == "" {
+				key.group = config.Group
+			}
+			if key.model == "" {
+				key.model = config.Model
+			}
+			hasRows[key] = true
+			if counts[key.group] >= intelligenceResultsPerGroup {
+				trimmed = true
+				return true
+			}
+			counts[key.group]++
+			kept[key]++
+			if row.Error != "" {
+				failed[key]++
+			}
+			return false
+		})
+
+		legacy := len(config.Groups) == 0
+		if legacy {
+			config.Groups = []intelligenceGroup{{Group: config.Group, Model: config.Model}}
+		}
+		for i := range config.Groups {
+			group := &config.Groups[i]
+			models := slices.Clone(group.SelectedModels())
+			group.Models = slices.DeleteFunc(models, func(name string) bool {
+				key := groupModel{group.Group, name}
+				if hasRows[key] {
+					return kept[key] == 0
+				}
+				if counts[key.group] >= intelligenceResultsPerGroup {
+					trimmed = true
+					return true
+				}
+				counts[key.group]++
+				kept[key] = 1
+				failed[key] = 1
+				return false
+			})
+			group.Model = ""
+		}
+		if len(kept) == 0 {
+			changed, err := model.PruneIntelligenceTest(ctx, task, nil, nil, nil, keepSchedule)
+			if changed {
+				deleted++
+			}
+			return err
+		}
+		if !trimmed {
+			return nil
+		}
+		config.Groups = slices.DeleteFunc(config.Groups, func(group intelligenceGroup) bool { return len(group.Models) == 0 })
+		if legacy {
+			config.Groups = nil
+		} else if kept[groupModel{config.Group, config.Model}] == 0 {
+			config.Group, config.Model = "", ""
+		}
+		config.Retry, config.QueuedRetries = nil, nil
+		progress := intelligenceProgress{}
+		if err := task.DecodeState(&progress); err != nil {
+			return err
+		}
+		progress.Total, progress.Processed = 0, 0
+		progress.CompletedRetries = nil
+		progress.Models = slices.DeleteFunc(progress.Models, func(entry intelligenceModelProgress) bool {
+			return kept[groupModel{entry.Group, entry.Model}] == 0
+		})
+		for i := range progress.Models {
+			entry := &progress.Models[i]
+			key := groupModel{entry.Group, entry.Model}
+			entry.Total, entry.Processed, entry.Failed = kept[key], kept[key], failed[key]
+		}
+		for _, count := range kept {
+			progress.Total += count
+		}
+		progress.Processed, progress.Progress = progress.Total, 100
+		_, err := model.PruneIntelligenceTest(ctx, task, config, progress, result, false)
+		return err
+	})
+	return deleted, err
+}
+
 func GetIntelligenceResults(c *gin.Context) {
 	history, err := intelligenceHistory(false)
 	if err != nil {
@@ -816,6 +940,14 @@ func GetIntelligenceTestResult(c *gin.Context) {
 }
 
 func (intelligenceTestHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if _, err := pruneIntelligenceHistory(cleanupCtx, time.Now()); err != nil {
+			common.SysLog(common.LogText("intelligence test history cleanup failed: %v", err))
+		}
+	}()
+
 	var config intelligenceConfig
 	if err := task.DecodePayload(&config); err != nil {
 		finishSystemTaskHandler(task, runnerID, model.SystemTaskStatusFailed, nil, err)
@@ -1201,7 +1333,7 @@ func runManxueIntelligenceTest(ctx context.Context, config intelligenceConfig, u
 		}
 	}()
 	key := "sk-" + token.GetFullKey()
-	payload := map[string]any{"benchmark": config.Benchmark, "base_url": baseURL, "api_key": key, "model": config.Model, "public": false}
+	payload := map[string]any{"benchmark": config.Benchmark, "base_url": baseURL, "api_key": key, "model": config.Model}
 	if config.ReasoningEffort != "" {
 		payload["reasoning_effort"] = config.ReasoningEffort
 	}

@@ -104,9 +104,6 @@ export function IntelligenceHistory(props: { history: IntelligenceTask[] }) {
             {formatNumber(props.history.length, locale)}
           </Badge>
         </div>
-        <p className='text-muted-foreground text-xs'>
-          {t('Showing the latest 20 runs.')}
-        </p>
       </header>
       {props.history.length === 0 ? (
         <EmptyState title={t('No intelligence test results yet')} bordered />

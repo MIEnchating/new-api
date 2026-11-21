@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -40,7 +41,11 @@ func (systemTaskCleanupHandler) NewPayload() any { return nil }
 
 func (systemTaskCleanupHandler) Run(ctx context.Context, task *model.SystemTask, runnerID string) {
 	days := max(operation_setting.GetSystemTaskSetting().RetentionDays, 1)
-	deleted, err := model.DeleteFinishedSystemTasks(ctx, common.GetTimestamp()-int64(days)*24*60*60)
+	now := time.Now()
+	deleted, retentionErr := pruneIntelligenceHistory(ctx, now)
+	expired, err := model.DeleteFinishedSystemTasks(ctx, now.Unix()-int64(days)*24*60*60)
+	deleted += expired
+	err = errors.Join(retentionErr, err)
 	status := model.SystemTaskStatusSucceeded
 	if err != nil {
 		status = model.SystemTaskStatusFailed
