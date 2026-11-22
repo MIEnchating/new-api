@@ -3344,6 +3344,7 @@
     "Filter by name or ID...": "Фильтр по имени или ID...",
     "Filter by name, ID, or key...": "Фильтровать по имени, ID или ключу...",
     "Filter by name...": "Фильтр по имени...",
+    "Filter blank Responses messages": "Фильтровать пустые сообщения Responses",
     "Filter by node": "Фильтр по узлу",
     "Filter by price field": "Фильтр по полю цены",
     "Filter by ratio type": "Фильтровать по типу коэффициента",

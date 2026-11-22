@@ -40,6 +40,113 @@ type responsesLifecycleBody struct {
 	closeErr  error
 }
 
+func TestOaiResponsesStreamHandlerFiltersOnlyConfirmedAssistantPlaceholders(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 3
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	for _, tc := range []struct {
+		name       string
+		id         string
+		text       string
+		enabled    bool
+		interleave bool
+		incomplete bool
+		drop       bool
+	}{
+		{name: "disabled preserves the matching message", id: "msg_ack_ack_1", text: " "},
+		{name: "EasyAPI placeholder", id: "msg_ack_ack_1", text: " ", enabled: true, drop: true},
+		{name: "OneBool placeholder", id: "item_fake_ttft_1", text: " ", enabled: true, drop: true},
+		{name: "single blank message with a new ID format", id: "a1d8eec9-52d9-4119-8662-b040aa7bb4b7", text: " ", enabled: true, drop: true},
+		{name: "assistant message with regular text", id: "msg_1", text: " text", enabled: true},
+		{name: "message with two spaces remains intact", id: "msg_1", text: "  ", enabled: true},
+		{name: "message without a stable ID remains intact", text: " ", enabled: true},
+		{name: "interleaved tool must stay ordered", id: "msg_ack_ack_1", text: " ", enabled: true, interleave: true},
+		{name: "unconfirmed item on EOF", id: "msg_ack_ack_1", text: " ", enabled: true, incomplete: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			item := fmt.Sprintf(`{"id":%q,"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":%q}]}`, tc.id, tc.text)
+			added := fmt.Sprintf(`{"type":"response.output_item.added","output_index":0,"item":{"id":%q,"type":"message","role":"assistant","status":"in_progress","content":[]}}`, tc.id)
+			part := fmt.Sprintf(`{"type":"response.content_part.added","item_id":%q,"output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}`, tc.id)
+			delta := fmt.Sprintf(`{"type":"response.output_text.delta","item_id":%q,"output_index":0,"content_index":0,"delta":%q}`, tc.id, tc.text)
+			done := fmt.Sprintf(`{"type":"response.output_item.done","output_index":0,"item":%s}`, item)
+			tool := `{"id":"fc_1","type":"function_call","name":"exec_command","call_id":"call_1","arguments":"{}","status":"completed"}`
+			toolEvent := fmt.Sprintf(`{"type":"response.output_item.done","output_index":1,"item":%s}`, tool)
+			tail := fmt.Sprintf(`{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":7,"output_tokens":5,"total_tokens":12},"output":[%s,%s]}}`, item, tool)
+			frames := []string{added, part, delta, done, toolEvent, tail}
+			if tc.interleave {
+				frames = []string{added, part, toolEvent, delta, done, tail}
+			}
+			if tc.incomplete {
+				frames = frames[:3]
+			}
+
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+			info := &relaycommon.RelayInfo{
+				OriginModelName: "gpt-6.2-sol", StartTime: time.Now(),
+				RelayFormat: types.RelayFormatOpenAIResponses,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					UpstreamModelName:    "gpt-6.2-sol",
+					ChannelOtherSettings: dto.ChannelOtherSettings{FilterBlankResponsesMessages: tc.enabled},
+				},
+			}
+			sse := "data: " + strings.Join(frames, "\n\ndata: ") + "\n\n"
+			usage, apiErr := OaiResponsesStreamHandler(c, info, &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(sse)),
+			})
+			require.Nil(t, apiErr)
+			got := recorder.Body.String()
+			if tc.incomplete {
+				require.Contains(t, got, added)
+				require.Contains(t, got, delta)
+				require.NotEqual(t, string(relaycommon.ResponseOutcomeCompleted), info.StreamStatus.ResponseOutcome())
+				return
+			}
+			require.Equal(t, 12, usage.TotalTokens)
+			require.Equal(t, string(relaycommon.ResponseOutcomeCompleted), info.StreamStatus.ResponseOutcome())
+			if tc.drop {
+				require.NotContains(t, got, tc.id)
+				require.NotContains(t, got, "event: keepalive")
+				require.Contains(t, got, strings.Replace(toolEvent, `"output_index":1`, `"output_index":0`, 1))
+				require.Contains(t, got, `"output":[`+tool+`]`)
+				return
+			}
+			require.Contains(t, got, done)
+			require.Contains(t, got, toolEvent)
+			require.Contains(t, got, tail)
+			require.NotContains(t, got, "event: keepalive")
+			if tc.interleave {
+				require.Less(t, strings.Index(got, toolEvent), strings.Index(got, done))
+			}
+		})
+	}
+}
+
+func TestResponsesBlankMessageFilterKeepsIndexesAlignedWhenLaterCandidateHasText(t *testing.T) {
+	filter := responsesBlankMessageFilter{removed: map[int]string{0: "msg_ack_ack_1"}}
+	var sent []string
+	frames := []string{
+		`{"type":"response.output_item.added","output_index":1,"item":{"type":"message","role":"assistant","id":"msg_2","content":[]}}`,
+		`{"type":"response.output_text.delta","output_index":1,"item_id":"msg_2","content_index":0,"delta":" "}`,
+		`{"type":"response.output_text.delta","output_index":1,"item_id":"msg_2","content_index":0,"delta":"hello"}`,
+	}
+	for _, data := range frames {
+		var event dto.ResponsesStreamResponse
+		require.NoError(t, common.UnmarshalJsonStr(data, &event))
+		require.NoError(t, filter.forward(event, responsesSSEFrame{event: event.Type, data: data}, func(frame responsesSSEFrame) error {
+			sent = append(sent, frame.data)
+			return nil
+		}))
+	}
+	for i, frame := range frames {
+		frames[i] = strings.Replace(frame, `"output_index":1`, `"output_index":0`, 1)
+	}
+	require.Equal(t, frames, sent)
+}
+
 func (b *responsesLifecycleBody) Read(p []byte) (int, error) {
 	if b.data.Len() > 0 {
 		return b.data.Read(p)

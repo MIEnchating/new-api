@@ -144,6 +144,7 @@ export interface ChannelSettings {
 }
 
 export interface ChannelOtherSettings {
+  filter_blank_responses_messages?: boolean
   azure_responses_version?: string
   vertex_key_type?: 'json' | 'api_key'
   vertex_project_id?: string

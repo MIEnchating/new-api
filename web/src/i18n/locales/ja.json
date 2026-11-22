@@ -3344,6 +3344,7 @@
     "Filter by name or ID...": "名前またはIDでフィルター...",
     "Filter by name, ID, or key...": "名前、ID、またはキーでフィルター...",
     "Filter by name...": "名前でフィルター...",
+    "Filter blank Responses messages": "Responses の空白メッセージを除外",
     "Filter by node": "ノードでフィルター",
     "Filter by price field": "価格フィールドでフィルター",
     "Filter by ratio type": "倍率タイプで絞り込み",

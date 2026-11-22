@@ -76,6 +76,15 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	defer service.CloseResponseBodyGracefully(resp)
 
 	accumulator := service.NewResponsesUsageAccumulator(info)
+	var filter *responsesBlankMessageFilter
+	if info.ChannelMeta != nil && resp.StatusCode == http.StatusOK &&
+		c.Request.Method == http.MethodPost && c.Request.URL.Path == "/v1/responses" &&
+		info.ChannelOtherSettings.FilterBlankResponsesMessages {
+		filter = &responsesBlankMessageFilter{}
+	}
+	writeFrame := func(frame responsesSSEFrame) error {
+		return helper.ResponseChunkData(c, dto.ResponsesStreamResponse{Type: frame.event}, frame.data)
+	}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		info.ObserveActualResponseModel(common.StringToByteSlice(data))
@@ -91,7 +100,14 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			data = string(rewriteSGLangResponsesCreatedAt(info, []byte(data), "response.created_at", streamResponse.Response.CreatedAt))
 		}
 		accumulator.Observe(&streamResponse, common.StringToByteSlice(data))
-		if err := helper.ResponseChunkData(c, streamResponse, data); err != nil {
+		frame := responsesSSEFrame{event: streamResponse.Type, data: data}
+		var err error
+		if filter == nil {
+			err = writeFrame(frame)
+		} else {
+			err = filter.forward(streamResponse, frame, writeFrame)
+		}
+		if err != nil {
 			sr.Stop(err)
 			return
 		}
@@ -100,6 +116,13 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Done()
 		}
 	})
+	if filter != nil && len(filter.pending) > 0 && c.Request.Context().Err() == nil {
+		// A stream that ended before confirming the item must retain its frames.
+		if err := filter.flush(writeFrame); err != nil {
+			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonHandlerStop, err)
+			info.StreamStatus.RecordError(err.Error())
+		}
+	}
 
 	common.SetContextKey(c, constant.ContextKeyResponseStreamStatus, info.StreamStatus)
 	info.StreamStatus.RequireTerminal()

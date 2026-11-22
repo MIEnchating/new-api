@@ -147,6 +147,7 @@ import {
   CHANNEL_TYPE_NEW_API,
   CHANNEL_TYPE_OLLAMA,
   CHANNEL_TYPE_OPTIONS,
+  CHANNEL_TYPE_SUB2API,
   CHANNEL_TYPE_TASK_PLUGIN,
   CHANNEL_TYPE_VLLM,
   CHANNEL_TYPE_SGLANG,
@@ -342,6 +343,7 @@ const SENSITIVE_FORM_FIELDS = [
   'tls_insecure_skip_verify',
   'pass_through_body_enabled',
   'responses_websocket_enabled',
+  'filter_blank_responses_messages',
   'system_prompt',
   'system_prompt_override',
   'allow_service_tier',
@@ -5085,6 +5087,26 @@ export function ChannelMutateDrawer({
                   supported={responsesWebsocketSupported}
                   disabled={sensitiveLocked || isSubmitting}
                 />
+                {currentType === CHANNEL_TYPE_SUB2API && (
+                  <FormField
+                    control={form.control}
+                    name='filter_blank_responses_messages'
+                    render={({ field }) => (
+                      <FormItem className='flex items-center justify-between gap-4 px-4 py-3'>
+                        <FormLabel>
+                          {t('Filter blank Responses messages')}
+                        </FormLabel>
+                        <FormControl>
+                          <Switch
+                            checked={field.value === true}
+                            onCheckedChange={field.onChange}
+                            disabled={sensitiveLocked || isSubmitting}
+                          />
+                        </FormControl>
+                      </FormItem>
+                    )}
+                  />
+                )}
                 {formatFields}
                 {ollamaOpenAIChatFields}
                 {thinkingFields}

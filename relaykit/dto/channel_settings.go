@@ -136,6 +136,7 @@ type ChannelOtherSettings struct {
 	UpstreamModelUpdateLastRemovedModels  []string              `json:"upstream_model_update_last_removed_models,omitempty"`  // 上次检测到的可删除模型
 	UpstreamModelUpdateIgnoredModels      []string              `json:"upstream_model_update_ignored_models,omitempty"`       // 手动忽略的模型
 	AdvancedCustom                        *AdvancedCustomConfig `json:"advanced_custom,omitempty"`
+	FilterBlankResponsesMessages          bool                  `json:"filter_blank_responses_messages,omitempty"`
 	// BillingServiceTier declares the upstream's fixed tier for expression
 	// pricing. It does not inject or modify upstream request parameters.
 	BillingServiceTier string `json:"billing_service_tier,omitempty"`

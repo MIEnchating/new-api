@@ -22,6 +22,7 @@ import {
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
   CHANNEL_TYPE_NEW_API,
   CHANNEL_TYPE_OLLAMA,
+  CHANNEL_TYPE_SUB2API,
   CHANNEL_TYPE_TASK_PLUGIN,
   CHANNEL_TYPE_VLLM,
   CHANNEL_TYPE_SGLANG,
@@ -273,6 +274,7 @@ export const channelFormSchema = z
     tls_insecure_skip_verify: z.boolean().optional(),
     pass_through_body_enabled: z.boolean().optional(),
     responses_websocket_enabled: z.boolean().optional(),
+    filter_blank_responses_messages: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
     // Type-specific settings (stored in settings JSON)
@@ -479,6 +481,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   tls_insecure_skip_verify: false,
   pass_through_body_enabled: false,
   responses_websocket_enabled: false,
+  filter_blank_responses_messages: false,
   system_prompt: '',
   system_prompt_override: false,
   // Type-specific settings
@@ -581,6 +584,7 @@ export function transformChannelToFormDefaults(
   let disableStore = false
   let allowSafetyIdentifier = false
   let allowIncludeObfuscation = false
+  let filterBlankResponsesMessages = false
   let allowInferenceGeo = false
   let allowSpeed = false
   let claudeBetaQuery = false
@@ -611,6 +615,8 @@ export function transformChannelToFormDefaults(
       disableStore = parsed.disable_store === true
       allowSafetyIdentifier = parsed.allow_safety_identifier === true
       allowIncludeObfuscation = parsed.allow_include_obfuscation === true
+      filterBlankResponsesMessages =
+        parsed.filter_blank_responses_messages === true
       allowInferenceGeo = parsed.allow_inference_geo === true
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
@@ -677,6 +683,7 @@ export function transformChannelToFormDefaults(
     billing_service_tier: billingServiceTier,
     disable_store: disableStore,
     allow_include_obfuscation: allowIncludeObfuscation,
+    filter_blank_responses_messages: filterBlankResponsesMessages,
     allow_inference_geo: allowInferenceGeo,
     allow_speed: allowSpeed,
     claude_beta_query: claudeBetaQuery,
@@ -754,6 +761,14 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error('Failed to parse existing settings:', error)
+    }
+  }
+
+  if (formData.type === CHANNEL_TYPE_SUB2API) {
+    if (formData.filter_blank_responses_messages === true) {
+      settingsObj.filter_blank_responses_messages = true
+    } else {
+      delete settingsObj.filter_blank_responses_messages
     }
   }
 

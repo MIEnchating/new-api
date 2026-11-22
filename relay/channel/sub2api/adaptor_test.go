@@ -2,9 +2,12 @@ package sub2api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -112,6 +115,40 @@ func TestAdaptorInheritsNewAPIResponsesCompactSupport(t *testing.T) {
 	assert.Equal(t, "https://sub2api.example/v1/responses/compact", url)
 	assert.Equal(t, "sub2api", adaptor.GetChannelName())
 	assert.Empty(t, adaptor.GetModelList())
+}
+
+func TestAdaptorAppliesResponsesMessageFilterConfiguredForChannel(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 3
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	info := &relaycommon.RelayInfo{
+		RelayMode: relayconstant.RelayModeResponses, RelayFormat: types.RelayFormatOpenAIResponses,
+		IsStream: true, StartTime: time.Now(),
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType:          constant.ChannelTypeSub2API,
+			UpstreamModelName:    "gpt-6.2-sol",
+			ChannelOtherSettings: dto.ChannelOtherSettings{FilterBlankResponsesMessages: true},
+		},
+	}
+	adaptor := &Adaptor{}
+	adaptor.Init(info)
+	sse := `data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","role":"assistant","id":"msg_ack_ack_1","content":[]}}
+
+data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant","id":"msg_ack_ack_1","status":"completed","content":[{"type":"output_text","text":" "}]}}
+
+data: {"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":2,"output_tokens":1,"total_tokens":3}}}
+
+`
+	usage, apiErr := adaptor.DoResponse(c, &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(sse))}, info)
+	require.Nil(t, apiErr)
+	require.Equal(t, 3, usage.(*dto.Usage).TotalTokens)
+	require.NotContains(t, recorder.Body.String(), "msg_ack_ack_1")
+	require.NotContains(t, recorder.Body.String(), "event: keepalive")
+	require.Contains(t, recorder.Body.String(), "event: response.completed")
 }
 
 func TestConvertClaudeRequestPreservesAdaptiveThinkingForCompatibleModel(t *testing.T) {

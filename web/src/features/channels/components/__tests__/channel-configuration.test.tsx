@@ -3921,3 +3921,47 @@ test('editing a forced UltraFast channel preserves model names and saves a keybo
     custom_option: true,
   })
 })
+
+test.each([false, true])(
+  'editing a Sub2API channel toggles Responses blank message filtering from %s',
+  async (enabled) => {
+    editingChannel = {
+      ...editingChannel,
+      type: CHANNEL_TYPE_SUB2API,
+      settings: JSON.stringify({
+        filter_blank_responses_messages: enabled || undefined,
+        custom_option: true,
+      }),
+    }
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true } })
+    const user = userEvent.setup()
+    render(<ConfigurationHarness currentRow={editingChannel} />)
+
+    const requestTab = await screen.findByRole('tab', {
+      name: /Request & Response/,
+    })
+    await user.click(requestTab)
+    const filter = screen.getByRole('switch', {
+      name: 'Filter blank Responses messages',
+    })
+    if (enabled) {
+      expect(filter).toBeChecked()
+    } else {
+      expect(filter).not.toBeChecked()
+    }
+
+    await user.click(filter)
+    await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+    await waitFor(() => expect(put).toHaveBeenCalledOnce())
+    const payload = put.mock.calls[0]?.[1] as { settings: string }
+    const settings = JSON.parse(payload.settings)
+    expect(settings.custom_option).toBe(true)
+    if (enabled) {
+      expect(settings).not.toHaveProperty('filter_blank_responses_messages')
+    } else {
+      expect(settings.filter_blank_responses_messages).toBe(true)
+    }
+  }
+)

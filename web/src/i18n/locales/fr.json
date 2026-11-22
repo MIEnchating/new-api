@@ -3344,6 +3344,7 @@
     "Filter by name or ID...": "Filtrer par nom ou ID...",
     "Filter by name, ID, or key...": "Filtrer par nom, ID ou clé...",
     "Filter by name...": "Filtrer par nom...",
+    "Filter blank Responses messages": "Filtrer les messages Responses vides",
     "Filter by node": "Filtrer par nœud",
     "Filter by price field": "Filtrer par champ de prix",
     "Filter by ratio type": "Filtrer par type de ratio",

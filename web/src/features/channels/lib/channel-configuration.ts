@@ -21,6 +21,7 @@ import type { FieldErrors, FieldPath } from 'react-hook-form'
 import type { TaskPluginOption } from '../api'
 import {
   CHANNEL_TYPE_OLLAMA,
+  CHANNEL_TYPE_SUB2API,
   CHANNEL_TYPE_TASK_PLUGIN,
   CLAUDE_FIELD_PASSTHROUGH_TYPES,
   MODEL_FETCHABLE_TYPES,
@@ -67,6 +68,7 @@ const CONFIGURATION_BLOCKS = {
       'thinking_to_content',
       'pass_through_body_enabled',
       'responses_websocket_enabled',
+      'filter_blank_responses_messages',
       'ollama_openai_chat',
       'system_prompt',
       'system_prompt_override',
@@ -176,6 +178,8 @@ export function getChannelConfigurationState(
       ((supportsResponsesWebSocket(values.type) ||
         (pluginChannel && plugin?.responsesWebsocket === true)) &&
         values.responses_websocket_enabled) ||
+      (values.type === CHANNEL_TYPE_SUB2API &&
+        values.filter_blank_responses_messages) ||
       (values.type === CHANNEL_TYPE_OLLAMA && values.ollama_openai_chat) ||
       values.system_prompt?.trim() ||
       values.system_prompt_override
