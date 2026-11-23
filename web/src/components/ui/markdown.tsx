@@ -664,10 +664,12 @@ const markdownExtensions: MarkedExtension[] = [
           return renderMath(String(token.text), true)
         },
         start(source: string) {
-          return source.match(/^\$\$/m)?.index
+          return source.match(/^(?:\$\$|\\\[)/m)?.index
         },
         tokenizer(source: string) {
-          const match = /^\$\$\n?([\s\S]+?)\n?\$\$(?:\n|$)/.exec(source)
+          const match =
+            /^\$\$\n?([\s\S]+?)\n?\$\$(?:\n|$)/.exec(source) ??
+            /^\\\[\n?([\s\S]+?)\n?\\\](?:\n|$)/.exec(source)
 
           if (!match) {
             return undefined
@@ -687,16 +689,12 @@ const markdownExtensions: MarkedExtension[] = [
           return renderMath(String(token.text), false)
         },
         start(source: string) {
-          const index = source.indexOf('$$')
-
-          if (index === -1) {
-            return undefined
-          }
-
-          return index
+          return source.match(/\$\$|\\\(/)?.index
         },
         tokenizer(source: string) {
-          const match = /^\$\$([^\n$]+?)\$\$/.exec(source)
+          const match =
+            /^\$\$([^\n$]+?)\$\$/.exec(source) ??
+            /^\\\(([^\n]+?)\\\)/.exec(source)
 
           if (!match) {
             return undefined

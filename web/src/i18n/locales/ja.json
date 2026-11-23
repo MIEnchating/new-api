@@ -3879,6 +3879,7 @@
     "Incoming path must not include query": "受信パスに query を含めることはできません",
     "Incoming path must start with /": "受信パスは / で始める必要があります",
     "Incomplete": "未完了",
+    "Incorrect answer": "不正解",
     "Increase quota for user “{{name}}”": "ユーザー「{{name}}」のクォータを増額",
     "Increase user quota": "ユーザーのクォータを増額",
     "Increased user quota by {{quota}}": "ユーザーのクォータを {{quota}} 増やしました",

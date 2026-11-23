@@ -35,6 +35,7 @@ import type {
   IntelligenceTask,
 } from '@/features/status-monitor/intelligence-api'
 import { IntelligenceDetails } from '@/features/status-monitor/intelligence-details'
+import { IntelligenceExternalResult } from '@/features/status-monitor/intelligence-external-result'
 import { getIntelligenceQuestionName } from '@/features/status-monitor/intelligence-labels'
 import { IntelligencePreview } from '@/features/status-monitor/intelligence-preview'
 import { toIntlLocale } from '@/i18n/languages'
@@ -278,20 +279,10 @@ export function IntelligenceHistoryRun(props: {
                           </div>
                         )}
                         {row.external_result && (
-                          <div className='text-muted-foreground space-y-1 text-xs break-words'>
-                            <p>
-                              {row.external_result.label ||
-                                row.external_result.status}
-                            </p>
-                            {row.external_result.answer && (
-                              <p className='max-h-32 overflow-auto whitespace-pre-wrap'>
-                                {row.external_result.answer}
-                              </p>
-                            )}
-                            {row.external_result.reason && (
-                              <p>{row.external_result.reason}</p>
-                            )}
-                          </div>
+                          <IntelligenceExternalResult
+                            result={row.external_result}
+                            className='max-h-64 overflow-auto'
+                          />
                         )}
                         {row.channel_id === 0 &&
                           !row.external_result &&

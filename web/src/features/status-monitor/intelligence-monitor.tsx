@@ -202,7 +202,7 @@ export function IntelligenceMonitor() {
                 bordered
               />
             )}
-            <div className='grid min-w-0 grid-cols-1 gap-4 @min-[36rem]:grid-cols-2 @min-[60rem]:grid-cols-3 @min-[60rem]:gap-6'>
+            <div className='grid min-w-0 grid-cols-1 gap-4 @min-[36rem]:grid-cols-2 @min-[60rem]:grid-cols-3 @min-[60rem]:gap-6 @min-[80rem]:grid-cols-4'>
               {filteredCards.map((card) => (
                 <IntelligenceResultCard
                   key={card.id}

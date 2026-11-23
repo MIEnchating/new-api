@@ -3879,6 +3879,7 @@
     "Incoming path must not include query": "Le chemin entrant ne doit pas inclure de query",
     "Incoming path must start with /": "Le chemin entrant doit commencer par /",
     "Incomplete": "Incomplet",
+    "Incorrect answer": "Réponse incorrecte",
     "Increase quota for user “{{name}}”": "Augmenter le quota de « {{name}} »",
     "Increase user quota": "Augmenter le quota utilisateur",
     "Increased user quota by {{quota}}": "Quota de l'utilisateur augmenté de {{quota}}",

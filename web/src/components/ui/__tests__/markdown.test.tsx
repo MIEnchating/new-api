@@ -25,6 +25,8 @@ test.each([
   ['inline', 'Formula: $$\\frac{1}{2}$$.'],
   ['display', '$$\n\\frac{1}{2}\n$$'],
   ['fenced', '```math\n\\frac{1}{2}\n```'],
+  ['parenthesized', 'Formula: \\(\\frac{1}{2}\\).'],
+  ['bracketed', '\\[\n\\frac{1}{2}\n\\]'],
 ])('preserves MathML and visual output when rendering %s math', (_, source) => {
   const view = render(<Markdown>{source}</Markdown>)
   const math = view.getByRole('math', { hidden: true })
@@ -34,6 +36,18 @@ test.each([
   expect(view.container.querySelector('.katex-html')).toHaveAttribute(
     'aria-hidden',
     'true'
+  )
+})
+
+test('preserves math delimiters inside inline and fenced code', () => {
+  const source = '`\\(7+4=11\\)`\n\n```text\n\\[7+4=11\\]\n```'
+  const view = render(<Markdown>{source}</Markdown>)
+  expect(view.container.querySelector('.katex')).toBeNull()
+  expect(view.container.querySelector('p code')).toHaveTextContent(
+    '\\(7+4=11\\)'
+  )
+  expect(view.container.querySelector('pre code')).toHaveTextContent(
+    '\\[7+4=11\\]'
   )
 })
 

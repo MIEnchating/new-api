@@ -3879,6 +3879,7 @@
     "Incoming path must not include query": "Path đầu vào không được chứa query",
     "Incoming path must start with /": "Path đầu vào phải bắt đầu bằng /",
     "Incomplete": "Chưa hoàn tất",
+    "Incorrect answer": "Câu trả lời không đúng",
     "Increase quota for user “{{name}}”": "Tăng hạn mức cho người dùng “{{name}}”",
     "Increase user quota": "Tăng hạn mức người dùng",
     "Increased user quota by {{quota}}": "Đã tăng hạn mức người dùng thêm {{quota}}",

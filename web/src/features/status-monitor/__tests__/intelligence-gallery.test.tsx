@@ -30,8 +30,13 @@ import {
   within,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { createInstance } from 'i18next'
+import { I18nextProvider } from 'react-i18next'
 import { expect, it, vi } from 'vitest'
 
+import { IntelligenceHistoryRun } from '@/features/system-settings/operations/intelligence-history-run'
+import en from '@/i18n/locales/en.json'
+import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
 
 import {
@@ -111,42 +116,93 @@ it.each([
   }
 )
 
-it('shows the answer returned by an external intelligence test', () => {
-  const task = historyTask(1)
-  if (!task.result) throw new Error('Expected a result fixture')
-  const channel = {
-    ...task.result.channels[0],
-    error: '',
-    external_result: {
-      benchmark: 'candy',
-      status: 'passed',
-      answer: '21',
-    },
+it.each([
+  { surface: 'gallery', status: 'passed', label: 'Passed', chinese: '通过' },
+  {
+    surface: 'gallery',
+    status: 'incorrect',
+    label: 'Incorrect answer',
+    chinese: '答案不符',
+  },
+  { surface: 'history', status: 'passed', label: 'Passed', chinese: '通过' },
+  {
+    surface: 'history',
+    status: 'incorrect',
+    label: 'Incorrect answer',
+    chinese: '答案不符',
+  },
+])(
+  'renders the $status candy verdict and formatted answer in $surface',
+  async ({ surface, status, label, chinese }) => {
+    const i18n = createInstance()
+    await i18n.init({ lng: 'en', fallbackLng: 'en', resources: { en, zh } })
+    const task = historyTask(1)
+    task.status = 'succeeded'
+    if (!task.result) throw new Error('Expected a result fixture')
+    const channel = {
+      ...task.result.channels[0],
+      error: '',
+      external_result: {
+        benchmark: 'candy',
+        status,
+        answer:
+          'Minimum **21** candies. Formula: \\(7+4=11\\).\n\n- Choose 9 round candies.\n- Choose 12 star candies.\n\n<script>alert("unsafe")</script>',
+      },
+    }
+    task.result.channels = [channel]
+    const client = new QueryClient({
+      defaultOptions: { queries: { enabled: false, retry: false } },
+    })
+    const view = render(
+      <QueryClientProvider client={client}>
+        <I18nextProvider i18n={i18n}>
+          {surface === 'gallery' ? (
+            <IntelligenceResultCard
+              id='external-result'
+              task={task}
+              channel={channel}
+              group={task.group}
+              model={task.model}
+              status='succeeded'
+              showGroup={false}
+              onGroupSelect={() => {}}
+            />
+          ) : (
+            <IntelligenceHistoryRun
+              task={task}
+              deleting={false}
+              onDelete={() => {}}
+              onRetry={() => {}}
+            />
+          )}
+        </I18nextProvider>
+      </QueryClientProvider>
+    )
+    try {
+      expect(screen.getByText('21')).toBeVisible()
+      expect(screen.getByText('21').tagName).toBe('STRONG')
+      expect(screen.getByText('Candy test')).toBeVisible()
+      expect(screen.getByText(label)).toBeVisible()
+      expect(screen.queryByText(status)).not.toBeInTheDocument()
+      const answerList = screen
+        .getByText('Choose 9 round candies.')
+        .closest('ul')
+      if (!answerList) throw new Error('Expected a formatted answer list')
+      expect(within(answerList).getAllByRole('listitem')).toHaveLength(2)
+      expect(view.container.querySelector('.katex')).not.toBeNull()
+      expect(view.container.querySelector('script')).toBeNull()
+      expect(view.container.querySelector('.max-h-40, .max-h-32')).toBeNull()
+      await act(async () => {
+        await i18n.changeLanguage('zh')
+      })
+      expect(screen.getByText('糖果检测')).toBeVisible()
+      expect(screen.getByText(chinese)).toBeVisible()
+    } finally {
+      view.unmount()
+      client.clear()
+    }
   }
-  const client = new QueryClient({
-    defaultOptions: { queries: { enabled: false, retry: false } },
-  })
-  const view = render(
-    <QueryClientProvider client={client}>
-      <IntelligenceResultCard
-        id='external-result'
-        task={task}
-        channel={channel}
-        group={task.group}
-        model={task.model}
-        status='succeeded'
-        showGroup={false}
-        onGroupSelect={() => {}}
-      />
-    </QueryClientProvider>
-  )
-  try {
-    expect(screen.getByText('21')).toBeVisible()
-  } finally {
-    view.unmount()
-    client.clear()
-  }
-})
+)
 
 it.each([
   {

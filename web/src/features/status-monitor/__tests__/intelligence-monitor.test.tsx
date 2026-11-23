@@ -780,12 +780,26 @@ it('saves independent daily times for multiple groups and allows more runs while
         {}
       )
     )
-    await user.click(
-      screen.getAllByRole('combobox', { name: 'Select models' })[0]
-    )
+    const models = within(
+      screen.getByRole('group', { name: 'default' })
+    ).getByRole('combobox', { name: 'Select models' })
+    await user.click(models)
     await user.click(
       await screen.findByRole('option', { name: 'model-a-extended' })
     )
+    await user.keyboard('{Escape}')
+    const modelControl = models.closest<HTMLElement>(
+      '[data-slot="combobox-chips"]'
+    )
+    expect(modelControl).not.toBeNull()
+    if (!modelControl) throw new Error('Expected the model selection control')
+    expect(modelControl).toHaveClass('h-8', 'flex-nowrap')
+    expect(within(modelControl).getByText('model-a')).toBeVisible()
+    expect(within(modelControl).getByText('+1 more')).toBeVisible()
+    await user.click(models)
+    expect(
+      await screen.findByRole('option', { name: 'model-a-extended' })
+    ).toHaveAttribute('aria-selected', 'true')
     await user.keyboard('{Escape}')
     await user.click(
       screen.getAllByRole('switch', {
@@ -1268,8 +1282,10 @@ it('shows only compact result metadata and previews without channel IDs, record 
       expect(card).toHaveClass('border', 'ring-0')
     }
     expect(cards[0]?.parentElement).toHaveClass(
+      'grid-cols-1',
       '@min-[36rem]:grid-cols-2',
-      '@min-[60rem]:grid-cols-3'
+      '@min-[60rem]:grid-cols-3',
+      '@min-[80rem]:grid-cols-4'
     )
     expect(screen.getByRole('tabpanel')).toHaveClass(
       'overflow-x-hidden',
@@ -2208,7 +2224,7 @@ it('stops downloading completed previews while a batch runs and fetches newly co
   }
 })
 
-it('moves test groups with named controls and saves their order without losing settings', async () => {
+it('reorders test groups from the drag handle and saves their settings in the new order', async () => {
   const data: IntelligenceMonitorData = {
     config: {
       groups: [
@@ -2248,13 +2264,26 @@ it('moves test groups with named controls and saves their order without losing s
     </QueryClientProvider>
   )
   const user = userEvent.setup()
+  // jsdom does not lay out the group cards for the drag sensors.
+  const measure = vi
+    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    .mockImplementation(function (this: HTMLElement) {
+      const group = this.closest('[role="group"]')
+      if (group?.getAttribute('aria-label') === 'vip') {
+        return new DOMRect(0, 320, 400, 300)
+      }
+      return new DOMRect(0, 0, 400, 300)
+    })
   try {
     expect(
       screen.getByRole('button', { name: 'Move default up' })
     ).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Move vip down' })).toBeDisabled()
-    screen.getByRole('button', { name: 'Move vip up' }).focus()
-    await user.keyboard('{Enter}')
+    const handle = screen.getByRole('button', { name: 'Drag vip to reorder' })
+    handle.focus()
+    await user.keyboard('[Space]')
+    await user.keyboard('{ArrowUp}')
+    await user.keyboard('[Space]')
     expect(
       screen
         .getAllByRole('combobox', { name: 'Model Group' })
@@ -2275,6 +2304,7 @@ it('moves test groups with named controls and saves their order without losing s
       ).toBeEnabled()
     )
   } finally {
+    measure.mockRestore()
     view.unmount()
     actions.remove()
     client.clear()

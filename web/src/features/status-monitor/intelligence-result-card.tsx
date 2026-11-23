@@ -32,6 +32,7 @@ import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
+import { IntelligenceExternalResult } from './intelligence-external-result'
 import { getIntelligenceQuestionName } from './intelligence-labels'
 import { IntelligencePreview } from './intelligence-preview'
 import type { IntelligenceCardData } from './intelligence-results'
@@ -250,22 +251,10 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
             role={error ? 'alert' : undefined}
           >
             {props.channel?.external_result && !error ? (
-              <div className='my-auto space-y-2 text-sm'>
-                <p className='font-medium'>
-                  {props.channel.external_result.label ||
-                    props.channel.external_result.status}
-                </p>
-                {props.channel.external_result.reason && (
-                  <p className='text-muted-foreground text-xs'>
-                    {props.channel.external_result.reason}
-                  </p>
-                )}
-                {props.channel.external_result.answer && (
-                  <p className='max-h-40 overflow-auto break-words whitespace-pre-wrap'>
-                    {props.channel.external_result.answer}
-                  </p>
-                )}
-              </div>
+              <IntelligenceExternalResult
+                result={props.channel.external_result}
+                className='shrink-0'
+              />
             ) : active && !error ? (
               <LoadingState message={statusLabel} className='min-h-0 flex-1' />
             ) : (

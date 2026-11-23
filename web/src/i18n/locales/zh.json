@@ -3879,6 +3879,7 @@
     "Incoming path must not include query": "入口路径不能包含 query",
     "Incoming path must start with /": "入口路径必须以 / 开头",
     "Incomplete": "未完成",
+    "Incorrect answer": "答案不符",
     "Increase quota for user “{{name}}”": "增加用户「{{name}}」的额度",
     "Increase user quota": "增加用户额度",
     "Increased user quota by {{quota}}": "增加用户额度 {{quota}}",
