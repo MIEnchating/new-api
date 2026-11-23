@@ -143,7 +143,7 @@ type AmountRequest struct {
 }
 
 func GetEpayClient() *epay.Client {
-	if operation_setting.PayAddress == "" || operation_setting.EpayId == "" || operation_setting.EpayKey == "" {
+	if !isEpayWebhookConfigured() {
 		return nil
 	}
 	withUrl, err := epay.NewClient(&epay.Config{

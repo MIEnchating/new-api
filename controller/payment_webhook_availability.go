@@ -3,9 +3,12 @@ package controller
 import (
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 )
+
+const legacyEpaySignTypeOption = "payment_setting.epay_sign_type"
 
 func isPaymentComplianceConfirmed() bool {
 	return operation_setting.IsPaymentComplianceConfirmed()
@@ -92,6 +95,12 @@ func isEpayTopUpEnabled() bool {
 }
 
 func isEpayWebhookConfigured() bool {
+	common.OptionMapRWMutex.RLock()
+	signType := strings.TrimSpace(common.OptionMap[legacyEpaySignTypeOption])
+	common.OptionMapRWMutex.RUnlock()
+	if signType != "" && !strings.EqualFold(signType, "MD5") {
+		return false
+	}
 	return strings.TrimSpace(operation_setting.PayAddress) != "" &&
 		strings.TrimSpace(operation_setting.EpayId) != "" &&
 		strings.TrimSpace(operation_setting.EpayKey) != ""

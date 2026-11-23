@@ -41,10 +41,12 @@ func taskPluginCompileError(c *gin.Context, err error) {
 }
 
 type taskPluginUploadRequest struct {
-	Source       string `json:"source" binding:"required"`
-	Enabled      *bool  `json:"enabled"`
-	Remark       string `json:"remark"`
-	SourceSha256 string `json:"sourceSha256"`
+	Source          string `json:"source" binding:"required"`
+	Enabled         *bool  `json:"enabled"`
+	Remark          string `json:"remark"`
+	SourceSha256    string `json:"sourceSha256"`
+	ExpectedKey     string `json:"expectedKey"`
+	ExpectedVersion string `json:"expectedVersion"`
 	// Icon carries the sidecar icon.svg / icon.png as a data URI. It is optional
 	// and stored separately from the source so the JavaScript stays readable.
 	Icon string `json:"icon"`
@@ -134,6 +136,11 @@ func UploadTaskPlugin(c *gin.Context) {
 	loaded, err := temporary.Register(request.Source, jsplugin.Options{})
 	if err != nil {
 		taskPluginCompileError(c, err)
+		return
+	}
+	if (request.ExpectedKey != "" && loaded.Meta.Key != request.ExpectedKey) ||
+		(request.ExpectedVersion != "" && loaded.Meta.Version != request.ExpectedVersion) {
+		common.ApiErrorT(c, "The plugin, version or language in the metadata does not match")
 		return
 	}
 	if err = jsplugin.ValidateV1Meta(loaded.Meta); err != nil {

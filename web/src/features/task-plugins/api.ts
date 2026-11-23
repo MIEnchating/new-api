@@ -118,6 +118,8 @@ export async function uploadTaskPlugin(
 export async function installMarketplacePlugin(request: {
   source: string
   sourceSha256?: string
+  expectedKey: string
+  expectedVersion: string
   remark: string
   icon?: string
   /** The marketplace source the plugin came from; the gateway checks its key rules. */
@@ -128,6 +130,8 @@ export async function installMarketplacePlugin(request: {
     {
       source: request.source,
       sourceSha256: request.sourceSha256,
+      expectedKey: request.expectedKey,
+      expectedVersion: request.expectedVersion,
       enabled: true,
       remark: request.remark,
       icon: request.icon || undefined,

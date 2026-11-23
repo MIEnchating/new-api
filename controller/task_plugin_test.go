@@ -2287,3 +2287,30 @@ func TestUploadTaskPluginAppliesMarketplaceKeyRulesAndCountsCommunityInstalls(t 
 	assert.Equal(t, map[string]string{"key": "alice_foo", "version": "1.0.0", "gateway": gateway, "path": "/api/v1/community/installs"}, count)
 	assert.Regexp(t, `^[0-9a-f]{64}$`, gateway)
 }
+
+func TestUploadTaskPluginRejectsUnexpectedMarketplaceIdentity(t *testing.T) {
+	setupTaskPluginFactoryDisableTest(t)
+	for _, tc := range []struct {
+		name, expectedKey, expectedVersion string
+	}{
+		{"wrong key", "catalog-plugin", "1.0.0"},
+		{"wrong version", "identity-fixture", "2.0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := common.Marshal(taskPluginUploadRequest{
+				Source:          taskPluginControllerTestSource("identity-fixture", "1.0.0"),
+				ExpectedKey:     tc.expectedKey,
+				ExpectedVersion: tc.expectedVersion,
+			})
+			require.NoError(t, err)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/plugin/task", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			UploadTaskPlugin(c)
+			assert.Contains(t, recorder.Body.String(), "The plugin, version or language in the metadata does not match")
+			_, err = model.GetTaskPluginVersion("identity-fixture", "1.0.0")
+			assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+		})
+	}
+}

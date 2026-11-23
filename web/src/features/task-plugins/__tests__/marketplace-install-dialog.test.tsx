@@ -207,6 +207,8 @@ test('first install shows source on demand and disables repeat submission until 
   expect(api.installMarketplacePlugin).toHaveBeenCalledWith({
     source,
     sourceSha256: undefined,
+    expectedKey: 'demo',
+    expectedVersion: '1.1',
     remark: 'Official v1.1',
     icon: undefined,
     marketplaceIndexUrl: 'https://example.com/index.json',
@@ -508,6 +510,8 @@ test('selecting a historical version installs its source and hash', async () => 
   expect(api.installMarketplacePlugin).toHaveBeenCalledWith({
     source: 'const old = 0',
     sourceSha256: createHash('sha256').update('const old = 0').digest('hex'),
+    expectedKey: 'demo',
+    expectedVersion: '1.0',
     remark: 'Official v1.0',
     icon: undefined,
     marketplaceIndexUrl: 'https://example.com/index.json',
@@ -822,6 +826,8 @@ test('a factory plugin uses its built-in source as the diff baseline and install
   expect(api.installMarketplacePlugin).toHaveBeenCalledWith({
     source: 'const old = 0',
     sourceSha256: createHash('sha256').update('const old = 0').digest('hex'),
+    expectedKey: 'demo',
+    expectedVersion: '1.0',
     remark: 'Official v1.0',
     icon: undefined,
     marketplaceIndexUrl: 'https://example.com/index.json',
