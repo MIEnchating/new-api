@@ -509,6 +509,8 @@ export function SiteStatus() {
     },
   ].filter((tab) => access.enabled && tab.enabled)
   const [preferredTab, setActiveTab] = useState('intelligence')
+  const [intelligenceRefreshContainer, setIntelligenceRefreshContainer] =
+    useState<HTMLDivElement | null>(null)
   const activeTab =
     visibleTabs.find((tab) => tab.value === preferredTab)?.value ??
     visibleTabs[0]?.value
@@ -769,6 +771,12 @@ export function SiteStatus() {
                     </TabsTrigger>
                   ))}
                 </TabsList>
+                {activeTab === 'intelligence' && (
+                  <div
+                    ref={setIntelligenceRefreshContainer}
+                    className='min-w-0 shrink-0'
+                  />
+                )}
                 {activeTab && activeTab !== 'intelligence' && (
                   <RefreshControl
                     key={activeTab}
@@ -840,7 +848,9 @@ export function SiteStatus() {
                   className='flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
                 >
                   <Suspense fallback={<PanelLoadingState />}>
-                    <IntelligenceMonitor />
+                    <IntelligenceMonitor
+                      refreshContainer={intelligenceRefreshContainer}
+                    />
                   </Suspense>
                 </TabsContent>
               )}

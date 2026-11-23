@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
 import { EmptyState } from '@/components/empty-state'
@@ -39,7 +40,9 @@ import { IntelligenceResultCard } from './intelligence-result-card'
 import { buildIntelligenceCards } from './intelligence-results'
 import { RefreshControl } from './refresh-control'
 
-export function IntelligenceMonitor() {
+export function IntelligenceMonitor(props: {
+  refreshContainer?: HTMLElement | null
+}) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const [activeGroupKey, setActiveGroupKey] = useState('all')
@@ -119,6 +122,15 @@ export function IntelligenceMonitor() {
 
   if (query.isPending) return <LoadingState />
   if (!query.data) return <ErrorState onRetry={() => void query.refetch()} />
+  const refreshControl = (
+    <RefreshControl
+      loading={false}
+      refreshing={query.isFetching}
+      lastUpdated={new Date(query.dataUpdatedAt)}
+      onRefresh={() => void query.refetch()}
+      autoRefresh={false}
+    />
+  )
   return (
     <section
       aria-label={t('Intelligence test history')}
@@ -170,15 +182,11 @@ export function IntelligenceMonitor() {
                 ))}
               </TabsList>
             )}
-            <div className='shrink-0 lg:ml-auto'>
-              <RefreshControl
-                loading={false}
-                refreshing={query.isFetching}
-                lastUpdated={new Date(query.dataUpdatedAt)}
-                onRefresh={() => void query.refetch()}
-                autoRefresh={false}
-              />
-            </div>
+            {props.refreshContainer ? (
+              createPortal(refreshControl, props.refreshContainer)
+            ) : (
+              <div className='shrink-0 lg:ml-auto'>{refreshControl}</div>
+            )}
           </div>
           {query.isError && (
             <Alert variant='destructive'>

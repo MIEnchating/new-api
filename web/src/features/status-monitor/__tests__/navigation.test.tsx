@@ -101,6 +101,70 @@ async function renderSiteStatus(
 }
 
 describe('status page separation', () => {
+  it('keeps intelligence update time and refresh beside the page tabs when switching status pages', async () => {
+    const get = vi.spyOn(api, 'get').mockImplementation(async (url) => {
+      let data: unknown = ''
+      if (url === '/api/status-monitor/intelligence/results') {
+        data = { history: [] }
+      }
+      if (url === '/api/status-monitor/providers') data = { providers: [] }
+      if (url === '/api/uptime/status') data = []
+      return { data: { success: true, data } }
+    })
+    const view = await renderSiteStatus(
+      {
+        enabled: true,
+        requireAuth: false,
+        tabs: { intelligence: true, uptime: true, official: true },
+      },
+      'intelligence'
+    )
+    const user = userEvent.setup()
+    try {
+      await screen.findByText('No intelligence test results yet')
+      const header = screen
+        .getByRole('tab', { name: 'Intelligence testing' })
+        .closest('[role="tablist"]')?.parentElement
+      if (!header) throw new Error('Expected the status page tab header')
+      expect(header).toHaveClass('sm:flex-row', 'sm:items-center')
+      expect(within(header).getByText(/Updated/)).toBeVisible()
+      expect(
+        within(header).getByRole('button', { name: 'Refresh' })
+      ).toBeVisible()
+      expect(
+        within(
+          screen.getByRole('region', { name: 'Intelligence test history' })
+        ).queryByRole('button', { name: 'Refresh' })
+      ).not.toBeInTheDocument()
+
+      get.mockClear()
+      await user.click(within(header).getByRole('button', { name: 'Refresh' }))
+      await waitFor(() =>
+        expect(
+          get.mock.calls.filter(
+            ([url]) => url === '/api/status-monitor/intelligence/results'
+          )
+        ).toHaveLength(1)
+      )
+      for (const tab of [
+        'Site status',
+        'Official status',
+        'Intelligence testing',
+      ]) {
+        await user.click(screen.getByRole('tab', { name: tab }))
+        await waitFor(() => {
+          expect(
+            within(header).getAllByRole('button', { name: /Refresh/ })
+          ).toHaveLength(1)
+          expect(within(header).getByText(/Updated/)).toBeVisible()
+        })
+      }
+    } finally {
+      view.unmount()
+      view.client.clear()
+    }
+  })
+
   it.each([
     ['uptime', 'Site status', '/api/uptime/status'],
     ['official', 'Official status', '/api/status-monitor/providers'],
