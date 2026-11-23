@@ -1256,17 +1256,20 @@ it('shows only compact result metadata and previews without channel IDs, record 
     const timestamps = view.container.querySelectorAll('time[datetime]')
     expect(timestamps).toHaveLength(2)
     expect(timestamps[0]).toHaveAttribute('title')
-    expect(timestamps[0].closest('[data-slot=card-header]')).toHaveTextContent(
-      'Pelican'
-    )
-    expect(timestamps[0].parentElement).toHaveTextContent('seconds')
     const cards = frames.map((frame) => frame.closest('[data-slot=card]'))
+    expect(timestamps[0].closest('[data-slot=card-header]')).toHaveTextContent(
+      'test-model'
+    )
+    expect(
+      cards[0]?.querySelector('[data-slot=intelligence-card-content]')
+    ).toHaveClass('aspect-[4/3]')
     expect(cards[0]).not.toBe(cards[1])
     for (const card of cards) {
       expect(card).toHaveClass('border', 'ring-0')
     }
     expect(cards[0]?.parentElement).toHaveClass(
-      'grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))]'
+      '@min-[36rem]:grid-cols-2',
+      '@min-[60rem]:grid-cols-3'
     )
     expect(screen.getByRole('tabpanel')).toHaveClass(
       'overflow-x-hidden',
@@ -1274,7 +1277,7 @@ it('shows only compact result metadata and previews without channel IDs, record 
     )
     expect(
       cards[0]?.querySelector('[data-slot=card-header] > div')
-    ).toHaveClass('items-start', 'gap-3')
+    ).toHaveClass('items-center', 'justify-between', 'gap-2')
     const enlargeButton = screen.getAllByRole('button', {
       name: 'Enlarge preview',
     })[0]
@@ -1295,7 +1298,7 @@ it('shows only compact result metadata and previews without channel IDs, record 
     )
     expect(enlargeButton).toHaveFocus()
     expect(frames[0].closest('[data-preview-viewport]')).toHaveClass(
-      'aspect-[6/5]',
+      'aspect-[4/3]',
       'overflow-hidden'
     )
   } finally {

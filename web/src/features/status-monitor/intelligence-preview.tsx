@@ -40,6 +40,7 @@ import { Dialog } from '@/components/dialog'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 import {
   getIntelligenceResult,
@@ -67,8 +68,8 @@ type IntelligencePreviewProps = {
   group?: string
   model?: string
   questionIndex: number
-  label?: string
-  variant?: 'inline' | 'button'
+  label?: ReactNode
+  variant?: 'inline' | 'button' | 'gallery'
 }
 
 export const IntelligencePreview = memo(function IntelligencePreview(
@@ -123,7 +124,13 @@ export const IntelligencePreview = memo(function IntelligencePreview(
   }
 
   return (
-    <div ref={viewport} className='bg-muted relative aspect-[6/5] border-t'>
+    <div
+      ref={viewport}
+      className={cn(
+        'bg-muted relative',
+        props.variant === 'gallery' ? 'aspect-[4/3]' : 'aspect-[6/5] border-t'
+      )}
+    >
       {(visited || expanded) && (
         <IntelligencePreviewContent
           {...props}
@@ -181,16 +188,21 @@ function IntelligencePreviewContent(
   )
 
   let feedback: ReactNode = null
+  const gallery = props.variant === 'gallery'
+  const aspect = gallery ? 'aspect-[4/3]' : 'aspect-[6/5]'
   if (query.isPending) {
-    feedback = <LoadingState className='aspect-[6/5] min-h-0' />
+    feedback = <LoadingState className={cn(aspect, 'min-h-0')} />
   } else if (query.isError) {
     feedback = (
-      <ErrorState className='min-h-48' onRetry={() => void query.refetch()} />
+      <ErrorState
+        className={gallery ? 'absolute inset-0 overflow-auto' : 'min-h-48'}
+        onRetry={() => void query.refetch()}
+      />
     )
   } else if (!html) {
     feedback = (
       <ErrorState
-        className='min-h-48'
+        className={gallery ? 'absolute inset-0 overflow-auto' : 'min-h-48'}
         title={t('Intelligence test returned no output')}
       />
     )
@@ -201,9 +213,10 @@ function IntelligencePreviewContent(
   return (
     <div className='relative'>
       {props.variant !== 'button' && (
-        <div className='pointer-events-none aspect-[6/5]' inert>
+        <div className={cn('pointer-events-none', aspect)} inert>
           <IntelligenceAnimation
             document={previewDocument}
+            gallery={gallery}
             active={
               pageVisible && props.visible && !props.expanded && !scrolling
             }
@@ -232,9 +245,16 @@ function IntelligencePreviewContent(
             <Button
               variant='ghost'
               aria-label={t('Enlarge preview')}
-              className='absolute inset-0 h-full w-full rounded-none p-0 hover:bg-transparent active:translate-y-0'
+              className='absolute inset-0 h-full w-full cursor-zoom-in rounded-none p-0 hover:bg-transparent focus-visible:ring-inset active:translate-y-0'
             >
-              <span className='bg-background/80 text-foreground absolute right-2 bottom-2 rounded-md border p-1.5'>
+              <span
+                className={cn(
+                  'absolute right-2 bottom-2 border p-1.5',
+                  gallery
+                    ? 'rounded-full border-white/20 bg-black/70 text-white'
+                    : 'bg-background/80 text-foreground rounded-md'
+                )}
+              >
                 <Maximize2 aria-hidden='true' className='size-3.5' />
               </span>
             </Button>
@@ -269,7 +289,11 @@ function findIntelligencePreview(
   )
 }
 
-function IntelligenceAnimation(props: { document: string; active: boolean }) {
+function IntelligenceAnimation(props: {
+  document: string
+  active: boolean
+  gallery?: boolean
+}) {
   const { t } = useTranslation()
   const viewport = useRef<HTMLDivElement>(null)
   const frame = useRef<HTMLIFrameElement>(null)
@@ -303,10 +327,16 @@ function IntelligenceAnimation(props: { document: string; active: boolean }) {
     <div
       ref={viewport}
       data-preview-viewport
-      className='bg-muted relative aspect-[6/5] overflow-hidden [contain:layout_paint]'
+      className={cn(
+        'bg-muted relative overflow-hidden [contain:layout_paint]',
+        props.gallery ? 'aspect-[4/3]' : 'aspect-[6/5]'
+      )}
     >
       <WebPreview
-        className='absolute top-0 left-0 h-[800px] w-[960px] origin-top-left rounded-none border-0'
+        className={cn(
+          'absolute top-0 left-0 w-[960px] origin-top-left rounded-none border-0',
+          props.gallery ? 'h-[720px]' : 'h-[800px]'
+        )}
         style={{ transform: `scale(${scale})` }}
       >
         {mounted && (

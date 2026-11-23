@@ -129,17 +129,22 @@ func (group *intelligenceGroup) UnmarshalJSON(data []byte) error {
 }
 
 type manxueTestResponse struct {
-	ID        string `json:"id"`
-	Status    string `json:"status"`
-	Phase     string `json:"phase"`
-	Benchmark string `json:"benchmark"`
-	Candy     *struct {
-		Status     string `json:"status"`
-		Answer     string `json:"answer"`
-		DurationMS int64  `json:"duration_ms"`
+	ID            string `json:"id"`
+	Status        string `json:"status"`
+	Phase         string `json:"phase"`
+	Benchmark     string `json:"benchmark"`
+	UsageReported *bool  `json:"usage_reported"`
+	Candy         *struct {
+		Status       string `json:"status"`
+		Answer       string `json:"answer"`
+		DurationMS   int64  `json:"duration_ms"`
+		OutputTokens int64  `json:"output_tokens"`
 	} `json:"candy,omitempty"`
 	Result *struct {
-		HTML string `json:"html"`
+		HTML         string `json:"html"`
+		DurationMS   int64  `json:"duration_ms"`
+		FirstTokenMS *int64 `json:"first_token_ms"`
+		OutputTokens int64  `json:"output_tokens"`
 	} `json:"result,omitempty"`
 	Assessment *struct {
 		Quality string `json:"quality"`
@@ -389,6 +394,12 @@ func publishedIntelligenceTask(task *model.SystemTask, includeHTML bool, admin b
 			"question_name": channel.QuestionName, "latency_ms": channel.LatencyMs, "error": "", "group": channel.Group, "model": channel.Model, "endpoint": channel.Endpoint}
 		row["retry_count"] = max(0, len(channel.Attempts)-1)
 		row["revision"] = channel.Revision
+		if channel.Error == "" && channel.TokensPerSecond > 0 {
+			row["tokens_per_second"] = channel.TokensPerSecond
+			if channel.AverageTPS {
+				row["average_tps"] = true
+			}
+		}
 		if admin {
 			row["request_id"] = channel.RequestID
 			row["upstream_request_id"] = channel.UpstreamRequestID
@@ -888,6 +899,8 @@ type intelligenceChannelResult struct {
 	HTML              string                      `json:"html,omitempty"`
 	ExternalResult    *intelligenceExternalResult `json:"external_result,omitempty"`
 	LatencyMs         int64                       `json:"latency_ms"`
+	TokensPerSecond   float64                     `json:"tokens_per_second,omitempty"`
+	AverageTPS        bool                        `json:"average_tps,omitempty"`
 	Error             string                      `json:"error"`
 }
 
@@ -1377,6 +1390,7 @@ func runManxueIntelligenceTest(ctx context.Context, config intelligenceConfig, u
 			row.Error = intelligenceExternalFailure(ctx)
 			return row
 		}
+		result = manxueTestResponse{}
 		decodeErr := common.DecodeJson(io.LimitReader(response.Body, 2<<20), &result)
 		response.Body.Close()
 		if decodeErr != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
@@ -1396,10 +1410,13 @@ func runManxueIntelligenceTest(ctx context.Context, config intelligenceConfig, u
 		Benchmark: result.Benchmark, Status: result.Status,
 		Phase: strings.ReplaceAll(result.Phase, token.Key, "[redacted]"),
 	}
+	var duration, outputTokens int64
+	var firstToken *int64
 	if result.Candy != nil {
 		row.ExternalResult.Status = strings.ReplaceAll(result.Candy.Status, token.Key, "[redacted]")
 		row.ExternalResult.Answer = strings.ReplaceAll(result.Candy.Answer, token.Key, "[redacted]")
 		row.ExternalResult.DurationMS = result.Candy.DurationMS
+		duration, outputTokens = result.Candy.DurationMS, result.Candy.OutputTokens
 		if result.Candy.Status != "passed" && result.Candy.Status != "incorrect" {
 			row.Error = "External intelligence test did not complete successfully"
 		}
@@ -1407,11 +1424,25 @@ func runManxueIntelligenceTest(ctx context.Context, config intelligenceConfig, u
 		row.ExternalResult.Quality = strings.ReplaceAll(result.Assessment.Quality, token.Key, "[redacted]")
 		row.ExternalResult.Label = strings.ReplaceAll(result.Assessment.Label, token.Key, "[redacted]")
 		row.ExternalResult.Reason = strings.ReplaceAll(result.Assessment.Reason, token.Key, "[redacted]")
+		if result.Result != nil {
+			duration, outputTokens = result.Result.DurationMS, result.Result.OutputTokens
+			firstToken = result.Result.FirstTokenMS
+		}
 	} else {
 		row.Error = "External intelligence test request failed"
 	}
 	if result.Result != nil && len(result.Result.HTML) <= 131072 {
 		row.HTML = strings.ReplaceAll(result.Result.HTML, token.Key, "[redacted]")
+	}
+	if row.Error == "" && (result.UsageReported == nil || *result.UsageReported) && outputTokens > 0 && duration > 0 {
+		if firstToken == nil {
+			row.AverageTPS = true
+		} else if *firstToken < 0 || *firstToken >= duration {
+			return row
+		} else {
+			duration -= *firstToken
+		}
+		row.TokensPerSecond = float64(outputTokens) / (float64(duration) / 1000)
 	}
 	return row
 }
@@ -1481,6 +1512,8 @@ func runIntelligenceRequest(ctx context.Context, channel *model.Channel, userID 
 	} else if len(row.HTML) > 131072 {
 		row.HTML = ""
 		row.Error = "Intelligence test output exceeded 128 KiB"
+	} else {
+		row.TokensPerSecond = response.tokensPerSecond
 	}
 	return row
 }

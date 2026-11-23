@@ -149,11 +149,72 @@ it('shows the answer returned by an external intelligence test', () => {
 })
 
 it.each([
-  { error: '', label: 'Suspected degradation' },
-  { error: 'External intelligence test request failed', label: '' },
+  {
+    tokensPerSecond: 25.4,
+    average: false,
+    title: 'Sustained tokens per second',
+  },
+  { tokensPerSecond: 12.3, average: true, title: 'Average TPS' },
 ])(
-  'keeps the generated preview visible after Manxue classification ($label)',
-  ({ error, label }) => {
+  'shows available TPS and identifies whether it is average or sustained',
+  ({ tokensPerSecond, average, title }) => {
+    const task = historyTask(1)
+    if (!task.result) throw new Error('Expected a result fixture')
+    const channel = {
+      ...task.result.channels[0],
+      error: '',
+      tokens_per_second: tokensPerSecond,
+      average_tps: average,
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { enabled: false, retry: false } },
+    })
+    const view = render(
+      <QueryClientProvider client={client}>
+        <IntelligenceResultCard
+          id='throughput-result'
+          task={task}
+          channel={channel}
+          group={task.group}
+          model={task.model}
+          status='succeeded'
+          showGroup={false}
+          onGroupSelect={() => {}}
+        />
+      </QueryClientProvider>
+    )
+    try {
+      expect(screen.getByTitle(title)).toHaveTextContent(
+        average ? 'Average TPS' : 'TPS'
+      )
+      expect(screen.getByTitle(title)).toHaveTextContent(
+        tokensPerSecond.toFixed(1)
+      )
+    } finally {
+      view.unmount()
+      client.clear()
+    }
+  }
+)
+
+it.each([
+  { error: '', label: '正常', quality: 'normal', ribbon: '正常' },
+  { error: '', label: '参考', quality: 'normal', ribbon: 'For reference' },
+  {
+    error: '',
+    label: '疑似降智',
+    quality: 'degraded',
+    ribbon: '疑似降智',
+  },
+  {
+    error: 'External intelligence test request failed',
+    label: '',
+    quality: '',
+    ribbon: 'Failed',
+  },
+])(
+  'keeps the artwork visible with the $ribbon assessment and shows details in the preview',
+  async ({ error, label, quality, ribbon }) => {
     const task = historyTask(1)
     if (!task.result) throw new Error('Expected a result fixture')
     const channel = {
@@ -164,7 +225,13 @@ it.each([
       has_html: true,
       html: '<!doctype html><html><body><svg></svg></body></html>',
       external_result: label
-        ? { benchmark: 'html', status: 'succeeded', label }
+        ? {
+            benchmark: 'html',
+            status: 'succeeded',
+            label,
+            quality,
+            reason: 'Classifier assessment detail',
+          }
         : undefined,
     }
     task.result.channels = [channel]
@@ -188,10 +255,17 @@ it.each([
       </QueryClientProvider>
     )
     try {
+      const preview = screen.getByRole('button', { name: 'Enlarge preview' })
+      expect(preview).toBeVisible()
+      expect(screen.getByText(ribbon)).toBeVisible()
       expect(
-        screen.getByRole('button', { name: 'Enlarge preview' })
+        screen.queryByText(error || 'Classifier assessment detail')
+      ).not.toBeInTheDocument()
+      await userEvent.click(preview)
+      const dialog = await screen.findByRole('dialog')
+      expect(
+        within(dialog).getByText(error || 'Classifier assessment detail')
       ).toBeVisible()
-      expect(screen.getByText(error || `Manxue AI · ${label}`)).toBeVisible()
     } finally {
       view.unmount()
       client.clear()
@@ -537,7 +611,7 @@ it('keeps batch models in their configured order when results arrive out of orde
 })
 
 it.each(['pending', 'running', 'failed', 'succeeded'] as const)(
-  'keeps the same header and preview dimensions for %s cards, including long content',
+  'keeps the same tile ratio for %s cards, including long content',
   (status) => {
     const task = historyTask(0)
     const error =
@@ -576,20 +650,16 @@ it.each(['pending', 'running', 'failed', 'succeeded'] as const)(
       const card = screen
         .getByLabelText(`Model: ${model}`)
         .closest('[data-slot=card]')
+      expect(card).toHaveClass('rounded-xl', 'overflow-hidden')
       expect(card?.querySelector('[data-slot=card-header]')).toHaveClass(
-        'h-28',
-        'shrink-0'
+        'order-last',
+        'border-t'
       )
       expect(screen.getByText(model)).toHaveClass('truncate')
       const content = card?.querySelector(
         '[data-slot=intelligence-card-content]'
       )
-      expect(content).toHaveClass(
-        'relative',
-        'aspect-[6/5]',
-        'shrink-0',
-        'overflow-hidden'
-      )
+      expect(content).toHaveClass('relative', 'aspect-[4/3]', 'overflow-hidden')
       expect(content?.firstElementChild).toHaveClass('absolute', 'inset-0')
       if (status === 'failed') {
         expect(

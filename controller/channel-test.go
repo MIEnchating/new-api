@@ -46,12 +46,13 @@ type channelTestProbe struct {
 }
 
 type testResult struct {
-	context        *gin.Context
-	responseBody   []byte
-	streamOutcome  relaycommon.StreamOutcome
-	upstreamStatus int
-	localErr       error
-	newAPIError    *types.NewAPIError
+	context         *gin.Context
+	responseBody    []byte
+	streamOutcome   relaycommon.StreamOutcome
+	tokensPerSecond float64
+	upstreamStatus  int
+	localErr        error
+	newAPIError     *types.NewAPIError
 }
 
 func normalizeChannelTestEndpoint(channel *model.Channel, endpointType string) string {
@@ -537,6 +538,7 @@ func testChannelWithProbe(ctx context.Context, channel *model.Channel, testUserI
 		}
 	}()
 	usageA, respErr := adaptor.DoResponse(c, httpResp, info)
+	responseFinishedAt := time.Now()
 	if respErr != nil {
 		return testResult{
 			context:     c,
@@ -593,12 +595,19 @@ func testChannelWithProbe(ctx context.Context, channel *model.Channel, testUserI
 	if probe == nil {
 		common.SysLog(common.LogText("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
 	}
+	var tokensPerSecond float64
+	if probe != nil && info.IsStream && info.HasSendResponse() && usage.CompletionTokens > 0 {
+		if duration := responseFinishedAt.Sub(info.FirstResponseTime); duration > 0 {
+			tokensPerSecond = float64(usage.CompletionTokens) / duration.Seconds()
+		}
+	}
 	return testResult{
-		context:       c,
-		localErr:      nil,
-		newAPIError:   nil,
-		responseBody:  respBody,
-		streamOutcome: info.StreamStatus.OutcomeSnapshot(),
+		context:         c,
+		localErr:        nil,
+		newAPIError:     nil,
+		responseBody:    respBody,
+		streamOutcome:   info.StreamStatus.OutcomeSnapshot(),
+		tokensPerSecond: tokensPerSecond,
 	}
 }
 

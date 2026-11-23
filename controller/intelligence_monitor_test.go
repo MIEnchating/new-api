@@ -755,6 +755,8 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 		if terminal == "response.completed" {
 			assert.Equal(t, model.SystemTaskStatusSucceeded, streamTask.Status, streamTask.Result)
 			assert.Equal(t, output, gjson.Get(streamTask.Result, "channels.0.html").String())
+			assert.Greater(t, gjson.Get(streamTask.Result, "channels.0.tokens_per_second").Float(), float64(0))
+			assert.False(t, gjson.Get(streamTask.Result, "channels.0.average_tps").Bool())
 		} else {
 			assert.Equal(t, model.SystemTaskStatusFailed, streamTask.Status)
 			assert.Empty(t, gjson.Get(streamTask.Result, "channels.0.html").String())
@@ -933,7 +935,7 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 				}
 				_, _ = io.WriteString(w, `{"id":"task-id","benchmark":"candy","status":"running"}`)
 			case "GET /api/v1/tests/task-id":
-				_, _ = io.WriteString(w, `{"id":"task-id","benchmark":"candy","status":"succeeded","candy":{"status":"passed","answer":"21"}}`)
+				_, _ = io.WriteString(w, `{"id":"task-id","benchmark":"candy","status":"succeeded","candy":{"status":"passed","answer":"21","duration_ms":2100,"output_tokens":21}}`)
 			default:
 				w.WriteHeader(http.StatusNotFound)
 			}
@@ -970,6 +972,8 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 			} else {
 				assert.Equal(t, model.SystemTaskStatusSucceeded, task.Status, task.Result)
 				assert.Equal(t, "21", gjson.Get(task.Result, "channels.0.external_result.answer").String())
+				assert.InDelta(t, 10, gjson.Get(task.Result, "channels.0.tokens_per_second").Float(), 0.01)
+				assert.True(t, gjson.Get(task.Result, "channels.0.average_tps").Bool())
 			}
 			select {
 			case key := <-keys:

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Clock3, Cpu } from 'lucide-react'
+import { Clock3 } from 'lucide-react'
 import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -27,8 +27,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
+import { formatThroughput } from '@/features/performance-metrics/lib/format'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 import { getIntelligenceQuestionName } from './intelligence-labels'
 import { IntelligencePreview } from './intelligence-preview'
@@ -50,6 +52,8 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
     : ''
   const active = props.status === 'running' || props.status === 'pending'
   const retryCount = props.channel?.retry_count ?? 0
+  const tps = props.channel?.tokens_per_second
+  const throughput = typeof tps === 'number' ? formatThroughput(tps) : ''
   const percent =
     props.counts && props.counts.total > 0
       ? Math.min(
@@ -69,36 +73,42 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
     props.channel &&
     (props.channel.has_html || (!error && !props.channel.external_result))
   const assessment = props.channel?.external_result
+  let ribbonLabel = statusLabel
+  let ribbonColor = 'bg-slate-600'
+  if (error) {
+    ribbonColor = 'bg-red-700'
+  } else if (assessment?.label === '参考') {
+    ribbonLabel = t('For reference')
+  } else if (assessment?.quality === 'normal') {
+    ribbonLabel = assessment.label || t('Normal')
+    ribbonColor = 'bg-emerald-800'
+  } else if (
+    assessment?.quality === 'degraded' ||
+    assessment?.quality === 'suspicious'
+  ) {
+    ribbonLabel = assessment.label || t('Suspected degradation')
+    ribbonColor = 'bg-amber-800'
+  } else if (assessment) {
+    ribbonLabel = assessment.label || t('Unknown')
+  }
+  const previewLabel = [groupLabel, props.model, questionName]
+    .filter(Boolean)
+    .join(' · ')
 
   return (
     <Card
       data-card-hover='false'
-      className='min-w-0 gap-0 overflow-hidden border py-0 ring-0'
+      className='relative min-w-0 gap-0 overflow-hidden rounded-xl border py-0 ring-0'
     >
-      <CardHeader className='h-28 shrink-0 content-start gap-2 px-4 py-3'>
-        <div className='flex min-w-0 items-start justify-between gap-3'>
-          <CardTitle className='min-w-0 flex-1'>
-            <Badge
-              variant='outline'
-              aria-label={`${t('Model')}: ${props.model}`}
-              title={props.model}
-              className='bg-muted/30 h-auto min-h-6 max-w-full min-w-0 justify-start gap-1.5 rounded-md px-2 font-mono text-xs font-semibold'
-            >
-              <Cpu
-                aria-hidden='true'
-                className='text-muted-foreground shrink-0'
-              />
-              <span className='truncate'>{props.model}</span>
-            </Badge>
-          </CardTitle>
-          <Badge
-            variant={props.status === 'failed' ? 'destructive' : 'secondary'}
-            className='shrink-0 text-[10px]'
+      <CardHeader className='order-last shrink-0 content-start gap-1 rounded-none border-t px-3 py-2.5'>
+        <div className='flex min-h-6 min-w-0 items-center justify-between gap-2'>
+          <CardTitle
+            aria-label={`${t('Model')}: ${props.model}`}
+            title={props.model}
+            className='min-w-0 flex-1 truncate font-mono text-sm font-semibold'
           >
-            {statusLabel}
-          </Badge>
-        </div>
-        <div className='flex h-6 min-w-0 items-center gap-2'>
+            {props.model}
+          </CardTitle>
           {props.showGroup && (
             <Button
               variant='ghost'
@@ -106,7 +116,7 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
               aria-label={t('Filter by group {{group}}', {
                 group: groupLabel,
               })}
-              className='h-auto min-h-6 max-w-full min-w-0 justify-start rounded-md p-0'
+              className='h-auto min-h-6 max-w-[55%] min-w-0 justify-start rounded-md p-0'
               onClick={() => props.onGroupSelect(props.group)}
             >
               <GroupBadge
@@ -116,17 +126,26 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
               />
             </Button>
           )}
-          {questionName && (
-            <span
-              className='text-muted-foreground min-w-0 flex-1 truncate text-xs'
-              title={questionName}
+        </div>
+        <div className='text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs tabular-nums'>
+          {!hasPreview && (
+            <Badge
+              variant={props.status === 'failed' ? 'destructive' : 'secondary'}
+              className='shrink-0 text-[10px]'
             >
+              {statusLabel}
+            </Badge>
+          )}
+          {questionName && (
+            <span className='max-w-28 min-w-0 truncate' title={questionName}>
               {questionName}
             </span>
           )}
-        </div>
-        <div className='text-muted-foreground flex min-w-0 items-center justify-between gap-2 text-xs tabular-nums'>
-          <time dateTime={date.toISOString()} title={dateLabel}>
+          <time
+            className='mr-auto shrink-0'
+            dateTime={date.toISOString()}
+            title={dateLabel}
+          >
             {date.toLocaleString(locale, {
               month: '2-digit',
               day: '2-digit',
@@ -150,6 +169,22 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
               {t('seconds')}
             </span>
           )}
+          {typeof tps === 'number' &&
+            Number.isFinite(tps) &&
+            tps > 0 &&
+            !error && (
+              <span
+                className='text-foreground shrink-0 font-medium'
+                title={
+                  props.channel?.average_tps
+                    ? t('Average TPS')
+                    : t('Sustained tokens per second')
+                }
+              >
+                {props.channel?.average_tps ? t('Average TPS') : 'TPS'}{' '}
+                {throughput.replace(/ t\/s$/, '')}
+              </span>
+            )}
           {!props.channel && props.counts && props.counts.total > 0 && (
             <span>
               {formatNumber(props.counts.processed, locale)} /{' '}
@@ -161,19 +196,53 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
       <div
         data-slot='intelligence-card-content'
         aria-busy={active}
-        className='bg-muted/30 relative aspect-[6/5] shrink-0 overflow-hidden border-t'
+        className='bg-muted/30 relative aspect-[4/3] shrink-0 overflow-hidden'
       >
         {props.channel && hasPreview ? (
           <div className='absolute inset-0 overflow-hidden'>
             <IntelligencePreview
+              variant='gallery'
               version={props.channel.revision || props.task.retry?.revision}
               taskId={props.task.task_id}
               channelId={props.channel.channel_id}
               group={props.channel.group}
               model={props.channel.model}
               questionIndex={props.channel.question_index}
-              label={`${groupLabel} · ${props.model} · ${questionName}`}
+              label={
+                assessment || error ? (
+                  <>
+                    <span className='block'>{previewLabel}</span>
+                    {assessment && (
+                      <span className='mt-2 block'>
+                        {t('Manxue AI')} · {ribbonLabel}
+                      </span>
+                    )}
+                    {assessment?.reason && (
+                      <span className='block [overflow-wrap:anywhere]'>
+                        {assessment.reason}
+                      </span>
+                    )}
+                    {error && (
+                      <span className='text-destructive block'>{t(error)}</span>
+                    )}
+                  </>
+                ) : (
+                  previewLabel
+                )
+              }
             />
+            {(assessment || error) && (
+              <span className='pointer-events-none absolute top-0 right-0 z-10 size-28 overflow-hidden'>
+                <span
+                  className={cn(
+                    'absolute top-8 -right-9 w-40 rotate-45 px-8 py-1 text-center text-[10px] leading-tight font-semibold text-white shadow-sm',
+                    ribbonColor
+                  )}
+                >
+                  {ribbonLabel}
+                </span>
+              </span>
+            )}
           </div>
         ) : (
           <div
@@ -226,21 +295,6 @@ export const IntelligenceResultCard = memo(function IntelligenceResultCard(
           />
         )}
       </div>
-      {hasPreview && (assessment || error) && (
-        <div className='space-y-1 border-t px-4 py-3 text-xs break-words'>
-          {assessment && (
-            <>
-              <p className='font-medium'>
-                {t('Manxue AI')} · {assessment.label || assessment.status}
-              </p>
-              {assessment.reason && (
-                <p className='text-muted-foreground'>{assessment.reason}</p>
-              )}
-            </>
-          )}
-          {error && <p className='text-destructive'>{t(error)}</p>}
-        </div>
-      )}
     </Card>
   )
 })

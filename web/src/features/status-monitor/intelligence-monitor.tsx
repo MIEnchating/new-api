@@ -194,7 +194,7 @@ export function IntelligenceMonitor() {
             ref={resultsViewport}
             onScroll={handleScroll}
             value={selectedGroupKey}
-            className='min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pb-2'
+            className='@container min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-1 pt-2 pb-2'
           >
             {filteredCards.length === 0 && (
               <EmptyState
@@ -202,7 +202,7 @@ export function IntelligenceMonitor() {
                 bordered
               />
             )}
-            <div className='grid min-w-0 grid-cols-[repeat(auto-fill,minmax(min(100%,22rem),1fr))] items-stretch gap-3 sm:gap-4'>
+            <div className='grid min-w-0 grid-cols-1 gap-4 @min-[36rem]:grid-cols-2 @min-[60rem]:grid-cols-3 @min-[60rem]:gap-6'>
               {filteredCards.map((card) => (
                 <IntelligenceResultCard
                   key={card.id}

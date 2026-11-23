@@ -171,6 +171,8 @@ export type IntelligenceTask = {
       has_html?: boolean
       external_result?: IntelligenceExternalResult
       latency_ms: number
+      tokens_per_second?: number
+      average_tps?: boolean
       error: string
     }[]
   }
