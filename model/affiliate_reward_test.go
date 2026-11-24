@@ -147,6 +147,50 @@ func TestAffiliateAccountingDatabase(t *testing.T) {
 			common.QuotaForInviter = 200
 			t.Cleanup(func() { common.QuotaForInviter = oldReward })
 
+			t.Run("topup succeeds when its inviter is unavailable", func(t *testing.T) {
+				for i, tc := range []struct {
+					name       string
+					hardDelete bool
+					manual     bool
+				}{
+					{name: "callback soft-deleted inviter"},
+					{name: "manual completion soft-deleted inviter", manual: true},
+					{name: "callback missing inviter", hardDelete: true},
+				} {
+					t.Run(tc.name, func(t *testing.T) {
+						inviterID, inviteeID := 200+i*2, 201+i*2
+						insertInviteRebateUser(t, inviterID, fmt.Sprintf("removed_inviter_%d", i), 0)
+						insertInviteRebateUser(t, inviteeID, fmt.Sprintf("pending_invitee_%d", i), inviterID)
+						deletion := DB
+						if tc.hardDelete {
+							deletion = deletion.Unscoped()
+						}
+						require.NoError(t, deletion.Delete(&User{}, inviterID).Error)
+						trade := fmt.Sprintf("rebate-unavailable-inviter-%d", i)
+						insertInviteRebateTopUp(t, trade, inviteeID, 10)
+
+						if tc.manual {
+							require.NoError(t, ManualCompleteTopUp(trade, "127.0.0.1"))
+						} else {
+							alreadyDone, err := RechargeEpay(trade, "alipay", "127.0.0.1")
+							require.NoError(t, err)
+							assert.False(t, alreadyDone)
+						}
+						alreadyDone, err := RechargeEpay(trade, "alipay", "127.0.0.1")
+						require.NoError(t, err)
+						assert.True(t, alreadyDone)
+						topUp := GetTopUpByTradeNo(trade)
+						require.NotNil(t, topUp)
+						assert.Equal(t, common.TopUpStatusSuccess, topUp.Status)
+						assert.Positive(t, topUp.CompleteTime)
+						assert.Equal(t, 1000, getInviteRebateUser(t, inviteeID).Quota)
+						var count int64
+						require.NoError(t, DB.Model(&AffiliateReward{}).Where("invitee_id = ?", inviteeID).Count(&count).Error)
+						assert.Zero(t, count)
+					})
+				}
+			})
+
 			t.Run("invitation count includes unrewarded historical referrals", func(t *testing.T) {
 				insertInviteRebateUser(t, 1, "count_inviter", 0)
 				insertInviteRebateUser(t, 2, "count_invitee", 1)

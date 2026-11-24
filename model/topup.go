@@ -176,6 +176,15 @@ func completePendingTopUpTx(tx *gorm.DB, topUp *TopUp, quotaToAdd int, userUpdat
 	if !isFirstTopUp || user.InviterId <= 0 || rebateQuota <= 0 || !operation_setting.IsPaymentComplianceConfirmed() {
 		return nil, nil
 	}
+	// A missing inviter does not prevent crediting the paying user. Lock an
+	// existing inviter so deletion cannot race the reward write.
+	var inviter User
+	if err := lockForUpdate(tx).Select("id").Take(&inviter, user.InviterId).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
 	created, err := creditAffiliateRewardTx(tx, &AffiliateReward{
 		EventKey:  fmt.Sprintf("first-topup:%d", topUp.Id),
 		InviterId: user.InviterId,
