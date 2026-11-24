@@ -412,6 +412,20 @@ func publishedIntelligenceTask(task *model.SystemTask, includeHTML bool, admin b
 			row["error"] = "Intelligence test request failed"
 			if admin && len(channel.Attempts) > 0 {
 				row["error"] = channel.Error
+			} else if admin && channel.Endpoint == "external" {
+				switch channel.Error {
+				case "Set a public HTTPS server address for Manxue AI",
+					"No enabled channels match the selected group and model",
+					"Failed to generate token",
+					"External intelligence test request failed",
+					"External intelligence test did not complete successfully",
+					"External intelligence test exceeded the 10-minute request timeout",
+					"Intelligence test was cancelled",
+					"Could not connect to the upstream service",
+					"Upstream returned an invalid response body",
+					"Manxue AI returned an HTTP error":
+					row["error"] = channel.Error
+				}
 			}
 		}
 		if includeHTML && channel.HTML != "" {
@@ -1367,11 +1381,12 @@ func runManxueIntelligenceTest(ctx context.Context, config intelligenceConfig, u
 		row.Error = intelligenceExternalFailure(ctx)
 		return row
 	}
-	var result manxueTestResponse
-	decodeErr := common.DecodeJson(io.LimitReader(response.Body, 2<<20), &result)
-	response.Body.Close()
-	if decodeErr != nil || response.StatusCode < 200 || response.StatusCode >= 300 || result.ID == "" {
-		row.Error = "External intelligence test request failed"
+	result := readManxueTestResponse(response, &row)
+	if row.Error != "" {
+		return row
+	}
+	if result.ID == "" {
+		row.Error = "Upstream returned an invalid response body"
 		return row
 	}
 	for result.Status == "queued" || result.Status == "running" {
@@ -1390,16 +1405,17 @@ func runManxueIntelligenceTest(ctx context.Context, config intelligenceConfig, u
 			row.Error = intelligenceExternalFailure(ctx)
 			return row
 		}
-		result = manxueTestResponse{}
-		decodeErr := common.DecodeJson(io.LimitReader(response.Body, 2<<20), &result)
-		response.Body.Close()
-		if decodeErr != nil || response.StatusCode < 200 || response.StatusCode >= 300 {
-			row.Error = "External intelligence test request failed"
+		result = readManxueTestResponse(response, &row)
+		if row.Error != "" {
 			return row
 		}
 	}
 	if result.Benchmark != config.Benchmark {
-		row.Error = "External intelligence test request failed"
+		row.Error = "Upstream returned an invalid response body"
+		return row
+	}
+	if result.Status == "cancelled" {
+		row.Error = "Intelligence test was cancelled"
 		return row
 	}
 	if result.Status != "succeeded" {
@@ -1447,6 +1463,21 @@ func runManxueIntelligenceTest(ctx context.Context, config intelligenceConfig, u
 	return row
 }
 
+// Record only the HTTP status and a known message. Error bodies can contain
+// credentials or private upstream data.
+func readManxueTestResponse(response *http.Response, row *intelligenceChannelResult) (result manxueTestResponse) {
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		row.HTTPStatus = response.StatusCode
+		row.Error = "Manxue AI returned an HTTP error"
+		return result
+	}
+	if err := common.DecodeJson(io.LimitReader(response.Body, 2<<20), &result); err != nil {
+		row.Error = "Upstream returned an invalid response body"
+	}
+	return result
+}
+
 func waitForExternalIntelligencePoll(ctx context.Context, interval time.Duration) error {
 	timer := time.NewTimer(interval)
 	defer timer.Stop()
@@ -1465,7 +1496,7 @@ func intelligenceExternalFailure(ctx context.Context) string {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return "External intelligence test exceeded the 10-minute request timeout"
 	}
-	return "External intelligence test request failed"
+	return "Could not connect to the upstream service"
 }
 
 // Each request owns its context and result; only the coordinator persists progress.

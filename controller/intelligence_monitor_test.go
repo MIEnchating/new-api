@@ -930,7 +930,8 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 				assert.Equal(t, http.StatusForbidden, useKey(http.MethodGet, "/v1/responses", key, "gpt-4o-mini"))
 				assert.Equal(t, http.StatusUnauthorized, useKey(http.MethodGet, "/v1/models", key, "gpt-4o-mini"))
 				if fail.Load() {
-					w.WriteHeader(http.StatusServiceUnavailable)
+					w.WriteHeader(http.StatusTooManyRequests)
+					_, _ = io.WriteString(w, "private error: "+key)
 					return
 				}
 				_, _ = io.WriteString(w, `{"id":"task-id","benchmark":"candy","status":"running"}`)
@@ -969,6 +970,9 @@ func TestIntelligenceMonitorDatabase(t *testing.T) {
 			require.NoError(t, err)
 			if failing {
 				assert.Equal(t, model.SystemTaskStatusFailed, task.Status)
+				assert.Equal(t, "Manxue AI returned an HTTP error", gjson.Get(task.Result, "channels.0.error").String())
+				assert.EqualValues(t, http.StatusTooManyRequests, gjson.Get(task.Result, "channels.0.http_status").Int())
+				assert.NotContains(t, task.Result, "private error")
 			} else {
 				assert.Equal(t, model.SystemTaskStatusSucceeded, task.Status, task.Result)
 				assert.Equal(t, "21", gjson.Get(task.Result, "channels.0.external_result.answer").String())
@@ -1200,6 +1204,42 @@ func TestIntelligencePublicResultHidesInternalErrors(t *testing.T) {
 	assert.Equal(t, "Intelligence test request failed", gjson.GetBytes(encoded, "result.channels.0.error").String())
 	for _, private := range []string{"private prompt", "private-worker", "private-provider", "database://secret", "api-key=secret"} {
 		assert.NotContains(t, string(encoded), private)
+	}
+}
+
+func TestIntelligenceExternalFailureDetailsAreAdminOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		persisted  string
+		httpStatus int
+		adminError string
+	}{
+		{"HTTP error", "Manxue AI returned an HTTP error", http.StatusTooManyRequests, "Manxue AI returned an HTTP error"},
+		{"existing failure", "External intelligence test did not complete successfully", 0, "External intelligence test did not complete successfully"},
+		{"untrusted historical error", "api-key=secret", 0, "Intelligence test request failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := common.Marshal(intelligenceResult{Channels: []intelligenceChannelResult{{
+				Endpoint: "external", Error: tc.persisted, HTTPStatus: tc.httpStatus,
+			}}})
+			require.NoError(t, err)
+			task := &model.SystemTask{Payload: "{}", Result: string(result)}
+			for _, admin := range []bool{true, false} {
+				response, err := publishedIntelligenceTask(task, false, admin)
+				require.NoError(t, err)
+				encoded, err := common.Marshal(response)
+				require.NoError(t, err)
+				row := gjson.GetBytes(encoded, "result.channels.0")
+				if admin {
+					assert.Equal(t, tc.adminError, row.Get("error").String())
+					assert.EqualValues(t, tc.httpStatus, row.Get("http_status").Int())
+				} else {
+					assert.Equal(t, "Intelligence test request failed", row.Get("error").String())
+					assert.False(t, row.Get("http_status").Exists())
+				}
+				assert.False(t, row.Get("attempts.0").Exists())
+			}
+		})
 	}
 }
 

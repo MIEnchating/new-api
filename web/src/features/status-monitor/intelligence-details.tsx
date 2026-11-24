@@ -33,6 +33,7 @@ type DiagnosticChannel = {
   endpoint?: string
   question_name?: string
   error?: string
+  http_status?: number
   attempts?: IntelligenceAttempt[]
 }
 
@@ -109,6 +110,11 @@ export function IntelligenceDetails(props: {
             {row.error && (
               <p className='text-destructive break-words whitespace-pre-wrap'>
                 {t(row.error)}
+                {!row.attempts?.length &&
+                row.http_status &&
+                row.http_status >= 300
+                  ? ` · HTTP ${row.http_status}`
+                  : null}
               </p>
             )}
             {row.attempts?.length ? (

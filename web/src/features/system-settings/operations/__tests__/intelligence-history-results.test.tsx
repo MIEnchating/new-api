@@ -187,6 +187,28 @@ it('previews legacy records without group or model fields and omits failed reque
   expect(frame.getAttribute('srcdoc')).toContain('Legacy result')
 })
 
+it('shows the external failure reason and HTTP status for the affected model', async () => {
+  renderHistory([
+    {
+      ...channel,
+      channel_id: 0,
+      model: 'failed-model',
+      endpoint: 'external',
+      error: 'Manxue AI returned an HTTP error',
+      http_status: 429,
+    },
+  ])
+  expect(
+    screen.getByText('Manxue AI returned an HTTP error · HTTP 429')
+  ).toBeVisible()
+  await userEvent.click(screen.getByRole('button', { name: 'Detail' }))
+  expect(
+    within(screen.getByRole('dialog')).getByText(
+      'Manxue AI returned an HTTP error · HTTP 429'
+    )
+  ).toBeVisible()
+})
+
 it('retries only the chosen model after confirmation and refreshes its cached preview', async () => {
   const task = renderHistory([
     { ...channel, group: 'default', model: 'first-model' },

@@ -3946,6 +3946,7 @@ test.each([false, true])(
     const filter = screen.getByRole('switch', {
       name: 'Filter blank Responses messages',
     })
+    expect(filter).toHaveAccessibleDescription()
     if (enabled) {
       expect(filter).toBeChecked()
     } else {

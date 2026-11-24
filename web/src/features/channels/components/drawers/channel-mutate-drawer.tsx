@@ -5093,9 +5093,16 @@ export function ChannelMutateDrawer({
                     name='filter_blank_responses_messages'
                     render={({ field }) => (
                       <FormItem className='flex items-center justify-between gap-4 px-4 py-3'>
-                        <FormLabel>
-                          {t('Filter blank Responses messages')}
-                        </FormLabel>
+                        <div className='space-y-0.5'>
+                          <FormLabel>
+                            {t('Filter blank Responses messages')}
+                          </FormLabel>
+                          <FormDescription>
+                            {t(
+                              'Applies to assistant messages containing only a single space in streamed Responses.'
+                            )}
+                          </FormDescription>
+                        </div>
                         <FormControl>
                           <Switch
                             checked={field.value === true}

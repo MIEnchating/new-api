@@ -301,8 +301,11 @@ export function IntelligenceHistoryRun(props: {
                           </p>
                         )}
                         {row.error && (
-                          <p className='text-destructive text-xs break-all whitespace-pre-wrap'>
+                          <p className='text-destructive text-xs break-words whitespace-pre-wrap'>
                             {t(row.error)}
+                            {row.http_status && row.http_status >= 300
+                              ? ` · HTTP ${row.http_status}`
+                              : null}
                           </p>
                         )}
                         <div className='mt-auto flex flex-wrap justify-end gap-2'>
