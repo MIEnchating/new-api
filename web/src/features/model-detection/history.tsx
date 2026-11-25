@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { Dialog } from '@/components/dialog'
 import { EmptyState } from '@/components/empty-state'
 import { StatusBadge } from '@/components/status-badge'
+import { Accordion } from '@/components/ui/accordion'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -33,6 +34,7 @@ import { cn } from '@/lib/utils'
 import type { DetectionHistoryRecord } from './history-storage'
 import { ModelDetectionResults } from './results'
 import { DetectionSamples } from './samples'
+import { TokenizerProbeResult } from './tokenizer-result'
 
 const historyColumns =
   'grid-cols-[minmax(0,1fr)_auto_1rem] @lg/history:grid-cols-[minmax(0,1fr)_9rem_6.25rem_1rem]'
@@ -68,6 +70,13 @@ export function DetectionHistory(props: { records: DetectionHistoryRecord[] }) {
   const result =
     selected?.outcome.status === 'success' ? selected.outcome.result : undefined
   const round = result?.rounds?.[0]
+  const tokenizer =
+    selected && result?.tokenizer ? (
+      <TokenizerProbeResult
+        report={result.tokenizer}
+        selectedModel={selected.target.model}
+      />
+    ) : undefined
 
   return (
     <Dialog
@@ -144,18 +153,16 @@ export function DetectionHistory(props: { records: DetectionHistoryRecord[] }) {
               )}
             </CardContent>
           </Card>
-          {round && (
+          {round ? (
             <DetectionSamples
               challenges={round.challenges}
               samples={round.samples}
+              tokenizer={tokenizer}
             />
+          ) : (
+            tokenizer && <Accordion>{tokenizer}</Accordion>
           )}
-          {result && (
-            <ModelDetectionResults
-              result={result}
-              selectedModel={selected.target.model}
-            />
-          )}
+          {result && <ModelDetectionResults result={result} />}
           {selected.outcome.status === 'error' && (
             <Alert variant='destructive'>
               <AlertDescription className='[overflow-wrap:anywhere]'>

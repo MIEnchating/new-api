@@ -365,8 +365,14 @@ it('runs the selected site endpoint with its prepared prompts and opens the save
   await user.click(
     within(dialog).getByRole('button', { name: /View result.*fixture-model/ })
   )
+  const historicalSamples = within(dialog).getByRole('region', {
+    name: 'Detection samples',
+  })
+  expect(
+    within(historicalSamples).getByRole('button', { name: /Tokenizer probe/ })
+  ).toHaveAttribute('aria-expanded', 'false')
   await user.click(
-    await within(dialog).findByRole('button', { name: /Sample 1/ })
+    within(historicalSamples).getByRole('button', { name: /Sample 1/ })
   )
   expect(await within(dialog).findByText('123, 234, 345')).toBeInTheDocument()
 })
@@ -406,7 +412,7 @@ it('opens a failed history record by keyboard and restores focus to that record 
   ).toHaveFocus()
 })
 
-it('shows tokenizer diagnostics in an expandable result and retries only the probe', async () => {
+it('shows tokenizer diagnostics next to the sample controls and retries only the probe', async () => {
   const post = vi
     .spyOn(api, 'post')
     .mockResolvedValueOnce({
@@ -441,21 +447,29 @@ it('shows tokenizer diagnostics in an expandable result and retries only the pro
   const report = await screen.findByRole('region', {
     name: 'Detection results',
   })
-  const probe = await within(report).findByRole('button', {
+  const samples = screen.getByRole('region', { name: 'Detection samples' })
+  expect(
+    within(samples).getAllByRole('button', { name: /^Sample \d/ })
+  ).toHaveLength(3)
+  expect(
+    within(report).queryByRole('button', { name: /Tokenizer probe/ })
+  ).not.toBeInTheDocument()
+  const probe = within(samples).getByRole('button', {
     name: /Tokenizer probe/,
   })
   expect(probe).toHaveAttribute('aria-expanded', 'false')
-  await user.click(probe)
+  probe.focus()
+  await user.keyboard('{Enter}')
   expect(probe).toHaveAttribute('aria-expanded', 'true')
-  expect(within(report).getByText('Nearest to Baichuan 1')).toBeVisible()
+  expect(within(samples).getByText('Nearest to Baichuan 1')).toBeVisible()
   expect(
-    within(report).getByText('Response model: upstream-model')
+    within(samples).getByText('Response model: upstream-model')
   ).toBeVisible()
-  expect(within(report).getByText('测试文本')).toBeVisible()
-  expect(within(report).getByText('+25')).toBeVisible()
+  expect(within(samples).getByText('测试文本')).toBeVisible()
+  expect(within(samples).getByText('+25')).toBeVisible()
 
   await user.click(
-    within(report).getByRole('button', { name: 'Retry tokenizer probe' })
+    within(samples).getByRole('button', { name: 'Retry tokenizer probe' })
   )
   expect(post).toHaveBeenLastCalledWith(
     '/api/model-detection',
@@ -470,7 +484,7 @@ it('shows tokenizer diagnostics in an expandable result and retries only the pro
     within(report).getByRole('heading', { name: 'Candidate' })
   ).toBeVisible()
   expect(
-    await within(report).findByText('Response model: new-upstream-model')
+    await within(samples).findByText('Response model: new-upstream-model')
   ).toBeVisible()
   const records = readDetectionHistory(7)
   expect(records).toHaveLength(1)

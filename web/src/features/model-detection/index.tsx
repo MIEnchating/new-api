@@ -44,7 +44,7 @@ import {
 } from './history-storage'
 import { ModelDetectionResults } from './results'
 import { DetectionSamples } from './samples'
-import { TokenizerProbePending } from './tokenizer-result'
+import { TokenizerProbePending, TokenizerProbeResult } from './tokenizer-result'
 
 type DetectionRun =
   | { status: 'idle' }
@@ -259,7 +259,7 @@ export function ModelDetection(props: { userId: number }) {
             ? { target: run.target, onSubmit: retryTokenizer }
             : undefined
         }
-        report={(retryProbe) =>
+        report={
           (runMessage || run.status === 'success') && (
             <section aria-labelledby='model-detection-results'>
               <Card size='sm' className='gap-2'>
@@ -279,13 +279,7 @@ export function ModelDetection(props: { userId: number }) {
                 </CardHeader>
                 <CardContent aria-live='polite'>
                   {run.status === 'success' ? (
-                    <ModelDetectionResults
-                      result={run.result}
-                      selectedModel={run.target.model}
-                      onRetryTokenizer={retryProbe}
-                      tokenizerPending={probePending}
-                      tokenizerError={probeError}
-                    />
+                    <ModelDetectionResults result={run.result} />
                   ) : (
                     runMessage
                   )}
@@ -294,7 +288,7 @@ export function ModelDetection(props: { userId: number }) {
             </section>
           )
         }
-        samples={
+        samples={(retryProbe) => (
           <>
             {challenges.error && (
               <Alert variant='destructive'>
@@ -311,12 +305,23 @@ export function ModelDetection(props: { userId: number }) {
               samples={round?.samples}
               sampling={run.status === 'running'}
               preparing={challenges.isFetching}
+              tokenizer={
+                run.status === 'success' && run.result.tokenizer ? (
+                  <TokenizerProbeResult
+                    report={run.result.tokenizer}
+                    selectedModel={run.target.model}
+                    onRetry={retryProbe}
+                    pending={probePending}
+                    error={probeError}
+                  />
+                ) : undefined
+              }
             />
             {run.status === 'running' && run.tokenizer && (
               <TokenizerProbePending />
             )}
           </>
-        }
+        )}
       />
     </div>
   )

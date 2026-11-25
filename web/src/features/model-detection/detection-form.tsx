@@ -181,12 +181,12 @@ type DetectionFormProps = {
   onRefreshSamples: () => void
   samplesReady: boolean
   samplesLoading: boolean
-  report: (retryTokenizer?: () => void) => ReactNode
+  report: ReactNode
   tokenizerRetry?: {
     target: Pick<ModelDetectionInput, 'model' | 'group' | 'api_url'>
     onSubmit: (input: ModelDetectionInput) => Promise<void>
   }
-  samples: ReactNode
+  samples: (retryTokenizer?: () => void) => ReactNode
 }
 
 export function DetectionForm(props: DetectionFormProps) {
@@ -385,10 +385,10 @@ export function DetectionForm(props: DetectionFormProps) {
               </FieldSet>
             </CardContent>
           </Card>
-          {props.samples}
-          {props.report(
+          {props.samples(
             retry && canRetry ? form.handleSubmit(retry.onSubmit) : undefined
           )}
+          {props.report}
         </div>
       </div>
       <footer className='bg-background shrink-0 border-t'>

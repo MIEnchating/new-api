@@ -324,6 +324,7 @@ func migrateDB() error {
 		&InvoiceRequest{},
 		&InvoiceRequestOrder{},
 		&AffiliateReward{},
+		&PendingAffiliateUsageReward{},
 		&LotteryCampaign{},
 		&LotteryProfile{},
 		&LotteryDailyActivity{},

@@ -132,7 +132,7 @@ func TestAffiliateAccountingDatabase(t *testing.T) {
 			}
 			require.NoError(t, db.Raw(query).Scan(&version).Error)
 			t.Logf("%s %s", dialect, version)
-			models := []any{&AffiliateReward{}, &BillingTransaction{}, &TopUp{}, &User{}, &Log{}, &Option{}, &SystemTask{}}
+			models := []any{&AffiliateReward{}, &PendingAffiliateUsageReward{}, &BillingTransaction{}, &TopUp{}, &User{}, &Log{}, &Option{}, &SystemTask{}}
 			require.NoError(t, db.Migrator().DropTable(models...))
 			require.NoError(t, db.AutoMigrate(models...))
 			t.Cleanup(func() { assert.NoError(t, db.Migrator().DropTable(models...)) })
@@ -226,9 +226,22 @@ func TestAffiliateAccountingDatabase(t *testing.T) {
 				assert.Zero(t, total)
 				assert.Zero(t, getInviteRebateUser(t, inviterID).AffQuota)
 
+				var pending PendingAffiliateUsageReward
+				require.NoError(t, DB.Where("event_key = ?", "wallet-usage:request:retry").First(&pending).Error)
+				require.Equal(t, 50, pending.Quota)
+				require.Equal(t, settledAt, pending.SettledAt)
+				require.Positive(t, pending.NextAttemptAt)
+
 				require.NoError(t, DB.Model(&User{}).Where("id = ?", inviterID).Update("aff_history", 0).Error)
+				require.NoError(t, RetryPendingAffiliateUsageRewards(t.Context(), pending.NextAttemptAt-1))
+				assert.Zero(t, getInviteRebateUser(t, inviterID).AffQuota)
+				require.NoError(t, RetryPendingAffiliateUsageRewards(t.Context(), pending.NextAttemptAt))
+				require.NoError(t, RetryPendingAffiliateUsageRewards(t.Context(), pending.NextAttemptAt))
 				require.NoError(t, CreditAffiliateUsageReward(inviteeID, "request:retry", 1000, settledAt))
 				assert.Equal(t, 50, getInviteRebateUser(t, inviterID).AffQuota)
+				var remaining int64
+				require.NoError(t, DB.Model(&PendingAffiliateUsageReward{}).Where("event_key = ?", pending.EventKey).Count(&remaining).Error)
+				assert.Zero(t, remaining)
 			})
 
 			t.Run("saved wallet commission settings control future rewards", func(t *testing.T) {

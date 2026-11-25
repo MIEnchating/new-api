@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
@@ -143,6 +144,18 @@ func settleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 		recordWalletUsageReward(ctx, relayInfo.UserId, chargeKey, actualQuota)
 	}
 	return nil
+}
+
+// RunAffiliateUsageRewardRetry processes persisted credits on the master node.
+func RunAffiliateUsageRewardRetry() {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		if err := model.RetryPendingAffiliateUsageRewards(context.Background(), common.GetTimestamp()); err != nil {
+			common.SysError(common.LogText("retrying wallet usage referral rewards: %s", err.Error()))
+		}
+		<-ticker.C
+	}
 }
 
 func recordWalletUsageReward(ctx context.Context, userID int, chargeKey string, quota int) {

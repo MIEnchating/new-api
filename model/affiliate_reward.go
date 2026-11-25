@@ -1,6 +1,8 @@
 package model
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -27,6 +29,18 @@ type AffiliateReward struct {
 	Quota     int    `json:"quota"`
 	SourceId  int64  `json:"-" gorm:"index"`
 	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_affiliate_reward_inviter_time,priority:2"`
+}
+
+// PendingAffiliateUsageReward stores the original reward amount before the
+// separate ledger transaction so failed credits can be retried after restart.
+type PendingAffiliateUsageReward struct {
+	Id            int64
+	EventKey      string `gorm:"type:varchar(128);uniqueIndex"`
+	InviterId     int
+	InviteeId     int
+	Quota         int
+	SettledAt     int64
+	NextAttemptAt int64 `gorm:"index"`
 }
 
 type AffiliateRewardItem struct {
@@ -131,30 +145,87 @@ func CreditAffiliateUsageReward(inviteeID int, chargeKey string, spentQuota int,
 	if err != nil || rewardQuota == 0 {
 		return err
 	}
-	eventKey := "wallet-usage:" + chargeKey
-	return DB.Transaction(func(tx *gorm.DB) error {
+	pending := PendingAffiliateUsageReward{
+		EventKey:  "wallet-usage:" + chargeKey,
+		InviterId: invitee.InviterId,
+		InviteeId: inviteeID,
+		Quota:     rewardQuota,
+		SettledAt: settledAt,
+	}
+	if err := DB.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "event_key"}},
+		DoNothing: true,
+	}).Create(&pending).Error; err != nil {
+		return fmt.Errorf("persist pending wallet usage reward: %w", err)
+	}
+	return applyPendingAffiliateUsageReward(DB, pending.EventKey, common.GetTimestamp())
+}
+
+func applyPendingAffiliateUsageReward(db *gorm.DB, eventKey string, now int64) error {
+	var pending PendingAffiliateUsageReward
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).Where("event_key = ? AND next_attempt_at <= ?", eventKey, now).
+			Limit(1).Find(&pending).Error; err != nil || pending.Id == 0 {
+			return err
+		}
 		var inviter User
-		if err := lockForUpdate(tx).Select("id").Where("id = ?", invitee.InviterId).
-			Limit(1).Find(&inviter).Error; err != nil || inviter.Id == 0 {
+		if err := lockForUpdate(tx).Select("id").Where("id = ?", pending.InviterId).
+			Limit(1).Find(&inviter).Error; err != nil {
 			return err
 		}
-		// Serialize repeats on the inviter row and check the event explicitly.
-		// MySQL may report a matched row for a no-op insert when clientFoundRows is on.
-		var existing AffiliateReward
-		if err := tx.Select("id").Where("event_key = ?", eventKey).
-			Limit(1).Find(&existing).Error; err != nil || existing.Id != 0 {
-			return err
+		if inviter.Id != 0 {
+			// A replay may enqueue a reward that already reached the ledger.
+			// Do not depend on MySQL's affected-rows behavior for no-op upserts.
+			var existing AffiliateReward
+			if err := tx.Select("id").Where("event_key = ?", pending.EventKey).
+				Limit(1).Find(&existing).Error; err != nil {
+				return err
+			}
+			if existing.Id == 0 {
+				if _, err := creditAffiliateRewardTx(tx, &AffiliateReward{
+					EventKey:  pending.EventKey,
+					InviterId: pending.InviterId,
+					InviteeId: pending.InviteeId,
+					Type:      AffiliateRewardTypeWalletUsage,
+					Quota:     pending.Quota,
+					CreatedAt: pending.SettledAt,
+				}); err != nil {
+					return err
+				}
+			}
 		}
-		_, err := creditAffiliateRewardTx(tx, &AffiliateReward{
-			EventKey:  eventKey,
-			InviterId: invitee.InviterId,
-			InviteeId: inviteeID,
-			Type:      AffiliateRewardTypeWalletUsage,
-			Quota:     rewardQuota,
-			CreatedAt: settledAt,
-		})
-		return err
+		return tx.Delete(&pending).Error
 	})
+	if err == nil || pending.Id == 0 {
+		return err
+	}
+	// Move a failed row behind other due rewards. The transaction has rolled
+	// back, so a failed ledger write never leaves a partial positive credit.
+	retryErr := db.Model(&PendingAffiliateUsageReward{}).
+		Where("id = ? AND next_attempt_at <= ?", pending.Id, now).
+		Update("next_attempt_at", now+60).Error
+	return errors.Join(err, retryErr)
+}
+
+// RetryPendingAffiliateUsageRewards resumes saved rewards with their original
+// amounts and settlement dates. The current rate only affects future charges.
+func RetryPendingAffiliateUsageRewards(ctx context.Context, now int64) error {
+	if !operation_setting.IsPaymentComplianceConfirmed() {
+		return nil
+	}
+	db := DB.WithContext(ctx)
+	var pending []PendingAffiliateUsageReward
+	if err := db.Select("event_key").Where("next_attempt_at <= ?", now).
+		Order("next_attempt_at, id").Limit(100).Find(&pending).Error; err != nil {
+		return err
+	}
+	var result error
+	for _, reward := range pending {
+		if err := applyPendingAffiliateUsageReward(db, reward.EventKey, now); err != nil {
+			result = errors.Join(result, fmt.Errorf("retry wallet usage reward %s: %w", reward.EventKey, err))
+		}
+	}
+	return result
 }
 
 func GetAffiliateRewards(inviterId int, pageInfo *common.PageInfo) ([]AffiliateRewardItem, int64, error) {

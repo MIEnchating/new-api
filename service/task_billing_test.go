@@ -55,6 +55,7 @@ func TestMain(m *testing.M) {
 		&model.Task{},
 		&model.User{},
 		&model.AffiliateReward{},
+		&model.PendingAffiliateUsageReward{},
 		&model.Token{},
 		&model.Log{},
 		&model.Channel{},
