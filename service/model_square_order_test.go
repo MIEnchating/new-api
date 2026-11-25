@@ -24,11 +24,14 @@ func TestBuildModelSquareOrder(t *testing.T) {
 	previousDB := model.DB
 	previousOptions := common.OptionMap
 	previousDataExport := common.DataExportEnabled
+	previousAliases := common.GetGroupAliases()
+	require.NoError(t, common.SetGroupAliases(nil))
 	model.DB = database
 	t.Cleanup(func() {
 		model.DB = previousDB
 		common.OptionMap = previousOptions
 		common.DataExportEnabled = previousDataExport
+		require.NoError(t, common.SetGroupAliases(previousAliases))
 		modelUsageCache = map[int]modelUsageCacheItem{}
 		_ = sqlDB.Close()
 	})
@@ -133,4 +136,9 @@ func TestBuildModelSquareOrder(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, adminTotals, model.ModelUsageTotal{ModelName: "zeta", Requests: 170, Tokens: 17000})
 	assert.JSONEq(t, `{"recommended":["beta","Kappa","gamma","delta"],"requests":["beta","Kappa","gamma","delta"],"tokens":["Kappa","gamma","beta"]}`, string(encoded))
+
+	require.NoError(t, common.SetGroupAliases(map[string]string{"default": "renamed"}))
+	assert.Equal(t, ModelSquareOrder{
+		Recommended: requests, Requests: requests, Tokens: tokens,
+	}, BuildModelSquareOrder(pricing, map[string]string{"renamed": "Public"}))
 }

@@ -53,13 +53,13 @@ function mockApi(
   return vi.spyOn(api, 'post').mockResolvedValue({ data: { success: true } })
 }
 
-function renderDialog(onOpenChange = vi.fn()) {
+function renderDialog(onOpenChange = vi.fn(), open = true) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   const view = render(
     <QueryClientProvider client={client}>
-      <ModelSquareOrderDialog open onOpenChange={onOpenChange} />
+      <ModelSquareOrderDialog open={open} onOpenChange={onOpenChange} />
     </QueryClientProvider>
   )
   return {
@@ -77,6 +77,33 @@ afterEach(() => {
 })
 
 describe('model square order dialog', () => {
+  it('only fetches root options when the order dialog opens', async () => {
+    mockApi({ 'model_square_setting.sort_mode': 'manual' })
+    const dialog = renderDialog(vi.fn(), false)
+
+    expect(api.get).not.toHaveBeenCalled()
+    dialog.rerender(true)
+
+    expect(
+      await screen.findByRole('button', { name: 'Manual order', pressed: true })
+    ).toBeEnabled()
+    expect(api.get).toHaveBeenCalledWith('/api/option/')
+  })
+
+  it('shows each valid name once when the saved order contains invalid or duplicate entries', async () => {
+    mockApi({
+      'model_square_setting.sort_mode': 'manual',
+      'model_square_setting.sort_models': '["beta",null,"alpha","beta",""]',
+    })
+    renderDialog()
+
+    await screen.findByRole('button', { name: 'Remove alpha' })
+    expect(screen.getAllByRole('button', { name: /^Remove / })).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Remove beta' })).toHaveLength(
+      1
+    )
+  })
+
   it('keeps list edits as a draft and saves only the changed setting', async () => {
     const post = mockApi({
       'model_square_setting.sort_mode': 'manual',
@@ -105,6 +132,23 @@ describe('model square order dialog', () => {
         },
       ],
     })
+  })
+
+  it('disables saving after the administrator restores the saved order', async () => {
+    const post = mockApi({ 'model_square_setting.sort_mode': 'manual' })
+    const user = userEvent.setup()
+    renderDialog()
+
+    const manual = await screen.findByRole('button', {
+      name: 'Manual order',
+      pressed: true,
+    })
+    await user.click(screen.getByRole('button', { name: 'Most used' }))
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+    await user.click(manual)
+
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    expect(post).not.toHaveBeenCalled()
   })
 
   it('saves several changed settings together and shows one success toast', async () => {

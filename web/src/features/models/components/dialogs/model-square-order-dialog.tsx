@@ -103,10 +103,23 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const queryClient = useQueryClient()
-  const optionsQuery = useSystemOptions()
+  const optionsQuery = useSystemOptions(props.open)
   const [draft, setDraft] = useState<OrderOptions | null>(null)
 
-  const saved = getOptionValue(optionsQuery.data?.data, DEFAULT_ORDER)
+  const saved = useMemo(() => {
+    const options = getOptionValue(optionsQuery.data?.data, DEFAULT_ORDER)
+    // Existing API-written orders may contain repeated names or empty entries.
+    return {
+      ...options,
+      [MODELS_KEY]: [
+        ...new Set(
+          options[MODELS_KEY].filter(
+            (name) => typeof name === 'string' && name !== ''
+          )
+        ),
+      ],
+    }
+  }, [optionsQuery.data?.data])
   const order = draft ?? saved
   const mode = order[MODE_KEY]
   const metric = order[METRIC_KEY]
@@ -173,20 +186,18 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
       queryClient.invalidateQueries({ queryKey: ['system-options'] }),
   })
 
+  const changedSettings = (Object.keys(order) as (keyof OrderOptions)[]).filter(
+    (key) => JSON.stringify(order[key]) !== JSON.stringify(saved[key])
+  )
   const handleSave = () => {
-    const keys = Object.keys(order) as (keyof OrderOptions)[]
     saveOrder.mutate(
-      keys
-        .filter(
-          (key) => JSON.stringify(order[key]) !== JSON.stringify(saved[key])
-        )
-        .map((key) => {
-          const value = order[key]
-          return {
-            key,
-            value: Array.isArray(value) ? JSON.stringify(value) : value,
-          }
-        })
+      changedSettings.map((key) => {
+        const value = order[key]
+        return {
+          key,
+          value: Array.isArray(value) ? JSON.stringify(value) : value,
+        }
+      })
     )
   }
 
@@ -232,7 +243,9 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
           <Button
             onClick={handleSave}
             disabled={
-              draft === null || !optionsQuery.isSuccess || saveOrder.isPending
+              changedSettings.length === 0 ||
+              !optionsQuery.isSuccess ||
+              saveOrder.isPending
             }
           >
             {t('Save')}
@@ -245,6 +258,7 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
           <div className='text-sm font-medium'>{t('Sort method')}</div>
           <ToggleGroup
             value={[mode]}
+            disabled={!optionsQuery.isSuccess}
             onValueChange={(values) => {
               const next = values.find((value) => value !== mode)
               if (next) update({ [MODE_KEY]: next })

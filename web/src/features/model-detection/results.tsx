@@ -42,15 +42,8 @@ import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
 
 import type { ModelDetectionResult } from './api'
-import { TokenizerProbeResult } from './tokenizer-result'
 
-export function ModelDetectionResults(props: {
-  result: ModelDetectionResult
-  selectedModel: string
-  onRetryTokenizer?: () => void
-  tokenizerPending?: boolean
-  tokenizerError?: string
-}) {
+export function ModelDetectionResults(props: { result: ModelDetectionResult }) {
   const { t, i18n } = useTranslation()
   const leaderId = useId()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
@@ -112,15 +105,6 @@ export function ModelDetectionResults(props: {
             </div>
           </CardContent>
         </Card>
-      )}
-      {result.tokenizer && (
-        <TokenizerProbeResult
-          report={result.tokenizer}
-          selectedModel={props.selectedModel}
-          onRetry={props.onRetryTokenizer}
-          pending={props.tokenizerPending}
-          error={props.tokenizerError}
-        />
       )}
       {round &&
         (leader ? (

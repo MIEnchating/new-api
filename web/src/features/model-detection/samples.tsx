@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { ChevronDown } from 'lucide-react'
-import { useId, useState } from 'react'
+import { useId, useState, type ReactElement } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { CopyButton } from '@/components/copy-button'
@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/collapsible'
 import { toIntlLocale } from '@/i18n/languages'
 import { formatNumber } from '@/lib/format'
+import { cn } from '@/lib/utils'
 
 import type { ModelDetectionChallenge, ModelDetectionSample } from './api'
 
@@ -200,6 +201,7 @@ export function DetectionSamples(props: {
   samples?: ModelDetectionSample[]
   sampling?: boolean
   preparing?: boolean
+  tokenizer?: ReactElement
 }) {
   const { t, i18n } = useTranslation()
   const titleId = useId()
@@ -222,12 +224,19 @@ export function DetectionSamples(props: {
         {t('Detection samples')}
       </h2>
       {props.samples?.length ? (
-        <Accordion className='grid gap-3 @2xl/samples:grid-cols-3'>
+        <Accordion
+          className={cn(
+            'grid gap-3 @2xl/samples:[&>[data-slot=accordion-item]>:first-child]:row-start-1 [&>[data-slot=accordion-item]>[data-slot=accordion-content]]:col-span-full',
+            props.tokenizer
+              ? '@2xl/samples:grid-cols-4'
+              : '@2xl/samples:grid-cols-3'
+          )}
+        >
           {sampleCards.map(({ key, ...card }) => (
             <AccordionItem
               key={key}
-              value={key}
-              className='contents @2xl/samples:[&>:first-child]:row-start-1 [&>[data-slot=accordion-content]]:col-span-full'
+              value={`sample-${key}`}
+              className='contents'
             >
               <AccordionTrigger className='border-border bg-card hover:bg-muted/40 w-full items-center px-3 hover:no-underline'>
                 <span className='min-w-0'>
@@ -251,12 +260,16 @@ export function DetectionSamples(props: {
               </AccordionContent>
             </AccordionItem>
           ))}
+          {props.tokenizer}
         </Accordion>
       ) : (
         <div className='grid gap-3 @2xl/samples:grid-cols-3'>
           {sampleCards.map(({ key, ...card }) => (
             <SampleCard key={key} {...card} />
           ))}
+          {props.tokenizer && (
+            <Accordion className='col-span-full'>{props.tokenizer}</Accordion>
+          )}
         </div>
       )}
     </section>

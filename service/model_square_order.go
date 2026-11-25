@@ -66,11 +66,20 @@ func getModelUsageTotals(days int, usableGroups map[string]string) ([]model.Mode
 		return nil, err
 	}
 
+	var usableGroupIdentities map[string]struct{}
+	if usableGroups != nil {
+		usableGroupIdentities = make(map[string]struct{}, len(usableGroups))
+		for name := range usableGroups {
+			if name != "" {
+				usableGroupIdentities[common.GroupIdentity(name)] = struct{}{}
+			}
+		}
+	}
 	byModel := make(map[string]model.ModelUsageTotal)
 	for _, usage := range result.([]model.GroupModelUsageTotal) {
-		if usableGroups != nil {
-			// Historical rows with no group cannot be attributed safely.
-			if _, ok := usableGroups[usage.UseGroup]; !ok || usage.UseGroup == "" {
+		if usableGroupIdentities != nil {
+			// Renames retain the group identity. Rows without a group cannot be attributed.
+			if _, ok := usableGroupIdentities[common.GroupIdentity(usage.UseGroup)]; !ok {
 				continue
 			}
 		}

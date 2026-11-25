@@ -16,21 +16,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ChevronDown, ScanText } from 'lucide-react'
-import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { LoadingState } from '@/components/loading-state'
 import { StatusBadge } from '@/components/status-badge'
+import {
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible'
-import { IconBadge } from '@/components/ui/icon-badge'
 import { toIntlLocale } from '@/i18n/languages'
 
 import type { ModelDetectionResult } from './api'
@@ -67,7 +64,6 @@ export function TokenizerProbeResult(props: {
   error?: string
 }) {
   const { t, i18n } = useTranslation()
-  const titleId = useId()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   const percent = new Intl.NumberFormat(locale, {
     style: 'percent',
@@ -115,159 +111,134 @@ export function TokenizerProbeResult(props: {
 
   const displayName =
     verdict?.kind === 'exact' && nearest ? nearest : t('Unlisted tokenizer')
+  const summaryName =
+    verdict?.kind !== 'exact' && nearest
+      ? t('Nearest to {{tokenizer}}', { tokenizer: nearest })
+      : displayName
+  const summary =
+    verdict && !pending
+      ? `${summaryName} · ${percent.format(verdict.confidence)}`
+      : status
 
   return (
-    <section aria-labelledby={titleId}>
-      <Collapsible>
-        <Card className='gap-0 py-0'>
-          <h3 id={titleId}>
-            <CollapsibleTrigger
-              render={
-                <Button
-                  type='button'
-                  variant='ghost'
-                  className='group h-auto w-full justify-start gap-2.5 rounded-xl px-3 py-3 text-start whitespace-normal sm:px-4'
-                />
-              }
-            >
-              <IconBadge tone='primary' size='sm'>
-                <ScanText aria-hidden='true' />
-              </IconBadge>
-              <span className='min-w-0 flex-1'>
-                <span className='block font-semibold'>
-                  {t('Tokenizer probe')}
-                </span>
-                {verdict && !pending && (
-                  <span className='text-muted-foreground block text-xs [overflow-wrap:anywhere]'>
-                    {verdict.kind !== 'exact' && nearest
-                      ? t('Nearest to {{tokenizer}}', { tokenizer: nearest })
-                      : displayName}{' '}
-                    · {percent.format(verdict.confidence)}
-                  </span>
-                )}
-              </span>
-              <StatusBadge
-                label={status}
-                variant={tone}
-                copyable={false}
-                className='h-auto max-w-28 py-1 text-xs whitespace-normal'
+    <AccordionItem value='tokenizer' className='contents'>
+      <AccordionTrigger className='border-border bg-card hover:bg-muted/40 w-full items-center gap-2 px-3 hover:no-underline'>
+        <span className='min-w-0 [overflow-wrap:anywhere]'>
+          {t('Tokenizer probe')}
+          <span className='text-muted-foreground text-xs'>
+            {' · '}
+            {summary}
+          </span>
+        </span>
+      </AccordionTrigger>
+      <AccordionContent className='px-px pb-px [&_p:not(:last-child)]:mb-0'>
+        <Card className='@container/report min-w-0 gap-0 py-0'>
+          <CardContent className='space-y-4 px-3 py-4 sm:px-4'>
+            <StatusBadge label={status} variant={tone} copyable={false} />
+            {pending ? (
+              <LoadingState
+                inline
+                size='sm'
+                message={t('Waiting for tokenizer probe results…')}
               />
-              <ChevronDown
-                data-icon='inline-end'
-                aria-hidden='true'
-                className='shrink-0 group-aria-expanded:rotate-180'
-              />
-            </CollapsibleTrigger>
-          </h3>
-          <CollapsibleContent className='min-w-0 border-t'>
-            <CardContent className='space-y-4 px-3 py-4 sm:px-4'>
-              {pending ? (
-                <LoadingState
-                  inline
-                  size='sm'
-                  message={t('Waiting for tokenizer probe results…')}
-                />
-              ) : (
-                <>
-                  <p className='text-muted-foreground text-xs'>
-                    {t(
-                      'Tokenizer results use reported input token counts. The model ranking and its confidence are calculated independently.'
-                    )}
-                  </p>
-                  {props.error && (
-                    <Alert variant='destructive'>
-                      <AlertDescription>{props.error}</AlertDescription>
-                    </Alert>
+            ) : (
+              <>
+                <p className='text-muted-foreground text-xs'>
+                  {t(
+                    'Tokenizer results use reported input token counts. The model ranking and its confidence are calculated independently.'
                   )}
-                  <div className='grid gap-3 @2xl/report:grid-cols-2'>
-                    <div className='bg-muted/40 flex min-w-0 flex-wrap items-start justify-between gap-2 rounded-lg p-3'>
-                      <div className='min-w-0'>
-                        <p className='text-muted-foreground text-xs'>
-                          {t('Upstream tokenizer')}
-                        </p>
-                        <p className='mt-1 text-base font-semibold [overflow-wrap:anywhere]'>
-                          {verdict
-                            ? displayName
-                            : t('No tokenizer result was available.')}
-                        </p>
-                        {verdict && verdict.kind !== 'exact' && nearest && (
-                          <p className='text-muted-foreground mt-1 text-xs'>
-                            {t('Nearest to {{tokenizer}}', {
-                              tokenizer: nearest,
-                            })}
-                          </p>
-                        )}
-                      </div>
-                      {verdict && (
-                        <div>
-                          <p className='text-muted-foreground text-xs'>
-                            {t('Confidence')}
-                          </p>
-                          <p className='mt-1 text-lg font-semibold tabular-nums'>
-                            {percent.format(verdict.confidence)}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                    <div className='bg-muted/40 min-w-0 space-y-1 rounded-lg p-3 [overflow-wrap:anywhere]'>
+                </p>
+                {props.error && (
+                  <Alert variant='destructive'>
+                    <AlertDescription>{props.error}</AlertDescription>
+                  </Alert>
+                )}
+                <div className='grid gap-3 @2xl/report:grid-cols-2'>
+                  <div className='bg-muted/40 flex min-w-0 flex-wrap items-start justify-between gap-2 rounded-lg p-3'>
+                    <div className='min-w-0'>
                       <p className='text-muted-foreground text-xs'>
-                        {t('Selected model')}
+                        {t('Upstream tokenizer')}
                       </p>
-                      <p className='font-semibold'>{props.selectedModel}</p>
-                      {verdict && (
-                        <StatusBadge
-                          label={claimLabels[claim?.status ?? 'uncertain']}
-                          variant={
-                            claim?.status === 'consistent'
-                              ? 'success'
-                              : 'warning'
-                          }
-                          copyable={false}
-                          className='h-auto py-1 text-xs whitespace-normal'
-                        />
-                      )}
-                      {expected && (
-                        <p className='text-muted-foreground text-xs'>
-                          {expected}
-                        </p>
-                      )}
-                      {responseModel && (
-                        <p className='text-muted-foreground text-xs'>
-                          {t('Response model: {{model}}', {
-                            model: responseModel,
+                      <p className='mt-1 text-base font-semibold [overflow-wrap:anywhere]'>
+                        {verdict
+                          ? displayName
+                          : t('No tokenizer result was available.')}
+                      </p>
+                      {verdict && verdict.kind !== 'exact' && nearest && (
+                        <p className='text-muted-foreground mt-1 text-xs'>
+                          {t('Nearest to {{tokenizer}}', {
+                            tokenizer: nearest,
                           })}
                         </p>
                       )}
                     </div>
+                    {verdict && (
+                      <div>
+                        <p className='text-muted-foreground text-xs'>
+                          {t('Confidence')}
+                        </p>
+                        <p className='mt-1 text-lg font-semibold tabular-nums'>
+                          {percent.format(verdict.confidence)}
+                        </p>
+                      </div>
+                    )}
                   </div>
-                  {report.baseline_drift && (
-                    <Alert>
-                      <AlertDescription>
-                        {t(
-                          'The upstream reported inconsistent baseline token counts.'
-                        )}
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                  <TokenizerEvidence report={report} />
-                  {props.onRetry && (
-                    <div className='flex justify-end'>
-                      <Button
-                        type='button'
-                        variant='outline'
-                        size='sm'
-                        onClick={props.onRetry}
-                      >
-                        {t('Retry tokenizer probe')}
-                      </Button>
-                    </div>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </CollapsibleContent>
+                  <div className='bg-muted/40 min-w-0 space-y-1 rounded-lg p-3 [overflow-wrap:anywhere]'>
+                    <p className='text-muted-foreground text-xs'>
+                      {t('Selected model')}
+                    </p>
+                    <p className='font-semibold'>{props.selectedModel}</p>
+                    {verdict && (
+                      <StatusBadge
+                        label={claimLabels[claim?.status ?? 'uncertain']}
+                        variant={
+                          claim?.status === 'consistent' ? 'success' : 'warning'
+                        }
+                        copyable={false}
+                        className='h-auto py-1 text-xs whitespace-normal'
+                      />
+                    )}
+                    {expected && (
+                      <p className='text-muted-foreground text-xs'>
+                        {expected}
+                      </p>
+                    )}
+                    {responseModel && (
+                      <p className='text-muted-foreground text-xs'>
+                        {t('Response model: {{model}}', {
+                          model: responseModel,
+                        })}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                {report.baseline_drift && (
+                  <Alert>
+                    <AlertDescription>
+                      {t(
+                        'The upstream reported inconsistent baseline token counts.'
+                      )}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <TokenizerEvidence report={report} />
+                {props.onRetry && (
+                  <div className='flex justify-end'>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      onClick={props.onRetry}
+                    >
+                      {t('Retry tokenizer probe')}
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </CardContent>
         </Card>
-      </Collapsible>
-    </section>
+      </AccordionContent>
+    </AccordionItem>
   )
 }
