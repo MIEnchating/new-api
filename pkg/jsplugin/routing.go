@@ -504,6 +504,7 @@ var reservedRouteNamespaces = []string{
 	"/usage-logs",
 	"/users",
 	"/wallet",
+	"/model-detection",
 }
 
 func (g *RoutingGeneration) Get(key string) (*LoadedPlugin, bool) {
