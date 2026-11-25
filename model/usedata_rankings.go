@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
@@ -42,17 +43,22 @@ type GroupModelUsageTotal struct {
 	UseGroup string
 }
 
-// GetGroupModelUsageTotals keeps usage separate by the group used for each request.
-func GetGroupModelUsageTotals(startTime int64, endTime int64) ([]GroupModelUsageTotal, error) {
-	modelName, useGroup := "model_name", "COALESCE(use_group, '')"
-	if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
-		// The database collation can otherwise combine distinct group or model names.
-		modelName, useGroup = "CAST(model_name AS BINARY)", "CAST(COALESCE(use_group, '') AS BINARY)"
+// GetGroupModelUsageTotals reads the retained request logs. Historical dashboard
+// buckets can combine groups whose names compare equal in a MySQL collation
+// during writes, so grouping those buckets by exact name would still leak usage.
+func GetGroupModelUsageTotals(ctx context.Context, startTime int64, endTime int64) ([]GroupModelUsageTotal, error) {
+	query := LOG_DB.WithContext(ctx).Model(&Log{})
+	modelName, useGroup := "model_name", "COALESCE("+query.Statement.Quote("group")+", '')"
+	if common.UsingLogDatabase(common.DatabaseTypeMySQL) {
+		modelName = "CAST(CONVERT(" + modelName + " USING utf8mb4) AS BINARY)"
+		useGroup = "CAST(CONVERT(" + useGroup + " USING utf8mb4) AS BINARY)"
 	}
 	var rows []GroupModelUsageTotal
-	query := DB.Table("quota_data").
-		Select(modelName + " as model_name, " + useGroup + " as use_group, sum(count) as requests, sum(token_used) as tokens").
-		Where("model_name <> ''").
+	query = applyUserVisibleLogFilter(query, "other").
+		Select(modelName+" as model_name, "+useGroup+" as use_group, count(*) as requests, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) as tokens").
+		Where("type = ? AND model_name <> ''", LogTypeConsume).
+		// A later task debit adjusts the original request's charge.
+		Where("(other IS NULL OR other LIKE ? OR other NOT LIKE ? OR other NOT LIKE ?)", `%"request_path":%`, `%"pre_consumed_quota":%`, `%"actual_quota":%`).
 		Group(modelName + ", " + useGroup)
 	query = applyRankingQuotaTimeRange(query, startTime, endTime)
 	err := query.Find(&rows).Error

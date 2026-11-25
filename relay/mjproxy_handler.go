@@ -263,11 +263,10 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	if billingErr != nil {
 		common.SysLog(common.LogText("error consuming Midjourney quota: %s", billingErr.Error()))
 	}
-	err = midjourneyTask.Insert()
-	if err != nil {
+	billingApplied, insertErr, billingErr := service.PersistMidjourneyTask(info, midjourneyTask, billingPrepared)
+	if insertErr != nil {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "insert_midjourney_task_failed")
 	}
-	billingApplied, billingErr := service.SettleMidjourneyTaskBilling(info, midjourneyTask, billingPrepared)
 	if billingErr != nil {
 		common.SysLog(common.LogText("error settling Midjourney quota: %s", billingErr.Error()))
 	}
@@ -624,14 +623,13 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 	if billingErr != nil {
 		common.SysLog(common.LogText("error consuming Midjourney quota: %s", billingErr.Error()))
 	}
-	err = midjourneyTask.Insert()
-	if err != nil {
+	billingApplied, insertErr, billingErr := service.PersistMidjourneyTask(relayInfo, midjourneyTask, billingPrepared)
+	if insertErr != nil {
 		return &dto.MidjourneyResponse{
 			Code:        4,
 			Description: "insert_midjourney_task_failed",
 		}
 	}
-	billingApplied, billingErr := service.SettleMidjourneyTaskBilling(relayInfo, midjourneyTask, billingPrepared)
 	if billingErr != nil {
 		common.SysLog(common.LogText("error settling Midjourney quota: %s", billingErr.Error()))
 	}

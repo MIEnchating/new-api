@@ -333,14 +333,19 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		logger.LogError(ctx, common.LogText("failed to adjust funding for the difference, task %s: %s", task.TaskID, err.Error()))
 		return
 	}
-
-	// 调整令牌额度
-	taskAdjustTokenQuota(ctx, task, quotaDelta)
-
 	task.Quota = actualQuota
 	if err := task.UpdateQuota(); err != nil {
 		logger.LogError(ctx, common.LogText("failed to write back the settled task quota, task %s: %s", task.TaskID, err.Error()))
 	}
+	finishTaskQuotaAdjustment(ctx, task, preConsumedQuota, reason, clamps...)
+}
+
+func finishTaskQuotaAdjustment(ctx context.Context, task *model.Task, preConsumedQuota int, reason *common.Message, clamps ...*common.QuotaClamp) {
+	quotaDelta := task.Quota - preConsumedQuota
+	if quotaDelta == 0 {
+		return
+	}
+	taskAdjustTokenQuota(ctx, task, quotaDelta)
 
 	// 提交阶段已经累计过一次请求；结算阶段只调整最终用量。
 	model.UpdateUserUsedQuota(task.UserId, quotaDelta)
@@ -358,7 +363,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	other := taskBillingOther(task)
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("pre_consumed_quota", preConsumedQuota)
-	other.SetPublic("actual_quota", actualQuota)
+	other.SetPublic("actual_quota", task.Quota)
 	for _, clamp := range clamps {
 		attachQuotaSaturationToOther(other, clamp)
 	}
@@ -380,8 +385,23 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 // 当任务成功且返回了 totalTokens 时，根据模型倍率和分组倍率重新计算实际扣费额度，
 // 与预扣费的差额进行补扣或退还。支持钱包和订阅计费来源。
 func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTokens int) bool {
-	if totalTokens <= 0 {
+	adjustment := taskQuotaFromTokens(task, totalTokens)
+	if adjustment == nil {
 		return false
+	}
+	RecalculateTaskQuota(ctx, task, adjustment.quota, adjustment.reason, adjustment.clamp)
+	return true
+}
+
+type taskQuotaAdjustment struct {
+	quota  int
+	reason *common.Message
+	clamp  *common.QuotaClamp
+}
+
+func taskQuotaFromTokens(task *model.Task, totalTokens int) *taskQuotaAdjustment {
+	if totalTokens <= 0 {
+		return nil
 	}
 
 	modelName := taskModelName(task)
@@ -390,7 +410,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 	modelRatio, hasRatioSetting, _ := ratio_setting.GetModelRatio(modelName)
 	// 只有配置了倍率(非固定价格)时才按 token 重新计费
 	if !hasRatioSetting || modelRatio <= 0 {
-		return false
+		return nil
 	}
 
 	// 获取用户和组的倍率信息
@@ -402,7 +422,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		}
 	}
 	if group == "" {
-		return false
+		return nil
 	}
 
 	var finalGroupRatio float64
@@ -435,8 +455,7 @@ func RecalculateTaskQuotaByTokens(ctx context.Context, task *model.Task, totalTo
 		"group_ratio":      fmt.Sprintf("%.2f", finalGroupRatio),
 		"other_multiplier": fmt.Sprintf("%.4f", otherMultiplier),
 	})
-	RecalculateTaskQuota(ctx, task, actualQuota, reason, clamp)
-	return true
+	return &taskQuotaAdjustment{quota: actualQuota, reason: reason, clamp: clamp}
 }
 
 // EvaluateTaskCompletionUsage evaluates actual facts against the frozen task

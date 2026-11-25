@@ -79,10 +79,7 @@ func modelManagementDB(t *testing.T, kind, dsn string) *gorm.DB {
 		connection.SetConnMaxLifetime(0)
 	}
 	model.LOG_DB = database
-	require.NoError(t, database.AutoMigrate(
-		&model.Model{}, &model.Vendor{}, &model.Channel{}, &model.Ability{},
-		&model.Option{}, &model.User{}, &model.AuditLog{}, &model.QuotaData{},
-	))
+	require.NoError(t, database.AutoMigrate(&model.Model{}, &model.Vendor{}, &model.Channel{}, &model.Ability{}, &model.Option{}, &model.User{}, &model.AuditLog{}))
 	for _, value := range restoreRatios {
 		require.NoError(t, value.restore("{}"))
 	}
@@ -1977,7 +1974,7 @@ func TestModelSquareOrderFollowsSavedSetting(t *testing.T) {
 				t.Skip("set " + dialect.env + " to run this database")
 			}
 			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
-			require.NoError(t, db.AutoMigrate(&model.SystemTask{}))
+			require.NoError(t, db.AutoMigrate(&model.SystemTask{}, &model.Log{}))
 			// The service caches usage across databases, so usage ordering is
 			// covered in the service tests and the query is checked directly below.
 			common.DataExportEnabled = false
@@ -2046,17 +2043,18 @@ func TestModelSquareOrderFollowsSavedSetting(t *testing.T) {
 			}, modelSquareData[[]modelSquareUsage](t, GetModelSquareUsage, "/api/models/square_usage?days=7", ""))
 
 			now := time.Now().Unix()
-			require.NoError(t, db.Create(&[]model.QuotaData{
-				{UserID: 1, Username: "a", ModelName: "alpha", UseGroup: "default", CreatedAt: now - 3600, Count: 3, TokenUsed: 100},
-				{UserID: 2, Username: "b", ModelName: "alpha", UseGroup: "default", CreatedAt: now - 7200, Count: 2},
-				{UserID: 1, Username: "a", ModelName: "alpha", UseGroup: "Default", CreatedAt: now - 3600, Count: 1},
-				{UserID: 1, Username: "a", ModelName: "gamma", CreatedAt: now - 8*24*3600, Count: 9, TokenUsed: 900},
-				{UserID: 1, Username: "a", ModelName: "", CreatedAt: now - 3600, Count: 4, TokenUsed: 40},
+			require.NoError(t, db.Create(&[]model.Log{
+				{UserId: 1, ModelName: "alpha", Group: "default", CreatedAt: now - 3600, Type: model.LogTypeConsume, PromptTokens: 70, CompletionTokens: 30},
+				{UserId: 2, ModelName: "alpha", Group: "default", CreatedAt: now - 7200, Type: model.LogTypeConsume},
+				{UserId: 1, ModelName: "alpha", Group: "Default", CreatedAt: now - 3600, Type: model.LogTypeConsume},
+				{UserId: 1, ModelName: "alpha", Group: "default", CreatedAt: now - 1800, Type: model.LogTypeConsume, Other: `{"task_id":"task_123","pre_consumed_quota":10,"actual_quota":20}`},
+				{UserId: 1, ModelName: "gamma", CreatedAt: now - 8*24*3600, Type: model.LogTypeConsume, PromptTokens: 900},
+				{UserId: 1, CreatedAt: now - 3600, Type: model.LogTypeConsume, PromptTokens: 40},
 			}).Error)
-			totals, err := model.GetGroupModelUsageTotals(now-7*24*3600, now)
+			totals, err := model.GetGroupModelUsageTotals(t.Context(), now-7*24*3600, now)
 			require.NoError(t, err)
 			assert.ElementsMatch(t, []model.GroupModelUsageTotal{
-				{UseGroup: "default", ModelUsageTotal: model.ModelUsageTotal{ModelName: "alpha", Requests: 5, Tokens: 100}},
+				{UseGroup: "default", ModelUsageTotal: model.ModelUsageTotal{ModelName: "alpha", Requests: 2, Tokens: 100}},
 				{UseGroup: "Default", ModelUsageTotal: model.ModelUsageTotal{ModelName: "alpha", Requests: 1}},
 			}, totals)
 		})

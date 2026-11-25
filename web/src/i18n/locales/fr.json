@@ -558,6 +558,8 @@
     "Alipay": "Alipay",
     "All": "Tout",
     "All amounts are configured in USD and displayed in the site currency.": "Tous les montants sont configurés en USD et affichés dans la devise du site.",
+    "All allowed QQ groups use this key. Choose a dedicated API key with a quota to limit their combined usage.": "Tous les groupes QQ autorisés partagent cette clé. Choisissez une clé API dédiée assortie d’un quota pour limiter leur utilisation cumulée.",
+    "All allowed QQ groups use this key. Set a spending limit with the external provider before enabling chat.": "Tous les groupes QQ autorisés partagent cette clé. Définissez un plafond de dépenses auprès du fournisseur externe avant d’activer le chat.",
     "All API tokens": "Tous les jetons API",
     "All balances updated": "Tous les soldes ont été mis à jour",
     "All categories": "Toutes catégories",

@@ -610,7 +610,7 @@ func TestPrepareMidjourneyTaskBillingKeepsUnbilledMarkerClear(t *testing.T) {
 	assert.Zero(t, task.BillingChannelId)
 }
 
-func TestSettleMidjourneyTaskBillingRequiresPersistedTask(t *testing.T) {
+func TestPersistMidjourneyTaskRejectsAlreadyPersistedTask(t *testing.T) {
 	truncate(t)
 
 	const userID, tokenID, channelID = 49, 49, 49
@@ -632,10 +632,12 @@ func TestSettleMidjourneyTaskBillingRequiresPersistedTask(t *testing.T) {
 	prepared, err := PrepareMidjourneyTaskBilling(relayInfo, task, chargedQuota, true)
 	require.NoError(t, err)
 	require.True(t, prepared)
+	require.NoError(t, task.Insert())
 
-	billed, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
+	billed, insertErr, err := PersistMidjourneyTask(relayInfo, task, prepared)
 
-	require.Error(t, err)
+	require.Error(t, insertErr)
+	require.NoError(t, err)
 	assert.False(t, billed)
 	assert.Equal(t, initialUserQuota, getUserQuota(t, userID))
 	assert.Equal(t, initialTokenQuota, getTokenRemainQuota(t, tokenID))
@@ -676,9 +678,9 @@ func TestMidjourneyRefundRestoresEveryAccountingElementOnBillingChannel(t *testi
 	assert.Equal(t, chargedQuota, task.Quota)
 	assert.Zero(t, task.TokenId)
 	assert.Equal(t, billingChannelID, task.BillingChannelId)
-	require.NoError(t, task.Insert())
 
-	billed, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
+	billed, insertErr, err := PersistMidjourneyTask(relayInfo, task, prepared)
+	require.NoError(t, insertErr)
 	require.NoError(t, err)
 	require.True(t, billed)
 	assert.Equal(t, initialUserQuota-chargedQuota, getUserQuota(t, userID))
@@ -737,7 +739,6 @@ func TestSettleMidjourneyTaskBillingFundingFailureClearsMarkers(t *testing.T) {
 	prepared, err := PrepareMidjourneyTaskBilling(relayInfo, task, chargedQuota, true)
 	require.NoError(t, err)
 	require.True(t, prepared)
-	require.NoError(t, task.Insert())
 
 	require.NoError(t, model.DB.Exec(`
 		CREATE TRIGGER fail_midjourney_user_update
@@ -751,7 +752,8 @@ func TestSettleMidjourneyTaskBillingFundingFailureClearsMarkers(t *testing.T) {
 		model.DB.Exec("DROP TRIGGER IF EXISTS fail_midjourney_user_update")
 	})
 
-	billed, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
+	billed, insertErr, err := PersistMidjourneyTask(relayInfo, task, prepared)
+	require.NoError(t, insertErr)
 
 	require.Error(t, err)
 	assert.False(t, billed)
@@ -791,7 +793,6 @@ func TestSettleMidjourneyTaskBillingTokenFailureKeepsFundingRefundable(t *testin
 	prepared, err := PrepareMidjourneyTaskBilling(relayInfo, task, chargedQuota, true)
 	require.NoError(t, err)
 	require.True(t, prepared)
-	require.NoError(t, task.Insert())
 
 	require.NoError(t, model.DB.Exec(`
 		CREATE TRIGGER fail_midjourney_token_update
@@ -805,7 +806,8 @@ func TestSettleMidjourneyTaskBillingTokenFailureKeepsFundingRefundable(t *testin
 		model.DB.Exec("DROP TRIGGER IF EXISTS fail_midjourney_token_update")
 	})
 
-	billed, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
+	billed, insertErr, err := PersistMidjourneyTask(relayInfo, task, prepared)
+	require.NoError(t, insertErr)
 
 	require.Error(t, err)
 	require.True(t, billed)
@@ -1469,16 +1471,21 @@ func TestWalletReferralRewardsFollowFinalCharges(t *testing.T) {
 	require.Nil(t, PreConsumeBilling(ctx, 2000, taskRequest))
 	task := makeTask(inviteeID, 0, 2000, 0, BillingSourceWallet, 0)
 	task.TaskID = "referral-usage-pending-task"
-	require.NoError(t, task.Insert())
-	require.NoError(t, SettleTaskSubmissionBilling(ctx, taskRequest, task, task.Quota))
+	walletSettled, insertErr, tokenErr := PersistTaskSubmission(ctx, taskRequest, task, task.Quota)
+	require.True(t, walletSettled)
+	require.NoError(t, insertErr)
+	require.NoError(t, tokenErr)
 	items, total, err := model.GetAffiliateRewards(inviterID, nil)
 	require.NoError(t, err)
 	assert.EqualValues(t, 1, total)
 	require.Len(t, items, 1)
 	assert.Equal(t, 60, items[0].Quota)
 
+	previous := task.Status
 	task.Status = model.TaskStatusSuccess
-	finalizeTerminalTask(ctx, &mockAdaptor{adjustReturn: 1500}, task, &relaycommon.TaskInfo{Status: model.TaskStatusSuccess})
+	won, err := persistPolledTask(ctx, &mockAdaptor{adjustReturn: 1500}, task, &relaycommon.TaskInfo{Status: model.TaskStatusSuccess}, previous)
+	require.NoError(t, err)
+	require.True(t, won)
 	items, total, err = model.GetAffiliateRewards(inviterID, nil)
 	require.NoError(t, err)
 	assert.EqualValues(t, 2, total)

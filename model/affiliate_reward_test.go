@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -98,6 +99,14 @@ func TestAllAffiliateRewardsFiltersInviterInviteeAndType(t *testing.T) {
 	assert.Equal(t, "carol-invitee", items[0].InviteeUsername)
 }
 
+func creditAffiliateUsageRewardForTest(inviteeID int, chargeKey string, spentQuota int, settledAt int64) error {
+	eventKey, err := enqueueAffiliateUsageReward(DB, inviteeID, chargeKey, spentQuota, settledAt)
+	if err != nil || eventKey == "" {
+		return err
+	}
+	return applyPendingAffiliateUsageReward(DB, eventKey, common.GetTimestamp())
+}
+
 // External DSNs must point to disposable databases, as this suite owns its tables.
 func TestAffiliateAccountingDatabase(t *testing.T) {
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
@@ -132,7 +141,7 @@ func TestAffiliateAccountingDatabase(t *testing.T) {
 			}
 			require.NoError(t, db.Raw(query).Scan(&version).Error)
 			t.Logf("%s %s", dialect, version)
-			models := []any{&AffiliateReward{}, &PendingAffiliateUsageReward{}, &BillingTransaction{}, &TopUp{}, &User{}, &Log{}, &Option{}, &SystemTask{}}
+			models := []any{&AffiliateReward{}, &PendingAffiliateUsageReward{}, &BillingTransaction{}, &TopUp{}, &User{}, &Log{}, &Option{}, &SystemTask{}, &Task{}, &Midjourney{}}
 			require.NoError(t, db.Migrator().DropTable(models...))
 			require.NoError(t, db.AutoMigrate(models...))
 			t.Cleanup(func() { assert.NoError(t, db.Migrator().DropTable(models...)) })
@@ -147,6 +156,67 @@ func TestAffiliateAccountingDatabase(t *testing.T) {
 			oldReward := common.QuotaForInviter
 			common.QuotaForInviter = 200
 			t.Cleanup(func() { common.QuotaForInviter = oldReward })
+
+			t.Run("failed outbox write rolls back wallet adjustment and task completion", func(t *testing.T) {
+				const inviterID, inviteeID = 371, 372
+				insertInviteRebateUser(t, inviterID, "atomic_usage_inviter", 0)
+				insertInviteRebateUser(t, inviteeID, "atomic_usage_invitee", inviterID)
+				t.Cleanup(func() {
+					assert.NoError(t, DB.Where("inviter_id = ?", inviterID).Delete(&AffiliateReward{}).Error)
+				})
+				require.NoError(t, DB.Model(&User{}).Where("id = ?", inviteeID).Update("quota", 3800).Error)
+				task := Task{UserId: inviteeID, TaskID: "atomic-usage-task", Quota: 1200, Status: TaskStatusSubmitted}
+				require.NoError(t, task.Insert())
+				const callback = "test:reject_wallet_reward_insert"
+				reject := true
+				injected := errors.New("forced reward queue insert failure")
+				require.NoError(t, DB.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+					if reject && tx.Statement.Schema != nil && tx.Statement.Schema.Table == "pending_affiliate_usage_rewards" {
+						tx.AddError(injected)
+					}
+				}))
+				t.Cleanup(func() { assert.NoError(t, DB.Callback().Create().Remove(callback)) })
+
+				won, err := CommitWalletUsage(inviteeID, 200, 200, "request:rollback", nil)
+				require.ErrorIs(t, err, injected)
+				assert.False(t, won)
+				assert.Equal(t, 3800, getInviteRebateUser(t, inviteeID).Quota)
+
+				inline := Midjourney{UserId: inviteeID, MjId: "atomic-usage-midjourney", Quota: 200, Status: string(TaskStatusSuccess)}
+				fundingErr, err := inline.InsertWithWalletBilling()
+				require.ErrorIs(t, fundingErr, injected)
+				require.ErrorIs(t, err, injected)
+				assert.Zero(t, inline.Id)
+				var inlineCount int64
+				require.NoError(t, DB.Model(&Midjourney{}).Where("mj_id = ?", inline.MjId).Count(&inlineCount).Error)
+				assert.Zero(t, inlineCount)
+				assert.Equal(t, 3800, getInviteRebateUser(t, inviteeID).Quota)
+
+				task.Status = TaskStatusSuccess
+				won, err = task.CompleteWalletTask(TaskStatusSubmitted, 1000)
+				require.ErrorIs(t, err, injected)
+				assert.False(t, won)
+				var persisted Task
+				require.NoError(t, DB.First(&persisted, task.ID).Error)
+				assert.Equal(t, TaskStatus(TaskStatusSubmitted), persisted.Status)
+				assert.Equal(t, 1200, persisted.Quota)
+				assert.Equal(t, 3800, getInviteRebateUser(t, inviteeID).Quota)
+				assert.Zero(t, getInviteRebateUser(t, inviterID).AffQuota)
+
+				reject = false
+				stale := task
+				won, err = task.CompleteWalletTask(TaskStatusSubmitted, 1000)
+				require.NoError(t, err)
+				require.True(t, won)
+				won, err = stale.CompleteWalletTask(TaskStatusSubmitted, 1000)
+				require.NoError(t, err)
+				assert.False(t, won)
+				require.NoError(t, DB.First(&persisted, task.ID).Error)
+				assert.Equal(t, TaskStatus(TaskStatusSuccess), persisted.Status)
+				assert.Equal(t, 1000, persisted.Quota)
+				assert.Equal(t, 4000, getInviteRebateUser(t, inviteeID).Quota)
+				assert.Equal(t, 50, getInviteRebateUser(t, inviterID).AffQuota)
+			})
 
 			t.Run("wallet charges earn five percent until the sixtieth day", func(t *testing.T) {
 				const inviterID, inviteeID = 301, 302
@@ -165,7 +235,7 @@ func TestAffiliateAccountingDatabase(t *testing.T) {
 				for range 2 {
 					go func() {
 						<-starts
-						attempts <- CreditAffiliateUsageReward(inviteeID, "request:first", 2009, joinedAt)
+						attempts <- creditAffiliateUsageRewardForTest(inviteeID, "request:first", 2009, joinedAt)
 					}()
 				}
 				close(starts)
@@ -184,9 +254,9 @@ func TestAffiliateAccountingDatabase(t *testing.T) {
 					{"request:below-one-unit", 19, joinedAt},
 					{"request:refund", -2000, joinedAt},
 				} {
-					require.NoError(t, CreditAffiliateUsageReward(inviteeID, charge.key, charge.quota, charge.settledAt))
+					require.NoError(t, creditAffiliateUsageRewardForTest(inviteeID, charge.key, charge.quota, charge.settledAt))
 				}
-				require.NoError(t, CreditAffiliateUsageReward(inviterID, "request:no-inviter", 2000, joinedAt))
+				require.NoError(t, creditAffiliateUsageRewardForTest(inviterID, "request:no-inviter", 2000, joinedAt))
 
 				inviter := getInviteRebateUser(t, inviterID)
 				assert.Equal(t, 111, inviter.AffQuota)
@@ -219,7 +289,7 @@ func TestAffiliateAccountingDatabase(t *testing.T) {
 				insertInviteRebateUser(t, inviteeID, "capped_usage_invitee", inviterID)
 				settledAt := getInviteRebateUser(t, inviteeID).CreatedAt
 				require.NoError(t, DB.Model(&User{}).Where("id = ?", inviterID).Update("aff_history", common.MaxWalletQuota).Error)
-				require.ErrorIs(t, CreditAffiliateUsageReward(inviteeID, "request:retry", 1000, settledAt), ErrWalletQuotaLimitExceeded)
+				require.ErrorIs(t, creditAffiliateUsageRewardForTest(inviteeID, "request:retry", 1000, settledAt), ErrWalletQuotaLimitExceeded)
 				items, total, err := GetAffiliateRewards(inviterID, nil)
 				require.NoError(t, err)
 				assert.Empty(t, items)
@@ -237,7 +307,7 @@ func TestAffiliateAccountingDatabase(t *testing.T) {
 				assert.Zero(t, getInviteRebateUser(t, inviterID).AffQuota)
 				require.NoError(t, RetryPendingAffiliateUsageRewards(t.Context(), pending.NextAttemptAt))
 				require.NoError(t, RetryPendingAffiliateUsageRewards(t.Context(), pending.NextAttemptAt))
-				require.NoError(t, CreditAffiliateUsageReward(inviteeID, "request:retry", 1000, settledAt))
+				require.NoError(t, creditAffiliateUsageRewardForTest(inviteeID, "request:retry", 1000, settledAt))
 				assert.Equal(t, 50, getInviteRebateUser(t, inviterID).AffQuota)
 				var remaining int64
 				require.NoError(t, DB.Model(&PendingAffiliateUsageReward{}).Where("event_key = ?", pending.EventKey).Count(&remaining).Error)
@@ -270,13 +340,13 @@ func TestAffiliateAccountingDatabase(t *testing.T) {
 				require.Error(t, UpdateOption(key, `{"enabled":true,"rate_percent":101}`))
 				require.Error(t, UpdateOption(key, `{"enabled":true,"rate_percent":-1}`))
 				require.Error(t, UpdateOption(key, `{"enabled":true,"rate_percent":null}`))
-				require.NoError(t, CreditAffiliateUsageReward(inviteeID, "request:configured", 1007, settledAt))
+				require.NoError(t, creditAffiliateUsageRewardForTest(inviteeID, "request:configured", 1007, settledAt))
 				assert.Equal(t, 125, getInviteRebateUser(t, inviterID).AffQuota)
 
 				require.NoError(t, UpdateOption(key, `{"enabled":true,"rate_percent":0}`))
-				require.NoError(t, CreditAffiliateUsageReward(inviteeID, "request:zero-rate", 1007, settledAt))
+				require.NoError(t, creditAffiliateUsageRewardForTest(inviteeID, "request:zero-rate", 1007, settledAt))
 				require.NoError(t, UpdateOption(key, disabled))
-				require.NoError(t, CreditAffiliateUsageReward(inviteeID, "request:disabled", 1007, settledAt))
+				require.NoError(t, creditAffiliateUsageRewardForTest(inviteeID, "request:disabled", 1007, settledAt))
 				assert.Equal(t, 125, getInviteRebateUser(t, inviterID).AffQuota)
 				payment := operation_setting.GetPaymentSetting()
 				payment.ComplianceConfirmed = false

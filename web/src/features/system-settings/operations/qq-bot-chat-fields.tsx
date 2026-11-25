@@ -285,6 +285,9 @@ function QQBotExternalFields(props: { settings: QQBotSettings }) {
         maxLength={1024}
         secret
         configured={savedKey}
+        description={t(
+          'All allowed QQ groups use this key. Set a spending limit with the external provider before enabling chat.'
+        )}
       />
       <FormField
         control={form.control}
@@ -416,6 +419,11 @@ function QQBotBuiltinFields(props: { settings: QQBotSettings }) {
                 }}
               />
             </FormControl>
+            <FormDescription>
+              {t(
+                'All allowed QQ groups use this key. Choose a dedicated API key with a quota to limit their combined usage.'
+              )}
+            </FormDescription>
             {keys.hasNextPage && (
               <Button
                 type='button'

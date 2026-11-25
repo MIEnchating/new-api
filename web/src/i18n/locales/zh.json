@@ -558,6 +558,8 @@
     "Alipay": "支付宝",
     "All": "全部",
     "All amounts are configured in USD and displayed in the site currency.": "所有金额均以美元配置，并按站点货币显示。",
+    "All allowed QQ groups use this key. Choose a dedicated API key with a quota to limit their combined usage.": "所有已授权的 QQ 群共用此密钥。请选择设置了额度上限的专用 API 密钥，以限制群聊总用量。",
+    "All allowed QQ groups use this key. Set a spending limit with the external provider before enabling chat.": "所有已授权的 QQ 群共用此密钥。启用聊天前，请先在外部服务商处设置消费上限。",
     "All API tokens": "全部 API 密钥",
     "All balances updated": "所有余额已更新",
     "All categories": "全部分类",

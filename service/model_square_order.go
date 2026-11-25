@@ -2,6 +2,7 @@ package service
 
 import (
 	"cmp"
+	"context"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,6 +28,7 @@ type ModelSquareOrder struct {
 type modelUsageCacheItem struct {
 	expiresAt time.Time
 	totals    []model.GroupModelUsageTotal
+	err       error
 }
 
 var (
@@ -50,17 +52,24 @@ func getModelUsageTotals(days int, usableGroups map[string]string) ([]model.Mode
 		item, ok := modelUsageCache[days]
 		modelUsageCacheMu.Unlock()
 		if ok && now.Before(item.expiresAt) {
-			return item.totals, nil
+			return item.totals, item.err
 		}
 
-		totals, err := model.GetGroupModelUsageTotals(now.AddDate(0, 0, -days).Unix(), now.Unix())
+		// A cold usage sort can scan a large log window. Bound the scan so a
+		// slow or unavailable log database cannot hold the pricing page open.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		totals, err := model.GetGroupModelUsageTotals(ctx, now.AddDate(0, 0, -days).Unix(), now.Unix())
+		ttl := rankingCacheTTL
 		if err != nil {
-			return nil, err
+			// Back off across successive pricing requests during a log failure.
+			common.SysError(common.LogText("failed to load model usage for the model square: %s", err.Error()))
+			ttl = 30 * time.Second
 		}
 		modelUsageCacheMu.Lock()
-		modelUsageCache[days] = modelUsageCacheItem{expiresAt: now.Add(rankingCacheTTL), totals: totals}
+		modelUsageCache[days] = modelUsageCacheItem{expiresAt: time.Now().Add(ttl), totals: totals, err: err}
 		modelUsageCacheMu.Unlock()
-		return totals, nil
+		return totals, err
 	})
 	if err != nil {
 		return nil, err
@@ -104,10 +113,7 @@ func BuildModelSquareOrder(pricing []model.Pricing, usableGroups map[string]stri
 		listed[item.ModelName] = struct{}{}
 	}
 	setting := operation_setting.GetModelSquareSetting()
-	totals, err := getModelUsageTotals(setting.SortDays, usableGroups)
-	if err != nil {
-		common.SysError(common.LogText("failed to load model usage for the model square: %s", err.Error()))
-	}
+	totals, _ := getModelUsageTotals(setting.SortDays, usableGroups)
 	order := ModelSquareOrder{
 		Requests: modelNamesByUsage(totals, operation_setting.ModelSquareMetricRequests, listed),
 		Tokens:   modelNamesByUsage(totals, operation_setting.ModelSquareMetricTokens, listed),

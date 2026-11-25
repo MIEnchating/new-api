@@ -13,6 +13,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 const (
@@ -76,11 +77,40 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 // SettleTaskSubmissionBilling defers the referral reward for pending tasks
 // until polling finalizes the charge. Immediate successes settle here.
 func SettleTaskSubmissionBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, task *model.Task, actualQuota int) error {
+	return settleBilling(ctx, relayInfo, actualQuota, taskSubmissionChargeKey(task))
+}
+
+func taskSubmissionChargeKey(task *model.Task) string {
 	var chargeKey string
 	if task.Status == model.TaskStatusSuccess && task.TaskID != "" {
 		chargeKey = "task:" + task.TaskID
 	}
-	return settleBilling(ctx, relayInfo, actualQuota, chargeKey)
+	return chargeKey
+}
+
+// PersistTaskSubmission commits a wallet-backed task and its final funding
+// adjustment together. Other billing implementations retain their separate
+// insert and settlement, including the existing insert failure handling.
+func PersistTaskSubmission(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, task *model.Task, actualQuota int, omitColumns ...string) (walletSettled bool, insertErr, tokenErr error) {
+	session, ok := relayInfo.Billing.(*BillingSession)
+	if !ok {
+		return false, task.InsertWithContext(ctx.Request.Context(), omitColumns...), nil
+	}
+	if _, ok = session.funding.(*WalletFunding); !ok {
+		return false, task.InsertWithContext(ctx.Request.Context(), omitColumns...), nil
+	}
+	walletSettled, err := session.settleCharge(actualQuota, taskSubmissionChargeKey(task), func(tx *gorm.DB) (bool, error) {
+		return true, task.InsertTx(tx.WithContext(ctx.Request.Context()), omitColumns...)
+	})
+	if !walletSettled {
+		task.ID = 0
+		return false, err, nil
+	}
+	if err == nil && actualQuota != 0 {
+		preConsumed := session.GetPreConsumedQuota()
+		checkAndSendQuotaNotify(relayInfo, actualQuota-preConsumed, preConsumed)
+	}
+	return true, nil, err
 }
 
 func settleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int, chargeKey string) error {
@@ -106,15 +136,11 @@ func settleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 			))
 		}
 
-		settledQuota := actualQuota
 		var err error
 		if session, ok := relayInfo.Billing.(*BillingSession); ok {
-			settledQuota, err = session.settleCharge(actualQuota)
-		} else if err = relayInfo.Billing.Settle(actualQuota); err != nil {
-			settledQuota = 0
-		}
-		if relayInfo.BillingSource != BillingSourceSubscription {
-			recordWalletUsageReward(ctx, relayInfo.UserId, chargeKey, settledQuota)
+			_, err = session.settleCharge(actualQuota, chargeKey, nil)
+		} else {
+			err = relayInfo.Billing.Settle(actualQuota)
 		}
 		if err != nil {
 			return err
@@ -134,14 +160,11 @@ func settleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 	// 回退：无 BillingSession 时使用旧路径
 	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
 	if quotaDelta != 0 {
-		result, err := postConsumeQuotaWithResult(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
-		if result.FundingApplied && relayInfo.BillingSource != BillingSourceSubscription {
-			recordWalletUsageReward(ctx, relayInfo.UserId, chargeKey, actualQuota)
-		}
-		return err
+		return postConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true, chargeKey)
 	}
-	if relayInfo.BillingSource != BillingSourceSubscription {
-		recordWalletUsageReward(ctx, relayInfo.UserId, chargeKey, actualQuota)
+	if relayInfo.BillingSource != BillingSourceSubscription && chargeKey != "" && actualQuota > 0 {
+		_, err := model.CommitWalletUsage(relayInfo.UserId, 0, actualQuota, chargeKey, nil)
+		return err
 	}
 	return nil
 }
@@ -155,15 +178,5 @@ func RunAffiliateUsageRewardRetry() {
 			common.SysError(common.LogText("retrying wallet usage referral rewards: %s", err.Error()))
 		}
 		<-ticker.C
-	}
-}
-
-func recordWalletUsageReward(ctx context.Context, userID int, chargeKey string, quota int) {
-	if chargeKey == "" || quota <= 0 {
-		return
-	}
-	settledAt := common.GetTimestamp()
-	if err := model.CreditAffiliateUsageReward(userID, chargeKey, quota, settledAt); err != nil {
-		logger.LogError(ctx, common.LogText("failed to credit wallet usage referral reward (userId=%d, charge=%s, quota=%d, settledAt=%d): %s", userID, chargeKey, quota, settledAt, err.Error()))
 	}
 }

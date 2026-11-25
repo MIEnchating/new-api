@@ -1,6 +1,7 @@
 package service
 
 import (
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -20,15 +21,27 @@ func TestBuildModelSquareOrder(t *testing.T) {
 	sqlDB, err := database.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, database.AutoMigrate(&model.QuotaData{}))
+	require.NoError(t, database.AutoMigrate(&model.Log{}))
+	dashboard, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "dashboard.db")), &gorm.Config{})
+	require.NoError(t, err)
+	dashboardDB, err := dashboard.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = dashboardDB.Close() })
+	require.NoError(t, dashboard.AutoMigrate(&model.QuotaData{}))
 	previousDB := model.DB
+	previousLogDB := model.LOG_DB
+	previousLogType := common.LogDatabaseType()
 	previousOptions := common.OptionMap
 	previousDataExport := common.DataExportEnabled
 	previousAliases := common.GetGroupAliases()
 	require.NoError(t, common.SetGroupAliases(nil))
-	model.DB = database
+	model.DB = dashboard
+	model.LOG_DB = database
+	common.SetLogDatabaseType(common.DatabaseTypeSQLite)
 	t.Cleanup(func() {
 		model.DB = previousDB
+		model.LOG_DB = previousLogDB
+		common.SetLogDatabaseType(previousLogType)
 		common.OptionMap = previousOptions
 		common.DataExportEnabled = previousDataExport
 		require.NoError(t, common.SetGroupAliases(previousAliases))
@@ -37,21 +50,26 @@ func TestBuildModelSquareOrder(t *testing.T) {
 	})
 
 	hourAgo := time.Now().Add(-time.Hour).Unix()
-	require.NoError(t, database.Create(&[]model.QuotaData{
-		{ModelName: "gamma", UseGroup: "default", CreatedAt: hourAgo, Count: 5, TokenUsed: 900},
-		// Ties with gamma: byte order puts upper case first.
-		{ModelName: "Kappa", UseGroup: "default", CreatedAt: hourAgo, Count: 5, TokenUsed: 900},
-		{ModelName: "beta", UseGroup: "default", CreatedAt: hourAgo, Count: 9, TokenUsed: 100},
-		{ModelName: "beta", UseGroup: "default", CreatedAt: hourAgo - 3600, Count: 1, TokenUsed: 50},
-		// Per-call models can have requests without tokens.
-		{ModelName: "delta", UseGroup: "default", CreatedAt: hourAgo, Count: 3},
-		{ModelName: "alpha", UseGroup: "default", CreatedAt: hourAgo - 10*24*3600, Count: 99, TokenUsed: 9999},
-		{ModelName: "zeta", UseGroup: "Default", CreatedAt: hourAgo, Count: 80, TokenUsed: 8000},
-		{ModelName: "zeta", CreatedAt: hourAgo, Count: 90, TokenUsed: 9000},
-		{ModelName: "retired", CreatedAt: hourAgo, Count: 50, TokenUsed: 5000},
+	// Older dashboard writers could mix Default into the default bucket.
+	require.NoError(t, dashboard.Create(&model.QuotaData{
+		ModelName: "zeta", UseGroup: "default", CreatedAt: hourAgo, Count: 9, TokenUsed: 8000,
 	}).Error)
-	pricing := []model.Pricing{{ModelName: "alpha"}, {ModelName: "beta"}, {ModelName: "delta"}, {ModelName: "gamma"}, {ModelName: "Kappa"}, {ModelName: "zeta"}}
-	requests := []string{"beta", "Kappa", "gamma", "delta"}
+	require.NoError(t, database.Create(&[]model.Log{
+		{ModelName: "gamma", Group: "default", CreatedAt: hourAgo, Type: model.LogTypeConsume, CompletionTokens: 900},
+		// Ties with gamma: byte order puts upper case first.
+		{ModelName: "Kappa", Group: "default", CreatedAt: hourAgo, Type: model.LogTypeConsume, PromptTokens: 900},
+		{ModelName: "beta", Group: "default", CreatedAt: hourAgo, Type: model.LogTypeConsume, PromptTokens: 100},
+		{ModelName: "beta", Group: "default", CreatedAt: hourAgo - 3600, Type: model.LogTypeConsume, CompletionTokens: 50},
+		// Per-call models can have requests without tokens.
+		{ModelName: "omega", Group: "default", CreatedAt: hourAgo, Type: model.LogTypeConsume},
+		{ModelName: "alpha", Group: "default", CreatedAt: hourAgo - 10*24*3600, Type: model.LogTypeConsume, PromptTokens: 9999},
+		{ModelName: "zeta", Group: "Default", CreatedAt: hourAgo, Type: model.LogTypeConsume, PromptTokens: 8000},
+		{ModelName: "zeta", Group: "default", CreatedAt: hourAgo, Type: model.LogTypeConsume, PromptTokens: 7000, Other: `{"user_visible":false}`},
+		{ModelName: "zeta", CreatedAt: hourAgo, Type: model.LogTypeConsume, PromptTokens: 9000},
+		{ModelName: "retired", CreatedAt: hourAgo, Type: model.LogTypeConsume, PromptTokens: 5000},
+	}).Error)
+	pricing := []model.Pricing{{ModelName: "alpha"}, {ModelName: "beta"}, {ModelName: "omega"}, {ModelName: "gamma"}, {ModelName: "Kappa"}, {ModelName: "zeta"}}
+	requests := []string{"beta", "Kappa", "gamma", "omega"}
 	tokens := []string{"Kappa", "gamma", "beta"}
 
 	for _, tc := range []struct {
@@ -91,15 +109,15 @@ func TestBuildModelSquareOrder(t *testing.T) {
 		},
 		{
 			name:       "pinned models come before the most used",
-			setting:    operation_setting.ModelSquareSetting{SortMode: "mixed", SortMetric: "tokens", SortDays: 7, SortModels: []string{"delta", "retired", "beta"}},
+			setting:    operation_setting.ModelSquareSetting{SortMode: "mixed", SortMetric: "tokens", SortDays: 7, SortModels: []string{"omega", "retired", "beta"}},
 			dataExport: true,
-			want:       ModelSquareOrder{Recommended: []string{"delta", "beta", "Kappa", "gamma"}, Requests: requests, Tokens: tokens},
+			want:       ModelSquareOrder{Recommended: []string{"omega", "beta", "Kappa", "gamma"}, Requests: requests, Tokens: tokens},
 		},
 		{
 			name:       "longer period counts older usage",
 			setting:    operation_setting.ModelSquareSetting{SortMode: "usage", SortMetric: "tokens", SortDays: 30},
 			dataExport: true,
-			want:       ModelSquareOrder{Recommended: []string{"alpha", "Kappa", "gamma", "beta"}, Requests: []string{"alpha", "beta", "Kappa", "gamma", "delta"}, Tokens: []string{"alpha", "Kappa", "gamma", "beta"}},
+			want:       ModelSquareOrder{Recommended: []string{"alpha", "Kappa", "gamma", "beta"}, Requests: []string{"beta", "Kappa", "alpha", "gamma", "omega"}, Tokens: []string{"alpha", "Kappa", "gamma", "beta"}},
 		},
 		{
 			name:    "without dashboard data usage sorts fall back to names",
@@ -134,8 +152,8 @@ func TestBuildModelSquareOrder(t *testing.T) {
 	require.NoError(t, err)
 	adminTotals, err := GetModelUsageTotals(7)
 	require.NoError(t, err)
-	assert.Contains(t, adminTotals, model.ModelUsageTotal{ModelName: "zeta", Requests: 170, Tokens: 17000})
-	assert.JSONEq(t, `{"recommended":["beta","Kappa","gamma","delta"],"requests":["beta","Kappa","gamma","delta"],"tokens":["Kappa","gamma","beta"]}`, string(encoded))
+	assert.Contains(t, adminTotals, model.ModelUsageTotal{ModelName: "zeta", Requests: 2, Tokens: 17000})
+	assert.JSONEq(t, `{"recommended":["beta","Kappa","gamma","omega"],"requests":["beta","Kappa","gamma","omega"],"tokens":["Kappa","gamma","beta"]}`, string(encoded))
 
 	require.NoError(t, common.SetGroupAliases(map[string]string{"default": "renamed"}))
 	assert.Equal(t, ModelSquareOrder{

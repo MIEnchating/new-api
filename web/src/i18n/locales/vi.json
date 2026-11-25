@@ -558,6 +558,8 @@
     "Alipay": "Alipay",
     "All": "All",
     "All amounts are configured in USD and displayed in the site currency.": "Tất cả số tiền được cấu hình bằng USD và hiển thị theo tiền tệ của trang web.",
+    "All allowed QQ groups use this key. Choose a dedicated API key with a quota to limit their combined usage.": "Tất cả nhóm QQ được phép dùng chung khóa này. Hãy chọn khóa API riêng có hạn mức để giới hạn tổng mức sử dụng của các nhóm.",
+    "All allowed QQ groups use this key. Set a spending limit with the external provider before enabling chat.": "Tất cả nhóm QQ được phép dùng chung khóa này. Hãy đặt giới hạn chi tiêu với nhà cung cấp bên ngoài trước khi bật trò chuyện.",
     "All API tokens": "Tất cả khóa API",
     "All balances updated": "Đã cập nhật tất cả số dư",
     "All categories": "Tất cả danh mục",

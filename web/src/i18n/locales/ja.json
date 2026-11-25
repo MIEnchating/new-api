@@ -558,6 +558,8 @@
     "Alipay": "Alipay",
     "All": "すべて",
     "All amounts are configured in USD and displayed in the site currency.": "金額はすべて米ドルで設定し、サイトの通貨で表示します。",
+    "All allowed QQ groups use this key. Choose a dedicated API key with a quota to limit their combined usage.": "許可したすべての QQ グループがこのキーを共有します。合計使用量を制限するには、クォータ付きの専用 API キーを選択してください。",
+    "All allowed QQ groups use this key. Set a spending limit with the external provider before enabling chat.": "許可したすべての QQ グループがこのキーを共有します。チャットを有効にする前に、外部プロバイダーで利用額の上限を設定してください。",
     "All API tokens": "すべての API キー",
     "All balances updated": "すべての残高を更新しました",
     "All categories": "すべてのカテゴリ",

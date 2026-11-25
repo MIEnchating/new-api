@@ -500,6 +500,7 @@ var reservedRouteNamespaces = []string{
 	"/invoices",
 	"/keys",
 	"/lottery",
+	"/model-detection",
 	"/models",
 	"/pages",
 	"/playground",
