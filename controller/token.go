@@ -416,45 +416,6 @@ func GetToken(c *gin.Context) {
 	common.ApiSuccess(c, buildMaskedTokenResponse(token))
 }
 
-func getTokenModelGroups(token *model.Token) ([]string, error) {
-	_, routes, err := model.NormalizeTokenGroupRouteConfig(token.GroupRouteConfig)
-	if err != nil {
-		return nil, err
-	}
-	hasConfiguredRoutes := len(routes) > 0
-	routes = model.EnabledTokenGroupRoutes(routes)
-	if len(routes) > 0 {
-		groups := make([]string, 0, len(routes))
-		for _, route := range routes {
-			groups = append(groups, route.Group)
-		}
-		return groups, nil
-	}
-	if hasConfiguredRoutes {
-		return []string{}, nil
-	}
-
-	if token.Group != "" && token.Group != "auto" {
-		return []string{token.Group}, nil
-	}
-
-	userGroup, err := model.GetUserGroup(token.UserId, false)
-	if err != nil {
-		return nil, err
-	}
-	if token.Group == "auto" {
-		autoGroups, err := token.GetAutoGroups()
-		if err != nil {
-			return nil, err
-		}
-		if len(autoGroups) > 0 {
-			return service.FilterUserTokenAutoGroups(userGroup, autoGroups), nil
-		}
-		return service.GetUserAutoGroup(userGroup), nil
-	}
-	return []string{userGroup}, nil
-}
-
 func getTokenModels(token *model.Token) ([]string, error) {
 	effective, err := token.ResolveRoutingTemplate()
 	if err != nil {
@@ -466,7 +427,7 @@ func getTokenModels(token *model.Token) ([]string, error) {
 			return nil, err
 		}
 	}
-	groups, err := getTokenModelGroups(token)
+	groups, err := service.TokenModelGroups(token, "")
 	if err != nil {
 		return nil, err
 	}

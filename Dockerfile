@@ -36,6 +36,12 @@ COPY . .
 COPY --from=builder /build/web/dist ./web/dist
 RUN go build -pgo="$(go list -m -f '{{.Dir}}' github.com/MoeForge/moejs)/default.pgo" -ldflags "-s -w -X 'github.com/QuantumNous/new-api/common.Version=$(cat VERSION)'" -o new-api
 
+FROM node:22.23.1-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS model-detector
+
+WORKDIR /opt/model-detection
+COPY scripts/model-detection/package.json scripts/model-detection/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
 FROM debian:bookworm-slim@sha256:f06537653ac770703bc45b4b113475bd402f451e85223f0f2837acbf89ab020a
 
 RUN apt-get update \
@@ -44,8 +50,13 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && update-ca-certificates
 
+COPY --from=model-detector /usr/local/bin/node /usr/local/bin/node
+COPY --from=model-detector /opt/model-detection/node_modules /opt/model-detection/node_modules
+ENV MODEL_DETECTION_CLI_PATH=/opt/model-detection/node_modules/.bin/fpd
+
 COPY --from=builder2 /build/new-api /
 COPY LICENSE NOTICE THIRD-PARTY-LICENSES.md /licenses/
+COPY --from=model-detector /usr/local/LICENSE /licenses/Node-LICENSE
 EXPOSE 3000
 WORKDIR /data
 ENTRYPOINT ["/new-api"]

@@ -162,6 +162,14 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 
 	// router/api-router.go: /api/option
 	"GET /api/option/":                                           accessTokenScopeRule("option:read"),
+	"GET /api/option/qqbot":                                      accessTokenSessionRule,
+	"GET /api/option/qqbot/chat-options":                         accessTokenSessionRule,
+	"GET /api/option/qqbot/discovered-groups":                    accessTokenSessionRule,
+	"POST /api/option/qqbot/external-models":                     accessTokenSessionRule,
+	"PUT /api/option/qqbot":                                      accessTokenSessionRule,
+	"GET /api/user/qqbot":                                        accessTokenSessionRule,
+	"POST /api/user/qqbot":                                       accessTokenSessionRule,
+	"DELETE /api/user/qqbot":                                     accessTokenSessionRule,
 	"GET /api/option/request_policy":                             accessTokenScopeRule("option:read"),
 	"PATCH /api/option/request_policy":                           accessTokenScopeRule("option:write"),
 	"PUT /api/option/":                                           accessTokenScopeRule("option:write"),
@@ -339,6 +347,8 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/status-monitor/intelligence/results/:task_id": accessTokenAnyRule,
 	"GET /api/status-monitor/providers":                     accessTokenAnyRule,
 	"GET /api/custom-menu-pages":                            accessTokenScopeRule("profile:read"),
+	"POST /api/model-detection":                             accessTokenSessionRule,
+	"GET /api/model-detection/challenges":                   accessTokenSessionRule,
 	"GET /api/user/aff/rewards":                             accessTokenScopeRule("wallet:read"),
 	"GET /api/user/billing/self":                            accessTokenScopeRule("wallet:read"),
 	"GET /api/user/billing":                                 accessTokenScopeRule("billing:read"),

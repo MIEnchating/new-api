@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -14,6 +15,26 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+var channelAvailabilityNotifier atomic.Pointer[func(int, string, int)]
+
+func SetChannelAvailabilityNotifier(notify func(int, string, int)) {
+	if notify == nil {
+		channelAvailabilityNotifier.Store(nil)
+		return
+	}
+	channelAvailabilityNotifier.Store(&notify)
+}
+
+func notifyChannelAvailability(channelID int, name string, previous, status int) {
+	if !((previous == common.ChannelStatusEnabled && status == common.ChannelStatusAutoDisabled) ||
+		(previous == common.ChannelStatusAutoDisabled && status == common.ChannelStatusEnabled)) {
+		return
+	}
+	if notify := channelAvailabilityNotifier.Load(); notify != nil {
+		(*notify)(channelID, name, status)
+	}
+}
 
 func formatNotifyType(channelId int, status int) string {
 	return fmt.Sprintf("%s_%d_%d", dto.NotifyTypeChannelUpdate, channelId, status)
@@ -38,8 +59,9 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 		return
 	}
 
-	success := model.UpdateChannelStatus(channelError.ChannelId, channelError.UsingKey, common.ChannelStatusAutoDisabled, reason)
+	success, previous, current := model.UpdateChannelStatusWithTransition(channelError.ChannelId, channelError.UsingKey, common.ChannelStatusAutoDisabled, reason)
 	if success {
+		notifyChannelAvailability(channelError.ChannelId, channelError.ChannelName, previous, current)
 		closeWebSockets, channel := shouldCloseActiveWebSocketsAfterDisable(channelError.ChannelId)
 		if closeWebSockets {
 			CloseActiveWebSocketsForChannel(channelError.ChannelId, ChannelDisabledCloseReason)
@@ -55,8 +77,9 @@ func DisableChannel(channelError types.ChannelError, reason string) {
 }
 
 func EnableChannel(channelId int, usingKey string, channelName string) {
-	success := model.UpdateChannelStatus(channelId, usingKey, common.ChannelStatusEnabled, "")
+	success, previous, current := model.UpdateChannelStatusWithTransition(channelId, usingKey, common.ChannelStatusEnabled, "")
 	if success {
+		notifyChannelAvailability(channelId, channelName, previous, current)
 		params := map[string]any{"Name": channelName, "Id": channelId}
 		NotifyChannelWatchers(formatNotifyType(channelId, common.ChannelStatusEnabled), func(lang string) (string, string) {
 			return i18n.Translate(lang, i18n.MsgChannelNotifyEnabledSubject, params), i18n.Translate(lang, i18n.MsgChannelNotifyEnabledContent, params)

@@ -322,6 +322,7 @@ export type BillingSettings = {
   QuotaForInviter: number
   QuotaForInvitee: number
   InviteRechargeRebateRatio: number
+  AffiliateUsageReward: string
   TopUpLink: string
   'quota_setting.enable_free_model_pre_consume': boolean
   'quota_setting.trust_quota_usd': number

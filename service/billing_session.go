@@ -36,6 +36,7 @@ type BillingSession struct {
 	trusted          bool   // 是否命中信任额度旁路
 	fundingSettled   bool   // funding.Settle 已成功，资金来源已提交
 	settled          bool   // Settle 全部完成（资金 + 令牌）
+	settledQuota     int    // 结算后的实际扣费额度
 	refunded         bool   // Refund 已调用
 	lang             string // 请求声明的语言，为空表示未声明
 	mu               sync.Mutex
@@ -45,20 +46,28 @@ type BillingSession struct {
 // 资金来源和令牌额度分两步提交：若资金来源已提交但令牌调整失败，
 // 会标记 fundingSettled 防止 Refund 对已提交的资金来源执行退款。
 func (s *BillingSession) Settle(actualQuota int) error {
+	_, err := s.settleCharge(actualQuota)
+	return err
+}
+
+// settleCharge returns the finalized funding charge, including when the
+// subsequent token adjustment fails or settlement is called again.
+func (s *BillingSession) settleCharge(actualQuota int) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.settled {
-		return nil
+		return s.settledQuota, nil
 	}
 	delta := actualQuota - s.preConsumedQuota
 	if delta == 0 {
+		s.settledQuota = actualQuota
 		s.settled = true
-		return nil
+		return actualQuota, nil
 	}
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
 	if !s.fundingSettled {
 		if err := s.funding.Settle(delta); err != nil {
-			return err
+			return 0, err
 		}
 		s.fundingSettled = true
 	}
@@ -80,8 +89,9 @@ func (s *BillingSession) Settle(actualQuota int) error {
 	if s.funding.Source() == BillingSourceSubscription {
 		s.relayInfo.SubscriptionPostDelta += int64(delta)
 	}
+	s.settledQuota = actualQuota
 	s.settled = true
-	return tokenErr
+	return actualQuota, tokenErr
 }
 
 // Refund 退还所有预扣费，幂等安全，异步执行。

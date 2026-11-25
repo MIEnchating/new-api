@@ -161,6 +161,7 @@ func InitOptionMap() {
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
 	common.OptionMap["InviteRechargeRebateRatio"] = strconv.FormatFloat(common.InviteRechargeRebateRatio, 'f', -1, 64)
+	common.OptionMap[operation_setting.AffiliateUsageRewardOptionKey] = operation_setting.DefaultAffiliateUsageRewardOption
 	common.OptionMap["QuotaRemindEnabled"] = strconv.FormatBool(common.QuotaRemindEnabled)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
@@ -261,6 +262,9 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == QQBotSettingsOptionKey {
+		return common.NewMessage("Use the QQ bot settings page to update this option.")
+	}
 	if key == ModelSquareVendorOrderOption {
 		_, err := parseModelSquareVendorOrder(value)
 		return err
@@ -289,6 +293,15 @@ func validateOptionValue(key string, value string) error {
 	}
 	if err := operation_setting.ValidateQuotaOption(key, value); err != nil {
 		return err
+	}
+	if key == operation_setting.AffiliateUsageRewardOptionKey {
+		settings, err := operation_setting.ParseAffiliateUsageRewardSetting(value)
+		if err != nil {
+			return err
+		}
+		if settings.Active() && !operation_setting.IsPaymentComplianceConfirmed() {
+			return common.NewMessage("Payment, redemption, subscription, and invitation reward features are disabled. The administrator must confirm compliance terms before enabling them.")
+		}
 	}
 	if key == CustomMenuPagesOptionKey {
 		return validateCustomMenuPagesJSON(value)
@@ -343,7 +356,8 @@ func validateOptionValue(key string, value string) error {
 }
 
 func UpdateOption(key string, value string) error {
-	if key == "GroupRatio" || key == "group_ratio_setting.group_ratio" || key == setting.GroupCategoriesOptionKey || key == ModelSquareVendorOrderOption {
+	if key == "GroupRatio" || key == "group_ratio_setting.group_ratio" || key == setting.GroupCategoriesOptionKey || key == ModelSquareVendorOrderOption ||
+		key == operation_setting.AffiliateUsageRewardOptionKey {
 		return UpdateOptionsBulk(map[string]string{key: value})
 	}
 	if IsRequestPolicyOption(key) {
@@ -517,6 +531,11 @@ func updateOptionMap(key string, value string) (err error) {
 	}
 	common.OptionMapRWMutex.Lock()
 	defer common.OptionMapRWMutex.Unlock()
+	if key == operation_setting.AffiliateUsageRewardOptionKey {
+		if err := operation_setting.UpdateAffiliateUsageRewardSetting(value); err != nil {
+			return err
+		}
+	}
 	common.OptionMap[key] = value
 
 	// 检查是否是模型配置 - 使用更规范的方式处理

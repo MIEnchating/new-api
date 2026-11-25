@@ -866,6 +866,12 @@
   "zhipu_image_empty_b64": "智谱图片接口返回的 b64 为空",
   "zhipu_image_get_b64_failed: %s": "智谱图片转 b64 失败: %s",
   "zhipu_image_missing_url": "智谱图片接口没有返回 URL",
+  "QQ bot configuration failed: %v": "QQ 机器人配置失败：%v",
+  "QQ bot discovered group OpenID %s": "QQ 机器人发现群 OpenID %s",
+  "QQ bot reply failed: %v": "QQ 机器人回复失败：%v",
+  "QQ bot channel notification queue is full": "QQ 机器人渠道通知队列已满",
+  "QQ bot channel notification failed (channel_id=%d): %v": "QQ 机器人发送渠道通知失败（渠道 ID=%d）：%v",
+  "QQ bot chat failed: %v": "QQ 机器人聊天调用失败：%v",
   "¥%.6f quota": "¥%.6f 额度",
   "＄%.6f quota": "＄%.6f 额度",
   "plugin scheduled failed: plugin=%s channel_id=%d key_index=%d category=%s": "插件定时任务失败：plugin=%s channel_id=%d key_index=%d category=%s"

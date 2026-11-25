@@ -15,6 +15,7 @@ docs
 .playwright-cli
 dev-logs
 /web/node_modules
+/scripts/model-detection/node_modules/
 /web/dist
 /web/.playwright-cli
 /web/output

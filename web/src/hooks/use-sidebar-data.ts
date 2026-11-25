@@ -34,6 +34,7 @@ import {
   PlugZap,
   Radio,
   ReceiptText,
+  ScanSearch,
   ServerCog,
   Settings,
   ShieldCheck,
@@ -154,6 +155,11 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             url: '/status-monitor',
             icon: HeartPulse,
           },
+          {
+            title: t('Model Detection'),
+            url: '/model-detection',
+            icon: ScanSearch,
+          },
           ...userPagesBySection.general,
         ],
       },
@@ -183,7 +189,7 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             icon: ShieldCheck,
           },
           {
-            title: t('Invitation Rebates'),
+            title: t('Referral Program'),
             url: '/affiliate',
             icon: Gift,
           },

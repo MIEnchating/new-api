@@ -30,7 +30,7 @@ import (
 // lottery endpoints directly.
 func LotteryFeatureEnabled() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		if !lotteryFeatureEnabledForUser(c.GetInt("id")) {
+		if !LotteryFeatureEnabledForUser(c.GetInt("id")) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"success": false,
 				"code":    "FEATURE_DISABLED",
@@ -42,7 +42,7 @@ func LotteryFeatureEnabled() func(c *gin.Context) {
 	}
 }
 
-func lotteryFeatureEnabledForUser(userID int) bool {
+func LotteryFeatureEnabledForUser(userID int) bool {
 	common.OptionMapRWMutex.RLock()
 	adminRaw := common.OptionMap["SidebarModulesAdmin"]
 	common.OptionMapRWMutex.RUnlock()
@@ -704,6 +704,14 @@ func TokenAuth() func(c *gin.Context) {
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusForbidden, err.Error())
 			return
+		}
+		if selection, ok := c.Request.Context().Value(qqBotGroupKey{}).(qqBotGroupSelection); ok {
+			token, err = restrictQQBotTokenGroup(token, userCache.Group, selection, c.FullPath())
+			if err != nil {
+				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
+				return
+			}
+			userGroup = token.Group
 		}
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, userGroup)
 

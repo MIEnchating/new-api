@@ -74,6 +74,9 @@ const (
 	ContextKeyUsingGroup  ContextKey = "group"
 	ContextKeyUserName    ContextKey = "username"
 
+	// ContextKeyDashboardRelay marks a relay scoped to an authenticated dashboard user.
+	ContextKeyDashboardRelay ContextKey = "dashboard_relay"
+
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 
 	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"

@@ -137,6 +137,14 @@ export interface SystemStatus {
     [key: string]: unknown
   }
   // Allow direct access to common properties
+  referral_program?: {
+    enabled: boolean
+    wallet_usage_enabled?: boolean
+    rate_percent: number
+    days: number
+    registration_rewards_enabled?: boolean
+    first_topup_rebate_ratio?: number
+  }
   version?: string
   system_name?: string
   logo?: string

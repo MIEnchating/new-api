@@ -652,8 +652,8 @@ export const STATIC_I18N_KEYS = [
   'Total Amount',
   'View balance changes from top-ups, redemptions, affiliate transfers, and administrator adjustments',
 
-  // Invitation rebates
-  'Invitation Rebates',
+  // Referral program
+  'Referral Program',
   'Invitation History',
   'Invited User',
   'Search inviter by username or ID',
@@ -673,7 +673,6 @@ export const STATIC_I18N_KEYS = [
   'Failed to load referral rewards',
   'Referral link, rewards, and invite income history.',
   'Referral link and invite income history',
-  'Share your referral link. When eligible users register or complete a first top-up, rewards are added to your referral balance.',
   '{{count}} records',
   'User {{identifier}}',
 

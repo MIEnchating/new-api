@@ -25,6 +25,8 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+export const createDialogHandle = DialogPrimitive.createHandle
+
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
   return <DialogPrimitive.Root data-slot='dialog' {...props} />
 }

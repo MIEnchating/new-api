@@ -25,12 +25,17 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-func GetTopUpInfo(c *gin.Context) {
-	complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
+func inviteRechargeRebateRatio() float64 {
 	inviteRechargeRebateRatio := common.InviteRechargeRebateRatio
 	if math.IsNaN(inviteRechargeRebateRatio) || math.IsInf(inviteRechargeRebateRatio, 0) || inviteRechargeRebateRatio <= 0 {
-		inviteRechargeRebateRatio = 0
+		return 0
 	}
+	return inviteRechargeRebateRatio
+}
+
+func GetTopUpInfo(c *gin.Context) {
+	complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
+	rebateRatio := inviteRechargeRebateRatio()
 
 	// 获取支付方式
 	payMethods := operation_setting.PayMethods
@@ -112,8 +117,8 @@ func GetTopUpInfo(c *gin.Context) {
 		"enable_redemption":                complianceConfirmed,
 		"payment_compliance_confirmed":     complianceConfirmed,
 		"payment_compliance_terms_version": operation_setting.CurrentComplianceTermsVersion,
-		"invite_recharge_rebate_enabled":   complianceConfirmed && inviteRechargeRebateRatio > 0,
-		"invite_recharge_rebate_ratio":     inviteRechargeRebateRatio,
+		"invite_recharge_rebate_enabled":   complianceConfirmed && rebateRatio > 0,
+		"invite_recharge_rebate_ratio":     rebateRatio,
 		"waffo_pay_methods": func() any {
 			if enableWaffo {
 				return setting.GetWaffoPayMethods()

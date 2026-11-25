@@ -27,6 +27,7 @@ import type { OperationsSettings } from '../types'
 import { createSectionRegistry } from '../utils/section-registry'
 import { ChannelMonitorSettingsSection } from './channel-monitor-settings-section'
 import { IntelligenceSettingsSection } from './intelligence-settings-section'
+import { QQBotSettingsSection } from './qq-bot-settings-section'
 
 const OPERATIONS_SECTIONS = [
   {
@@ -108,6 +109,11 @@ const OPERATIONS_SECTIONS = [
         }}
       />
     ),
+  },
+  {
+    id: 'qq-bot',
+    titleKey: 'QQ Bot',
+    build: () => <QQBotSettingsSection />,
   },
   {
     id: 'logs',

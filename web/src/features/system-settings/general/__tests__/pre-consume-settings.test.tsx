@@ -23,7 +23,13 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { beforeEach, expect, test, vi } from 'vitest'
@@ -80,6 +86,49 @@ beforeEach(() => {
   vi.spyOn(api, 'put').mockResolvedValue({ data: { success: true } })
 })
 
+test('groups related quota controls and keeps the commission switch with its rate', async () => {
+  const multiplier = await renderSettings()
+  const quota = within(
+    screen.getByRole('region', { name: 'Quota and top-ups' })
+  )
+  expect(
+    quota.getByRole('spinbutton', { name: 'New User Quota' })
+  ).toBeVisible()
+  expect(quota.getByRole('textbox', { name: 'Top-Up Link' })).toBeVisible()
+
+  const preConsume = screen.getByRole('region', {
+    name: 'Request pre-consumption',
+  })
+  expect(preConsume).toContainElement(multiplier)
+  expect(
+    within(preConsume).getByRole('switch', {
+      name: 'Pre-Consume for Free Models',
+    })
+  ).toBeVisible()
+
+  const referral = within(
+    screen.getByRole('region', { name: 'Referral Program' })
+  )
+  expect(
+    referral.getByRole('spinbutton', { name: 'Inviter Reward' })
+  ).toBeVisible()
+  expect(
+    referral.getByRole('spinbutton', { name: 'Invitee Reward' })
+  ).toBeVisible()
+  expect(
+    referral.getByRole('spinbutton', { name: 'First Top-Up Rebate Ratio' })
+  ).toBeVisible()
+  const commission = within(
+    referral.getByRole('group', { name: 'Wallet usage commission' })
+  )
+  expect(
+    commission.getByRole('switch', { name: 'Enable wallet usage commission' })
+  ).toBeVisible()
+  expect(
+    commission.getByRole('spinbutton', { name: 'Wallet usage commission (%)' })
+  ).toBeVisible()
+})
+
 test.each(['0.5', '1.5', '2.5', '0.0001'])(
   'typing multiplier %s preserves the decimal and saves its numeric value',
   async (value) => {
@@ -129,6 +178,28 @@ test('zero threshold disables bypass and saves as zero', async () => {
     expect(api.put).toHaveBeenCalledWith('/api/option/', {
       key: 'quota_setting.trust_quota_usd',
       value: 0,
+    })
+  )
+})
+
+test('saves the commission switch and fractional percentage together', async () => {
+  const user = userEvent.setup()
+  await renderSettings()
+  const enabled = screen.getByRole('switch', {
+    name: 'Enable wallet usage commission',
+  })
+  const rate = screen.getByRole('spinbutton', {
+    name: 'Wallet usage commission (%)',
+  })
+  expect(enabled).toBeChecked()
+  expect(rate).toHaveValue(5)
+  await user.click(enabled)
+  fireEvent.change(rate, { target: { value: '12.5' } })
+  await user.click(screen.getByRole('button', { name: 'Save Changes' }))
+  await waitFor(() =>
+    expect(api.put).toHaveBeenCalledWith('/api/option/', {
+      key: 'AffiliateUsageReward',
+      value: '{"enabled":false,"rate_percent":12.5}',
     })
   )
 })

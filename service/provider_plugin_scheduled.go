@@ -329,6 +329,7 @@ func runScheduledPlugin(ctx context.Context, channel *model.Channel, plugin *jsp
 		statusReason = "Disabled by plugin"
 	}
 	var statusChanged, applied bool
+	var previousChannelStatus int
 	var delay time.Duration
 	stored, err := model.UpdateScheduledChannelLocked(ctx, channel.Id, func(current *model.Channel) error {
 		currentPlugin, ok := PluginOfChannel(current)
@@ -352,6 +353,7 @@ func runScheduledPlugin(ctx context.Context, channel *model.Channel, plugin *jsp
 			current.Key = strings.Join(lines, "\n")
 			current.Keys = nil
 		}
+		previousChannelStatus = current.Status
 		switch result.KeyStatus {
 		case "enabled":
 			statusChanged = model.SetScheduledChannelKeyStatus(current, keyIndex, common.ChannelStatusEnabled, "")
@@ -370,6 +372,7 @@ func runScheduledPlugin(ctx context.Context, channel *model.Channel, plugin *jsp
 		_, balanceErr = UpdatePluginKeyBalances(stored, map[int]model.ChannelBalanceDetail{keyIndex: {BalanceResult: *result.Balance}})
 	}
 	if statusChanged {
+		notifyChannelAvailability(stored.Id, stored.Name, previousChannelStatus, stored.Status)
 		params := map[string]any{"Name": stored.Name, "Id": stored.Id, "Reason": statusReason}
 		subject, content := i18n.MsgChannelNotifyEnabledSubject, i18n.MsgChannelNotifyEnabledContent
 		if status == common.ChannelStatusAutoDisabled {

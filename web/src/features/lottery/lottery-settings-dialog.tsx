@@ -58,6 +58,7 @@ const EMPTY_CONFIG: LotteryConfig = {
     weekly_spend_amount: 50,
     weekly_chance_limit: 5,
     daily_active_amount: 20,
+    pity_draw_limit: 10,
     streak_rewards: [
       { days: 3, chances: 1 },
       { days: 7, chances: 3 },
@@ -161,6 +162,7 @@ function dateToTimestamp(value: Date | undefined) {
 
 interface LotterySettingsDialogProps {
   open: boolean
+  initialTab?: 'prizes' | 'grants'
   onOpenChange: (open: boolean) => void
   onSaved: (config: LotteryConfig) => void
 }
@@ -224,6 +226,13 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
       config.rules.daily_active_amount < 0
     ) {
       return t('Lottery rule values cannot be negative')
+    }
+    if (
+      !Number.isInteger(config.rules.pity_draw_limit) ||
+      config.rules.pity_draw_limit < 0 ||
+      config.rules.pity_draw_limit > 100
+    ) {
+      return t('Lottery guarantee limit must be between 0 and 100')
     }
     if (
       config.rules.streak_rewards.some(
@@ -304,7 +313,11 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
             <Loader2 className='text-muted-foreground size-6 animate-spin' />
           </div>
         ) : (
-          <Tabs defaultValue='prizes' className='min-h-0 flex-1 gap-0'>
+          <Tabs
+            key={props.initialTab}
+            defaultValue={props.initialTab ?? 'prizes'}
+            className='min-h-0 flex-1 gap-0'
+          >
             <TabsList variant='line' className='mx-5 mt-3 shrink-0'>
               <TabsTrigger value='rules'>
                 <Settings2 />
@@ -358,6 +371,28 @@ export function LotterySettingsDialog(props: LotterySettingsDialogProps) {
                       }))
                     }
                   />
+                </section>
+                <section className='space-y-2 rounded-md border p-4'>
+                  <div className='max-w-xs'>
+                    <NumberField
+                      label={t('Grand prize guarantee threshold')}
+                      value={config.rules.pity_draw_limit}
+                      min={0}
+                      max={100}
+                      suffix={t('times')}
+                      onChange={(value) =>
+                        setConfig((current) => ({
+                          ...current,
+                          rules: { ...current.rules, pity_draw_limit: value },
+                        }))
+                      }
+                    />
+                  </div>
+                  <p className='text-muted-foreground text-sm'>
+                    {t(
+                      'Set to 0 to disable. The guarantee awards the highest-value prize with a positive probability. Winning that tier resets the count.'
+                    )}
+                  </p>
                 </section>
                 <section className='rounded-md border'>
                   <div className='flex items-center justify-between border-b px-4 py-3'>

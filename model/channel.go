@@ -901,6 +901,13 @@ func hasEnabledMultiKey(keys []string, statusList map[int]int) bool {
 }
 
 func UpdateChannelStatus(channelId int, usingKey string, status int, reason string) (changed bool) {
+	changed, _, _ = UpdateChannelStatusWithTransition(channelId, usingKey, status, reason)
+	return changed
+}
+
+// UpdateChannelStatusWithTransition also returns the previous and current
+// whole-channel status when the status write commits.
+func UpdateChannelStatusWithTransition(channelId int, usingKey string, status int, reason string) (changed bool, previous int, current int) {
 	// A status set by hand names no key and is never an automatic disable; it
 	// reaches every node within seconds. An automatic change, a disable after a
 	// failure or the re-enable after a test of the key it used, is left to the
@@ -928,12 +935,12 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 	if common.MemoryCacheEnabled {
 		channelCache, _ := CacheGetChannel(channelId)
 		if channelCache == nil {
-			return false
+			return false, 0, 0
 		}
 		// A request failure must not replace an admin's manual disable;
 		// otherwise automatic recovery could re-enable the channel later.
 		if status == common.ChannelStatusAutoDisabled && channelCache.Status == common.ChannelStatusManuallyDisabled {
-			return false
+			return false, 0, 0
 		}
 		if channelCache.ChannelInfo.IsMultiKey {
 			beforeStatus := channelCache.Status
@@ -945,7 +952,7 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 		} else {
 			// 如果缓存渠道存在，且状态已是目标状态，直接返回
 			if channelCache.Status == status {
-				return false
+				return false, 0, 0
 			}
 			CacheUpdateChannelStatus(channelId, status)
 		}
@@ -964,6 +971,7 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 	// stored row, keeping what another writer stores in other_info meanwhile.
 	written, err := UpdateChannelOtherInfo(channelId, func(channel *Channel) (map[string]any, error) {
 		shouldUpdateAbilities = false
+		previous = channel.Status
 		// Check the stored row too, since this node's cache may be stale.
 		if status == common.ChannelStatusAutoDisabled && channel.Status == common.ChannelStatusManuallyDisabled {
 			return nil, nil
@@ -995,6 +1003,7 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 			shouldUpdateAbilities = true
 		}
 		updates := map[string]any{"status": channel.Status}
+		current = channel.Status
 		if channel.ChannelInfo.IsMultiKey {
 			updates["channel_info"] = channel.ChannelInfo
 		}
@@ -1004,7 +1013,10 @@ func UpdateChannelStatus(channelId int, usingKey string, status int, reason stri
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		common.SysLog(common.LogText("failed to update channel status: channel_id=%d, status=%d, error=%v", channelId, status, err))
 	}
-	return written
+	if !written || err != nil {
+		return written, 0, 0
+	}
+	return written, previous, current
 }
 
 // channelPluginHasHook reports a task plugin channel whose plugin exports

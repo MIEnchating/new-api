@@ -184,7 +184,7 @@ test.each([ROLE.USER, ROLE.ADMIN])(
     expect(entries).toEqual(
       expect.arrayContaining([
         'Channel Monitor',
-        'Invitation Rebates',
+        'Referral Program',
         'Lottery Center',
         'Public guide',
       ])

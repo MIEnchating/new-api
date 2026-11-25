@@ -214,6 +214,8 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 				logger.LogError(ctx, common.LogText("UpdateMidjourneyTask task error: %s", err.Error()))
 			} else if won && shouldReturnQuota {
 				service.RefundMidjourneyQuota(ctx, task, "Composition failed")
+			} else if won {
+				service.CreditCompletedMidjourneyReferralReward(ctx, task)
 			}
 		}
 	}

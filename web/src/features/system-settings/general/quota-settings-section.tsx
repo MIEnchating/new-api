@@ -18,7 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import i18next from 'i18next'
-import type { ChangeEvent } from 'react'
+import { Gift, SlidersHorizontal, Wallet } from 'lucide-react'
+import { useId, type ChangeEvent, type ReactNode } from 'react'
 import type { Resolver } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import * as z from 'zod'
@@ -35,11 +36,13 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { TitledCard } from '@/components/ui/titled-card'
 import { formatQuota } from '@/lib/format'
 
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
 import {
+  SettingsControlGroup,
   SettingsForm,
   SettingsSwitchContent,
   SettingsSwitchItem,
@@ -50,12 +53,26 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useSettingsForm } from '../hooks/use-settings-form'
 import { useUpdateOption } from '../hooks/use-update-option'
+import { safeJsonParse } from '../utils/json-parser'
+
+const affiliateUsageRewardSchema = z.object({
+  enabled: z.boolean(),
+  rate_percent: z
+    .number({ error: () => i18next.t('Please enter a valid number') })
+    .refine((rate) => rate >= 0 && rate <= 100, {
+      error: () =>
+        i18next.t('Wallet usage commission rate must be between 0 and 100.'),
+    }),
+})
+
+const defaultAffiliateUsageReward = { enabled: true, rate_percent: 5 }
 
 const quotaSchema = z.object({
   QuotaForNewUser: z.coerce.number().min(0),
   QuotaForInviter: z.coerce.number().min(0),
   QuotaForInvitee: z.coerce.number().min(0),
   InviteRechargeRebateRatio: z.coerce.number().min(0),
+  AffiliateUsageReward: affiliateUsageRewardSchema,
   TopUpLink: z.string(),
   quota_setting: z.object({
     enable_free_model_pre_consume: z.boolean(),
@@ -81,16 +98,48 @@ function formatQuotaInputValue(value: QuotaInputValue): string {
 }
 
 type QuotaSettingsSectionProps = {
-  defaultValues: QuotaFormValues
+  defaultValues: Omit<QuotaFormValues, 'AffiliateUsageReward'>
+  affiliateUsageRewardOption?: string
   complianceConfirmed?: boolean
+}
+
+function QuotaSettingsGroup(props: {
+  title: string
+  icon: ReactNode
+  children: ReactNode
+}) {
+  const titleId = useId()
+
+  return (
+    <section aria-labelledby={titleId} className='min-w-0'>
+      <TitledCard
+        title={<h3 id={titleId}>{props.title}</h3>}
+        icon={props.icon}
+        iconTone='primary'
+        disableHoverEffect
+        className='rounded-2xl'
+        headerClassName='bg-muted/25 sm:py-3 sm:!pb-3'
+        contentClassName='sm:py-4'
+        titleClassName='text-sm font-semibold sm:text-base'
+      >
+        <SettingsFormGrid className='items-start gap-y-4 [&_[data-slot=form-description]]:leading-relaxed'>
+          {props.children}
+        </SettingsFormGrid>
+      </TitledCard>
+    </section>
+  )
 }
 
 export function QuotaSettingsSection({
   defaultValues,
+  affiliateUsageRewardOption,
   complianceConfirmed = true,
 }: QuotaSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const affiliateUsageReward = affiliateUsageRewardSchema.safeParse(
+    safeJsonParse(affiliateUsageRewardOption, { silent: true })
+  )
   const handleNumberChange =
     (onChange: (value: QuotaInputValue) => void) =>
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -105,9 +154,23 @@ export function QuotaSettingsSection({
         unknown,
         QuotaFormValues
       >,
-      defaultValues,
-      onSubmit: async (_data, changedFields) => {
+      defaultValues: {
+        ...defaultValues,
+        AffiliateUsageReward:
+          affiliateUsageReward.data ?? defaultAffiliateUsageReward,
+      },
+      onSubmit: async (data, changedFields) => {
+        if (
+          'AffiliateUsageReward.enabled' in changedFields ||
+          'AffiliateUsageReward.rate_percent' in changedFields
+        ) {
+          await updateOption.mutateAsync({
+            key: 'AffiliateUsageReward',
+            value: JSON.stringify(data.AffiliateUsageReward),
+          })
+        }
         for (const [key, value] of Object.entries(changedFields)) {
+          if (key.startsWith('AffiliateUsageReward.')) continue
           await updateOption.mutateAsync({
             key,
             value: value as string | number | boolean,
@@ -117,27 +180,20 @@ export function QuotaSettingsSection({
     })
 
   return (
-    <SettingsSection title={t('Quota Settings')}>
+    <SettingsSection
+      title={t('Quota Settings')}
+      className='w-full max-w-7xl pb-2'
+    >
       <FormNavigationGuard when={isDirty} />
 
-      {!complianceConfirmed ? (
-        <Alert variant='destructive'>
-          <AlertDescription>
-            {t(
-              'Non-zero invitation rewards require compliance confirmation in Payment Gateway settings.'
-            )}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
       <Form {...form}>
-        <SettingsForm onSubmit={handleSubmit}>
+        <SettingsForm onSubmit={handleSubmit} className='gap-y-4'>
           <SettingsPageFormActions
             onSave={handleSubmit}
             isSaving={updateOption.isPending || isSubmitting}
           />
           <FormDirtyIndicator isDirty={isDirty} />
-          <SettingsFormGrid>
+          <QuotaSettingsGroup title={t('Quota and top-ups')} icon={<Wallet />}>
             <FormField
               control={form.control}
               name='QuotaForNewUser'
@@ -167,6 +223,31 @@ export function QuotaSettingsSection({
               )}
             />
 
+            <FormField
+              control={form.control}
+              name='TopUpLink'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Top-Up Link')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder={t('https://example.com/topup')}
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t('External link for users to purchase quota')}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </QuotaSettingsGroup>
+
+          <QuotaSettingsGroup
+            title={t('Request pre-consumption')}
+            icon={<SlidersHorizontal />}
+          >
             <FormField
               control={form.control}
               name='quota_setting.trust_quota_usd'
@@ -224,6 +305,44 @@ export function QuotaSettingsSection({
                 </FormItem>
               )}
             />
+
+            <SettingsControlGroup className='py-0'>
+              <FormField
+                control={form.control}
+                name='quota_setting.enable_free_model_pre_consume'
+                render={({ field }) => (
+                  <SettingsSwitchItem>
+                    <SettingsSwitchContent>
+                      <FormLabel>{t('Pre-Consume for Free Models')}</FormLabel>
+                      <FormDescription>
+                        {t(
+                          'When enabled, zero-cost models also pre-consume quota before final settlement.'
+                        )}
+                      </FormDescription>
+                    </SettingsSwitchContent>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        disabled={updateOption.isPending}
+                      />
+                    </FormControl>
+                  </SettingsSwitchItem>
+                )}
+              />
+            </SettingsControlGroup>
+          </QuotaSettingsGroup>
+
+          <QuotaSettingsGroup title={t('Referral Program')} icon={<Gift />}>
+            {!complianceConfirmed ? (
+              <Alert variant='destructive' className='lg:col-span-2'>
+                <AlertDescription>
+                  {t(
+                    'Non-zero invitation rewards require compliance confirmation in Payment Gateway settings.'
+                  )}
+                </AlertDescription>
+              </Alert>
+            ) : null}
 
             <FormField
               control={form.control}
@@ -308,52 +427,58 @@ export function QuotaSettingsSection({
               )}
             />
 
-            <SettingsFormGridItem span='full'>
-              <FormField
-                control={form.control}
-                name='quota_setting.enable_free_model_pre_consume'
-                render={({ field }) => (
-                  <SettingsSwitchItem>
-                    <SettingsSwitchContent>
-                      <FormLabel>{t('Pre-Consume for Free Models')}</FormLabel>
-                      <FormDescription>
-                        {t(
-                          'When enabled, zero-cost models also pre-consume quota before final settlement.'
-                        )}
-                      </FormDescription>
-                    </SettingsSwitchContent>
-                    <FormControl>
-                      <Switch
-                        checked={field.value}
-                        onCheckedChange={field.onChange}
-                        disabled={updateOption.isPending}
-                      />
-                    </FormControl>
-                  </SettingsSwitchItem>
-                )}
-              />
+            <SettingsFormGridItem>
+              <SettingsControlGroup
+                role='group'
+                aria-label={t('Wallet usage commission')}
+                className='space-y-2 p-3'
+              >
+                <FormField
+                  control={form.control}
+                  name='AffiliateUsageReward.enabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem className='py-0'>
+                      <SettingsSwitchContent>
+                        <FormLabel>
+                          {t('Enable wallet usage commission')}
+                        </FormLabel>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                          disabled={updateOption.isPending}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name='AffiliateUsageReward.rate_percent'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Wallet usage commission (%)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          type='number'
+                          min={0}
+                          max={100}
+                          step='any'
+                          value={field.value ?? ''}
+                          onChange={handleNumberChange(field.onChange)}
+                          name={field.name}
+                          onBlur={field.onBlur}
+                          ref={field.ref}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </SettingsControlGroup>
             </SettingsFormGridItem>
-
-            <FormField
-              control={form.control}
-              name='TopUpLink'
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>{t('Top-Up Link')}</FormLabel>
-                  <FormControl>
-                    <Input
-                      placeholder={t('https://example.com/topup')}
-                      {...field}
-                    />
-                  </FormControl>
-                  <FormDescription>
-                    {t('External link for users to purchase quota')}
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </SettingsFormGrid>
+          </QuotaSettingsGroup>
         </SettingsForm>
       </Form>
     </SettingsSection>

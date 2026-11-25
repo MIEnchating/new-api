@@ -115,6 +115,39 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
   return { ...result, visibility: visibility.result }
 }
 
+describe('model detection sidebar visibility', () => {
+  it('adds Model Detection to General for existing sidebar configurations', () => {
+    const { result } = sidebarFor(
+      { console: { enabled: true, status: true } },
+      { console: { enabled: true, status: true } }
+    )
+
+    expect(
+      result.current.find((group) => group.id === 'general')?.items
+    ).toContainEqual(
+      expect.objectContaining({
+        title: 'Model Detection',
+        url: '/model-detection',
+      })
+    )
+  })
+
+  it.each([
+    [{ console: { enabled: false } }, undefined],
+    [{ console: { enabled: true, model_detection: false } }, undefined],
+    [undefined, { console: { enabled: true, model_detection: false } }],
+  ])(
+    'honors the Console and Model Detection settings (%j, %j)',
+    (admin, user) => {
+      const { result } = sidebarFor(admin, user)
+
+      expect(result.current.flatMap((group) => group.items)).not.toContainEqual(
+        expect.objectContaining({ url: '/model-detection' })
+      )
+    }
+  )
+})
+
 describe('security sidebar visibility', () => {
   it('old configurations show Security & Access immediately after Profile and keep API Keys', () => {
     const { result } = sidebarFor(
@@ -130,7 +163,7 @@ describe('security sidebar visibility', () => {
       'Invoice applications',
       'Profile',
       'Security & Access',
-      'Invitation Rebates',
+      'Referral Program',
       'Lottery Center',
     ])
     expect(

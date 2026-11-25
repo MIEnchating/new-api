@@ -148,7 +148,10 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		return 0, fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
 	}
 
-	err = PostConsumeQuota(relayInfo, quota, 0, false)
+	result, err := postConsumeQuotaWithResult(relayInfo, quota, 0, false)
+	if result.FundingApplied && relayInfo.BillingSource != BillingSourceSubscription && quota > 0 {
+		recordWalletUsageReward(ctx, relayInfo.UserId, "realtime:"+common.NewRequestId(), quota)
+	}
 	if err != nil {
 		return 0, err
 	}

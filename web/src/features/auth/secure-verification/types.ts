@@ -26,6 +26,8 @@ export type VerificationMethod =
   | 'session'
 export type SecurityProofScope =
   | 'channel.key.read'
+  | 'qq_bot.settings.update'
+  | 'qq_bot.account.unbind'
   | 'passkey.register'
   | 'passkey.delete'
   | '2fa.setup'

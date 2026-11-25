@@ -93,6 +93,11 @@ export function SidebarModulesCard() {
           description: t('Uptime Kuma service status page.'),
         },
         {
+          key: 'model_detection',
+          title: t('Model Detection'),
+          description: t('Identify the likely model behind an API endpoint.'),
+        },
+        {
           key: 'token',
           title: t('Token Management'),
           description: t('API token management'),
@@ -148,7 +153,7 @@ export function SidebarModulesCard() {
         },
         {
           key: 'affiliate',
-          title: t('Invitation Rebates'),
+          title: t('Referral Program'),
           description: t('Referral link and invite income history'),
         },
         {

@@ -46,6 +46,7 @@ func GetStatus(c *gin.Context) {
 	defer common.OptionMapRWMutex.RUnlock()
 
 	legalSetting := system_setting.GetLegalSettings()
+	referralUsage := operation_setting.GetAffiliateUsageRewardSetting()
 
 	data := gin.H{
 		"version":                     common.Version,
@@ -91,6 +92,15 @@ func GetStatus(c *gin.Context) {
 		"password_login_enabled":        common.PasswordLoginEnabled,
 		"password_register_enabled":     common.PasswordRegisterEnabled,
 		"default_use_auto_group":        setting.DefaultUseAutoGroup,
+
+		"referral_program": gin.H{
+			"enabled":                      operation_setting.IsPaymentComplianceConfirmed(),
+			"wallet_usage_enabled":         referralUsage.Active(),
+			"rate_percent":                 referralUsage.RatePercent,
+			"days":                         operation_setting.AffiliateUsageRewardDays,
+			"registration_rewards_enabled": common.QuotaForInviter > 0 || common.QuotaForInvitee > 0,
+			"first_topup_rebate_ratio":     inviteRechargeRebateRatio(),
+		},
 
 		"password_login_encryption_enabled": common.PasswordLoginEncryptionEnabled,
 

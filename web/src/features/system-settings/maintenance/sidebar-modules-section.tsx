@@ -106,6 +106,10 @@ export function SidebarModulesSection({
         title: t('Channel Monitor'),
         description: t('Uptime Kuma service status page.'),
       },
+      model_detection: {
+        title: t('Model Detection'),
+        description: t('Identify the likely model behind an API endpoint.'),
+      },
       token: {
         title: t('Token management'),
         description: t('Create, revoke, and audit API tokens.'),
@@ -147,7 +151,7 @@ export function SidebarModulesSection({
         description: t('Manage your security settings and account access'),
       },
       affiliate: {
-        title: t('Invitation Rebates'),
+        title: t('Referral Program'),
         description: t('Referral link, rewards, and invite income history.'),
       },
       lottery: {

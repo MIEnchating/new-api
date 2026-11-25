@@ -69,6 +69,7 @@ Object.defineProperty(globalThis, 'cancelAnimationFrame', {
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
+const { fireEvent, render, within } = await import('@testing-library/react')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { api } = await import('@/lib/api')
@@ -77,6 +78,7 @@ const { DEFAULT_CURRENCY_CONFIG, useSystemConfigStore } =
   await import('@/stores/system-config-store')
 const { Lottery } = await import('..')
 const { LotterySettingsDialog } = await import('../lottery-settings-dialog')
+const originalAdapter = api.defaults.adapter
 
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
@@ -99,6 +101,14 @@ const baseStatus = {
   daily_active_quota: 10_000_000,
   today_active: false,
   current_streak: 1,
+  pity_draws_remaining: 0,
+  rules: {
+    weekly_spend_amount: 50,
+    weekly_chance_limit: 5,
+    daily_active_amount: 20,
+    pity_draw_limit: 10,
+    streak_rewards: [],
+  },
   prizes: [
     { type: 'quota_1', amount: 1, probability: 50 },
     { type: 'quota_5', amount: 5, probability: 20 },
@@ -116,6 +126,7 @@ async function flushRequests() {
 describe('lottery center', () => {
   afterAll(() => domWindow.close())
   afterEach(() => {
+    api.defaults.adapter = originalAdapter
     useSystemConfigStore.getState().setConfig({
       currency: { ...DEFAULT_CURRENCY_CONFIG },
     })
@@ -155,26 +166,23 @@ describe('lottery center', () => {
       await flushRequests()
     })
 
-    const mysteryBoxes = container.querySelectorAll<HTMLButtonElement>(
-      '[data-testid="lottery-mystery-box"]'
-    )
-    assert.equal(mysteryBoxes.length, 3)
-    assert.equal(
-      container.querySelectorAll('[data-lottery-grid-cell="true"]').length,
-      9
-    )
-    assert.equal(
-      [...mysteryBoxes].every((box) => box.disabled),
-      true
-    )
-    assert.equal(
-      container.querySelector<HTMLButtonElement>(
-        '[data-testid="lottery-draw-button"]'
-      )?.disabled,
-      true
-    )
+    const page = within(container)
+    expect(
+      page.getByRole<HTMLButtonElement>('button', { name: 'Draw once' })
+        .disabled
+    ).toBe(true)
+    expect(
+      page.getByRole<HTMLButtonElement>('button', { name: 'Draw 10 times' })
+        .disabled
+    ).toBe(true)
     assert.match(container.textContent || '', /every \$50 spent/)
     assert.match(container.textContent || '', /Spend \$20 in a single day/)
+    expect(
+      within(container).queryByRole('button', { name: 'Campaign' })
+    ).toBeNull()
+    expect(
+      within(container).queryByRole('button', { name: 'Chance grants' })
+    ).toBeNull()
     assert.ok(container.querySelector('[data-testid="lottery-mystery-card"]'))
     const rulesGrid = container.querySelector(
       '[data-testid="lottery-rules-grid"]'
@@ -182,11 +190,11 @@ describe('lottery center', () => {
     assert.ok(rulesGrid)
     expect(rulesGrid.classList.contains('sm:grid-cols-2')).toBe(true)
     const overview = container.querySelector('[data-testid="lottery-overview"]')
+    assert.ok(overview)
     expect(
-      overview?.classList.contains(
-        'lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]'
-      )
-    ).toBe(true)
+      overview.compareDocumentPosition(rulesGrid) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
     expect(
       container.querySelector(
         '[role="progressbar"][aria-label="Weekly spending"]'
@@ -195,21 +203,6 @@ describe('lottery center', () => {
     expect(
       container.querySelector('[role="progressbar"][aria-label="Today spent"]')
     ).not.toBeNull()
-    const history = container.querySelector('table')
-    expect(history?.getAttribute('aria-label')).toBe('Lottery records')
-    expect(history?.parentElement?.classList.contains('overflow-x-auto')).toBe(
-      true
-    )
-    const grid = container.querySelector(
-      '[role="group"][aria-label="Mystery gifts"]'
-    )
-    expect(grid?.classList.contains('grid-cols-3')).toBe(true)
-    expect(grid?.classList.contains('max-w-xs')).toBe(true)
-    expect(
-      container
-        .querySelector('[data-testid="lottery-draw-button"]')
-        ?.getAttribute('aria-label')
-    ).toBe('Draw now')
     const streak = container.querySelector(
       '[data-testid="lottery-current-streak"]'
     )
@@ -220,17 +213,267 @@ describe('lottery center', () => {
       '[data-testid="lottery-draw-all"]'
     )
     expect(emptyBatch?.disabled).toBe(true)
-    expect(emptyBatch?.textContent).toContain('Draw 0 times')
-    const drawLabel = container.querySelector(
-      '[data-testid="lottery-draw-button"] span.whitespace-normal'
-    )
-    expect(drawLabel).not.toBeNull()
+    expect(emptyBatch?.textContent).toContain('Draw all (0)')
     assert.doesNotMatch(container.textContent || '', /1 Yuan|5 Yuan|8 Yuan/)
-    assert.ok(
-      container.querySelector('[data-testid="lottery-records-pagination"]')
-    )
-
     await act(async () => root.unmount())
+  })
+
+  test('opens chance grant settings from a visible campaign for administrators', async () => {
+    useAuthStore.getState().auth.setUser({ id: 1, username: 'admin', role: 10 })
+    const campaign = {
+      id: 'festival',
+      name: 'Festival gift',
+      type: 'event',
+      enabled: true,
+      chances: 2,
+      start_at: 0,
+      end_at: 0,
+    }
+    api.defaults.adapter = async (config) => ({
+      data: {
+        success: true,
+        data: config.url?.endsWith('/config')
+          ? { prizes: baseStatus.prizes, grant_rules: [campaign] }
+          : { ...baseStatus, grant_rules: [campaign] },
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    })
+    const { unmount } = render(
+      <I18nextProvider i18n={i18n}>
+        <Lottery />
+      </I18nextProvider>
+    )
+    try {
+      const page = within(document.body)
+      const campaignTrigger = await page.findByRole('button', {
+        name: 'Campaign',
+        description: 'Festival gift',
+      })
+      expect(campaignTrigger.getAttribute('aria-expanded')).toBe('false')
+      expect(within(campaignTrigger).getByText('Festival gift')).toBeTruthy()
+      expect(page.queryByText('Receive once during the event')).toBeNull()
+      const draw = page.getByRole('button', { name: 'Draw once' })
+      expect(
+        draw.compareDocumentPosition(campaignTrigger) &
+          Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      fireEvent.click(campaignTrigger)
+      expect(campaignTrigger.getAttribute('aria-expanded')).toBe('true')
+      expect(
+        await page.findByText('Receive once during the event')
+      ).toBeTruthy()
+      fireEvent.click(page.getByRole('button', { name: 'Chance grants' }))
+      const settings = within(
+        await page.findByRole('dialog', { name: 'Lottery management' })
+      )
+      const grants = await settings.findByRole('tab', { name: 'Chance grants' })
+      expect(grants.getAttribute('aria-selected')).toBe('true')
+      expect(settings.getByRole('button', { name: 'Event grant' })).toBeTruthy()
+    } finally {
+      unmount()
+    }
+  })
+
+  test('keeps the highest drawable prize and draw controls together in mobile reading order', async () => {
+    api.defaults.adapter = async (config) => ({
+      data: {
+        success: true,
+        data: {
+          ...baseStatus,
+          prizes: [
+            ...baseStatus.prizes.slice(0, 2),
+            { type: 'top', name: 'Festival reward', amount: 8, probability: 5 },
+            {
+              type: 'disabled',
+              name: 'Disabled prize',
+              amount: 50,
+              probability: 0,
+            },
+            baseStatus.prizes[3],
+          ],
+        },
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    })
+    const { unmount } = render(
+      <I18nextProvider i18n={i18n}>
+        <Lottery />
+      </I18nextProvider>
+    )
+    try {
+      const page = within(document.body)
+      const overview = within(page.getByTestId('lottery-overview'))
+      const prize = await overview.findByRole('heading', {
+        name: 'Grand prize',
+      })
+      const draw = overview.getByRole('button', { name: 'Draw once' })
+      expect(
+        prize.compareDocumentPosition(draw) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+      expect(page.getByText('Festival reward')).toBeTruthy()
+      expect(page.getByText('$8')).toBeTruthy()
+      expect(page.queryByText('Disabled prize')).toBeNull()
+    } finally {
+      unmount()
+    }
+  })
+
+  test('discloses the configured odds and the guaranteed grand prize rule', async () => {
+    api.defaults.adapter = async (config) => ({
+      data: {
+        success: true,
+        data: { ...baseStatus, pity_draws_remaining: 1 },
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    })
+    const { unmount } = render(
+      <I18nextProvider i18n={i18n}>
+        <Lottery />
+      </I18nextProvider>
+    )
+    try {
+      const page = within(document.body)
+      const trigger = await page.findByRole('button', {
+        name: 'Draw probabilities',
+      })
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      fireEvent.click(trigger)
+      const dialog = await page.findByRole('dialog', {
+        name: 'Draw probabilities',
+        description: /base odds.*awards the highest-value prize/,
+      })
+      const table = within(dialog).getByRole('table', {
+        name: 'Draw probabilities',
+      })
+      expect(within(table).getByRole('row', { name: /\$8 5%/ })).toBeTruthy()
+      expect(
+        within(table).getByRole('row', { name: /No prize 25%/ })
+      ).toBeTruthy()
+      expect(within(table).getAllByRole('row')).toHaveLength(5)
+      expect(trigger.getAttribute('aria-expanded')).toBe('true')
+      fireEvent.keyDown(dialog, { key: 'Escape' })
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+    } finally {
+      unmount()
+    }
+  })
+
+  test('opens personal draw records from the page header and closes with Escape', async () => {
+    let recordRequests = 0
+    api.defaults.adapter = async (config) => {
+      const recordsRequest = config.url?.includes('/draws/self')
+      if (recordsRequest) recordRequests++
+      return {
+        data: {
+          success: true,
+          data: recordsRequest
+            ? { items: [], total: 0, page: 1, page_size: 10 }
+            : baseStatus,
+        },
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config,
+      }
+    }
+    const { unmount } = render(
+      <I18nextProvider i18n={i18n}>
+        <Lottery />
+      </I18nextProvider>
+    )
+    try {
+      const page = within(document.body)
+      const trigger = page.getByRole('button', { name: 'Lottery records' })
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      expect(page.queryByRole('table')).toBeNull()
+      expect(recordRequests).toBe(0)
+
+      trigger.focus()
+      fireEvent.click(trigger)
+      const dialog = await page.findByRole('dialog', {
+        name: 'Lottery records',
+      })
+      const history = within(dialog)
+      await history.findByText('No lottery results yet')
+      const table = history.getByRole('table', { name: 'Lottery records' })
+      expect(table.parentElement?.classList.contains('overflow-x-auto')).toBe(
+        true
+      )
+      expect(
+        history.getByRole<HTMLButtonElement>('button', { name: 'Next' })
+          .disabled
+      ).toBe(true)
+      expect(trigger.getAttribute('aria-expanded')).toBe('true')
+
+      fireEvent.keyDown(dialog, { key: 'Escape' })
+      expect(trigger.getAttribute('aria-expanded')).toBe('false')
+      expect(page.queryByRole('dialog', { name: 'Lottery records' })).toBeNull()
+    } finally {
+      unmount()
+    }
+  })
+
+  test('retries a failed records request and paginates the recovered history', async () => {
+    let failed = false
+    api.defaults.adapter = async (config) => {
+      let data: unknown = { success: true, data: baseStatus }
+      if (config.url?.includes('/draws/self')) {
+        const page = config.url.includes('p=2') ? 2 : 1
+        data = failed
+          ? {
+              success: true,
+              data: {
+                items: [
+                  {
+                    id: page,
+                    prize: page === 1 ? 'quota_1' : 'none',
+                    quota: page === 1 ? 500_000 : 0,
+                    status: page === 1 ? 'awarded' : 'no_prize',
+                    revoked_at: 0,
+                    created_at: 1_786_363_200,
+                  },
+                ],
+                total: 11,
+                page,
+                page_size: 10,
+              },
+            }
+          : { success: false }
+        failed = true
+      }
+      return { data, status: 200, statusText: 'OK', headers: {}, config }
+    }
+    const { unmount } = render(
+      <I18nextProvider i18n={i18n}>
+        <Lottery />
+      </I18nextProvider>
+    )
+    try {
+      const page = within(document.body)
+      fireEvent.click(page.getByRole('button', { name: 'Lottery records' }))
+      const history = within(
+        await page.findByRole('dialog', { name: 'Lottery records' })
+      )
+      fireEvent.click(await history.findByRole('button', { name: 'Retry' }))
+      await history.findByText('Awarded')
+      const next = history.getByRole<HTMLButtonElement>('button', {
+        name: 'Next',
+      })
+      fireEvent.click(next)
+      await history.findByRole('row', { name: /No prize/ })
+      expect(next.disabled).toBe(true)
+    } finally {
+      unmount()
+    }
   })
 
   test('converts USD earning thresholds to site currency and updates after a currency change', async () => {
@@ -282,7 +525,16 @@ describe('lottery center', () => {
 
     assert.match(container.textContent || '', /every ¥350 spent/)
     assert.match(container.textContent || '', /Spend ¥140 in a single day/)
+    const page = within(container)
+    const campaign = page.getByRole('button', { name: 'Campaign' })
+    fireEvent.click(campaign)
     assert.match(container.textContent || '', /Recharge threshold:\s*¥350/)
+    const grandPrize = page.getByRole('heading', { name: 'Grand prize' })
+    expect(
+      grandPrize.compareDocumentPosition(campaign) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(page.getByText('¥56')).toBeTruthy()
 
     await act(async () => {
       useSystemConfigStore.getState().setConfig({
@@ -292,6 +544,7 @@ describe('lottery center', () => {
     assert.match(container.textContent || '', /every \$50 spent/)
     assert.match(container.textContent || '', /Spend \$20 in a single day/)
     assert.match(container.textContent || '', /Recharge threshold:\s*\$50/)
+    expect(page.getByText('$8')).toBeTruthy()
     await act(async () => root.unmount())
   })
 
@@ -355,124 +608,116 @@ describe('lottery center', () => {
     await act(async () => root.unmount())
   })
 
-  test('updates the remaining chance and result after a successful draw', async () => {
-    let drawRequested = false
-    api.defaults.adapter = async (config) => {
-      if (config.url?.endsWith('/draw')) {
-        drawRequested = true
-        return {
-          data: {
-            success: true,
-            data: {
-              draw: {
-                id: 9,
-                prize: 'quota_5',
-                quota: 2_500_000,
-                status: 'awarded',
-                revoked_at: 0,
-                created_at: 1_786_363_200,
-              },
-              status: {
-                ...baseStatus,
-                recent_draws: [
-                  {
-                    id: 9,
-                    prize: 'quota_5',
-                    quota: 2_500_000,
-                    status: 'awarded',
-                    revoked_at: 0,
-                    created_at: 1_786_363_200,
-                  },
-                ],
-              },
+  test.each([
+    {
+      outcome: 'lower prize',
+      prize: 'quota_5',
+      quota: 2_500_000,
+      remaining: 3,
+      result: '$5',
+      announcement: 'Won $5',
+    },
+    {
+      outcome: 'grand prize',
+      prize: 'quota_8',
+      quota: 4_000_000,
+      remaining: 10,
+      result: '$8',
+      announcement: 'Won $8',
+    },
+    {
+      outcome: 'miss',
+      prize: 'none',
+      quota: 0,
+      remaining: 3,
+      result: 'No prize this time',
+      announcement: 'No prize',
+    },
+  ])(
+    'reveals a $outcome before updating the guarantee progress',
+    async (scenario) => {
+      let drawRequested = false
+      api.defaults.adapter = async (config) => {
+        let data: unknown = {
+          ...baseStatus,
+          available_chances: 1,
+          pity_draws_remaining: 4,
+        }
+        if (config.url?.endsWith('/draw')) {
+          drawRequested = true
+          const draw = {
+            id: 9,
+            prize: scenario.prize,
+            quota: scenario.quota,
+            status: scenario.quota ? 'awarded' : 'no_prize',
+            revoked_at: 0,
+            created_at: 1_786_363_200,
+          }
+          data = {
+            draw,
+            status: {
+              ...baseStatus,
+              pity_draws_remaining: scenario.remaining,
+              recent_draws: [draw],
             },
-          },
-          status: 200,
-          statusText: 'OK',
-          headers: {},
-          config,
+          }
         }
-      }
-      if (config.url?.includes('/draws/self')) {
         return {
-          data: {
-            success: true,
-            data: { items: [], total: 0, page: 1, page_size: 10 },
-          },
+          data: { success: true, data },
           status: 200,
           statusText: 'OK',
           headers: {},
           config,
         }
       }
-      return {
-        data: {
-          success: true,
-          data: { ...baseStatus, available_chances: 1 },
-        },
-        status: 200,
-        statusText: 'OK',
-        headers: {},
-        config,
-      }
-    }
-    const container = document.createElement('div')
-    document.body.append(container)
-    const root = createRoot(container)
 
-    await act(async () => {
-      root.render(
+      const { container, unmount } = render(
         <I18nextProvider i18n={i18n}>
           <Lottery />
         </I18nextProvider>
       )
-      await flushRequests()
-    })
-    const drawButton = container.querySelector<HTMLButtonElement>(
-      '[data-testid="lottery-draw-button"]'
-    )
-    assert.ok(drawButton)
-    assert.equal(drawButton.disabled, false)
+      try {
+        const page = within(container)
+        const progress = await page.findByRole('progressbar', {
+          name: 'Grand prize guarantee progress',
+        })
+        const drawButton = page.getByRole<HTMLButtonElement>('button', {
+          name: 'Draw once',
+        })
+        expect(progress.getAttribute('aria-valuenow')).toBe('6')
+        expect(progress.getAttribute('aria-valuemax')).toBe('10')
+        expect(drawButton.disabled).toBe(false)
 
-    await act(async () => {
-      drawButton.dispatchEvent(
-        new domWindow.MouseEvent('click', {
-          bubbles: true,
-        }) as unknown as MouseEvent
-      )
-      await flushRequests()
-    })
+        await act(async () => {
+          fireEvent.click(drawButton)
+          await flushRequests()
+        })
+        const drawProgress = await page.findByTestId('lottery-draw-progress')
+        expect(drawRequested).toBe(true)
+        expect(drawButton.disabled).toBe(true)
+        expect(
+          drawProgress.closest('[role="status"]')?.getAttribute('aria-live')
+        ).toBe('polite')
+        const revealStage = page.getByTestId('lottery-prize-stage')
+        expect(revealStage.getAttribute('data-state')).toBe('drawing')
+        expect(progress.getAttribute('aria-valuenow')).toBe('6')
 
-    assert.equal(drawRequested, true)
-    assert.equal(drawButton.disabled, true)
-    assert.equal(drawButton.dataset.state, 'drawing')
-    const drawProgress = container.querySelector(
-      '[data-testid="lottery-draw-progress"]'
-    )
-    assert.ok(drawProgress)
-    expect(
-      drawProgress.closest('[role="status"]')?.getAttribute('aria-live')
-    ).toBe('polite')
-    assert.match(drawProgress.textContent || '', /Drawing/)
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 2450))
-    })
-
-    assert.ok(
-      container.querySelector(
-        '[data-lottery-grid-cell="true"][data-state="revealed"]'
-      )
-    )
-    assert.equal(
-      container.querySelector('[data-testid="lottery-draw-progress"]'),
-      null
-    )
-    assert.match(container.textContent || '', /Won/)
-    assert.match(container.textContent || '', /\$5/)
-
-    await act(async () => root.unmount())
-  })
+        await within(revealStage).findByText(scenario.result, undefined, {
+          timeout: 5000,
+        })
+        expect(revealStage.getAttribute('data-state')).toBe('revealed')
+        expect(page.getByRole('status').textContent).toContain(
+          scenario.announcement
+        )
+        expect(progress.getAttribute('aria-valuenow')).toBe(
+          String(10 - scenario.remaining)
+        )
+        expect(drawButton.disabled).toBe(true)
+      } finally {
+        unmount()
+      }
+    }
+  )
 
   test.each([
     { available: 65, count: 10, buttonId: 'lottery-draw-10', requests: [10] },
@@ -566,6 +811,7 @@ describe('lottery center', () => {
         }
       }
       let reveal: (() => void) | undefined
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(1_786_363_200_000)
       const originalTimeout = window.setTimeout.bind(window)
       const timerSpy = vi
         .spyOn(window, 'setTimeout')
@@ -602,7 +848,7 @@ describe('lottery center', () => {
         )
         assert.ok(allButton)
         expect(allButton.textContent).toContain(
-          `Draw ${scenario.available} times`
+          `Draw all (${scenario.available})`
         )
         expect(allButton.disabled).toBe(false)
         expect(
@@ -634,12 +880,13 @@ describe('lottery center', () => {
           expect(container.textContent).toContain('Won $1')
         }
         expect(allButton.textContent).toContain(
-          `Draw ${scenario.available - count} times`
+          `Draw all (${scenario.available - count})`
         )
         expect(allButton.disabled).toBe(scenario.available === count)
       } finally {
         await act(async () => root.unmount())
         timerSpy.mockRestore()
+        clock.mockRestore()
         container.remove()
       }
     }
@@ -963,7 +1210,15 @@ describe('lottery center', () => {
       await flushRequests()
     })
 
-    const allRecordsButton = [...container.querySelectorAll('button')].find(
+    const historyButton = within(container).getByRole('button', {
+      name: 'Lottery records',
+    })
+    fireEvent.click(historyButton)
+    const recordsDialog = await within(document.body).findByRole('dialog', {
+      name: 'Lottery records',
+    })
+    await within(recordsDialog).findByText('No lottery results yet')
+    const allRecordsButton = [...recordsDialog.querySelectorAll('button')].find(
       (button) => button.textContent?.includes('All records')
     )
     assert.ok(allRecordsButton)
@@ -975,23 +1230,23 @@ describe('lottery center', () => {
       )
       await flushRequests()
     })
-    assert.match(container.textContent || '', /No lottery results yet/)
+    assert.match(recordsDialog.textContent || '', /No lottery results yet/)
     assert.equal(
-      container.querySelector('[data-testid="lottery-records-skeleton"]'),
+      recordsDialog.querySelector('[data-testid="lottery-records-skeleton"]'),
       null
     )
     await act(async () => {
       resolveAllRecords?.()
       await flushRequests()
     })
-    assert.match(container.textContent || '', /draw-user/)
-    assert.match(container.textContent || '', /ID: 27/)
-    const resultTrigger = container.querySelector<HTMLButtonElement>(
+    assert.match(recordsDialog.textContent || '', /draw-user/)
+    assert.match(recordsDialog.textContent || '', /ID: 27/)
+    const resultTrigger = recordsDialog.querySelector<HTMLButtonElement>(
       'button[aria-label="Result"]'
     )
     assert.equal(resultTrigger?.textContent?.trim(), 'All results')
 
-    const userInput = container.querySelector<HTMLInputElement>(
+    const userInput = recordsDialog.querySelector<HTMLInputElement>(
       '[data-testid="lottery-user-search"]'
     )
     assert.ok(userInput)
@@ -1006,7 +1261,7 @@ describe('lottery center', () => {
         new domWindow.Event('input', { bubbles: true }) as unknown as Event
       )
     })
-    const searchButton = [...container.querySelectorAll('button')].find(
+    const searchButton = [...recordsDialog.querySelectorAll('button')].find(
       (button) => button.textContent?.includes('Search')
     )
     assert.ok(searchButton)
@@ -1020,7 +1275,7 @@ describe('lottery center', () => {
     })
     assert.match(latestAdminUrl, /user=draw-user/)
 
-    const reverseButton = [...container.querySelectorAll('button')].find(
+    const reverseButton = [...recordsDialog.querySelectorAll('button')].find(
       (button) => button.textContent?.includes('Reverse reward')
     )
     assert.ok(reverseButton)
@@ -1060,9 +1315,9 @@ describe('lottery center', () => {
     })
     assert.equal(revokeRequested, true)
 
-    const grantRecordsButton = [...container.querySelectorAll('button')].find(
-      (button) => button.textContent?.includes('Chance grant records')
-    )
+    const grantRecordsButton = [
+      ...recordsDialog.querySelectorAll('button'),
+    ].find((button) => button.textContent?.includes('Chance grant records'))
     assert.ok(grantRecordsButton)
     await act(async () => {
       grantRecordsButton.dispatchEvent(
@@ -1072,25 +1327,25 @@ describe('lottery center', () => {
       )
       await flushRequests()
     })
-    assert.match(container.textContent || '', /Summer recharge/)
-    assert.match(container.textContent || '', /1\s*\/\s*2/)
-    assert.match(container.textContent || '', /Never expires/)
+    assert.match(recordsDialog.textContent || '', /Summer recharge/)
+    assert.match(recordsDialog.textContent || '', /1\s*\/\s*2/)
+    assert.match(recordsDialog.textContent || '', /Never expires/)
     assert.equal(
-      container
+      recordsDialog
         .querySelector<HTMLButtonElement>('button[aria-label="Source"]')
         ?.textContent?.trim(),
       'All sources'
     )
     assert.equal(
-      container
+      recordsDialog
         .querySelector<HTMLButtonElement>('button[aria-label="Status"]')
         ?.textContent?.trim(),
       'All statuses'
     )
 
-    const manualGrantButton = [...container.querySelectorAll('button')].find(
-      (button) => button.textContent?.includes('Manual grant')
-    )
+    const manualGrantButton = [
+      ...recordsDialog.querySelectorAll('button'),
+    ].find((button) => button.textContent?.includes('Manual grant'))
     assert.ok(manualGrantButton)
     await act(async () => {
       manualGrantButton.dispatchEvent(
@@ -1177,7 +1432,7 @@ describe('lottery center', () => {
     assert.equal(typeof manualGrantBody.request_id, 'string')
     assert.ok(grantLoadCount >= 2)
 
-    const grantUserInput = container.querySelector<HTMLInputElement>(
+    const grantUserInput = recordsDialog.querySelector<HTMLInputElement>(
       '[data-testid="lottery-grant-user-search"]'
     )
     assert.ok(grantUserInput)
@@ -1192,9 +1447,9 @@ describe('lottery center', () => {
         new domWindow.Event('input', { bubbles: true }) as unknown as Event
       )
     })
-    const grantSearchButton = [...container.querySelectorAll('button')].find(
-      (button) => button.textContent?.includes('Search')
-    )
+    const grantSearchButton = [
+      ...recordsDialog.querySelectorAll('button'),
+    ].find((button) => button.textContent?.includes('Search'))
     assert.ok(grantSearchButton)
     await act(async () => {
       grantSearchButton.dispatchEvent(

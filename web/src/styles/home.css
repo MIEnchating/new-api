@@ -303,14 +303,7 @@ For commercial licensing, please contact support@quantumnous.com
     animation-delay: -3s;
   }
   .home-entry {
-    transition:
-      transform 200ms ease,
-      background-color 200ms ease,
-      box-shadow 200ms ease;
-  }
-  .home-entry:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 14px 32px -24px var(--primary);
+    transition: background-color 200ms ease;
   }
   .home-orbit-track {
     animation: home-orbit-turn var(--orbit-duration) linear reverse infinite;

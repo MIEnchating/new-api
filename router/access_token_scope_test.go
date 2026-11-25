@@ -1,21 +1,29 @@
 package router
 
 import (
+	"encoding/base64"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/qqbot"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting/console_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -69,6 +77,9 @@ var accessTokenExemptRoutes = []string{
 	"GET /api/subscription/epay/return",
 	"POST /api/subscription/epay/return",
 
+	// Signed QQ Open Platform callback.
+	"POST " + qqbot.WebhookPath,
+
 	// Dedicated backend SSO credential; dashboard tokens are never accepted.
 	"POST /api/sso/chatgpt2api/exchange",
 	"POST /api/sso/chatgpt2api/session",
@@ -94,9 +105,12 @@ func newAccessTokenScopeTestEngine(t *testing.T) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
+	bot := qqbot.NewRuntime("", "3001", nil, func() string { return "" })
+	t.Cleanup(bot.Close)
 	// A permission route that is also in the static table panics here.
 	require.NotPanics(t, func() {
 		SetApiRouter(engine)
+		setQQBotRoutes(engine, bot)
 		SetDashboardRouter(engine)
 		SetRelayRouter(engine)
 		SetTaskPluginProtocolRouter(engine)
@@ -193,6 +207,189 @@ func TestDashboardPerfMetricsRequiresAdminReadAccess(t *testing.T) {
 			assert.Contains(t, recorder.Header().Get("Cache-Control"), "no-store")
 		})
 	}
+}
+
+func TestModelDetectionRequiresDashboardSession(t *testing.T) {
+	setupRelayRouterTestDB(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.UserAccessToken{}, &model.AuditLog{}))
+	engine := gin.New()
+	SetApiRouter(engine)
+
+	guest := httptest.NewRecorder()
+	engine.ServeHTTP(guest, httptest.NewRequest(http.MethodPost, "/api/model-detection", nil))
+	assert.Equal(t, http.StatusUnauthorized, guest.Code)
+	assert.Contains(t, guest.Header().Get("Cache-Control"), "no-store")
+
+	user := model.User{Username: "detector-pat", AffCode: "detector-pat", Role: common.RoleCommonUser, Group: "default", Status: common.UserStatusEnabled}
+	require.NoError(t, model.DB.Create(&user).Error)
+	suffix, err := common.GenerateRandomCharsKey(43)
+	require.NoError(t, err)
+	raw := model.AccessTokenPrefix + suffix
+	token := model.UserAccessToken{Name: "detector", TokenHash: model.AccessTokenFingerprint(raw), TokenHint: model.AccessTokenHint(raw)}
+	require.NoError(t, token.SetScopes([]string{"profile:read"}))
+	require.NoError(t, model.CreateUserAccessToken(user.Id, &token, service.AccessTokenMaxPerUser))
+
+	request := httptest.NewRequest(http.MethodPost, "/api/model-detection", nil)
+	request.Header.Set("Authorization", "Bearer "+raw)
+	pat := httptest.NewRecorder()
+	engine.ServeHTTP(pat, request)
+	assert.Equal(t, http.StatusForbidden, pat.Code)
+	assert.Contains(t, pat.Header().Get("Cache-Control"), "no-store")
+	assert.NotContains(t, pat.Body.String(), raw)
+}
+
+func TestModelDetectionUsesAccountRelayAndSessionBoundSamples(t *testing.T) {
+	setupRelayRouterTestDB(t)
+	require.NoError(t, i18n.Init())
+	ratio_setting.InitRatioSettings()
+	require.NoError(t, model.DB.AutoMigrate(
+		&model.UserSession{}, &model.Channel{}, &model.Log{}, &model.Option{}, &model.SystemTask{},
+		&model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{},
+	))
+	sqlDB, err := model.DB.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	user := model.User{Username: "detector-user", AffCode: "detector-user", Group: "default", Status: common.UserStatusEnabled, Quota: 1000000}
+	require.NoError(t, model.DB.Create(&user).Error)
+	first, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "fixture")
+	require.NoError(t, err)
+	second, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "fixture")
+	require.NoError(t, err)
+
+	var upstreamCalls atomic.Int32
+	values := make([]string, 335)
+	for i := range values {
+		values[i] = strconv.Itoa(1 + (i/2*37)%155 + i%2*190)
+	}
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		assert.Equal(t, service.ModelDetectionChatEndpoint, r.URL.Path)
+		assert.Equal(t, "Bearer model-detection-upstream", r.Header.Get("Authorization"))
+		assert.Empty(t, r.Header.Get("Cookie"))
+		payload, err := common.Marshal(map[string]any{
+			"id": "detector-fixture", "object": "chat.completion", "model": "gpt-4o",
+			"choices": []any{map[string]any{
+				"index": 0, "message": map[string]string{"role": "assistant", "content": strings.Join(values, ", ")},
+				"finish_reason": "stop",
+			}},
+			"usage": map[string]int{"prompt_tokens": 200, "completion_tokens": 335, "total_tokens": 535},
+		})
+		assert.NoError(t, err)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(upstream.Close)
+	baseURL := upstream.URL
+	channel := model.Channel{
+		Name: "detector-upstream", Type: constant.ChannelTypeOpenAI, Status: common.ChannelStatusEnabled,
+		Group: "default", Models: "gpt-4o", Key: "model-detection-upstream", BaseURL: &baseURL,
+	}
+	require.NoError(t, channel.Insert())
+	service.InitHttpClient()
+	engine := gin.New()
+	SetApiRouter(engine)
+
+	serve := func(method, path, credential string, input *service.ModelDetectionRequest) *httptest.ResponseRecorder {
+		t.Helper()
+		var body []byte
+		if input != nil {
+			var err error
+			body, err = common.Marshal(input)
+			require.NoError(t, err)
+		}
+		request := httptest.NewRequest(method, path, strings.NewReader(string(body)))
+		request.Header.Set("Authorization", "Bearer "+credential)
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		engine.ServeHTTP(recorder, request)
+		return recorder
+	}
+
+	const path = "/api/model-detection"
+	input := service.ModelDetectionRequest{
+		Endpoint: service.ModelDetectionChatEndpoint, Group: "unavailable", Model: "gpt-4o",
+		Mode: "detect", Stream: common.GetPointer(false),
+	}
+	forbidden := serve(http.MethodPost, path, first.AccessToken, &input)
+	require.Equal(t, http.StatusForbidden, forbidden.Code, forbidden.Body.String())
+	input.Group = "default"
+	missing := serve(http.MethodPost, path, first.AccessToken, &input)
+	require.Equal(t, http.StatusBadRequest, missing.Code, missing.Body.String())
+	assert.Zero(t, upstreamCalls.Load())
+
+	t.Run("prepared samples are bound to the session and successful probes use normal billing", func(t *testing.T) {
+		executable := os.Getenv("MODEL_DETECTION_TEST_CLI_PATH")
+		if executable == "" {
+			t.Skip("set MODEL_DETECTION_TEST_CLI_PATH to the pinned fpd executable")
+		}
+		t.Setenv("MODEL_DETECTION_CLI_PATH", executable)
+		preview := serve(http.MethodGet, path+"/challenges", first.AccessToken, nil)
+		require.Equal(t, http.StatusOK, preview.Code, preview.Body.String())
+		assert.Contains(t, preview.Header().Get("Cache-Control"), "no-store")
+		var samples struct {
+			Data struct {
+				Token      string                            `json:"token"`
+				Challenges []service.ModelDetectionChallenge `json:"challenges"`
+			} `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(preview.Body.Bytes(), &samples))
+		require.Len(t, samples.Data.Challenges, 3)
+		require.NotEmpty(t, samples.Data.Token)
+		assert.Zero(t, upstreamCalls.Load())
+
+		input.ChallengeToken = samples.Data.Token
+		replayed := serve(http.MethodPost, path, second.AccessToken, &input)
+		require.Equal(t, http.StatusBadRequest, replayed.Code, replayed.Body.String())
+		input.ChallengeToken += "z"
+		tampered := serve(http.MethodPost, path, first.AccessToken, &input)
+		require.Equal(t, http.StatusBadRequest, tampered.Code, tampered.Body.String())
+		expiredPayload, err := common.Marshal(map[string]any{"expires_at": 1, "challenges": samples.Data.Challenges})
+		require.NoError(t, err)
+		encoded := base64.RawURLEncoding.EncodeToString(expiredPayload)
+		input.ChallengeToken = encoded + "." + common.GenerateHMACWithKey(
+			[]byte(common.SessionSecret), "model-detection-challenges:"+first.Session.SID+":"+encoded,
+		)
+		expired := serve(http.MethodPost, path, first.AccessToken, &input)
+		require.Equal(t, http.StatusBadRequest, expired.Code, expired.Body.String())
+		assert.Zero(t, upstreamCalls.Load())
+
+		input.ChallengeToken = samples.Data.Token
+		t.Run("address and API key must match site configuration and account", func(t *testing.T) {
+			config := console_setting.GetConsoleSetting()
+			previous := *config
+			t.Cleanup(func() { *config = previous })
+			config.ApiInfoEnabled = true
+			config.ApiInfo = `[{"url":"https://detector.example/v1"}]`
+			const key = "detectorRoutingKeyFixture"
+			wrongOwner := model.Token{UserId: user.Id + 1, Key: key, Group: "default", Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true}
+			require.NoError(t, model.DB.Create(&wrongOwner).Error)
+			input := input
+			input.APIURL, input.APIKey = "https://unknown.example", "sk-"+key
+			unconfigured := serve(http.MethodPost, path, first.AccessToken, &input)
+			assert.Equal(t, http.StatusBadRequest, unconfigured.Code, unconfigured.Body.String())
+			input.APIURL = "https://detector.example/v1"
+			foreign := serve(http.MethodPost, path, first.AccessToken, &input)
+			assert.Equal(t, http.StatusForbidden, foreign.Code, foreign.Body.String())
+			assert.NotContains(t, foreign.Body.String(), key)
+			assert.Zero(t, upstreamCalls.Load())
+		})
+
+		detected := serve(http.MethodPost, path, first.AccessToken, &input)
+		require.Equal(t, http.StatusOK, detected.Code, detected.Body.String())
+		var response struct {
+			Success bool                         `json:"success"`
+			Data    service.ModelDetectionResult `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(detected.Body.Bytes(), &response))
+		assert.True(t, response.Success)
+		assert.Zero(t, response.Data.UpstreamStatus)
+		assert.EqualValues(t, 3, upstreamCalls.Load())
+		after, err := model.GetUserById(user.Id, false)
+		require.NoError(t, err)
+		assert.Less(t, after.Quota, user.Quota)
+		assert.NotContains(t, detected.Body.String(), first.AccessToken)
+		assert.NotContains(t, detected.Body.String(), channel.Key)
+	})
 }
 
 func TestAccessTokenCatalogCoversEveryPermission(t *testing.T) {

@@ -26,6 +26,7 @@ import (
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/pkg/qqbot"
 	"github.com/QuantumNous/new-api/pkg/wsmanager"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/relay/requestplugin"
@@ -226,15 +227,17 @@ func main() {
 	InjectUmamiAnalytics()
 	InjectGoogleAnalytics()
 
-	// 设置路由
-	router.SetRouter(server, router.WebAssets{
-		BuildFS:   buildFS,
-		IndexPage: indexPage,
-	})
 	var port = os.Getenv("PORT")
 	if port == "" {
 		port = strconv.Itoa(*common.Port)
 	}
+	bot := qqbot.NewRuntime(host, port, common.RDB, model.CachedQQBotSettings)
+	router.SetRouter(server, router.WebAssets{
+		BuildFS:   buildFS,
+		IndexPage: indexPage,
+	}, bot)
+	bot.StartChannelNotices()
+	service.SetChannelAvailabilityNotifier(bot.QueueChannelNotice)
 
 	srv := &http.Server{
 		Addr:    net.JoinHostPort(host, port),
@@ -263,6 +266,8 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		common.SysError(common.LogText("server forced to shutdown: %v", err))
 	}
+	service.SetChannelAvailabilityNotifier(nil)
+	bot.Close()
 	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)
 	if common.DataExportEnabled {
 		model.SaveQuotaDataCache()

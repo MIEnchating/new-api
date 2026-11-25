@@ -75,6 +75,7 @@ export const SIDEBAR_MODULES_DEFAULT: SidebarModulesAdminConfig = {
     enabled: true,
     detail: true,
     status: true,
+    model_detection: true,
     token: true,
     log: true,
     audit: true,

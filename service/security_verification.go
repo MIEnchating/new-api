@@ -22,6 +22,8 @@ const (
 	VerificationMethodOAuth              = "oauth"
 	VerificationMethodSession            = "session"
 	VerificationScopeChannelKeyRead      = "channel.key.read"
+	VerificationScopeQQBotSettings       = "qq_bot.settings.update"
+	VerificationScopeQQBotUnbind         = "qq_bot.account.unbind"
 	VerificationScopePasskeyRegister     = "passkey.register"
 	VerificationScopePasskeyDelete       = "passkey.delete"
 	VerificationScopeTwoFASetup          = "2fa.setup"
@@ -181,7 +183,7 @@ func BindVerificationOperation(operation VerificationOperation) (VerificationBin
 			if len(fields) != 2 || common.Validate.Var(context.Email, "required,email") != nil || context.Code != "" {
 				return VerificationBinding{}, ErrVerificationContextInvalid
 			}
-		case "wechat":
+		case "wechat", model.QQBotIdentityProvider:
 			context.Code = strings.TrimSpace(context.Code)
 			if len(fields) != 2 || context.Code == "" || len(context.Code) > 128 || context.Email != "" {
 				return VerificationBinding{}, ErrVerificationContextInvalid
@@ -261,7 +263,7 @@ func BindVerificationOperation(operation VerificationOperation) (VerificationBin
 		normalized = context
 	case VerificationScopePasskeyRegister, VerificationScopePasskeyDelete, VerificationScopeTwoFASetup,
 		VerificationScopeTwoFADisable, VerificationScopeTwoFABackupCodes,
-		VerificationScopePasswordSet, VerificationScopePasswordChange, VerificationScopeAccountDelete:
+		VerificationScopePasswordSet, VerificationScopePasswordChange, VerificationScopeAccountDelete, VerificationScopeQQBotSettings, VerificationScopeQQBotUnbind:
 		if len(fields) != 0 {
 			return VerificationBinding{}, ErrVerificationContextInvalid
 		}
@@ -326,6 +328,7 @@ func securityVerificationPolicy(scope string, state model.UserVerificationState)
 		}
 	case VerificationScopePasskeyRegister, VerificationScopeTwoFASetup,
 		VerificationScopeAccessTokenGenerate, VerificationScopeAccessTokenUpdate, VerificationScopeAccessTokenRevoke,
+		VerificationScopeQQBotSettings, VerificationScopeQQBotUnbind,
 		VerificationScopeAccountBind, VerificationScopeAccountUnbind,
 		VerificationScopePasswordSet, VerificationScopePasswordChange, VerificationScopeAccountDelete,
 		VerificationScopeAdminUserCreate, VerificationScopeAdminUserUpdate, VerificationScopeAdminUserDelete,
@@ -375,7 +378,7 @@ func GetVerificationRequirements(identity AuthIdentity, scope string) (*Verifica
 	if state.Status != common.UserStatusEnabled || state.AuthVersion != identity.UserAuthVersion {
 		return nil, ErrAuthTokenInvalid
 	}
-	if scope == VerificationScopeChannelKeyRead && state.Role != common.RoleRootUser {
+	if (scope == VerificationScopeChannelKeyRead || scope == VerificationScopeQQBotSettings) && state.Role != common.RoleRootUser {
 		return nil, ErrVerificationForbidden
 	}
 	if strings.HasPrefix(scope, verificationScopeAdminUserPrefix) && state.Role < common.RoleAdminUser {
@@ -393,6 +396,7 @@ func GetVerificationRequirements(identity AuthIdentity, scope string) (*Verifica
 		if methods[i].Method == VerificationMethodPassword && !common.PasswordLoginEnabled {
 			switch scope {
 			case VerificationScopeAccountBind, VerificationScopeAccountUnbind, VerificationScopePasswordSet, VerificationScopePasswordChange, VerificationScopeAccountDelete,
+				VerificationScopeQQBotSettings, VerificationScopeQQBotUnbind,
 				VerificationScopeAdminUserCreate, VerificationScopeAdminUserUpdate, VerificationScopeAdminUserDelete,
 				VerificationScopeAdminUserManage, VerificationScopeAdminUserPasskeyReset,
 				VerificationScopeAdminUserTwoFADisable, VerificationScopeAdminUserBindingClear:

@@ -1,12 +1,14 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
@@ -63,6 +65,24 @@ func PreConsumeBilling(c *gin.Context, preConsumedQuota int, relayInfo *relaycom
 // SettleBilling 执行计费结算。如果 RelayInfo 上有 BillingSession 则通过 session 结算，
 // 否则回退到旧的 PostConsumeQuota 路径（兼容按次计费等场景）。
 func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int) error {
+	var chargeKey string
+	if relayInfo.RequestId != "" {
+		chargeKey = "request:" + relayInfo.RequestId
+	}
+	return settleBilling(ctx, relayInfo, actualQuota, chargeKey)
+}
+
+// SettleTaskSubmissionBilling defers the referral reward for pending tasks
+// until polling finalizes the charge. Immediate successes settle here.
+func SettleTaskSubmissionBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, task *model.Task, actualQuota int) error {
+	var chargeKey string
+	if task.Status == model.TaskStatusSuccess && task.TaskID != "" {
+		chargeKey = "task:" + task.TaskID
+	}
+	return settleBilling(ctx, relayInfo, actualQuota, chargeKey)
+}
+
+func settleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuota int, chargeKey string) error {
 	if relayInfo.Billing != nil {
 		preConsumed := relayInfo.Billing.GetPreConsumedQuota()
 		delta := actualQuota - preConsumed
@@ -85,7 +105,17 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 			))
 		}
 
-		if err := relayInfo.Billing.Settle(actualQuota); err != nil {
+		settledQuota := actualQuota
+		var err error
+		if session, ok := relayInfo.Billing.(*BillingSession); ok {
+			settledQuota, err = session.settleCharge(actualQuota)
+		} else if err = relayInfo.Billing.Settle(actualQuota); err != nil {
+			settledQuota = 0
+		}
+		if relayInfo.BillingSource != BillingSourceSubscription {
+			recordWalletUsageReward(ctx, relayInfo.UserId, chargeKey, settledQuota)
+		}
+		if err != nil {
 			return err
 		}
 
@@ -103,7 +133,24 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 	// 回退：无 BillingSession 时使用旧路径
 	quotaDelta := actualQuota - relayInfo.FinalPreConsumedQuota
 	if quotaDelta != 0 {
-		return PostConsumeQuota(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
+		result, err := postConsumeQuotaWithResult(relayInfo, quotaDelta, relayInfo.FinalPreConsumedQuota, true)
+		if result.FundingApplied && relayInfo.BillingSource != BillingSourceSubscription {
+			recordWalletUsageReward(ctx, relayInfo.UserId, chargeKey, actualQuota)
+		}
+		return err
+	}
+	if relayInfo.BillingSource != BillingSourceSubscription {
+		recordWalletUsageReward(ctx, relayInfo.UserId, chargeKey, actualQuota)
 	}
 	return nil
+}
+
+func recordWalletUsageReward(ctx context.Context, userID int, chargeKey string, quota int) {
+	if chargeKey == "" || quota <= 0 {
+		return
+	}
+	settledAt := common.GetTimestamp()
+	if err := model.CreditAffiliateUsageReward(userID, chargeKey, quota, settledAt); err != nil {
+		logger.LogError(ctx, common.LogText("failed to credit wallet usage referral reward (userId=%d, charge=%s, quota=%d, settledAt=%d): %s", userID, chargeKey, quota, settledAt, err.Error()))
+	}
 }

@@ -88,6 +88,10 @@ const STATUS_RELATED_KEYS = new Set([
   'passkey.origins',
   'QuotaRemindEnabled',
   'QuotaRemindThreshold',
+  'QuotaForInviter',
+  'QuotaForInvitee',
+  'InviteRechargeRebateRatio',
+  'AffiliateUsageReward',
 ])
 
 export function shouldRefreshStatusForOption(key: string): boolean {

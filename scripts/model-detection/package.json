@@ -1,0 +1,7 @@
+{
+  "name": "model-detection-runtime",
+  "private": true,
+  "dependencies": {
+    "lmfpd": "0.0.1795415879338"
+  }
+}

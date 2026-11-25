@@ -59,6 +59,35 @@ func newProtectedFetchHTTPClient() *http.Client {
 	return newProtectedFetchHTTPClientWithDialer(nil, nil, nil)
 }
 
+// NewPublicHTTPSClient sends credentials only to directly connected public
+// endpoints. The dialed address is checked after DNS resolution and redirects
+// are returned to the caller without forwarding authorization.
+func NewPublicHTTPSClient() *http.Client {
+	policy := &common.SSRFProtection{ApplyIPFilterForDomain: true}
+	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
+	protected := &protectedFetchDialer{
+		resolver: net.DefaultResolver, dialContext: dialer.DialContext,
+		getProtection: func() (*common.SSRFProtection, bool, error) { return policy, true, nil },
+	}
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: publicHTTPSTransport{&http.Transport{
+			DialContext: protected.DialContext, MaxIdleConnsPerHost: 8,
+			IdleConnTimeout: 30 * time.Second, TLSHandshakeTimeout: 10 * time.Second, ForceAttemptHTTP2: true,
+		}},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+}
+
+type publicHTTPSTransport struct{ *http.Transport }
+
+func (t publicHTTPSTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Scheme != "https" {
+		return nil, fmt.Errorf("public integration endpoints require HTTPS")
+	}
+	return t.Transport.RoundTrip(req)
+}
+
 func newProtectedFetchHTTPClientWithDialer(resolver ssrfResolver, dialContext func(ctx context.Context, network, address string) (net.Conn, error), getProtection func() (*common.SSRFProtection, bool, error)) *http.Client {
 	return newProtectedFetchHTTPClientWithProxy(resolver, dialContext, getProtection, http.ProxyFromEnvironment)
 }

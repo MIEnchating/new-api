@@ -63,6 +63,7 @@ const BILLING_SECTIONS = [
     titleKey: 'Quota Settings',
     build: (settings: BillingSettings) => (
       <QuotaSettingsSection
+        affiliateUsageRewardOption={settings.AffiliateUsageReward}
         defaultValues={{
           QuotaForNewUser: settings.QuotaForNewUser,
           QuotaForInviter: settings.QuotaForInviter,

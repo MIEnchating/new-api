@@ -46,6 +46,7 @@ import { Route as AuthenticatedInvoicesIndexRouteImport } from './routes/_authen
 import { Route as AuthenticatedInvoicesApplyRouteImport } from './routes/_authenticated/invoices/apply'
 import { Route as AuthenticatedKeysIndexRouteImport } from './routes/_authenticated/keys/index'
 import { Route as AuthenticatedLotteryIndexRouteImport } from './routes/_authenticated/lottery/index'
+import { Route as AuthenticatedModelDetectionIndexRouteImport } from './routes/_authenticated/model-detection/index'
 import { Route as AuthenticatedModelsIndexRouteImport } from './routes/_authenticated/models/index'
 import { Route as AuthenticatedModelsSectionRouteImport } from './routes/_authenticated/models/$section'
 import { Route as AuthenticatedPagesPageIdRouteImport } from './routes/_authenticated/pages/$pageId'
@@ -276,6 +277,12 @@ const AuthenticatedLotteryIndexRoute =
   AuthenticatedLotteryIndexRouteImport.update({
     id: '/lottery/',
     path: '/lottery/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
+const AuthenticatedModelDetectionIndexRoute =
+  AuthenticatedModelDetectionIndexRouteImport.update({
+    id: '/model-detection/',
+    path: '/model-detection/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
 const AuthenticatedModelsIndexRoute =
@@ -546,6 +553,7 @@ export interface FileRoutesByFullPath {
   '/invoices/': typeof AuthenticatedInvoicesIndexRoute
   '/keys/': typeof AuthenticatedKeysIndexRoute
   '/lottery/': typeof AuthenticatedLotteryIndexRoute
+  '/model-detection/': typeof AuthenticatedModelDetectionIndexRoute
   '/models/': typeof AuthenticatedModelsIndexRoute
   '/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/profile/': typeof AuthenticatedProfileIndexRoute
@@ -620,6 +628,7 @@ export interface FileRoutesByTo {
   '/invoices': typeof AuthenticatedInvoicesIndexRoute
   '/keys': typeof AuthenticatedKeysIndexRoute
   '/lottery': typeof AuthenticatedLotteryIndexRoute
+  '/model-detection': typeof AuthenticatedModelDetectionIndexRoute
   '/models': typeof AuthenticatedModelsIndexRoute
   '/playground': typeof AuthenticatedPlaygroundIndexRoute
   '/profile': typeof AuthenticatedProfileIndexRoute
@@ -698,6 +707,7 @@ export interface FileRoutesById {
   '/_authenticated/invoices/': typeof AuthenticatedInvoicesIndexRoute
   '/_authenticated/keys/': typeof AuthenticatedKeysIndexRoute
   '/_authenticated/lottery/': typeof AuthenticatedLotteryIndexRoute
+  '/_authenticated/model-detection/': typeof AuthenticatedModelDetectionIndexRoute
   '/_authenticated/models/': typeof AuthenticatedModelsIndexRoute
   '/_authenticated/playground/': typeof AuthenticatedPlaygroundIndexRoute
   '/_authenticated/profile/': typeof AuthenticatedProfileIndexRoute
@@ -775,6 +785,7 @@ export interface FileRouteTypes {
     | '/invoices/'
     | '/keys/'
     | '/lottery/'
+    | '/model-detection/'
     | '/models/'
     | '/playground/'
     | '/profile/'
@@ -849,6 +860,7 @@ export interface FileRouteTypes {
     | '/invoices'
     | '/keys'
     | '/lottery'
+    | '/model-detection'
     | '/models'
     | '/playground'
     | '/profile'
@@ -926,6 +938,7 @@ export interface FileRouteTypes {
     | '/_authenticated/invoices/'
     | '/_authenticated/keys/'
     | '/_authenticated/lottery/'
+    | '/_authenticated/model-detection/'
     | '/_authenticated/models/'
     | '/_authenticated/playground/'
     | '/_authenticated/profile/'
@@ -1240,6 +1253,13 @@ declare module '@tanstack/react-router' {
       path: '/lottery'
       fullPath: '/lottery/'
       preLoaderRoute: typeof AuthenticatedLotteryIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/_authenticated/model-detection/': {
+      id: '/_authenticated/model-detection/'
+      path: '/model-detection'
+      fullPath: '/model-detection/'
+      preLoaderRoute: typeof AuthenticatedModelDetectionIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/models/': {
@@ -1619,6 +1639,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedInvoicesIndexRoute: typeof AuthenticatedInvoicesIndexRoute
   AuthenticatedKeysIndexRoute: typeof AuthenticatedKeysIndexRoute
   AuthenticatedLotteryIndexRoute: typeof AuthenticatedLotteryIndexRoute
+  AuthenticatedModelDetectionIndexRoute: typeof AuthenticatedModelDetectionIndexRoute
   AuthenticatedModelsIndexRoute: typeof AuthenticatedModelsIndexRoute
   AuthenticatedPlaygroundIndexRoute: typeof AuthenticatedPlaygroundIndexRoute
   AuthenticatedProfileIndexRoute: typeof AuthenticatedProfileIndexRoute
@@ -1657,6 +1678,7 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedInvoicesIndexRoute: AuthenticatedInvoicesIndexRoute,
   AuthenticatedKeysIndexRoute: AuthenticatedKeysIndexRoute,
   AuthenticatedLotteryIndexRoute: AuthenticatedLotteryIndexRoute,
+  AuthenticatedModelDetectionIndexRoute: AuthenticatedModelDetectionIndexRoute,
   AuthenticatedModelsIndexRoute: AuthenticatedModelsIndexRoute,
   AuthenticatedPlaygroundIndexRoute: AuthenticatedPlaygroundIndexRoute,
   AuthenticatedProfileIndexRoute: AuthenticatedProfileIndexRoute,

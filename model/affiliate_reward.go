@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/shopspring/decimal"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -13,6 +15,7 @@ import (
 const (
 	AffiliateRewardTypeRegistration = "registration"
 	AffiliateRewardTypeFirstTopUp   = "first_topup"
+	AffiliateRewardTypeWalletUsage  = "wallet_usage"
 )
 
 type AffiliateReward struct {
@@ -104,6 +107,56 @@ func creditAffiliateRewardTx(tx *gorm.DB, reward *AffiliateReward) (bool, error)
 	return true, nil
 }
 
+// CreditAffiliateUsageReward credits a finalized wallet charge once. The caller
+// supplies a server-generated key for the charge and its settlement timestamp.
+func CreditAffiliateUsageReward(inviteeID int, chargeKey string, spentQuota int, settledAt int64) error {
+	settings := operation_setting.GetAffiliateUsageRewardSetting()
+	if !settings.Active() || spentQuota <= 0 || inviteeID <= 0 || chargeKey == "" || settledAt <= 0 || !operation_setting.IsPaymentComplianceConfirmed() {
+		return nil
+	}
+	if err := common.ValidateWalletQuota(spentQuota); err != nil {
+		return err
+	}
+	const windowSeconds = operation_setting.AffiliateUsageRewardDays * 24 * 60 * 60
+	var invitee User
+	if err := DB.Select("inviter_id").Where(
+		"id = ? AND inviter_id > 0 AND inviter_id <> id AND created_at > 0 AND created_at <= ? AND created_at > ?",
+		inviteeID, settledAt, settledAt-windowSeconds,
+	).Limit(1).Find(&invitee).Error; err != nil || invitee.InviterId == 0 {
+		return err
+	}
+	rewardQuota, err := common.WalletQuotaFromDecimalStrict(
+		decimal.NewFromInt(int64(spentQuota)).Mul(decimal.NewFromFloat(settings.RatePercent)).Shift(-2).Truncate(0),
+	)
+	if err != nil || rewardQuota == 0 {
+		return err
+	}
+	eventKey := "wallet-usage:" + chargeKey
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var inviter User
+		if err := lockForUpdate(tx).Select("id").Where("id = ?", invitee.InviterId).
+			Limit(1).Find(&inviter).Error; err != nil || inviter.Id == 0 {
+			return err
+		}
+		// Serialize repeats on the inviter row and check the event explicitly.
+		// MySQL may report a matched row for a no-op insert when clientFoundRows is on.
+		var existing AffiliateReward
+		if err := tx.Select("id").Where("event_key = ?", eventKey).
+			Limit(1).Find(&existing).Error; err != nil || existing.Id != 0 {
+			return err
+		}
+		_, err := creditAffiliateRewardTx(tx, &AffiliateReward{
+			EventKey:  eventKey,
+			InviterId: invitee.InviterId,
+			InviteeId: inviteeID,
+			Type:      AffiliateRewardTypeWalletUsage,
+			Quota:     rewardQuota,
+			CreatedAt: settledAt,
+		})
+		return err
+	})
+}
+
 func GetAffiliateRewards(inviterId int, pageInfo *common.PageInfo) ([]AffiliateRewardItem, int64, error) {
 	if inviterId <= 0 {
 		return nil, 0, fmt.Errorf("invalid inviter")
@@ -153,7 +206,9 @@ func GetAllAffiliateRewards(pageInfo *common.PageInfo, filter AffiliateRewardAdm
 	if pageInfo == nil {
 		pageInfo = &common.PageInfo{Page: 1, PageSize: 10}
 	}
-	if filter.Type != "" && filter.Type != AffiliateRewardTypeRegistration && filter.Type != AffiliateRewardTypeFirstTopUp {
+	switch filter.Type {
+	case "", AffiliateRewardTypeRegistration, AffiliateRewardTypeFirstTopUp, AffiliateRewardTypeWalletUsage:
+	default:
 		return nil, 0, fmt.Errorf("invalid affiliate reward type")
 	}
 

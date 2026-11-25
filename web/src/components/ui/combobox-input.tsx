@@ -40,6 +40,7 @@ interface ComboboxInputProps {
   onValueChange: (value: string) => void
   placeholder?: string
   emptyText?: string
+  maxLength?: number
   className?: string
   popupClassName?: string
   id?: string
@@ -49,6 +50,7 @@ interface ComboboxInputProps {
   onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>
   'aria-label'?: string
   'aria-labelledby'?: string
+  'aria-describedby'?: string
   'aria-invalid'?: React.AriaAttributes['aria-invalid']
 }
 
@@ -58,6 +60,7 @@ export function ComboboxInput({
   onValueChange,
   placeholder = 'Select or type...',
   emptyText = 'No option found.',
+  maxLength,
   className,
   popupClassName,
   id,
@@ -67,6 +70,7 @@ export function ComboboxInput({
   onKeyDown,
   'aria-label': ariaLabel,
   'aria-labelledby': ariaLabelledBy,
+  'aria-describedby': ariaDescribedBy,
   'aria-invalid': ariaInvalid,
 }: ComboboxInputProps) {
   const { t } = useTranslation()
@@ -237,8 +241,10 @@ export function ComboboxInput({
         type='text'
         role='combobox'
         disabled={disabled}
+        maxLength={maxLength}
         aria-label={ariaLabel}
         aria-labelledby={ariaLabelledBy}
+        aria-describedby={ariaDescribedBy}
         aria-invalid={ariaInvalid}
         aria-expanded={!!showDropdown}
         aria-controls={

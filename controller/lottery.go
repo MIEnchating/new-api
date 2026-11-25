@@ -12,7 +12,10 @@ import (
 )
 
 type lotteryConfigRequest struct {
-	Rules      *model.LotteryRules             `json:"rules"`
+	Rules *struct {
+		model.LotteryRules
+		PityDrawLimit *int `json:"pity_draw_limit"`
+	} `json:"rules"`
 	Prizes     *[]model.LotteryPrize           `json:"prizes"`
 	GrantRules *[]model.LotteryChanceGrantRule `json:"grant_rules"`
 }
@@ -95,7 +98,12 @@ func UpdateLotteryConfig(c *gin.Context) {
 	}
 	config := model.GetLotteryConfig()
 	if request.Rules != nil {
-		config.Rules = *request.Rules
+		rules := request.Rules.LotteryRules
+		rules.PityDrawLimit = config.Rules.PityDrawLimit
+		if request.Rules.PityDrawLimit != nil {
+			rules.PityDrawLimit = *request.Rules.PityDrawLimit
+		}
+		config.Rules = rules
 	}
 	if request.Prizes != nil {
 		config.Prizes = *request.Prizes

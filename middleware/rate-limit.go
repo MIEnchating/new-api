@@ -203,10 +203,35 @@ func TokenUsageRateLimit() func(c *gin.Context) {
 // LotteryDrawRateLimit allows repeated draws without consuming the much smaller
 // critical-operation budget. Must run after UserAuth; limits are per user.
 func LotteryDrawRateLimit() func(c *gin.Context) {
-	if !common.LotteryDrawRateLimitEnable {
-		return defNext
+	return func(c *gin.Context) {
+		if common.LotteryDrawRateLimitEnable && c.GetInt("id") == 0 {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+		allowed, retry, err := TakeLotteryDrawBudget(c.Request.Context(), c.GetInt("id"))
+		if err != nil {
+			logger.LogError(c.Request.Context(), common.LogText("rate limit check failed (key=%s): %v", redisUserRateLimitKey("LD", c.GetInt("id")), err))
+			c.AbortWithStatus(http.StatusInternalServerError)
+			return
+		}
+		if !allowed {
+			writeRateLimited(c, retry)
+		}
 	}
-	return userRateLimitFactory(common.LotteryDrawRateLimitNum, common.LotteryDrawRateLimitDuration, "LD")
+}
+
+// TakeLotteryDrawBudget shares the per-user limit across the website and QQ.
+func TakeLotteryDrawBudget(ctx context.Context, userID int) (bool, int64, error) {
+	if !common.LotteryDrawRateLimitEnable {
+		return true, 0, nil
+	}
+	if common.RedisEnabled {
+		allowed, _, ttl, err := redisFixedWindowTake(ctx, redisUserRateLimitKey("LD", userID), common.LotteryDrawRateLimitNum, common.LotteryDrawRateLimitDuration)
+		return allowed, ttl, err
+	}
+	inMemoryRateLimiter.Init(common.RateLimitKeyExpirationDuration)
+	key := fmt.Sprintf("LD:user:%d", userID)
+	return inMemoryRateLimiter.Request(key, common.LotteryDrawRateLimitNum, common.LotteryDrawRateLimitDuration), common.LotteryDrawRateLimitDuration, nil
 }
 
 func UserCriticalRateLimit(scope string) func(c *gin.Context) {

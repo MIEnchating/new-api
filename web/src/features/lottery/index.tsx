@@ -19,10 +19,12 @@ For commercial licensing, please contact support@quantumnous.com
 import dayjs from 'dayjs'
 import {
   CalendarDays,
+  ChevronDown,
   CircleCheck,
   Dices,
   Flame,
   Gift,
+  History,
   Loader2,
   RotateCcw,
   Search,
@@ -35,6 +37,7 @@ import {
   type FormEvent,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -45,6 +48,7 @@ import { toast } from 'sonner'
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Dialog } from '@/components/dialog'
 import { EmptyState } from '@/components/empty-state'
+import { ErrorState } from '@/components/error-state'
 import { Main } from '@/components/layout'
 import {
   CardStaggerContainer,
@@ -53,6 +57,13 @@ import {
 import { StatusBadge } from '@/components/status-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
+import { createDialogHandle, DialogTrigger } from '@/components/ui/dialog'
+import { IconBadge } from '@/components/ui/icon-badge'
 import { Input } from '@/components/ui/input'
 import { Progress } from '@/components/ui/progress'
 import {
@@ -74,7 +85,8 @@ import {
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { useIsAdmin } from '@/hooks/use-admin'
-import { formatQuota, formatTimestampToDate } from '@/lib/format'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatNumber, formatQuota, formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 import { createServerError } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
@@ -88,6 +100,7 @@ import {
   getUserLotteryDraws,
   revokeLotteryReward,
 } from './api'
+import { LotteryPrizeShowcase } from './lottery-prize-showcase'
 import { LotterySettingsDialog } from './lottery-settings-dialog'
 import { ManualLotteryGrantDialog } from './manual-lottery-grant-dialog'
 import type {
@@ -106,11 +119,8 @@ const ADMIN_PAGE_SIZE = 20
 const USER_PAGE_SIZE = 10
 // Keep each request within the server's MaxLotteryDrawCount limit.
 const MAX_DRAW_BATCH_SIZE = 100
-const LOTTERY_GRID_SIZE = 9
-const LOTTERY_GRID_CENTER = 4
-const LOTTERY_GRID_ROUTE = [0, 1, 2, 5, 8, 7, 6, 3] as const
 const EMPTY_GRANT_RULES: LotteryChanceGrantRule[] = []
-// Let the draw animation complete a few rotations before revealing the result.
+// Give the opening animation time to play before revealing the result.
 // The API response is already available, so this delay only affects the visual
 // presentation and is skipped when the request itself fails.
 const DRAW_REVEAL_DELAY_MS = 2400
@@ -242,27 +252,33 @@ function grantStatusConfig(
 }
 
 export function Lottery() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const isAdmin = useIsAdmin()
   const currencyConfig = useSystemConfigStore((store) => store.config.currency)
   const [status, setStatus] = useState<LotteryStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [drawing, setDrawing] = useState(false)
-  const [selectedBox, setSelectedBox] = useState<number | null>(null)
+  const [drawStartStatus, setDrawStartStatus] = useState<LotteryStatus | null>(
+    null
+  )
   const [latestDraw, setLatestDraw] = useState<LotteryDraw | null>(null)
   const [pendingDraws, setPendingDraws] = useState<LotteryDraw[] | null>(null)
   const [batchDraws, setBatchDraws] = useState<LotteryDraw[]>([])
   const [batchResultsOpen, setBatchResultsOpen] = useState(false)
   const drawInFlight = useRef(false)
   const drawPageActive = useRef(true)
-  const availableChances = status?.available_chances ?? 0
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const displayedStatus = drawStartStatus ?? status
+  const availableChances = displayedStatus?.available_chances ?? 0
+  const [settingsTab, setSettingsTab] = useState<'prizes' | 'grants' | null>(
+    null
+  )
   const [manualGrantOpen, setManualGrantOpen] = useState(false)
+  const [recordsOpen, setRecordsOpen] = useState(false)
+  const [recordsDialogHandle] = useState(createDialogHandle)
+  const recordsTriggerId = useId()
+  const campaignPreviewId = useId()
   const [recordView, setRecordView] = useState<'draws' | 'grants'>('draws')
   const [recordScope, setRecordScope] = useState<'mine' | 'all'>('mine')
-  const [displayedRecordScope, setDisplayedRecordScope] = useState<
-    'mine' | 'all'
-  >('mine')
   const [adminDraws, setAdminDraws] = useState<LotteryAdminDraw[]>([])
   const [adminDrawsLoading, setAdminDrawsLoading] = useState(false)
   const [hasLoadedAdminDraws, setHasLoadedAdminDraws] = useState(false)
@@ -270,6 +286,7 @@ export function Lottery() {
   const [adminTotal, setAdminTotal] = useState(0)
   const [userDraws, setUserDraws] = useState<LotteryDraw[]>([])
   const [userDrawsLoading, setUserDrawsLoading] = useState(true)
+  const [userDrawsFailed, setUserDrawsFailed] = useState(false)
   const [hasLoadedUserDraws, setHasLoadedUserDraws] = useState(false)
   const [userDrawPage, setUserDrawPage] = useState(1)
   const [userDrawTotal, setUserDrawTotal] = useState(0)
@@ -327,12 +344,15 @@ export function Lottery() {
   }, [])
 
   const loadUserDraws = useCallback(async () => {
+    if (!recordsOpen || recordView !== 'draws' || recordScope !== 'mine') return
     const requestId = ++userDrawRequestId.current
     setUserDrawsLoading(true)
+    setUserDrawsFailed(false)
     try {
       const response = await getUserLotteryDraws(userDrawPage, USER_PAGE_SIZE)
       if (requestId !== userDrawRequestId.current) return
       if (!response.success || !response.data) {
+        setUserDrawsFailed(true)
         handleServerError(response, t('Failed to load lottery records'))
         return
       }
@@ -341,6 +361,7 @@ export function Lottery() {
       setHasLoadedUserDraws(true)
     } catch (error) {
       if (requestId === userDrawRequestId.current) {
+        setUserDrawsFailed(true)
         handleServerError(error, t('Failed to load lottery records'))
       }
     } finally {
@@ -348,14 +369,21 @@ export function Lottery() {
         setUserDrawsLoading(false)
       }
     }
-  }, [t, userDrawPage])
+  }, [recordsOpen, recordScope, recordView, t, userDrawPage])
 
   useEffect(() => {
-    void loadUserDraws()
-  }, [loadUserDraws])
+    if (!drawing) void loadUserDraws()
+  }, [drawing, loadUserDraws])
 
   const loadAdminDraws = useCallback(async () => {
-    if (!isAdmin || recordScope !== 'all') return
+    if (
+      !recordsOpen ||
+      !isAdmin ||
+      recordView !== 'draws' ||
+      recordScope !== 'all'
+    ) {
+      return
+    }
     const requestId = ++adminDrawRequestId.current
     setAdminDrawsLoading(true)
     try {
@@ -371,7 +399,6 @@ export function Lottery() {
       }
       setAdminDraws(response.data.items || [])
       setAdminTotal(response.data.total || 0)
-      setDisplayedRecordScope('all')
       setHasLoadedAdminDraws(true)
     } catch (error) {
       if (requestId === adminDrawRequestId.current) {
@@ -382,15 +409,23 @@ export function Lottery() {
         setAdminDrawsLoading(false)
       }
     }
-  }, [adminPage, appliedDrawFilters, isAdmin, recordScope, t])
+  }, [
+    adminPage,
+    appliedDrawFilters,
+    isAdmin,
+    recordsOpen,
+    recordScope,
+    recordView,
+    t,
+  ])
 
   useEffect(() => {
-    void loadAdminDraws()
-  }, [loadAdminDraws])
+    if (!drawing) void loadAdminDraws()
+  }, [drawing, loadAdminDraws])
 
   const loadAdminGrants = useCallback(
     async (requestedPage = grantPage) => {
-      if (!isAdmin || recordView !== 'grants') return
+      if (!recordsOpen || !isAdmin || recordView !== 'grants') return
       const requestId = ++adminGrantRequestId.current
       setAdminGrantsLoading(true)
       try {
@@ -417,7 +452,7 @@ export function Lottery() {
         }
       }
     },
-    [appliedGrantFilters, grantPage, isAdmin, recordView, t]
+    [appliedGrantFilters, grantPage, isAdmin, recordsOpen, recordView, t]
   )
 
   useEffect(() => {
@@ -488,8 +523,8 @@ export function Lottery() {
     }
     drawInFlight.current = true
     drawStartedAt.current = Date.now()
+    setDrawStartStatus(status)
     setDrawing(true)
-    setSelectedBox(LOTTERY_GRID_ROUTE[0])
     setLatestDraw(null)
     setPendingDraws(null)
     setBatchDraws([])
@@ -511,21 +546,15 @@ export function Lottery() {
         const draws = result.draws ?? [result.draw]
         completedDraws.push(...draws)
         setStatus(result.status)
-        if (userDrawPage === 1) {
-          setUserDraws((current) =>
-            [...[...draws].reverse(), ...current].slice(0, USER_PAGE_SIZE)
-          )
-          setUserDrawTotal((current) => current + draws.length)
-        }
         // Stop if an older server returns only one draw for a batch request.
         if (draws.length !== batchSize) break
       }
     } catch (error) {
       if (drawPageActive.current) {
         handleServerError(error, t('Lottery draw failed'))
-        // A lost response may follow a committed draw. Refresh the balance and
-        // history before another manual attempt; never replay a failed batch.
-        await Promise.all([loadStatus(), loadUserDraws()])
+        // A lost response may follow a committed draw. Refresh the balance
+        // before another attempt. The history refreshes when drawing ends.
+        await loadStatus()
       }
     } finally {
       if (drawPageActive.current) {
@@ -533,26 +562,13 @@ export function Lottery() {
           setPendingDraws(completedDraws)
           if (userDrawPage !== 1) setUserDrawPage(1)
         } else {
+          setDrawStartStatus(null)
           setDrawing(false)
-          setSelectedBox(null)
           drawInFlight.current = false
         }
       }
     }
   }
-
-  useEffect(() => {
-    if (!drawing) return
-    const timer = window.setInterval(() => {
-      setSelectedBox((current) => {
-        const routeIndex = LOTTERY_GRID_ROUTE.indexOf(
-          current as (typeof LOTTERY_GRID_ROUTE)[number]
-        )
-        return LOTTERY_GRID_ROUTE[(routeIndex + 1) % LOTTERY_GRID_ROUTE.length]
-      })
-    }, 110)
-    return () => window.clearInterval(timer)
-  }, [drawing])
 
   useEffect(() => {
     const pendingDraw = pendingDraws?.at(-1)
@@ -562,11 +578,9 @@ export function Lottery() {
       DRAW_REVEAL_DELAY_MS - (Date.now() - drawStartedAt.current)
     )
     const timer = window.setTimeout(() => {
-      setSelectedBox(
-        LOTTERY_GRID_ROUTE[Math.abs(pendingDraw.id) % LOTTERY_GRID_ROUTE.length]
-      )
       setLatestDraw(pendingDraw)
       setPendingDraws(null)
+      setDrawStartStatus(null)
       setDrawing(false)
       drawInFlight.current = false
       if (pendingDraws.length > 1) {
@@ -605,9 +619,6 @@ export function Lottery() {
       setRevokeDraw(null)
       setRevokeReason('')
       await loadAdminDraws()
-      if (userDrawPage === 1) {
-        await loadUserDraws()
-      }
     } catch (error) {
       handleServerError(error, t('Failed to reverse lottery reward'))
     } finally {
@@ -623,13 +634,15 @@ export function Lottery() {
     status?.today_spend_quota || 0,
     status?.daily_active_quota || 0
   )
-  const showingAllRecords = isAdmin && displayedRecordScope === 'all'
+  const showingAllRecords =
+    isAdmin && recordScope === 'all' && hasLoadedAdminDraws
   const visibleDraws: Array<LotteryDraw | LotteryAdminDraw> = showingAllRecords
     ? adminDraws
     : userDraws
   const recordsLoading = showingAllRecords
     ? adminDrawsLoading && !hasLoadedAdminDraws
     : userDrawsLoading && !hasLoadedUserDraws
+  const showUserDrawsError = !showingAllRecords && userDrawsFailed
   const recordTotal = showingAllRecords ? adminTotal : userDrawTotal
   const recordsRefreshing = showingAllRecords
     ? adminDrawsLoading
@@ -641,228 +654,212 @@ export function Lottery() {
     : recordsRefreshing
   const campaignRules = status?.grant_rules ?? status?.active_grant_rules ?? []
   const campaignNow = Math.floor(Date.now() / 1000)
+  const campaigns = campaignRules.map((rule) => ({
+    rule,
+    state: campaignStatus(rule, campaignNow, t),
+  }))
+  const campaignPreview = campaigns
+    .filter(({ rule, state }) => rule.enabled && state.variant === 'success')
+    .map(({ rule }) => rule.name?.trim())
+    .filter(Boolean)
+    .join(' · ')
   const adminTotalPages = Math.max(1, Math.ceil(adminTotal / ADMIN_PAGE_SIZE))
   const grantTotalPages = Math.max(1, Math.ceil(grantTotal / ADMIN_PAGE_SIZE))
   const userTotalPages = Math.max(1, Math.ceil(userDrawTotal / USER_PAGE_SIZE))
   const recordColumnCount = showingGrantRecords ? 7 : showingAllRecords ? 7 : 4
-  const drawHint =
-    !loading && !status?.available_chances
-      ? t('No lottery chances available')
-      : t('One chance is consumed per draw')
+  const pityDrawsRemaining = displayedStatus?.pity_draws_remaining ?? 0
+  const pityDrawLimit = displayedStatus?.rules?.pity_draw_limit ?? 0
+  const batchReward = batchDraws.reduce((total, draw) => total + draw.quota, 0)
+  const showDrawOnStage = Boolean(status?.prizes?.length)
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const pityProgressLabel = t(
+    'Draws until guaranteed grand prize · {{draws}}',
+    {
+      draws: formatNumber(pityDrawsRemaining, locale),
+    }
+  )
+  const drawOptions = [
+    { id: 'once', count: 1, label: t('Draw once') },
+    {
+      id: '10',
+      count: 10,
+      label: t('Draw {{count}} times', { count: formatNumber(10, locale) }),
+    },
+    {
+      id: 'all',
+      count: availableChances,
+      label: t('Draw all ({{count}})', {
+        count: formatNumber(availableChances, locale),
+      }),
+    },
+  ]
 
   return (
     <Main>
-      <div className='min-h-0 min-w-0 flex-1 overflow-auto px-4 py-5 sm:px-6 sm:py-8'>
-        <CardStaggerContainer className='mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-6'>
+      <div className='min-h-0 min-w-0 flex-1 overflow-auto px-4 py-5 sm:px-6 sm:py-7'>
+        <CardStaggerContainer className='mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-4 sm:gap-5'>
           <CardStaggerItem>
-            <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
-              <div className='flex min-w-0 items-start gap-3'>
-                <div className='bg-primary/10 text-primary flex size-11 shrink-0 items-center justify-center rounded-xl'>
-                  <Dices className='size-5' aria-hidden='true' />
-                </div>
+            <div className='flex flex-wrap items-start justify-between gap-x-3 gap-y-4 sm:items-center'>
+              <div className='flex min-w-0 flex-1 basis-44 items-start gap-3'>
+                <IconBadge tone='primary' size='lg'>
+                  <Dices />
+                </IconBadge>
                 <div className='min-w-0'>
                   <h1 className='text-xl font-semibold tracking-tight sm:text-2xl'>
                     {t('Lottery Center')}
                   </h1>
-                  <p className='text-muted-foreground mt-1.5 max-w-2xl text-sm leading-6'>
+                  <p className='text-muted-foreground mt-1 max-w-2xl text-sm leading-5'>
                     {t(
                       'Earn chances through weekly usage and activity streaks, then draw quota rewards.'
                     )}
                   </p>
                 </div>
               </div>
-              {isAdmin ? (
-                <Button
-                  type='button'
-                  variant='outline'
-                  size='sm'
-                  className='min-h-11 shrink-0 whitespace-normal sm:w-auto'
-                  disabled={loading}
-                  onClick={() => setSettingsOpen(true)}
+              <div className='ms-auto flex max-w-full flex-wrap justify-end gap-2'>
+                <DialogTrigger
+                  id={recordsTriggerId}
+                  handle={recordsDialogHandle}
+                  render={
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      className='min-h-11'
+                    />
+                  }
                 >
-                  <Settings aria-hidden='true' />
-                  {t('Lottery settings')}
-                </Button>
-              ) : null}
+                  <History aria-hidden='true' />
+                  {t('Lottery records')}
+                </DialogTrigger>
+                {isAdmin ? (
+                  <Button
+                    type='button'
+                    variant='outline'
+                    size='sm'
+                    className='min-h-11 shrink-0 whitespace-normal sm:w-auto'
+                    disabled={loading}
+                    onClick={() => setSettingsTab('prizes')}
+                  >
+                    <Settings aria-hidden='true' />
+                    {t('Lottery settings')}
+                  </Button>
+                ) : null}
+              </div>
             </div>
           </CardStaggerItem>
 
-          <div
-            data-testid='lottery-overview'
-            className='grid min-w-0 items-stretch gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]'
-          >
-            <CardStaggerItem className='h-full min-w-0'>
-              <Card
-                data-card-hover='false'
-                className='bg-primary/[0.03] h-full gap-0 overflow-hidden rounded-2xl py-0'
-                data-testid='lottery-mystery-card'
+          <CardStaggerItem>
+            <Card
+              data-card-hover='false'
+              data-testid='lottery-mystery-card'
+              className='from-primary/[0.06] to-card @container/lottery gap-0 rounded-3xl bg-linear-to-br py-0'
+            >
+              <CardContent
+                className={cn(
+                  'grid min-w-0 gap-4 p-4 sm:p-6',
+                  (showDrawOnStage || (loading && !status)) &&
+                    '@min-[46rem]/lottery:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)] @min-[46rem]/lottery:grid-rows-[1fr_auto] @min-[46rem]/lottery:gap-x-7 @min-[46rem]/lottery:gap-y-5 @min-[46rem]/lottery:p-7'
+                )}
+                data-testid='lottery-overview'
               >
-                <CardHeader className='flex flex-row flex-wrap items-center justify-between gap-3 border-b px-5 py-5'>
-                  <CardTitle className='flex items-center gap-2 text-base'>
-                    <Gift className='text-primary size-4' aria-hidden='true' />
-                    {t('Mystery gifts')}
-                  </CardTitle>
-                  <div className='flex min-w-0 flex-col items-end gap-1'>
-                    <span className='text-muted-foreground text-xs'>
-                      {t('Available chances')}
-                    </span>
-                    {loading ? (
-                      <Skeleton className='h-8 w-10' />
-                    ) : (
-                      <strong className='text-primary text-3xl font-semibold tracking-tight tabular-nums'>
-                        {status?.available_chances || 0}
-                      </strong>
-                    )}
+                <div className='flex min-w-0 flex-col justify-center gap-4'>
+                  <div className='flex flex-wrap items-center justify-between gap-x-3 gap-y-2'>
+                    <div className='flex min-w-0 items-center gap-2.5'>
+                      <IconBadge tone='primary' size='lg'>
+                        <Gift />
+                      </IconBadge>
+                      <h2 className='min-w-0 text-xl font-semibold tracking-tight [overflow-wrap:anywhere] sm:text-3xl'>
+                        {t('Mystery gifts')}
+                      </h2>
+                    </div>
+                    <div className='bg-background/75 flex max-w-full flex-wrap items-baseline gap-x-2 rounded-xl border px-2.5 py-1.5'>
+                      <span className='text-muted-foreground text-xs [overflow-wrap:anywhere]'>
+                        {t('Available chances')}
+                      </span>
+                      {loading && !drawStartStatus ? (
+                        <Skeleton className='h-5 w-7' />
+                      ) : (
+                        <strong className='text-primary text-xl leading-none font-semibold [overflow-wrap:anywhere] tabular-nums'>
+                          {formatNumber(availableChances, locale)}
+                        </strong>
+                      )}
+                    </div>
                   </div>
-                </CardHeader>
-                <CardContent className='flex flex-1 flex-col items-center justify-center px-4 py-6 sm:px-6 sm:py-8'>
+                  {pityDrawsRemaining > 0 && (
+                    <div className='bg-background/70 space-y-2 rounded-xl border px-3 py-3 sm:px-4'>
+                      <div className='flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1'>
+                        <p className='text-sm font-semibold'>
+                          {t('Grand prize guarantee progress')}
+                        </p>
+                        <p className='text-muted-foreground text-xs tabular-nums sm:text-sm'>
+                          {pityProgressLabel}
+                        </p>
+                      </div>
+                      {pityDrawLimit >= pityDrawsRemaining && (
+                        <Progress
+                          aria-label={t('Grand prize guarantee progress')}
+                          aria-valuetext={pityProgressLabel}
+                          max={pityDrawLimit}
+                          value={pityDrawLimit - pityDrawsRemaining}
+                          className='[&_[data-slot=progress-indicator]]:rounded-full [&_[data-slot=progress-track]]:h-2'
+                        />
+                      )}
+                      <p className='text-muted-foreground text-xs leading-relaxed'>
+                        {t(
+                          'Only a grand prize resets this count. Every other draw advances it.'
+                        )}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                {showDrawOnStage && status && (
+                  <div className='min-w-0 @min-[46rem]/lottery:col-start-2 @min-[46rem]/lottery:row-span-2 @min-[46rem]/lottery:row-start-1'>
+                    <LotteryPrizeShowcase
+                      prizes={status.prizes}
+                      pityEnabled={pityDrawsRemaining > 0}
+                      drawing={drawing}
+                      revealedQuota={
+                        batchDraws.length > 0 ? batchReward : latestDraw?.quota
+                      }
+                    />
+                  </div>
+                )}
+                {loading && !status && (
+                  <Skeleton className='h-28 w-full rounded-2xl @min-[46rem]/lottery:col-start-2 @min-[46rem]/lottery:row-span-2 @min-[46rem]/lottery:row-start-1 @min-[46rem]/lottery:h-full' />
+                )}
+                <div className='min-w-0'>
                   <div
                     role='group'
                     aria-label={t('Mystery gifts')}
-                    className='grid w-full max-w-xs grid-cols-3 gap-2.5 sm:gap-3'
+                    className='grid grid-cols-2 gap-2 @min-[27rem]/lottery:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.4fr)]'
                   >
-                    {Array.from(
-                      { length: LOTTERY_GRID_SIZE },
-                      (_, boxIndex) => {
-                        const selected = selectedBox === boxIndex
-                        const revealed = selected && latestDraw !== null
-                        const subdued = latestDraw !== null && !selected
-                        const isCenter = boxIndex === LOTTERY_GRID_CENTER
-                        return (
-                          <Button
-                            variant='ghost'
-                            key={boxIndex}
-                            type='button'
-                            data-lottery-grid-cell='true'
-                            data-testid={
-                              isCenter
-                                ? 'lottery-draw-button'
-                                : boxIndex < 3
-                                  ? 'lottery-mystery-box'
-                                  : undefined
-                            }
-                            data-state={
-                              isCenter && drawing
-                                ? 'drawing'
-                                : revealed
-                                  ? 'revealed'
-                                  : 'idle'
-                            }
-                            aria-label={
-                              isCenter
-                                ? t('Draw now')
-                                : t('Mystery box {{index}}', {
-                                    index: boxIndex + 1,
-                                  })
-                            }
-                            disabled={
-                              !isCenter ||
-                              loading ||
-                              drawing ||
-                              (status?.available_chances || 0) <= 0
-                            }
-                            onClick={() => void handleDraw()}
-                            className={cn(
-                              'group border-border bg-background relative isolate flex aspect-square h-auto w-full min-w-0 items-center justify-center overflow-hidden rounded-2xl border p-1.5 transition-[border-color,background-color,box-shadow,opacity] duration-300 outline-none sm:p-2',
-                              'hover:border-primary/45 hover:bg-primary/[0.03] hover:shadow-sm focus-visible:ring-ring focus-visible:ring-2 focus-visible:ring-offset-2',
-                              'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-100',
-                              isCenter &&
-                                'border-primary bg-primary text-primary-foreground shadow-primary/15 shadow-md hover:bg-primary/90',
-                              isCenter &&
-                                !drawing &&
-                                !status?.available_chances &&
-                                'disabled:opacity-50',
-                              selected &&
-                                drawing &&
-                                'border-primary bg-primary/10 ring-primary/25 shadow-primary/15 shadow-md ring-2',
-                              drawing &&
-                                !selected &&
-                                !isCenter &&
-                                'disabled:opacity-55',
-                              revealed &&
-                                'border-success/45 bg-success/[0.04] shadow-success/10 shadow-md',
-                              subdued && !isCenter && 'disabled:opacity-35'
-                            )}
-                          >
-                            <span className='relative z-10 flex min-h-16 min-w-0 items-center justify-center'>
-                              {revealed ? (
-                                <span className='motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-75 flex flex-col items-center gap-1 text-center motion-safe:duration-500'>
-                                  <span className='bg-success/10 flex size-8 items-center justify-center rounded-full'>
-                                    <Sparkles
-                                      className='text-success size-4'
-                                      aria-hidden='true'
-                                    />
-                                  </span>
-                                  <strong className='text-sm leading-tight [overflow-wrap:anywhere] whitespace-normal tabular-nums sm:text-base'>
-                                    {latestDraw.quota > 0
-                                      ? formatQuota(latestDraw.quota)
-                                      : t('No prize')}
-                                  </strong>
-                                </span>
-                              ) : (
-                                <span
-                                  className={cn(
-                                    'flex items-center justify-center rounded-full transition-colors duration-300',
-                                    isCenter
-                                      ? 'bg-primary-foreground/10 size-14 sm:size-16'
-                                      : 'bg-muted group-hover:bg-primary/8 size-10 sm:size-11'
-                                  )}
-                                >
-                                  {isCenter ? (
-                                    <span className='flex flex-col items-center gap-1'>
-                                      <Dices
-                                        className={cn(
-                                          'text-primary-foreground size-6',
-                                          drawing &&
-                                            'motion-safe:animate-bounce'
-                                        )}
-                                        aria-hidden='true'
-                                      />
-                                      <span className='text-primary-foreground max-w-full text-center text-[11px] leading-3 font-semibold whitespace-normal'>
-                                        {drawing
-                                          ? t('Drawing...')
-                                          : t('Draw now')}
-                                      </span>
-                                    </span>
-                                  ) : (
-                                    <Gift
-                                      className={cn(
-                                        'size-5 transition-colors duration-150 sm:size-6',
-                                        selected && drawing
-                                          ? 'text-primary'
-                                          : 'text-muted-foreground group-hover:text-primary'
-                                      )}
-                                      aria-hidden='true'
-                                    />
-                                  )}
-                                </span>
-                              )}
-                            </span>
-                          </Button>
-                        )
-                      }
-                    )}
-                  </div>
-                  <div className='mt-4 flex w-full max-w-xs flex-wrap gap-2'>
-                    {[
-                      { id: '10', count: 10 },
-                      { id: 'all', count: availableChances },
-                    ].map(({ id, count }) => (
+                    {drawOptions.map((option) => (
                       <Button
-                        key={id}
+                        key={option.id}
                         type='button'
-                        variant='outline'
-                        className='h-auto min-h-9 min-w-0 flex-1 whitespace-normal'
-                        data-testid={`lottery-draw-${id}`}
+                        variant={option.id === 'once' ? 'default' : 'outline'}
+                        size='lg'
+                        className={cn(
+                          'h-auto min-h-11 min-w-0 rounded-xl px-2.5 py-2 leading-snug whitespace-normal [overflow-wrap:anywhere] sm:px-3',
+                          option.id === 'all' &&
+                            'col-span-2 @min-[27rem]/lottery:col-span-1'
+                        )}
+                        data-testid={
+                          option.id === 'once'
+                            ? 'lottery-draw-button'
+                            : `lottery-draw-${option.id}`
+                        }
+                        data-state={drawing ? 'drawing' : 'idle'}
                         disabled={
                           loading ||
                           drawing ||
-                          count <= 0 ||
-                          availableChances < count
+                          option.count <= 0 ||
+                          availableChances < option.count
                         }
-                        onClick={() => void handleDraw(count)}
+                        onClick={() => void handleDraw(option.count)}
                       >
-                        {t('Draw {{count}} times', { count })}
+                        {option.id === 'once' && <Dices aria-hidden='true' />}
+                        {option.label}
                       </Button>
                     ))}
                   </div>
@@ -870,428 +867,454 @@ export function Lottery() {
                     role='status'
                     aria-live='polite'
                     aria-atomic='true'
-                    className='mt-5 flex min-h-6 items-center justify-center text-center text-sm font-medium'
+                    className='text-muted-foreground text-xs'
                   >
                     {drawing && (
                       <span
-                        className='text-primary inline-flex items-center gap-2'
+                        className={cn(
+                          'text-primary mt-2 inline-flex items-center gap-2',
+                          showDrawOnStage && 'sr-only'
+                        )}
                         data-testid='lottery-draw-progress'
                       >
-                        <span>{t('Drawing...')}</span>
-                        <span
-                          className='inline-flex items-end gap-1'
+                        <Loader2
+                          className='size-4 motion-safe:animate-spin'
                           aria-hidden='true'
-                        >
-                          <i className='bg-primary size-1.5 rounded-full motion-safe:animate-bounce' />
-                          <i className='bg-primary size-1.5 rounded-full [animation-delay:120ms] motion-safe:animate-bounce' />
-                          <i className='bg-primary size-1.5 rounded-full [animation-delay:240ms] motion-safe:animate-bounce' />
-                        </span>
-                        <span
-                          className='bg-primary/10 inline-flex h-1.5 w-14 items-stretch gap-0.5 overflow-hidden rounded-full p-0.5'
-                          aria-hidden='true'
-                        >
-                          <i className='bg-primary/70 flex-1 rounded-full motion-safe:animate-pulse' />
-                          <i className='bg-primary/45 flex-1 rounded-full [animation-delay:120ms] motion-safe:animate-pulse' />
-                          <i className='bg-primary/25 flex-1 rounded-full [animation-delay:240ms] motion-safe:animate-pulse' />
-                        </span>
+                        />
+                        {t('Drawing...')}
                       </span>
                     )}
                     {!drawing && batchDraws.length > 0 && (
-                      <span>
+                      <span
+                        className={cn(
+                          'text-foreground mt-2 block font-medium',
+                          showDrawOnStage && 'sr-only'
+                        )}
+                      >
                         {t(
                           'Completed {{count}} draws · Total reward: {{amount}}',
                           {
                             count: batchDraws.length,
-                            amount: formatQuota(
-                              batchDraws.reduce(
-                                (total, draw) => total + draw.quota,
-                                0
-                              )
-                            ),
+                            amount: formatQuota(batchReward),
                           }
                         )}
                       </span>
                     )}
                     {!drawing && batchDraws.length === 0 && latestDraw && (
-                      <span className='motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-300'>
+                      <span
+                        className={cn(
+                          'text-foreground mt-2 block font-medium',
+                          showDrawOnStage && 'sr-only'
+                        )}
+                      >
                         {drawResultLabel(latestDraw, t)}
                       </span>
                     )}
                     {!drawing &&
                       batchDraws.length === 0 &&
                       !latestDraw &&
-                      drawHint}
+                      !loading &&
+                      !availableChances && (
+                        <p className='mt-2'>
+                          {t('No lottery chances available')}
+                        </p>
+                      )}
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+          </CardStaggerItem>
+
+          {campaignRules.length > 0 && (
+            <CardStaggerItem>
+              <Card data-card-hover='false' className='gap-0 py-0'>
+                <Collapsible>
+                  <CollapsibleTrigger
+                    aria-label={t('Campaign')}
+                    aria-describedby={
+                      campaignPreview ? campaignPreviewId : undefined
+                    }
+                    render={
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        className='group hover:bg-primary/10 h-auto min-h-12 w-full justify-start gap-3 rounded-xl px-4 py-2 text-start sm:px-5'
+                      />
+                    }
+                  >
+                    <IconBadge tone='primary' size='sm'>
+                      <Sparkles />
+                    </IconBadge>
+                    <span className='shrink-0'>{t('Campaign')}</span>
+                    {campaignPreview && (
+                      <span
+                        id={campaignPreviewId}
+                        className='text-muted-foreground min-w-0 truncate text-xs font-normal sm:text-sm'
+                      >
+                        {campaignPreview}
+                      </span>
+                    )}
+                    <ChevronDown
+                      className='text-muted-foreground ms-auto group-aria-expanded:rotate-180 motion-safe:transition-transform'
+                      aria-hidden='true'
+                    />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className='border-t'>
+                    {isAdmin && (
+                      <div className='flex justify-end px-5 pt-3'>
+                        <Button
+                          type='button'
+                          variant='outline'
+                          size='sm'
+                          onClick={() => setSettingsTab('grants')}
+                        >
+                          <Settings aria-hidden='true' />
+                          {t('Chance grants')}
+                        </Button>
+                      </div>
+                    )}
+                    <CardContent className='grid grid-cols-[repeat(auto-fit,minmax(min(100%,18rem),1fr))] items-stretch gap-3 px-5 py-4'>
+                      {campaigns.map(({ rule, state }) => (
+                        <div
+                          key={rule.id}
+                          className='bg-card flex h-full min-w-0 flex-col gap-2.5 rounded-xl border px-4 py-3'
+                        >
+                          <div className='flex min-h-7 flex-wrap items-center justify-between gap-2'>
+                            <span className='min-w-0 text-sm font-medium break-words'>
+                              {rule.name || t('Campaign')}
+                            </span>
+                            <div className='flex flex-wrap items-center gap-1.5'>
+                              <StatusBadge variant='info'>
+                                {t('{{count}} chances', {
+                                  count: rule.chances,
+                                })}
+                              </StatusBadge>
+                              <StatusBadge variant={state.variant}>
+                                {state.label}
+                              </StatusBadge>
+                            </div>
+                          </div>
+                          <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs leading-5'>
+                            {rule.type === 'recharge' ? (
+                              <>
+                                <p>
+                                  {t('Recharge threshold')}:{' '}
+                                  <span className='text-foreground font-medium'>
+                                    {formatQuota(
+                                      rule.threshold *
+                                        currencyConfig.quotaPerUnit
+                                    )}
+                                  </span>
+                                </p>
+                                <p>
+                                  {t('Grant frequency')}:{' '}
+                                  <span className='text-foreground font-medium'>
+                                    {rechargeGrantLimitLabel(rule.limit, t)}
+                                  </span>
+                                </p>
+                              </>
+                            ) : (
+                              <>
+                                <p>{t('Receive once during the event')}</p>
+                                {rule.reclaim ? (
+                                  <p>
+                                    {t('After the event ends')}:{' '}
+                                    <span className='text-foreground font-medium'>
+                                      {t('Reclaim unused chances')}
+                                    </span>
+                                  </p>
+                                ) : null}
+                              </>
+                            )}
+                          </div>
+                          <div className='text-muted-foreground flex min-w-0 items-start gap-1.5 border-t pt-2 text-xs leading-5'>
+                            <CalendarDays
+                              className='text-primary mt-0.5 size-3.5 shrink-0'
+                              aria-hidden='true'
+                            />
+                            <span className='min-w-0 break-words'>
+                              {t('Validity Period')}:{' '}
+                              {rule.start_at > 0
+                                ? formatTimestampToDate(rule.start_at)
+                                : t('Effective immediately')}
+                              {' - '}
+                              {rule.end_at > 0
+                                ? formatTimestampToDate(rule.end_at)
+                                : t('Never expires')}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </CollapsibleContent>
+                </Collapsible>
+              </Card>
+            </CardStaggerItem>
+          )}
+
+          <div
+            className='grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3'
+            data-testid='lottery-rules-grid'
+          >
+            <CardStaggerItem className='h-full min-w-0'>
+              <Card
+                data-card-hover='false'
+                className='h-full min-w-0 gap-0 rounded-2xl py-0'
+              >
+                <CardHeader className='border-b px-5 py-4'>
+                  <CardTitle className='flex items-center gap-2 text-base'>
+                    <Trophy className='text-chart-2 size-4' />
+                    {t('Weekly lottery chances')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className='flex flex-col gap-3 px-5 py-4'>
+                  <div className='flex flex-wrap items-end justify-between gap-3'>
+                    <div>
+                      <p className='text-muted-foreground text-xs'>
+                        {t('Weekly spending')}
+                      </p>
+                      <div className='mt-1 text-lg font-semibold tabular-nums'>
+                        {loading ? (
+                          <Skeleton className='h-7 w-28' />
+                        ) : (
+                          formatQuota(status?.weekly_spend_quota || 0)
+                        )}
+                      </div>
+                    </div>
+                    <StatusBadge variant='info' size='lg'>
+                      {t('{{earned}} / {{limit}} chances', {
+                        earned: status?.weekly_earned_chances || 0,
+                        limit: status?.weekly_chance_limit ?? 0,
+                      })}
+                    </StatusBadge>
+                  </div>
+                  <Progress
+                    aria-label={t('Weekly spending')}
+                    value={weeklyProgress}
+                  />
+                  <p className='text-muted-foreground text-xs leading-5'>
+                    {t(
+                      'Earn 1 chance for every {{amount}} spent each week, up to {{limit}} chances.',
+                      {
+                        amount: formatQuota(
+                          (status?.rules?.weekly_spend_amount ?? 50) *
+                            currencyConfig.quotaPerUnit
+                        ),
+                        limit: status?.weekly_chance_limit ?? 0,
+                      }
+                    )}
+                  </p>
                 </CardContent>
               </Card>
             </CardStaggerItem>
 
-            <div
-              className='grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2'
-              data-testid='lottery-rules-grid'
-            >
-              <CardStaggerItem className='h-full min-w-0'>
-                <Card
-                  data-card-hover='false'
-                  className='h-full min-w-0 gap-0 rounded-2xl py-0'
-                >
-                  <CardHeader className='border-b px-5 py-4'>
-                    <CardTitle className='flex items-center gap-2 text-base'>
-                      <Trophy className='text-chart-2 size-4' />
-                      {t('Weekly lottery chances')}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className='flex flex-col gap-3 px-5 py-4'>
-                    <div className='flex flex-wrap items-end justify-between gap-3'>
-                      <div>
-                        <p className='text-muted-foreground text-xs'>
-                          {t('Weekly spending')}
-                        </p>
-                        <div className='mt-1 text-lg font-semibold tabular-nums'>
-                          {loading ? (
-                            <Skeleton className='h-7 w-28' />
-                          ) : (
-                            formatQuota(status?.weekly_spend_quota || 0)
-                          )}
-                        </div>
+            <CardStaggerItem className='h-full min-w-0'>
+              <Card
+                data-card-hover='false'
+                className='h-full min-w-0 gap-0 rounded-2xl py-0'
+              >
+                <CardHeader className='border-b px-5 py-4'>
+                  <CardTitle className='flex items-center gap-2 text-base'>
+                    <CalendarDays className='text-chart-3 size-4' />
+                    {t('Daily activity')}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className='flex flex-col gap-3 px-5 py-4'>
+                  <div className='flex flex-wrap items-center justify-between gap-3'>
+                    <div>
+                      <p className='text-muted-foreground text-xs'>
+                        {t('Today spent')}
+                      </p>
+                      <div className='mt-1 font-semibold tabular-nums'>
+                        {loading ? (
+                          <Skeleton className='h-6 w-24' />
+                        ) : (
+                          formatQuota(status?.today_spend_quota || 0)
+                        )}
                       </div>
-                      <StatusBadge variant='info' size='lg'>
-                        {t('{{earned}} / {{limit}} chances', {
-                          earned: status?.weekly_earned_chances || 0,
-                          limit: status?.weekly_chance_limit ?? 0,
-                        })}
-                      </StatusBadge>
                     </div>
-                    <Progress
-                      aria-label={t('Weekly spending')}
-                      value={weeklyProgress}
-                    />
-                    <p className='text-muted-foreground text-xs leading-5'>
-                      {t(
-                        'Earn 1 chance for every {{amount}} spent each week, up to {{limit}} chances.',
-                        {
-                          amount: formatQuota(
-                            (status?.rules?.weekly_spend_amount ?? 50) *
-                              currencyConfig.quotaPerUnit
-                          ),
-                          limit: status?.weekly_chance_limit ?? 0,
-                        }
-                      )}
-                    </p>
-                  </CardContent>
-                </Card>
-              </CardStaggerItem>
-
-              <CardStaggerItem className='h-full min-w-0'>
-                <Card
-                  data-card-hover='false'
-                  className='h-full min-w-0 gap-0 rounded-2xl py-0'
-                >
-                  <CardHeader className='border-b px-5 py-4'>
-                    <CardTitle className='flex items-center gap-2 text-base'>
-                      <CalendarDays className='text-chart-3 size-4' />
-                      {t('Daily activity')}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className='flex flex-col gap-3 px-5 py-4'>
-                    <div className='flex flex-wrap items-center justify-between gap-3'>
-                      <div>
-                        <p className='text-muted-foreground text-xs'>
-                          {t('Today spent')}
-                        </p>
-                        <div className='mt-1 font-semibold tabular-nums'>
-                          {loading ? (
-                            <Skeleton className='h-6 w-24' />
-                          ) : (
-                            formatQuota(status?.today_spend_quota || 0)
-                          )}
-                        </div>
-                      </div>
-                      <StatusBadge
-                        variant={status?.today_active ? 'success' : 'neutral'}
-                        size='lg'
-                      >
-                        {status?.today_active
-                          ? t('Active today')
-                          : t('Not active yet')}
-                      </StatusBadge>
-                    </div>
-                    <Progress
-                      aria-label={t('Today spent')}
-                      value={dailyProgress}
-                    />
-                    <p className='text-muted-foreground text-xs'>
-                      {t(
-                        'Spend {{amount}} in a single day to mark that day as active.',
-                        {
-                          amount: formatQuota(
-                            (status?.rules?.daily_active_amount ?? 20) *
-                              currencyConfig.quotaPerUnit
-                          ),
-                        }
-                      )}
-                    </p>
-                  </CardContent>
-                </Card>
-              </CardStaggerItem>
-
-              <CardStaggerItem className='h-full min-w-0 sm:col-span-2'>
-                <Card
-                  data-card-hover='false'
-                  className='h-full min-w-0 gap-0 rounded-2xl py-0'
-                >
-                  <CardHeader className='flex flex-row flex-wrap items-center justify-between gap-3 border-b px-5 py-4'>
-                    <CardTitle className='flex items-center gap-2 text-base'>
-                      <Flame
-                        className='text-warning size-4'
-                        aria-hidden='true'
-                      />
-                      {t('Activity streak')}
-                    </CardTitle>
-                    <div
-                      className='flex items-baseline gap-1'
-                      data-testid='lottery-current-streak'
+                    <StatusBadge
+                      variant={status?.today_active ? 'success' : 'neutral'}
+                      size='lg'
                     >
-                      <strong className='text-lg tabular-nums'>
-                        {status?.current_streak || 0}
-                      </strong>
-                      <span className='text-muted-foreground text-xs'>
-                        {(status?.current_streak || 0) === 1
-                          ? t('day')
-                          : t('days')}
-                      </span>
-                    </div>
-                  </CardHeader>
-                  <CardContent className='flex flex-1 flex-col gap-4 px-5 py-4'>
-                    <p className='text-muted-foreground text-xs'>
-                      {t('Current streak')}
-                    </p>
-                    <div className='grid grid-cols-7 gap-1 sm:gap-2'>
-                      {activity.map((day) => (
+                      {status?.today_active
+                        ? t('Active today')
+                        : t('Not active yet')}
+                    </StatusBadge>
+                  </div>
+                  <Progress
+                    aria-label={t('Today spent')}
+                    value={dailyProgress}
+                  />
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'Spend {{amount}} in a single day to mark that day as active.',
+                      {
+                        amount: formatQuota(
+                          (status?.rules?.daily_active_amount ?? 20) *
+                            currencyConfig.quotaPerUnit
+                        ),
+                      }
+                    )}
+                  </p>
+                </CardContent>
+              </Card>
+            </CardStaggerItem>
+
+            <CardStaggerItem className='h-full min-w-0 sm:col-span-2 xl:col-span-1'>
+              <Card
+                data-card-hover='false'
+                className='h-full min-w-0 gap-0 rounded-2xl py-0'
+              >
+                <CardHeader className='flex flex-row flex-wrap items-center justify-between gap-3 border-b px-5 py-4'>
+                  <CardTitle className='flex items-center gap-2 text-base'>
+                    <Flame className='text-warning size-4' aria-hidden='true' />
+                    {t('Activity streak')}
+                  </CardTitle>
+                  <div
+                    className='flex items-baseline gap-1'
+                    data-testid='lottery-current-streak'
+                  >
+                    <strong className='text-lg tabular-nums'>
+                      {status?.current_streak || 0}
+                    </strong>
+                    <span className='text-muted-foreground text-xs'>
+                      {(status?.current_streak || 0) === 1
+                        ? t('day')
+                        : t('days')}
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent className='flex flex-1 flex-col gap-4 px-5 py-4'>
+                  <p className='text-muted-foreground text-xs'>
+                    {t('Current streak')}
+                  </p>
+                  <div className='grid grid-cols-7 gap-1 sm:gap-2'>
+                    {activity.map((day) => (
+                      <div
+                        key={day.date}
+                        className='flex min-w-0 flex-col items-center gap-1.5'
+                        title={day.date}
+                      >
                         <div
-                          key={day.date}
-                          className='flex min-w-0 flex-col items-center gap-1.5'
-                          title={day.date}
+                          className={cn(
+                            'flex size-8 items-center justify-center rounded-lg border',
+                            day.active
+                              ? 'border-success/30 bg-success/10 text-success'
+                              : 'text-muted-foreground'
+                          )}
                         >
-                          <div
-                            className={cn(
-                              'flex size-8 items-center justify-center rounded-lg border',
-                              day.active
-                                ? 'border-success/30 bg-success/10 text-success'
-                                : 'text-muted-foreground'
-                            )}
-                          >
-                            {day.active ? (
-                              <CircleCheck className='size-4' />
-                            ) : (
-                              <span className='size-1.5 rounded-full bg-current opacity-40' />
-                            )}
-                          </div>
-                          <span className='text-muted-foreground text-[10px]'>
-                            {day.date.slice(5)}
-                          </span>
+                          {day.active ? (
+                            <CircleCheck className='size-4' />
+                          ) : (
+                            <span className='size-1.5 rounded-full bg-current opacity-40' />
+                          )}
                         </div>
-                      ))}
-                    </div>
-                    <div className='mt-auto grid gap-2 border-t pt-3 sm:grid-cols-2'>
-                      {(status?.rules?.streak_rewards || []).map((reward) => (
-                        <div
-                          key={reward.days}
-                          className='bg-muted/30 rounded-xl border px-3 py-3'
-                        >
-                          <span className='text-sm font-medium'>
-                            {t('{{days}}-day streak', { days: reward.days })}
-                          </span>
-                          <p className='text-muted-foreground mt-0.5 text-xs'>
-                            {t('Reward: {{count}} lottery chances', {
-                              count: reward.chances,
-                            })}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              </CardStaggerItem>
-            </div>
+                        <span className='text-muted-foreground text-[10px]'>
+                          {day.date.slice(5)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className='mt-auto grid gap-2 border-t pt-3 sm:grid-cols-2'>
+                    {(status?.rules?.streak_rewards || []).map((reward) => (
+                      <div
+                        key={reward.days}
+                        className='bg-muted/30 rounded-xl border px-3 py-3'
+                      >
+                        <span className='text-sm font-medium'>
+                          {t('{{days}}-day streak', { days: reward.days })}
+                        </span>
+                        <p className='text-muted-foreground mt-0.5 text-xs'>
+                          {t('Reward: {{count}} lottery chances', {
+                            count: reward.chances,
+                          })}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            </CardStaggerItem>
           </div>
 
-          <CardStaggerItem>
-            <Card
-              data-card-hover='false'
-              className='min-w-0 gap-0 rounded-2xl py-0'
-            >
-              <CardHeader className='border-b px-5 py-4'>
-                <CardTitle className='flex items-center gap-2 text-base'>
-                  <Sparkles className='text-warning size-4' />
-                  {t('Campaign')}
-                </CardTitle>
-              </CardHeader>
-              {campaignRules.length > 0 ? (
-                <CardContent className='grid items-stretch gap-3 px-5 py-5 md:grid-cols-2'>
-                  {campaignRules.map((rule) => {
-                    const state = campaignStatus(rule, campaignNow, t)
-                    return (
-                      <div
-                        key={rule.id}
-                        className='bg-muted/20 flex h-full min-w-0 flex-col gap-3 rounded-xl border p-4'
-                      >
-                        <div className='flex min-h-7 flex-wrap items-center justify-between gap-2'>
-                          <span className='min-w-0 text-sm font-medium break-words'>
-                            {rule.name || t('Campaign')}
-                          </span>
-                          <div className='flex flex-wrap items-center gap-1.5'>
-                            <StatusBadge variant='info'>
-                              {t('{{count}} chances', { count: rule.chances })}
-                            </StatusBadge>
-                            <StatusBadge variant={state.variant}>
-                              {state.label}
-                            </StatusBadge>
-                          </div>
-                        </div>
-                        <div className='text-muted-foreground flex flex-col gap-1 text-xs leading-5'>
-                          {rule.type === 'recharge' ? (
-                            <>
-                              <p>
-                                {t('Recharge threshold')}:{' '}
-                                <span className='text-foreground font-medium'>
-                                  {formatQuota(
-                                    rule.threshold * currencyConfig.quotaPerUnit
-                                  )}
-                                </span>
-                              </p>
-                              <p>
-                                {t('Grant frequency')}:{' '}
-                                <span className='text-foreground font-medium'>
-                                  {rechargeGrantLimitLabel(rule.limit, t)}
-                                </span>
-                              </p>
-                            </>
-                          ) : (
-                            <>
-                              <p>{t('Receive once during the event')}</p>
-                              {rule.reclaim ? (
-                                <p>
-                                  {t('After the event ends')}:{' '}
-                                  <span className='text-foreground font-medium'>
-                                    {t('Reclaim unused chances')}
-                                  </span>
-                                </p>
-                              ) : null}
-                            </>
-                          )}
-                        </div>
-                        <div className='text-muted-foreground flex min-w-0 items-start gap-1.5 border-t pt-2 text-xs leading-5'>
-                          <CalendarDays
-                            className='text-primary mt-0.5 size-3.5 shrink-0'
-                            aria-hidden='true'
-                          />
-                          <span className='min-w-0 break-words'>
-                            {t('Validity Period')}:{' '}
-                            {rule.start_at > 0
-                              ? formatTimestampToDate(rule.start_at)
-                              : t('Effective immediately')}
-                            {' - '}
-                            {rule.end_at > 0
-                              ? formatTimestampToDate(rule.end_at)
-                              : t('Never expires')}
-                          </span>
-                        </div>
-                      </div>
-                    )
+          <Dialog
+            handle={recordsDialogHandle}
+            triggerId={recordsTriggerId}
+            open={recordsOpen}
+            onOpenChange={setRecordsOpen}
+            title={t('Lottery records')}
+            contentClassName={cn(
+              'overflow-hidden p-0 sm:p-0',
+              isAdmin && 'sm:max-w-5xl'
+            )}
+            headerClassName='border-b px-5 pt-4 pb-3 pr-12'
+            bodyClassName='px-0 py-0'
+          >
+            <div className='min-w-0'>
+              <div className='flex min-w-0 flex-wrap items-center gap-2 px-5 py-3'>
+                {isAdmin ? (
+                  <Tabs
+                    value={recordView}
+                    onValueChange={(value) => {
+                      const nextView = value as 'draws' | 'grants'
+                      setRecordView(nextView)
+                      if (nextView === 'grants') setGrantPage(1)
+                    }}
+                  >
+                    <TabsList>
+                      <TabsTrigger value='draws'>
+                        {t('Draw records')}
+                      </TabsTrigger>
+                      <TabsTrigger value='grants'>
+                        {t('Chance grant records')}
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                ) : null}
+                {isAdmin ? (
+                  <Tabs
+                    value={recordScope}
+                    className={showingGrantRecords ? 'hidden' : undefined}
+                    onValueChange={(value) => {
+                      const nextScope = value as 'mine' | 'all'
+                      setRecordScope(nextScope)
+                      if (nextScope === 'all') {
+                        setAdminPage(1)
+                      } else {
+                        setUserDrawPage(1)
+                      }
+                    }}
+                  >
+                    <TabsList>
+                      <TabsTrigger value='mine'>{t('My records')}</TabsTrigger>
+                      <TabsTrigger value='all'>{t('All records')}</TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                ) : null}
+                {showingGrantRecords ? (
+                  <Button
+                    type='button'
+                    size='sm'
+                    onClick={() => setManualGrantOpen(true)}
+                  >
+                    <Gift aria-hidden='true' />
+                    {t('Manual grant')}
+                  </Button>
+                ) : null}
+                <span className='text-muted-foreground text-xs tabular-nums'>
+                  {displayedRecordsRefreshing ? (
+                    <Loader2
+                      className='mr-1 inline size-3.5 animate-spin'
+                      aria-label={t('Loading')}
+                    />
+                  ) : null}
+                  {t('{{count}} records', {
+                    count: displayedRecordTotal,
                   })}
-                </CardContent>
-              ) : (
-                <CardContent className='text-muted-foreground flex min-h-28 items-center justify-center py-6 text-sm'>
-                  {t('No campaigns currently')}
-                </CardContent>
-              )}
-            </Card>
-          </CardStaggerItem>
-
-          <CardStaggerItem>
-            <Card
-              data-card-hover='false'
-              className='min-w-0 gap-0 rounded-2xl py-0'
-            >
-              <CardHeader className='flex flex-row flex-wrap items-center justify-between gap-3 border-b px-5 py-5'>
-                <CardTitle className='text-base'>
-                  {showingGrantRecords
-                    ? t('Chance grant records')
-                    : t('Lottery records')}
-                </CardTitle>
-                <div className='flex min-w-0 flex-wrap items-center gap-2 sm:justify-end'>
-                  {isAdmin ? (
-                    <Tabs
-                      value={recordView}
-                      onValueChange={(value) => {
-                        const nextView = value as 'draws' | 'grants'
-                        setRecordView(nextView)
-                        if (nextView === 'grants') setGrantPage(1)
-                      }}
-                    >
-                      <TabsList>
-                        <TabsTrigger value='draws'>
-                          {t('Draw records')}
-                        </TabsTrigger>
-                        <TabsTrigger value='grants'>
-                          {t('Chance grant records')}
-                        </TabsTrigger>
-                      </TabsList>
-                    </Tabs>
-                  ) : null}
-                  {isAdmin ? (
-                    <Tabs
-                      value={recordScope}
-                      className={showingGrantRecords ? 'hidden' : undefined}
-                      onValueChange={(value) => {
-                        const nextScope = value as 'mine' | 'all'
-                        setRecordScope(nextScope)
-                        if (
-                          (nextScope === 'mine' && hasLoadedUserDraws) ||
-                          (nextScope === 'all' && hasLoadedAdminDraws)
-                        ) {
-                          setDisplayedRecordScope(nextScope)
-                        }
-                        if (nextScope === 'all') {
-                          setAdminPage(1)
-                        } else {
-                          setUserDrawPage(1)
-                        }
-                      }}
-                    >
-                      <TabsList>
-                        <TabsTrigger value='mine'>
-                          {t('My records')}
-                        </TabsTrigger>
-                        <TabsTrigger value='all'>
-                          {t('All records')}
-                        </TabsTrigger>
-                      </TabsList>
-                    </Tabs>
-                  ) : null}
-                  {showingGrantRecords ? (
-                    <Button
-                      type='button'
-                      size='sm'
-                      onClick={() => setManualGrantOpen(true)}
-                    >
-                      <Gift aria-hidden='true' />
-                      {t('Manual grant')}
-                    </Button>
-                  ) : null}
-                  <span className='text-muted-foreground text-xs tabular-nums'>
-                    {displayedRecordsRefreshing ? (
-                      <Loader2
-                        className='mr-1 inline size-3.5 animate-spin'
-                        aria-label={t('Loading')}
-                      />
-                    ) : null}
-                    {t('{{count}} records', { count: displayedRecordTotal })}
-                  </span>
-                </div>
-              </CardHeader>
-              <CardContent className='p-0'>
+                </span>
+              </div>
+              <div>
                 {showingGrantRecords ? (
                   <form
                     className='bg-muted/20 grid gap-3 border-b p-5 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_170px_150px_auto]'
@@ -1578,6 +1601,16 @@ export function Lottery() {
                           />
                         </TableCell>
                       </TableRow>
+                    ) : showUserDrawsError ? (
+                      <TableRow>
+                        <TableCell colSpan={recordColumnCount}>
+                          <ErrorState
+                            title={t('Failed to load lottery records')}
+                            onRetry={() => void loadUserDraws()}
+                            className='min-h-44'
+                          />
+                        </TableCell>
+                      </TableRow>
                     ) : visibleDraws.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={recordColumnCount} className='p-0'>
@@ -1677,7 +1710,7 @@ export function Lottery() {
                 {(
                   showingGrantRecords
                     ? !(adminGrantsLoading && !hasLoadedAdminGrants)
-                    : !recordsLoading
+                    : !recordsLoading && !showUserDrawsError
                 ) ? (
                   <div
                     className='bg-muted/10 flex flex-wrap items-center justify-between gap-3 border-t px-5 py-4 text-sm'
@@ -1744,9 +1777,59 @@ export function Lottery() {
                     </div>
                   </div>
                 ) : null}
-              </CardContent>
-            </Card>
-          </CardStaggerItem>
+              </div>
+            </div>
+            <ManualLotteryGrantDialog
+              open={manualGrantOpen}
+              onOpenChange={setManualGrantOpen}
+              grantRules={status?.active_grant_rules ?? EMPTY_GRANT_RULES}
+              onSuccess={async () => {
+                setGrantPage(1)
+                await Promise.all([loadAdminGrants(1), loadStatus()])
+              }}
+            />
+            <ConfirmDialog
+              open={revokeDraw !== null}
+              onOpenChange={(open) => {
+                if (!open && !revoking) {
+                  setRevokeDraw(null)
+                  setRevokeReason('')
+                }
+              }}
+              title={t('Reverse lottery reward')}
+              desc={t(
+                'The awarded quota will be deducted and a linked reversal transaction will be created. The original record will remain.'
+              )}
+              confirmText={t('Confirm reversal')}
+              destructive
+              disabled={revokeReason.trim().length < 2}
+              isLoading={revoking}
+              handleConfirm={() => void handleRevokeReward()}
+            >
+              <div className='space-y-2'>
+                {revokeDraw ? (
+                  <div className='bg-muted/50 rounded-md border px-3 py-2 text-sm'>
+                    <div className='font-medium'>
+                      {revokeDraw.username || `ID: ${revokeDraw.user_id}`}
+                    </div>
+                    <div className='text-muted-foreground mt-1 font-mono text-xs break-all'>
+                      {revokeDraw.event_reference}
+                    </div>
+                    <div className='mt-1 font-medium tabular-nums'>
+                      -{formatQuota(revokeDraw.quota)}
+                    </div>
+                  </div>
+                ) : null}
+                <Textarea
+                  value={revokeReason}
+                  onChange={(event) => setRevokeReason(event.target.value)}
+                  placeholder={t('Reason')}
+                  aria-label={t('Reason')}
+                  maxLength={200}
+                />
+              </div>
+            </ConfirmDialog>
+          </Dialog>
         </CardStaggerContainer>
       </div>
       <Dialog
@@ -1755,9 +1838,7 @@ export function Lottery() {
         title={t('Batch draw results')}
         description={t('Completed {{count}} draws · Total reward: {{amount}}', {
           count: batchDraws.length,
-          amount: formatQuota(
-            batchDraws.reduce((total, draw) => total + draw.quota, 0)
-          ),
+          amount: formatQuota(batchReward),
         })}
         footer={
           <Button onClick={() => setBatchResultsOpen(false)}>
@@ -1783,8 +1864,11 @@ export function Lottery() {
         </ol>
       </Dialog>
       <LotterySettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
+        open={settingsTab !== null}
+        initialTab={settingsTab ?? undefined}
+        onOpenChange={(open) => {
+          if (!open) setSettingsTab(null)
+        }}
         onSaved={(config) => {
           setStatus((current) =>
             current
@@ -1794,56 +1878,6 @@ export function Lottery() {
           void loadStatus()
         }}
       />
-      <ManualLotteryGrantDialog
-        open={manualGrantOpen}
-        onOpenChange={setManualGrantOpen}
-        grantRules={status?.active_grant_rules ?? EMPTY_GRANT_RULES}
-        onSuccess={async () => {
-          setGrantPage(1)
-          await Promise.all([loadAdminGrants(1), loadStatus()])
-        }}
-      />
-      <ConfirmDialog
-        open={revokeDraw !== null}
-        onOpenChange={(open) => {
-          if (!open && !revoking) {
-            setRevokeDraw(null)
-            setRevokeReason('')
-          }
-        }}
-        title={t('Reverse lottery reward')}
-        desc={t(
-          'The awarded quota will be deducted and a linked reversal transaction will be created. The original record will remain.'
-        )}
-        confirmText={t('Confirm reversal')}
-        destructive
-        disabled={revokeReason.trim().length < 2}
-        isLoading={revoking}
-        handleConfirm={() => void handleRevokeReward()}
-      >
-        <div className='space-y-2'>
-          {revokeDraw ? (
-            <div className='bg-muted/50 rounded-md border px-3 py-2 text-sm'>
-              <div className='font-medium'>
-                {revokeDraw.username || `ID: ${revokeDraw.user_id}`}
-              </div>
-              <div className='text-muted-foreground mt-1 font-mono text-xs break-all'>
-                {revokeDraw.event_reference}
-              </div>
-              <div className='mt-1 font-medium tabular-nums'>
-                -{formatQuota(revokeDraw.quota)}
-              </div>
-            </div>
-          ) : null}
-          <Textarea
-            value={revokeReason}
-            onChange={(event) => setRevokeReason(event.target.value)}
-            placeholder={t('Reason')}
-            aria-label={t('Reason')}
-            maxLength={200}
-          />
-        </div>
-      </ConfirmDialog>
     </Main>
   )
 }

@@ -17,6 +17,8 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -52,6 +54,7 @@ func TestMain(m *testing.M) {
 	if err := db.AutoMigrate(
 		&model.Task{},
 		&model.User{},
+		&model.AffiliateReward{},
 		&model.Token{},
 		&model.Log{},
 		&model.Channel{},
@@ -1417,6 +1420,73 @@ func (m *mockAdaptor) ParseTaskResult(*model.Task, *http.Response, []byte) (*rel
 }
 func (m *mockAdaptor) AdjustBillingOnComplete(_ *model.Task, _ *relaycommon.TaskInfo) int {
 	return m.adjustReturn
+}
+
+func TestWalletReferralRewardsFollowFinalCharges(t *testing.T) {
+	truncate(t)
+	payment := operation_setting.GetPaymentSetting()
+	oldConfirmed, oldTerms := payment.ComplianceConfirmed, payment.ComplianceTermsVersion
+	payment.ComplianceConfirmed = true
+	payment.ComplianceTermsVersion = operation_setting.CurrentComplianceTermsVersion
+	t.Cleanup(func() {
+		payment.ComplianceConfirmed, payment.ComplianceTermsVersion = oldConfirmed, oldTerms
+	})
+
+	const inviterID, inviteeID = 241, 242
+	users := []model.User{
+		{Id: inviterID, Username: "wallet_inviter", AffCode: "wallet_inviter"},
+		{Id: inviteeID, Username: "wallet_invitee", AffCode: "wallet_invitee", InviterId: inviterID, Quota: 10_000},
+	}
+	require.NoError(t, model.DB.Create(&users).Error)
+	t.Cleanup(func() {
+		assert.NoError(t, model.DB.Where("inviter_id = ?", inviterID).Delete(&model.AffiliateReward{}).Error)
+	})
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	newRequest := func(requestID string) *relaycommon.RelayInfo {
+		return &relaycommon.RelayInfo{UserId: inviteeID, RequestId: requestID, IsPlayground: true, ForcePreConsume: true,
+			UserSetting: dto.UserSetting{BillingPreference: "wallet_only"}}
+	}
+
+	request := newRequest("referral-usage-request")
+	require.Nil(t, PreConsumeBilling(ctx, 1000, request))
+	require.NoError(t, SettleBilling(ctx, request, 1200))
+	require.NoError(t, SettleBilling(ctx, request, 1200))
+
+	zeroCharge := newRequest("referral-usage-zero")
+	require.Nil(t, PreConsumeBilling(ctx, 1000, zeroCharge))
+	require.NoError(t, SettleBilling(ctx, zeroCharge, 0))
+	require.NoError(t, SettleBilling(ctx, zeroCharge, 1200))
+
+	seedSubscription(t, inviteeID, inviteeID, 5000, 1200)
+	subscription := &relaycommon.RelayInfo{UserId: inviteeID, RequestId: "referral-usage-subscription", BillingSource: BillingSourceSubscription, IsPlayground: true}
+	subscription.Billing = &BillingSession{relayInfo: subscription, funding: &SubscriptionFunding{subscriptionId: inviteeID}, preConsumedQuota: 1200}
+	require.NoError(t, SettleBilling(ctx, subscription, 1300))
+	assert.EqualValues(t, 1300, getSubscriptionUsed(t, inviteeID))
+
+	taskRequest := newRequest("referral-usage-task")
+	require.Nil(t, PreConsumeBilling(ctx, 2000, taskRequest))
+	task := makeTask(inviteeID, 0, 2000, 0, BillingSourceWallet, 0)
+	task.TaskID = "referral-usage-pending-task"
+	require.NoError(t, task.Insert())
+	require.NoError(t, SettleTaskSubmissionBilling(ctx, taskRequest, task, task.Quota))
+	items, total, err := model.GetAffiliateRewards(inviterID, nil)
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, total)
+	require.Len(t, items, 1)
+	assert.Equal(t, 60, items[0].Quota)
+
+	task.Status = model.TaskStatusSuccess
+	finalizeTerminalTask(ctx, &mockAdaptor{adjustReturn: 1500}, task, &relaycommon.TaskInfo{Status: model.TaskStatusSuccess})
+	items, total, err = model.GetAffiliateRewards(inviterID, nil)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, total)
+	require.Len(t, items, 2)
+	assert.Equal(t, 75, items[0].Quota)
+	assert.Equal(t, 7300, getUserQuota(t, inviteeID))
+	var inviter model.User
+	require.NoError(t, model.DB.First(&inviter, inviterID).Error)
+	assert.Equal(t, 135, inviter.AffQuota)
 }
 
 // ===========================================================================

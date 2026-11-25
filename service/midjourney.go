@@ -89,7 +89,14 @@ func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.M
 	if updateErr := task.UpdateBillingState(); updateErr != nil {
 		return true, errors.Join(billingErr, fmt.Errorf("update Midjourney billing state: %w", updateErr))
 	}
+	CreditCompletedMidjourneyReferralReward(context.Background(), task)
 	return true, billingErr
+}
+
+func CreditCompletedMidjourneyReferralReward(ctx context.Context, task *model.Midjourney) {
+	if task.Status == string(model.TaskStatusSuccess) && task.Id > 0 {
+		recordWalletUsageReward(ctx, task.UserId, fmt.Sprintf("midjourney:%d", task.Id), task.Quota)
+	}
 }
 
 // RefundMidjourneyQuota reverses every accounting element recorded for a billed legacy task.

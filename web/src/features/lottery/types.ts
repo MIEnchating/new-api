@@ -35,6 +35,7 @@ export interface LotteryRules {
   weekly_spend_amount: number
   weekly_chance_limit: number
   daily_active_amount: number
+  pity_draw_limit: number
   streak_rewards: LotteryStreakReward[]
 }
 
@@ -154,6 +155,7 @@ export interface LotteryStatus {
   daily_active_quota: number
   today_active: boolean
   current_streak: number
+  pity_draws_remaining: number
   prizes: LotteryPrize[]
   recent_draws: LotteryDraw[]
   recent_activity: LotteryActivity[]

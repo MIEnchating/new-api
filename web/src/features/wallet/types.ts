@@ -41,7 +41,10 @@ export type PaymentResponse = ApiResponse<Record<string, unknown>> & {
 export type StripePaymentResponse = ApiResponse<{ pay_link: string }>
 export type AffiliateCodeResponse = ApiResponse<string>
 export type AffiliateTransferResponse = ApiResponse
-export type AffiliateRewardType = 'registration' | 'first_topup'
+export type AffiliateRewardType =
+  | 'registration'
+  | 'first_topup'
+  | 'wallet_usage'
 
 export interface AffiliateRewardItem {
   id: number

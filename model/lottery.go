@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	LotteryWeeklySpendAmount = 50
-	LotteryWeeklyChanceLimit = 5
-	LotteryDailyActiveAmount = 20
+	LotteryWeeklySpendAmount    = 50
+	LotteryWeeklyChanceLimit    = 5
+	LotteryDailyActiveAmount    = 20
+	defaultLotteryPityDrawLimit = 10
 
 	LotteryGrantTypeWeeklySpend = "weekly_spend"
 	LotteryGrantTypeStreak3     = "streak_3"
@@ -119,6 +120,7 @@ type LotteryRules struct {
 	WeeklySpendAmount int                   `json:"weekly_spend_amount"`
 	WeeklyChanceLimit int                   `json:"weekly_chance_limit"`
 	DailyActiveAmount int                   `json:"daily_active_amount"`
+	PityDrawLimit     int                   `json:"pity_draw_limit"`
 	StreakRewards     []LotteryStreakReward `json:"streak_rewards"`
 }
 
@@ -151,6 +153,7 @@ type LotteryStatus struct {
 	DailyActiveQuota    int                      `json:"daily_active_quota"`
 	TodayActive         bool                     `json:"today_active"`
 	CurrentStreak       int                      `json:"current_streak"`
+	PityDrawsRemaining  int                      `json:"pity_draws_remaining"`
 	Prizes              []LotteryPrize           `json:"prizes"`
 	RecentDraws         []LotteryDraw            `json:"recent_draws"`
 	RecentActivity      []LotteryDailyActivity   `json:"recent_activity"`
@@ -160,6 +163,7 @@ type LotteryStatus struct {
 }
 
 const MaxLotteryDrawCount = 100
+const maxLotteryPityDrawLimit = 100
 
 type LotteryDrawResult struct {
 	Draws  []LotteryDraw `json:"draws"`
@@ -270,6 +274,7 @@ func defaultLotteryRules() LotteryRules {
 		WeeklySpendAmount: LotteryWeeklySpendAmount,
 		WeeklyChanceLimit: LotteryWeeklyChanceLimit,
 		DailyActiveAmount: LotteryDailyActiveAmount,
+		PityDrawLimit:     defaultLotteryPityDrawLimit,
 		StreakRewards: []LotteryStreakReward{
 			{Days: 3, Chances: 1},
 			{Days: 7, Chances: 3},
@@ -322,6 +327,9 @@ func validateLotteryRules(rules LotteryRules) error {
 		rules.WeeklyChanceLimit < 0 || rules.WeeklyChanceLimit > 100 ||
 		rules.DailyActiveAmount < 0 || rules.DailyActiveAmount > 1_000_000 {
 		return errors.New("lottery base rule values are out of range")
+	}
+	if rules.PityDrawLimit < 0 || rules.PityDrawLimit > maxLotteryPityDrawLimit {
+		return common.NewMessage("Lottery guarantee limit must be between 0 and 100")
 	}
 	if len(rules.StreakRewards) > 20 {
 		return errors.New("too many lottery streak rewards")
@@ -452,6 +460,43 @@ func lotteryPrizeForRoll(roll int, prizes []LotteryPrize) LotteryPrize {
 		}
 	}
 	return prizes[len(prizes)-1]
+}
+
+func lotteryGrandPrize(prizes []LotteryPrize) LotteryPrize {
+	var grandPrize LotteryPrize
+	for _, prize := range prizes {
+		if prize.Probability > 0 && prize.Amount > grandPrize.Amount {
+			grandPrize = prize
+		}
+	}
+	return grandPrize
+}
+
+func lotteryDrawsUntilPity(db *gorm.DB, userId int, limit int, grandPrizeQuota int) (int, error) {
+	if grandPrizeQuota <= 0 {
+		return 0, nil
+	}
+	if limit <= 1 {
+		return limit, nil
+	}
+	var recentQuotas []int
+	// Use draw IDs to follow commit order for this user, even if requests
+	// started in a different order. Revocations preserve the original quota.
+	if err := db.Model(&LotteryDraw{}).
+		Where("user_id = ?", userId).
+		Order("id DESC").Limit(limit-1).Pluck("quota", &recentQuotas).Error; err != nil {
+		return 0, err
+	}
+	remaining := limit
+	for _, quota := range recentQuotas {
+		// Historical draws store their original payout. A payout at or above
+		// the current jackpot counts even if the configured prize IDs changed.
+		if quota >= grandPrizeQuota {
+			break
+		}
+		remaining--
+	}
+	return remaining, nil
 }
 
 func lotteryDayStart(now time.Time) time.Time {
@@ -1062,6 +1107,17 @@ func getLotteryStatusAt(
 		Find(&recentDraws).Error; err != nil {
 		return LotteryStatus{}, err
 	}
+	pityRemaining := 0
+	if config.Rules.PityDrawLimit > 0 {
+		grandPrizeQuota, err := lotteryAmountQuota(lotteryGrandPrize(config.Prizes).Amount)
+		if err != nil {
+			return LotteryStatus{}, err
+		}
+		pityRemaining, err = lotteryDrawsUntilPity(DB, userId, config.Rules.PityDrawLimit, grandPrizeQuota)
+		if err != nil {
+			return LotteryStatus{}, err
+		}
+	}
 
 	weeklyStart := lotteryWeekStart(now).Format("2006-01-02")
 	today := lotteryDayStart(now).Format("2006-01-02")
@@ -1111,6 +1167,7 @@ func getLotteryStatusAt(
 		DailyActiveQuota:    dailyTarget,
 		TodayActive:         todayQuota >= dailyTarget,
 		CurrentStreak:       currentStreak,
+		PityDrawsRemaining:  pityRemaining,
 		Prizes:              config.Prizes,
 		RecentDraws:         recentDraws,
 		RecentActivity:      recentActivity,
@@ -1144,25 +1201,27 @@ func drawLotteriesAt(userId int, now time.Time, rolls []int) (LotteryDrawResult,
 	if statusBefore.AvailableChances < len(rolls) {
 		return LotteryDrawResult{}, ErrNoLotteryChances
 	}
-	draws := make([]LotteryDraw, len(rolls))
-	for i, roll := range rolls {
-		prize := lotteryPrizeForRoll(roll, statusBefore.Prizes)
-		prizeQuota, err := lotteryAmountQuota(prize.Amount)
+	draws := make([]LotteryDraw, 0, len(rolls))
+	pityRemaining := 0
+	pityLimit := statusBefore.Rules.PityDrawLimit
+	grandPrize := lotteryGrandPrize(statusBefore.Prizes)
+	grandPrizeQuota := 0
+	if pityLimit > 0 {
+		grandPrizeQuota, err = lotteryAmountQuota(grandPrize.Amount)
 		if err != nil {
 			return LotteryDrawResult{}, err
-		}
-		draws[i] = LotteryDraw{
-			EventKey: "lottery-draw:" + common.GetUUID(), UserId: userId, Prize: prize.Type,
-			Quota: prizeQuota, Status: LotteryDrawStatusAwarded, CreatedAt: now.Unix(),
-		}
-		if prizeQuota <= 0 {
-			draws[i].Status = LotteryDrawStatusNoPrize
 		}
 	}
 	credited := false
 	err = DB.Transaction(func(tx *gorm.DB) error {
-		for i := range draws {
-			draw := &draws[i]
+		// Serialize each user's draws through the profile created during grant
+		// sync. SQLite serializes writers when the first chance is consumed.
+		var profile LotteryProfile
+		if err := lockForUpdate(tx).Select("user_id").
+			Where("user_id = ?", userId).Take(&profile).Error; err != nil {
+			return err
+		}
+		for i, roll := range rolls {
 			var grant LotteryChanceGrant
 			if err := lockForUpdate(tx).
 				Where("user_id = ? AND consumed < chances AND (expires_at = 0 OR expires_at > ?)", userId, now.Unix()).
@@ -1185,9 +1244,37 @@ func drawLotteriesAt(userId int, now time.Time, rolls []int) (LotteryDrawResult,
 			if result.RowsAffected != 1 {
 				return errors.New("lottery chance was already consumed")
 			}
-			if err := tx.Create(draw).Error; err != nil {
+			if i == 0 && grandPrizeQuota > 0 {
+				var err error
+				pityRemaining, err = lotteryDrawsUntilPity(tx, userId, pityLimit, grandPrizeQuota)
+				if err != nil {
+					return err
+				}
+			}
+			prize := lotteryPrizeForRoll(roll, statusBefore.Prizes)
+			if pityRemaining == 1 && prize.Amount < grandPrize.Amount {
+				prize = grandPrize
+			}
+			prizeQuota, err := lotteryAmountQuota(prize.Amount)
+			if err != nil {
 				return err
 			}
+			draw := LotteryDraw{
+				EventKey: "lottery-draw:" + common.GetUUID(), UserId: userId, Prize: prize.Type,
+				Quota: prizeQuota, Status: LotteryDrawStatusAwarded, CreatedAt: now.Unix(),
+			}
+			if prizeQuota <= 0 {
+				draw.Status = LotteryDrawStatusNoPrize
+			}
+			if grandPrizeQuota > 0 && prizeQuota >= grandPrizeQuota {
+				pityRemaining = pityLimit
+			} else if pityRemaining > 1 {
+				pityRemaining--
+			}
+			if err := tx.Create(&draw).Error; err != nil {
+				return err
+			}
+			draws = append(draws, draw)
 			if draw.Quota <= 0 {
 				continue
 			}
@@ -1227,6 +1314,7 @@ func drawLotteriesAt(userId int, now time.Time, rolls []int) (LotteryDrawResult,
 		common.SysLog("failed to refresh lottery status after committed draw: " + err.Error())
 		status = statusBefore
 		status.AvailableChances = max(0, status.AvailableChances-len(draws))
+		status.PityDrawsRemaining = pityRemaining
 		for _, draw := range draws {
 			status.RecentDraws = append([]LotteryDraw{draw}, status.RecentDraws...)
 		}
