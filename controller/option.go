@@ -150,7 +150,11 @@ type GroupSettingsUpdateRequest struct {
 	Renames []service.GroupRename `json:"renames"`
 }
 
-var routingReliabilityBulkOptionKeys = map[string]struct{}{
+var bulkOptionKeys = map[string]struct{}{
+	"model_square_setting.sort_mode":            {},
+	"model_square_setting.sort_metric":          {},
+	"model_square_setting.sort_days":            {},
+	"model_square_setting.sort_models":          {},
 	"RetryTimes":                                {},
 	"ChannelRouteCooldownEnabled":               {},
 	"ChannelRouteCooldownSeconds":               {},
@@ -225,17 +229,17 @@ func validateRoutingReliabilityOption(key string, value string) error {
 	return nil
 }
 
-func prepareRoutingReliabilityOptionUpdates(options []OptionUpdateRequest) (map[string]string, error) {
+func prepareBulkOptionUpdates(options []OptionUpdateRequest) (map[string]string, error) {
 	if len(options) == 0 {
 		return nil, fmt.Errorf("至少需要提交一项设置")
 	}
-	if len(options) > len(routingReliabilityBulkOptionKeys) {
+	if len(options) > len(bulkOptionKeys) {
 		return nil, fmt.Errorf("一次提交的设置项过多")
 	}
 
 	updates := make(map[string]string, len(options))
 	for _, option := range options {
-		if _, allowed := routingReliabilityBulkOptionKeys[option.Key]; !allowed {
+		if _, allowed := bulkOptionKeys[option.Key]; !allowed {
 			return nil, fmt.Errorf("设置项 %s 不支持批量更新", option.Key)
 		}
 		if _, duplicated := updates[option.Key]; duplicated {
@@ -643,7 +647,7 @@ func UpdateOptionsBulk(c *gin.Context) {
 		return
 	}
 
-	updates, err := prepareRoutingReliabilityOptionUpdates(request.Options)
+	updates, err := prepareBulkOptionUpdates(request.Options)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,

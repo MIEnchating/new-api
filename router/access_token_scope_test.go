@@ -174,9 +174,14 @@ func TestAccessTokenRouteRulesCoverEveryDashboardRoute(t *testing.T) {
 	}
 }
 
-func TestDashboardPerfMetricsRequiresAdminReadAccess(t *testing.T) {
+func TestDashboardUsageStatisticsRequireAdminReadAccess(t *testing.T) {
 	setupRelayRouterTestDB(t)
-	require.NoError(t, model.DB.AutoMigrate(&model.UserAccessToken{}, &model.AuditLog{}, &model.PerfMetric{}))
+	require.NoError(t, model.DB.AutoMigrate(
+		&model.UserAccessToken{}, &model.AuditLog{}, &model.PerfMetric{},
+		&model.QuotaData{}, &model.Model{}, &model.Vendor{},
+	))
+	model.InvalidatePricingCache()
+	t.Cleanup(model.InvalidatePricingCache)
 	engine := gin.New()
 	SetApiRouter(engine)
 	for _, tc := range []struct {
@@ -189,7 +194,7 @@ func TestDashboardPerfMetricsRequiresAdminReadAccess(t *testing.T) {
 		{"admin-log", "log:read", common.RoleAdminUser, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/api/data/perf-metrics/summary", nil)
+			var authorization string
 			if tc.role != 0 {
 				user := model.User{Username: tc.name, AffCode: tc.name, Role: tc.role, Group: "default", Status: common.UserStatusEnabled}
 				require.NoError(t, model.DB.Create(&user).Error)
@@ -199,12 +204,18 @@ func TestDashboardPerfMetricsRequiresAdminReadAccess(t *testing.T) {
 				token := model.UserAccessToken{Name: tc.name, TokenHash: model.AccessTokenFingerprint(raw), TokenHint: model.AccessTokenHint(raw)}
 				require.NoError(t, token.SetScopes([]string{tc.scope}))
 				require.NoError(t, model.CreateUserAccessToken(user.Id, &token, service.AccessTokenMaxPerUser))
-				req.Header.Set("Authorization", "Bearer "+raw)
+				authorization = "Bearer " + raw
 			}
-			recorder := httptest.NewRecorder()
-			engine.ServeHTTP(recorder, req)
-			assert.Equal(t, tc.want, recorder.Code)
-			assert.Contains(t, recorder.Header().Get("Cache-Control"), "no-store")
+			for _, path := range []string{"/api/data/perf-metrics/summary", "/api/models/square_usage"} {
+				req := httptest.NewRequest(http.MethodGet, path, nil)
+				if authorization != "" {
+					req.Header.Set("Authorization", authorization)
+				}
+				recorder := httptest.NewRecorder()
+				engine.ServeHTTP(recorder, req)
+				assert.Equal(t, tc.want, recorder.Code, path)
+				assert.Contains(t, recorder.Header().Get("Cache-Control"), "no-store", path)
+			}
 		})
 	}
 }

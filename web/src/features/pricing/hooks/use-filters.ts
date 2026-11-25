@@ -31,7 +31,12 @@ import {
   type ViewMode,
 } from '../constants'
 import { filterAndSortModels, extractAllTags } from '../lib/filters'
-import type { PricingModel, PricingVendor, TokenUnit } from '../types'
+import type {
+  ModelOrder,
+  PricingModel,
+  PricingVendor,
+  TokenUnit,
+} from '../types'
 
 type FilterState = {
   search?: string
@@ -53,7 +58,11 @@ function normalizeViewMode(value: unknown): ViewMode {
   return VIEW_MODES.CARD
 }
 
-export function useFilters(models: PricingModel[], vendors: PricingVendor[]) {
+export function useFilters(
+  models: PricingModel[],
+  modelOrder?: ModelOrder,
+  vendors?: readonly PricingVendor[]
+) {
   const search = useSearch({ from: '/pricing/' })
   const [filterState, setFilterState] = useState<FilterState>(() => ({
     search: search.search,
@@ -70,7 +79,10 @@ export function useFilters(models: PricingModel[], vendors: PricingVendor[]) {
 
   const searchInput = filterState.search || ''
   const debouncedSearchInput = useDebounce(searchInput, 200)
-  const sortBy = filterState.sort || SORT_OPTIONS.VENDOR
+  const defaultSort =
+    modelOrder?.default_sort ??
+    (modelOrder ? SORT_OPTIONS.RECOMMENDED : SORT_OPTIONS.VENDOR)
+  const sortBy = filterState.sort || defaultSort
   const vendorFilter = filterState.vendor || FILTER_ALL
   const groupFilter = filterState.group || FILTER_ALL
   const quotaTypeFilter = filterState.quotaType || QUOTA_TYPES.ALL
@@ -98,9 +110,8 @@ export function useFilters(models: PricingModel[], vendors: PricingVendor[]) {
     [updateFilters]
   )
   const setSortBy = useCallback(
-    (v: string) =>
-      updateFilters({ sort: v === SORT_OPTIONS.VENDOR ? undefined : v }),
-    [updateFilters]
+    (v: string) => updateFilters({ sort: v === defaultSort ? undefined : v }),
+    [defaultSort, updateFilters]
   )
   const setVendorFilter = useCallback(
     (v: string) => updateFilters({ vendor: v === FILTER_ALL ? undefined : v }),
@@ -159,11 +170,13 @@ export function useFilters(models: PricingModel[], vendors: PricingVendor[]) {
         endpointType: endpointTypeFilter,
         tag: tagFilter,
         sortBy,
+        modelOrder,
       },
       vendors
     )
   }, [
     models,
+    modelOrder,
     vendors,
     debouncedSearchInput,
     vendorFilter,

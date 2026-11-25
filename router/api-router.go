@@ -479,6 +479,7 @@ func SetApiRouter(router *gin.Engine) {
 			vendorRoute.DELETE("/:id", controller.DeleteVendorMeta)
 		}
 
+		apiRouter.GET("/models/square_usage", middleware.DisableCache(), middleware.AdminAuth(), controller.GetModelSquareUsage)
 		modelsRoute := apiRouter.Group("/models")
 		modelsRoute.Use(middleware.AdminAuth())
 		{

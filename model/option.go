@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -24,6 +25,8 @@ type Option struct {
 	Key   string `json:"key" gorm:"primaryKey"`
 	Value string `json:"value"`
 }
+
+var modelSquareOptionsMu sync.Mutex
 
 func AllOption() ([]*Option, error) {
 	var options []*Option
@@ -219,6 +222,8 @@ func LoadOptionsFromDatabase() error {
 	defer requestPolicyOptionMutex.Unlock()
 	passkeyOptionMutex.Lock()
 	defer passkeyOptionMutex.Unlock()
+	modelSquareOptionsMu.Lock()
+	defer modelSquareOptionsMu.Unlock()
 	options, err := AllOption()
 	if err != nil {
 		return err
@@ -234,6 +239,7 @@ func LoadOptionsFromDatabase() error {
 		return err
 	}
 	passkeyOptions := make(map[string]string)
+	modelSquareOptions := make(map[string]string)
 	for _, option := range options {
 		if option.Key == common.GroupAliasesOptionKey {
 			continue
@@ -242,13 +248,17 @@ func LoadOptionsFromDatabase() error {
 			passkeyOptions[option.Key] = option.Value
 			continue
 		}
+		if strings.HasPrefix(option.Key, operation_setting.ModelSquareOptionPrefix) {
+			modelSquareOptions[option.Key] = option.Value
+			continue
+		}
 		err := updateOptionMap(option.Key, option.Value)
 		if err != nil {
 			common.SysLog(common.LogText("failed to update option map: %s", err.Error()))
 		}
 	}
 	applyPasskeyDomainOptions(passkeyOptions)
-	return nil
+	return publishOptionUpdates(modelSquareOptions)
 }
 
 func SyncOptions(frequency int) {
@@ -316,6 +326,9 @@ func validateOptionValue(key string, value string) error {
 		}
 		return validateLotteryConfig(config)
 	}
+	if err := operation_setting.ValidateModelSquareOption(key, value); err != nil {
+		return err
+	}
 	if key == "EmailProvider" || key == "ResendApiKey" || key == "ResendFrom" {
 		if key == "EmailProvider" && value != "smtp" && value != "resend" {
 			return common.NewMessage("Email sending method must be SMTP or Resend")
@@ -357,7 +370,7 @@ func validateOptionValue(key string, value string) error {
 
 func UpdateOption(key string, value string) error {
 	if key == "GroupRatio" || key == "group_ratio_setting.group_ratio" || key == setting.GroupCategoriesOptionKey || key == ModelSquareVendorOrderOption ||
-		key == operation_setting.AffiliateUsageRewardOptionKey {
+		key == operation_setting.AffiliateUsageRewardOptionKey || strings.HasPrefix(key, operation_setting.ModelSquareOptionPrefix) {
 		return UpdateOptionsBulk(map[string]string{key: value})
 	}
 	if IsRequestPolicyOption(key) {
@@ -429,6 +442,15 @@ func UpdateOptionsBulk(values map[string]string) error {
 		}
 	}
 
+	// Keep persistence and publication of the saved order in the same order
+	// across concurrent updates and option reloads.
+	for key := range values {
+		if strings.HasPrefix(key, operation_setting.ModelSquareOptionPrefix) {
+			modelSquareOptionsMu.Lock()
+			defer modelSquareOptionsMu.Unlock()
+			break
+		}
+	}
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		return updateOptionsWithTx(tx, values, nil)
 	})
@@ -468,11 +490,15 @@ func publishOptionUpdates(values map[string]string) error {
 		return err
 	}
 	keys := make([]string, 0, len(values))
-	for key := range values {
-		if _, ok := handled[key]; !ok {
+	common.OptionMapRWMutex.Lock()
+	for key, value := range values {
+		if strings.HasPrefix(key, operation_setting.ModelSquareOptionPrefix) {
+			common.OptionMap[key] = value
+		} else if _, ok := handled[key]; !ok {
 			keys = append(keys, key)
 		}
 	}
+	common.OptionMapRWMutex.Unlock()
 	sort.Strings(keys)
 	for _, key := range keys {
 		if err := updateOptionMap(key, values[key]); err != nil {

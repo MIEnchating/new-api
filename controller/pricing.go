@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -8,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
@@ -75,6 +78,7 @@ func GetPricing(c *gin.Context) {
 		"usable_group":       orderedUsableGroup,
 		"supported_endpoint": model.GetSupportedEndpointMap(),
 		"auto_groups":        service.GetUserAutoGroup(userGroup),
+		"model_order":        service.BuildModelSquareOrder(pricing, usableGroup),
 		"pricing_version":    "a42d372ccf0b5dd13ecf71203521f9d2",
 	})
 }
@@ -107,6 +111,54 @@ func GetModelSquareVendors(c *gin.Context) {
 		rows = append(rows, vendorRow{
 			PricingVendor: vendor,
 			CanDelete:     vendor.ID > 0 && counts[int64(vendor.ID)] == 0 && !used[vendor.ID],
+		})
+	}
+	common.ApiSuccess(c, rows)
+}
+
+type modelSquareUsage struct {
+	ModelName  string `json:"model_name"`
+	Icon       string `json:"icon,omitempty"`
+	VendorName string `json:"vendor_name,omitempty"`
+	VendorIcon string `json:"vendor_icon,omitempty"`
+	Requests   int64  `json:"requests"`
+	Tokens     int64  `json:"tokens"`
+}
+
+// GetModelSquareUsage lists every model of the model square, whichever group
+// can see it, with its usage for the order preview.
+func GetModelSquareUsage(c *gin.Context) {
+	days := c.DefaultQuery("days", "7")
+	if err := operation_setting.ValidateModelSquareOption("model_square_setting.sort_days", days); err != nil {
+		common.ApiErrorStatus(c, http.StatusBadRequest, err)
+		return
+	}
+	dayCount, _ := strconv.Atoi(days)
+	totals, err := service.GetModelUsageTotals(dayCount)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	usage := make(map[string]model.ModelUsageTotal, len(totals))
+	for _, total := range totals {
+		usage[total.ModelName] = total
+	}
+	pricing := model.GetPricing()
+	vendors := make(map[int]model.PricingVendor)
+	for _, vendor := range model.GetVendors() {
+		vendors[vendor.ID] = vendor
+	}
+	rows := make([]modelSquareUsage, 0, len(pricing))
+	for _, item := range pricing {
+		vendor := vendors[item.VendorID]
+		total := usage[item.ModelName]
+		rows = append(rows, modelSquareUsage{
+			ModelName:  item.ModelName,
+			Icon:       item.Icon,
+			VendorName: vendor.Name,
+			VendorIcon: vendor.Icon,
+			Requests:   total.Requests,
+			Tokens:     total.Tokens,
 		})
 	}
 	common.ApiSuccess(c, rows)

@@ -31,6 +31,34 @@ func GetRankingQuotaTotals(startTime int64, endTime int64) ([]RankingQuotaTotal,
 	return rows, err
 }
 
+type ModelUsageTotal struct {
+	ModelName string `json:"model_name"`
+	Requests  int64  `json:"requests"`
+	Tokens    int64  `json:"tokens"`
+}
+
+type GroupModelUsageTotal struct {
+	ModelUsageTotal
+	UseGroup string
+}
+
+// GetGroupModelUsageTotals keeps usage separate by the group used for each request.
+func GetGroupModelUsageTotals(startTime int64, endTime int64) ([]GroupModelUsageTotal, error) {
+	modelName, useGroup := "model_name", "COALESCE(use_group, '')"
+	if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
+		// The database collation can otherwise combine distinct group or model names.
+		modelName, useGroup = "CAST(model_name AS BINARY)", "CAST(COALESCE(use_group, '') AS BINARY)"
+	}
+	var rows []GroupModelUsageTotal
+	query := DB.Table("quota_data").
+		Select(modelName + " as model_name, " + useGroup + " as use_group, sum(count) as requests, sum(token_used) as tokens").
+		Where("model_name <> ''").
+		Group(modelName + ", " + useGroup)
+	query = applyRankingQuotaTimeRange(query, startTime, endTime)
+	err := query.Find(&rows).Error
+	return rows, err
+}
+
 func GetRankingQuotaBuckets(startTime int64, endTime int64, bucketSize int64) ([]RankingQuotaBucket, error) {
 	if bucketSize <= 0 {
 		bucketSize = 3600
