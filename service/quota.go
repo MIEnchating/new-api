@@ -148,10 +148,7 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		return 0, fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
 	}
 
-	result, err := postConsumeQuotaWithResult(relayInfo, quota, 0, false)
-	if result.FundingApplied && relayInfo.BillingSource != BillingSourceSubscription && quota > 0 {
-		recordWalletUsageReward(ctx, relayInfo.UserId, "realtime:"+common.NewRequestId(), quota)
-	}
+	err = postConsumeQuota(relayInfo, quota, 0, false, "realtime:"+common.NewRequestId())
 	if err != nil {
 		return 0, err
 	}
@@ -432,42 +429,38 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 	return nil
 }
 
-type postConsumeQuotaResult struct {
-	FundingApplied bool
-	TokenApplied   bool
-}
-
 func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) error {
-	_, err := postConsumeQuotaWithResult(relayInfo, quota, preConsumedQuota, sendEmail)
-	return err
+	return postConsumeQuota(relayInfo, quota, preConsumedQuota, sendEmail, "")
 }
 
-func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (result postConsumeQuotaResult, err error) {
+func postConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool, chargeKey string) error {
+	var err error
 
 	// 1) Consume from wallet quota OR subscription item
 	if relayInfo != nil && relayInfo.BillingSource == BillingSourceSubscription {
 		if relayInfo.SubscriptionId == 0 {
-			return result, errors.New("subscription id is missing")
+			return errors.New("subscription id is missing")
 		}
 		delta := int64(quota)
 		if delta != 0 {
 			if err := model.PostConsumeUserSubscriptionDelta(relayInfo.SubscriptionId, delta); err != nil {
-				return result, err
+				return err
 			}
 			relayInfo.SubscriptionPostDelta += delta
 		}
 	} else {
 		// Wallet
-		if quota > 0 {
+		if chargeKey != "" {
+			_, err = model.CommitWalletUsage(relayInfo.UserId, quota, quota+preConsumedQuota, chargeKey, nil)
+		} else if quota > 0 {
 			err = model.DecreaseUserQuota(relayInfo.UserId, quota, false)
 		} else {
 			err = model.IncreaseUserQuota(relayInfo.UserId, -quota, false)
 		}
 		if err != nil {
-			return result, err
+			return err
 		}
 	}
-	result.FundingApplied = true
 
 	if !relayInfo.IsPlayground {
 		if quota > 0 {
@@ -476,9 +469,8 @@ func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, pre
 			err = model.IncreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, -quota)
 		}
 		if err != nil {
-			return result, err
+			return err
 		}
-		result.TokenApplied = true
 	}
 
 	if sendEmail {
@@ -487,7 +479,7 @@ func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, pre
 		}
 	}
 
-	return result, nil
+	return nil
 }
 
 func checkAndSendQuotaNotify(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int) {

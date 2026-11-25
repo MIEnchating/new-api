@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -59,44 +58,43 @@ func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.
 	return true, nil
 }
 
-// SettleMidjourneyTaskBilling charges a persisted legacy task and records the applied stages.
-func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.Midjourney, prepared bool) (bool, error) {
+// PersistMidjourneyTask commits the wallet debit with the task. A failed
+// debit leaves an unbilled task for the client to retrieve as before.
+func PersistMidjourneyTask(relayInfo *relaycommon.RelayInfo, task *model.Midjourney, prepared bool) (billed bool, insertErr, billingErr error) {
+	if task == nil || task.Id != 0 {
+		return false, errors.New("expected a new Midjourney task"), nil
+	}
 	if !prepared {
-		return false, nil
+		return false, task.Insert(), nil
 	}
-	if relayInfo == nil {
-		return false, errors.New("relay info is nil")
+	if relayInfo == nil || relayInfo.UserId != task.UserId {
+		return false, errors.New("missing Midjourney billing identity"), nil
 	}
-	if task == nil || task.Id == 0 {
-		return false, errors.New("Midjourney task must be persisted before billing")
-	}
-
-	result, billingErr := postConsumeQuotaWithResult(relayInfo, task.Quota, 0, true)
-	if !result.FundingApplied {
+	fundingErr, err := task.InsertWithWalletBilling()
+	if fundingErr != nil {
 		task.Quota = 0
 		task.TokenId = 0
 		task.BillingChannelId = 0
-		if updateErr := task.UpdateBillingState(); updateErr != nil {
-			return false, errors.Join(billingErr, fmt.Errorf("clear Midjourney billing state: %w", updateErr))
-		}
-		return false, billingErr
+		return false, task.Insert(), fundingErr
+	}
+	if err != nil {
+		return false, err, nil
 	}
 
 	task.TokenId = 0
-	if result.TokenApplied {
-		task.TokenId = relayInfo.TokenId
+	if !relayInfo.IsPlayground {
+		billingErr = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, task.Quota)
+		if billingErr == nil {
+			task.TokenId = relayInfo.TokenId
+		}
 	}
-	if updateErr := task.UpdateBillingState(); updateErr != nil {
-		return true, errors.Join(billingErr, fmt.Errorf("update Midjourney billing state: %w", updateErr))
+	if billingErr == nil && task.Quota != 0 {
+		checkAndSendQuotaNotify(relayInfo, task.Quota, 0)
 	}
-	CreditCompletedMidjourneyReferralReward(context.Background(), task)
-	return true, billingErr
-}
-
-func CreditCompletedMidjourneyReferralReward(ctx context.Context, task *model.Midjourney) {
-	if task.Status == string(model.TaskStatusSuccess) && task.Id > 0 {
-		recordWalletUsageReward(ctx, task.UserId, fmt.Sprintf("midjourney:%d", task.Id), task.Quota)
+	if task.TokenId != 0 {
+		billingErr = task.UpdateBillingState()
 	}
+	return true, nil, billingErr
 }
 
 // RefundMidjourneyQuota reverses every accounting element recorded for a billed legacy task.

@@ -31,8 +31,8 @@ type AffiliateReward struct {
 	CreatedAt int64  `json:"created_at" gorm:"bigint;index:idx_affiliate_reward_inviter_time,priority:2"`
 }
 
-// PendingAffiliateUsageReward stores the original reward amount before the
-// separate ledger transaction so failed credits can be retried after restart.
+// PendingAffiliateUsageReward records the reward owed by a committed wallet
+// settlement so an interrupted ledger credit can be retried after restart.
 type PendingAffiliateUsageReward struct {
 	Id            int64
 	EventKey      string `gorm:"type:varchar(128);uniqueIndex"`
@@ -121,29 +121,27 @@ func creditAffiliateRewardTx(tx *gorm.DB, reward *AffiliateReward) (bool, error)
 	return true, nil
 }
 
-// CreditAffiliateUsageReward credits a finalized wallet charge once. The caller
-// supplies a server-generated key for the charge and its settlement timestamp.
-func CreditAffiliateUsageReward(inviteeID int, chargeKey string, spentQuota int, settledAt int64) error {
+func enqueueAffiliateUsageReward(tx *gorm.DB, inviteeID int, chargeKey string, spentQuota int, settledAt int64) (string, error) {
 	settings := operation_setting.GetAffiliateUsageRewardSetting()
 	if !settings.Active() || spentQuota <= 0 || inviteeID <= 0 || chargeKey == "" || settledAt <= 0 || !operation_setting.IsPaymentComplianceConfirmed() {
-		return nil
+		return "", nil
 	}
 	if err := common.ValidateWalletQuota(spentQuota); err != nil {
-		return err
+		return "", err
 	}
 	const windowSeconds = operation_setting.AffiliateUsageRewardDays * 24 * 60 * 60
 	var invitee User
-	if err := DB.Select("inviter_id").Where(
+	if err := tx.Select("inviter_id").Where(
 		"id = ? AND inviter_id > 0 AND inviter_id <> id AND created_at > 0 AND created_at <= ? AND created_at > ?",
 		inviteeID, settledAt, settledAt-windowSeconds,
 	).Limit(1).Find(&invitee).Error; err != nil || invitee.InviterId == 0 {
-		return err
+		return "", err
 	}
 	rewardQuota, err := common.WalletQuotaFromDecimalStrict(
 		decimal.NewFromInt(int64(spentQuota)).Mul(decimal.NewFromFloat(settings.RatePercent)).Shift(-2).Truncate(0),
 	)
 	if err != nil || rewardQuota == 0 {
-		return err
+		return "", err
 	}
 	pending := PendingAffiliateUsageReward{
 		EventKey:  "wallet-usage:" + chargeKey,
@@ -152,13 +150,93 @@ func CreditAffiliateUsageReward(inviteeID int, chargeKey string, spentQuota int,
 		Quota:     rewardQuota,
 		SettledAt: settledAt,
 	}
-	if err := DB.Clauses(clause.OnConflict{
+	if err := tx.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "event_key"}},
 		DoNothing: true,
 	}).Create(&pending).Error; err != nil {
-		return fmt.Errorf("persist pending wallet usage reward: %w", err)
+		return "", fmt.Errorf("persist pending wallet usage reward: %w", err)
 	}
-	return applyPendingAffiliateUsageReward(DB, pending.EventKey, common.GetTimestamp())
+	return pending.EventKey, nil
+}
+
+// CommitWalletUsage commits the wallet adjustment and its referral entitlement
+// in one transaction. persist may insert or conditionally advance a task in
+// the same transaction. A lost task transition leaves both accounts untouched.
+func CommitWalletUsage(userID, delta, spentQuota int, chargeKey string, persist func(*gorm.DB) (bool, error)) (bool, error) {
+	if persist == nil && delta == 0 {
+		if err := common.ValidateWalletQuota(spentQuota); err != nil {
+			return false, err
+		}
+		// The reservation is already durable. With no delta or task
+		// mutation, the single outbox insert is the settlement commit.
+		eventKey, err := enqueueAffiliateUsageReward(DB, userID, chargeKey, spentQuota, common.GetTimestamp())
+		if err != nil {
+			return false, err
+		}
+		finishCommittedWalletUsage(userID, 0, eventKey)
+		return true, nil
+	}
+	var won bool
+	var eventKey string
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		won = true
+		if persist != nil {
+			var err error
+			won, err = persist(tx)
+			if err != nil || !won {
+				return err
+			}
+		}
+		var err error
+		eventKey, err = settleWalletUsageTx(tx, userID, delta, spentQuota, chargeKey)
+		return err
+	})
+	if err != nil || !won {
+		return false, err
+	}
+	finishCommittedWalletUsage(userID, delta, eventKey)
+	return true, nil
+}
+
+func settleWalletUsageTx(tx *gorm.DB, userID, delta, spentQuota int, chargeKey string) (string, error) {
+	if err := common.ValidateWalletQuota(spentQuota); err != nil {
+		return "", err
+	}
+	if delta < -common.MaxWalletQuota || delta > common.MaxWalletQuota {
+		return "", ErrWalletQuotaLimitExceeded
+	}
+	if delta != 0 {
+		change := tx.Model(&User{}).Where("id = ?", userID)
+		if delta < 0 {
+			change = change.Where("quota <= ?", common.MaxWalletQuota+delta)
+		}
+		result := change.Update("quota", gorm.Expr("quota - ?", delta))
+		if result.Error != nil {
+			return "", result.Error
+		}
+		if result.RowsAffected != 1 {
+			if delta < 0 {
+				return "", ErrWalletQuotaLimitExceeded
+			}
+			return "", gorm.ErrRecordNotFound
+		}
+	}
+	return enqueueAffiliateUsageReward(tx, userID, chargeKey, spentQuota, common.GetTimestamp())
+}
+
+func finishCommittedWalletUsage(userID, delta int, eventKey string) {
+	if delta != 0 && common.RedisEnabled {
+		if _, err := cacheApplyUserQuotaDelta(userID, -int64(delta)); err != nil {
+			common.SysError(common.LogText("failed to update cache after wallet settlement: %s", err.Error()))
+		}
+	}
+	if eventKey != "" {
+		// The wallet settlement is committed and must never be repeated on a
+		// ledger error. The persistent row is retried by the background worker.
+		if err := applyPendingAffiliateUsageReward(DB, eventKey, common.GetTimestamp()); err != nil {
+			common.SysError(common.LogText("failed to credit wallet usage referral reward %s: %s", eventKey, err.Error()))
+		}
+	}
 }
 
 func applyPendingAffiliateUsageReward(db *gorm.DB, eventKey string, now int64) error {

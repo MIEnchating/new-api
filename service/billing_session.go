@@ -19,6 +19,7 @@ import (
 
 	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 // ---------------------------------------------------------------------------
@@ -36,7 +37,6 @@ type BillingSession struct {
 	trusted          bool   // 是否命中信任额度旁路
 	fundingSettled   bool   // funding.Settle 已成功，资金来源已提交
 	settled          bool   // Settle 全部完成（资金 + 令牌）
-	settledQuota     int    // 结算后的实际扣费额度
 	refunded         bool   // Refund 已调用
 	lang             string // 请求声明的语言，为空表示未声明
 	mu               sync.Mutex
@@ -46,30 +46,44 @@ type BillingSession struct {
 // 资金来源和令牌额度分两步提交：若资金来源已提交但令牌调整失败，
 // 会标记 fundingSettled 防止 Refund 对已提交的资金来源执行退款。
 func (s *BillingSession) Settle(actualQuota int) error {
-	_, err := s.settleCharge(actualQuota)
+	_, err := s.settleCharge(actualQuota, "", nil)
 	return err
 }
 
-// settleCharge returns the finalized funding charge, including when the
-// subsequent token adjustment fails or settlement is called again.
-func (s *BillingSession) settleCharge(actualQuota int) (int, error) {
+// settleCharge reports wallet funding success separately from token adjustment
+// so a task committed with its wallet charge remains durable on token errors.
+func (s *BillingSession) settleCharge(actualQuota int, chargeKey string, persist func(*gorm.DB) (bool, error)) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.settled {
-		return s.settledQuota, nil
+		if persist != nil {
+			return false, errors.New("billing session already settled")
+		}
+		return true, nil
 	}
 	delta := actualQuota - s.preConsumedQuota
-	if delta == 0 {
-		s.settledQuota = actualQuota
-		s.settled = true
-		return actualQuota, nil
-	}
 	// 1) 调整资金来源（仅在尚未提交时执行，防止重复调用）
 	if !s.fundingSettled {
-		if err := s.funding.Settle(delta); err != nil {
-			return 0, err
+		if wallet, ok := s.funding.(*WalletFunding); ok {
+			if delta != 0 || (chargeKey != "" && actualQuota > 0) || persist != nil {
+				committed, err := model.CommitWalletUsage(wallet.userId, delta, actualQuota, chargeKey, persist)
+				if err != nil {
+					return false, err
+				}
+				if !committed {
+					return false, errors.New("wallet settlement was not committed")
+				}
+			}
+		} else if delta != 0 {
+			if err := s.funding.Settle(delta); err != nil {
+				return false, err
+			}
 		}
 		s.fundingSettled = true
+	}
+	if delta == 0 {
+		s.settled = true
+		return true, nil
 	}
 	// 2) 调整令牌额度
 	var tokenErr error
@@ -89,9 +103,8 @@ func (s *BillingSession) settleCharge(actualQuota int) (int, error) {
 	if s.funding.Source() == BillingSourceSubscription {
 		s.relayInfo.SubscriptionPostDelta += int64(delta)
 	}
-	s.settledQuota = actualQuota
 	s.settled = true
-	return actualQuota, tokenErr
+	return true, tokenErr
 }
 
 // Refund 退还所有预扣费，幂等安全，异步执行。

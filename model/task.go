@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -521,7 +522,10 @@ func (Task *Task) Insert() error {
 // (for example "data" when the submit route discards the upstream snapshot)
 // while the in-memory task keeps its values for presentation.
 func (Task *Task) InsertWithContext(ctx context.Context, omitColumns ...string) error {
-	tx := DB.WithContext(ctx)
+	return Task.InsertTx(DB.WithContext(ctx), omitColumns...)
+}
+
+func (Task *Task) InsertTx(tx *gorm.DB, omitColumns ...string) error {
 	if len(omitColumns) > 0 {
 		tx = tx.Omit(omitColumns...)
 	}
@@ -586,11 +590,32 @@ func (t *Task) UpdateQuota() error {
 // falls back to INSERT ON CONFLICT when the WHERE-guarded UPDATE matches
 // zero rows, which silently bypasses the CAS guard.
 func (t *Task) UpdateWithStatus(fromStatus TaskStatus) (bool, error) {
-	result := DB.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
+	return t.updateWithStatus(DB, fromStatus)
+}
+
+func (t *Task) updateWithStatus(tx *gorm.DB, fromStatus TaskStatus) (bool, error) {
+	result := tx.Model(t).Where("status = ?", fromStatus).Select("*").Updates(t)
 	if result.Error != nil {
 		return false, result.Error
 	}
 	return result.RowsAffected > 0, nil
+}
+
+// CompleteWalletTask settles a successful task exactly once. The task's
+// terminal state, final wallet amount and reward entitlement commit together.
+func (t *Task) CompleteWalletTask(fromStatus TaskStatus, actualQuota int) (bool, error) {
+	if t.Status != TaskStatusSuccess || fromStatus == TaskStatusSuccess || t.TaskID == "" {
+		return false, nil
+	}
+	reserved := t.Quota
+	t.Quota = actualQuota
+	won, err := CommitWalletUsage(t.UserId, actualQuota-reserved, actualQuota, "task:"+t.TaskID, func(tx *gorm.DB) (bool, error) {
+		return t.updateWithStatus(tx, fromStatus)
+	})
+	if err != nil || !won {
+		t.Quota = reserved
+	}
+	return won, err
 }
 
 // TaskBulkUpdateByID performs an unconditional bulk UPDATE by primary key IDs.

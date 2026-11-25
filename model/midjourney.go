@@ -1,5 +1,11 @@
 package model
 
+import (
+	"fmt"
+
+	"gorm.io/gorm"
+)
+
 type Midjourney struct {
 	Id          int    `json:"id"`
 	Code        int    `json:"code"`
@@ -153,6 +159,33 @@ func (midjourney *Midjourney) Insert() error {
 	return err
 }
 
+// InsertWithWalletBilling stores the task and its wallet debit together. An
+// immediately successful task also records the reward in the same commit.
+func (m *Midjourney) InsertWithWalletBilling() (fundingErr, err error) {
+	var eventKey string
+	err = DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(m).Error; err != nil {
+			return err
+		}
+		var key string
+		if m.Status == string(TaskStatusSuccess) {
+			key = m.walletChargeKey()
+		}
+		eventKey, fundingErr = settleWalletUsageTx(tx, m.UserId, m.Quota, m.Quota, key)
+		return fundingErr
+	})
+	if err != nil {
+		m.Id = 0
+		return fundingErr, err
+	}
+	finishCommittedWalletUsage(m.UserId, m.Quota, eventKey)
+	return nil, nil
+}
+
+func (m *Midjourney) walletChargeKey() string {
+	return fmt.Sprintf("midjourney:%d", m.Id)
+}
+
 func (midjourney *Midjourney) Update() error {
 	var err error
 	err = DB.Save(midjourney).Error
@@ -178,7 +211,20 @@ func (midjourney *Midjourney) GetBillingChannelId() int {
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).
 // Uses Model().Select("*").Updates() to avoid GORM Save()'s INSERT fallback.
 func (midjourney *Midjourney) UpdateWithStatus(fromStatus string) (bool, error) {
-	result := DB.Model(midjourney).Where("status = ?", fromStatus).Select("*").Updates(midjourney)
+	return midjourney.updateWithStatus(DB, fromStatus)
+}
+
+func (m *Midjourney) CompleteWalletTask(fromStatus string) (bool, error) {
+	if m.Status != string(TaskStatusSuccess) || fromStatus == m.Status || m.Id == 0 {
+		return false, nil
+	}
+	return CommitWalletUsage(m.UserId, 0, m.Quota, m.walletChargeKey(), func(tx *gorm.DB) (bool, error) {
+		return m.updateWithStatus(tx, fromStatus)
+	})
+}
+
+func (midjourney *Midjourney) updateWithStatus(tx *gorm.DB, fromStatus string) (bool, error) {
+	result := tx.Model(midjourney).Where("status = ?", fromStatus).Select("*").Updates(midjourney)
 	if result.Error != nil {
 		return false, result.Error
 	}

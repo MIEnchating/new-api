@@ -209,13 +209,16 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 					shouldReturnQuota = true
 				}
 			}
-			won, err := task.UpdateWithStatus(preStatus)
+			var won bool
+			if !shouldReturnQuota && task.Status == string(model.TaskStatusSuccess) && preStatus != task.Status {
+				won, err = task.CompleteWalletTask(preStatus)
+			} else {
+				won, err = task.UpdateWithStatus(preStatus)
+			}
 			if err != nil {
 				logger.LogError(ctx, common.LogText("UpdateMidjourneyTask task error: %s", err.Error()))
 			} else if won && shouldReturnQuota {
 				service.RefundMidjourneyQuota(ctx, task, "Composition failed")
-			} else if won {
-				service.CreditCompletedMidjourneyReferralReward(ctx, task)
 			}
 		}
 	}
