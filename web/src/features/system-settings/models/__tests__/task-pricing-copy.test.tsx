@@ -123,7 +123,11 @@ it('shows localized enum choices while preserving raw values in generated billin
   await user.click(
     screen.getByRole('combobox', { name: 'Generate songs or lyrics' })
   )
-  await user.click(screen.getByRole('option', { name: 'Generate lyrics' }))
+  await user.keyboard('lyrics')
+  expect(
+    await screen.findByRole('option', { name: 'Generate lyrics' })
+  ).toBeVisible()
+  await user.keyboard('{ArrowDown}{Enter}')
   expect(
     screen.getByText('Current pricing conditions: Generate lyrics')
   ).toBeVisible()

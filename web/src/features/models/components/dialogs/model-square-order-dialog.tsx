@@ -31,6 +31,7 @@ import { AutoGroupOrderItem } from '@/components/auto-group-order-item'
 import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
+import { FieldSet } from '@/components/ui/field'
 import {
   Select,
   SelectContent,
@@ -253,7 +254,7 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
         </>
       }
     >
-      <div className='flex flex-col gap-5'>
+      <FieldSet disabled={!optionsQuery.isSuccess} className='min-w-0 gap-5'>
         <div className='flex flex-col gap-2'>
           <div className='text-sm font-medium'>{t('Sort method')}</div>
           <ToggleGroup
@@ -455,7 +456,7 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
             )}
           </div>
         )}
-      </div>
+      </FieldSet>
     </Dialog>
   )
 }

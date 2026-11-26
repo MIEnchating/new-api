@@ -42,6 +42,12 @@ export default defineConfig({
     // the pool's fixed worker-start timeout before any test runs. This also
     // takes precedence over CLI maxWorkers, while preserving file isolation.
     fileParallelism: false,
+    // Reuse V8 bytecode for jsdom and its dependencies across isolated forks.
+    env: {
+      NODE_COMPILE_CACHE:
+        process.env.NODE_COMPILE_CACHE ??
+        path.resolve(__dirname, 'node_modules/.cache/vitest-node'),
+    },
     deps: {
       optimizer: {
         client: {
