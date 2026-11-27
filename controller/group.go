@@ -49,7 +49,10 @@ func GetUserGroups(c *gin.Context) {
 	usableGroups := make(map[string]map[string]any)
 	userGroup := ""
 	userId := c.GetInt("id")
-	userGroup, _ = model.GetUserGroup(userId, false)
+	// /api/user/groups is public, so anonymous requests have no user id and use the public groups
+	if userId > 0 {
+		userGroup, _ = model.GetUserGroup(userId, false)
+	}
 	userUsableGroups := service.GetUserUsableGroups(userGroup)
 	orderedGroups := service.GetOrderedGroupNames()
 	now := time.Now()

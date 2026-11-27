@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -49,6 +50,28 @@ func GetGroupEnabledModels(group string) []string {
 		DB.Table("abilities").Where(map[string]any{"group": common.GroupNames(group), "enabled": true}).Distinct("model").Pluck("model", &models)
 	}
 	return models
+}
+
+// IsModelConfiguredForGroups checks enabled and disabled channel abilities for
+// the requested model and its routing name.
+func IsModelConfiguredForGroups(groups []string, modelName string) (bool, error) {
+	names := []string{modelName}
+	if normalized := ratio_setting.RoutingMatchModelName(modelName); normalized != "" && normalized != modelName {
+		names = append(names, normalized)
+	}
+	aliases := make([]string, 0, len(groups))
+	for _, group := range groups {
+		aliases = append(aliases, common.GroupNames(group)...)
+	}
+	var abilities []Ability
+	if err := DB.Select("group", "model").
+		Where(map[string]any{"group": aliases, "model": names}).Find(&abilities).Error; err != nil {
+		return false, err
+	}
+	// Database collations may compare distinct group or model names as equal.
+	return slices.ContainsFunc(abilities, func(ability Ability) bool {
+		return slices.Contains(aliases, ability.Group) && slices.Contains(names, ability.Model)
+	}), nil
 }
 
 func GetEnabledModels() []string {

@@ -63,7 +63,7 @@ func (b *Bot) emailGroupBinding(ctx context.Context, event groupMessage, argumen
 	}
 	code, err := model.CreateQQBotGroupBindingCode(b.appID, event.GroupID, event.Author.OpenID, user)
 	if err == nil {
-		err = common.SendEmail(botText(i18n.MsgQQBotGroupBindingSubject), email,
+		err = common.SendEmail(botText(i18n.MsgQQBotGroupBindingSubject), strings.TrimSpace(user.Email),
 			botText(i18n.MsgQQBotGroupBindingEmail, map[string]any{
 				"Code": code, "Group": event.GroupID, "Member": event.Author.OpenID,
 			}))

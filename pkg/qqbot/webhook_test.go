@@ -17,6 +17,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
@@ -410,21 +411,14 @@ func TestQQBotGroupAccountCommands(t *testing.T) {
 	require.NoError(t, i18n.Init())
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
+			dsn := testdb.IsolatedDSN(t, dialect)
 			var driver gorm.Dialector
 			switch dialect {
 			case "sqlite":
 				driver = sqlite.Open(":memory:")
 			case "mysql":
-				dsn := os.Getenv("TEST_MYSQL_DSN")
-				if dsn == "" {
-					t.Skip("TEST_MYSQL_DSN is not configured")
-				}
 				driver = mysql.Open(dsn)
 			case "postgres":
-				dsn := os.Getenv("TEST_POSTGRES_DSN")
-				if dsn == "" {
-					t.Skip("TEST_POSTGRES_DSN is not configured")
-				}
 				driver = postgres.Open(dsn)
 			}
 			db, err := gorm.Open(driver, &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Silent)})
@@ -441,7 +435,6 @@ func TestQQBotGroupAccountCommands(t *testing.T) {
 			for _, table := range tables {
 				require.False(t, db.Migrator().HasTable(table), "the integration test needs an isolated database")
 			}
-			t.Cleanup(func() { require.NoError(t, db.Migrator().DropTable(tables...)) })
 			require.NoError(t, db.AutoMigrate(tables...))
 			versionQuery := "SELECT version()"
 			if dialect == "sqlite" {
@@ -510,10 +503,15 @@ func TestQQBotGroupAccountCommands(t *testing.T) {
 
 			type reply struct{ path, messageID, text string }
 			replies := make(chan reply, 12)
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			bot := newBot(config{appID: testAppID, appSecret: testSecret, groups: groups}, nil)
+			t.Cleanup(bot.Close)
+			bot.now = func() time.Time { return now }
+			bot.qqClient.Transport = modelListTransport(func(r *http.Request) (*http.Response, error) {
+				defer r.Body.Close()
 				if r.URL.Path == "/app/getAppAccessToken" {
-					_, _ = io.WriteString(w, `{"access_token":"qq-token","expires_in":"7200"}`)
-					return
+					return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(
+						`{"access_token":"qq-token","expires_in":"7200"}`,
+					))}, nil
 				}
 				var message struct {
 					ID   string `json:"msg_id"`
@@ -521,12 +519,8 @@ func TestQQBotGroupAccountCommands(t *testing.T) {
 				}
 				assert.NoError(t, common.DecodeJsonBody(r.Body, &message))
 				replies <- reply{r.URL.Path, message.ID, message.Text}
-				_, _ = io.WriteString(w, `{"id":"qq-reply"}`)
-			}))
-			t.Cleanup(server.Close)
-			bot := newBot(config{appID: testAppID, appSecret: testSecret, groups: groups}, nil)
-			t.Cleanup(bot.Close)
-			bot.now, bot.qqAPI = func() time.Time { return now }, server.URL
+				return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"id":"qq-reply"}`))}, nil
+			})
 			body := func(event, group, member, id, content string) string {
 				raw, err := common.Marshal(map[string]any{"op": 0, "t": event, "d": map[string]any{
 					"id": id, "group_openid": group, "content": content,

@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
-	"os"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -19,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	appI18n "github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/internal/testdb"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	builtinplugins "github.com/QuantumNous/new-api/plugins"
@@ -30,7 +30,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"gorm.io/gorm/schema"
 )
 
 const genericTaskPluginSource = `
@@ -2098,54 +2097,50 @@ func TestPrepareTaskPluginEndpointFiltersEachSharedCandidate(t *testing.T) {
 	}
 }
 
+func setupChannelRoutingTestDB(t *testing.T, dialect string) *gorm.DB {
+	t.Helper()
+	dsn := testdb.IsolatedDSN(t, dialect)
+	previousDB, previousMain, previousLog := model.DB, common.MainDatabaseType(), common.LogDatabaseType()
+	previousPath, previousMaster := common.SQLitePath, common.IsMasterNode
+	previousCache, previousRedis := common.MemoryCacheEnabled, common.RedisEnabled
+	common.SQLitePath, common.IsMasterNode = t.TempDir()+"/routing.db", false
+	common.RedisEnabled = false
+	t.Setenv("SQL_DSN", dsn)
+	require.NoError(t, model.InitDB())
+	database := model.DB
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { assert.NoError(t, sqlDB.Close()) })
+	t.Cleanup(func() {
+		for _, table := range []any{&model.Ability{}, &model.Channel{}} {
+			assert.NoError(t, database.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(table).Error)
+		}
+		common.MemoryCacheEnabled = true
+		model.InitChannelCache()
+		model.DB = previousDB
+		common.SetDatabaseTypes(previousMain, previousLog)
+		common.SQLitePath, common.IsMasterNode = previousPath, previousMaster
+		common.MemoryCacheEnabled, common.RedisEnabled = previousCache, previousRedis
+		if previousDB != nil {
+			model.InitChannelCache()
+		}
+	})
+	require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Task{}, &model.Option{}))
+	query := "SELECT version()"
+	if dialect == "sqlite" {
+		query = "SELECT sqlite_version()"
+	}
+	var version string
+	require.NoError(t, database.Raw(query).Scan(&version).Error)
+	t.Logf("database version: %s", version)
+	return database
+}
+
 func TestRouteTaskPluginEndpointUsesSelectedChannel(t *testing.T) {
 	require.NoError(t, appI18n.Init())
 	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
 		t.Run(dialect, func(t *testing.T) {
-			dsn := ""
-			if dialect != "sqlite" {
-				dsn = os.Getenv("TEST_" + strings.ToUpper(dialect) + "_DSN")
-				if dsn == "" {
-					t.Skip("database test DSN not configured")
-				}
-			}
-			previousDB, previousMain, previousLog := model.DB, common.MainDatabaseType(), common.LogDatabaseType()
-			previousPath, previousMaster := common.SQLitePath, common.IsMasterNode
-			previousCache, previousRedis := common.MemoryCacheEnabled, common.RedisEnabled
-			common.SQLitePath, common.IsMasterNode = t.TempDir()+"/routing.db", false
-			common.RedisEnabled = false
-			t.Setenv("SQL_DSN", dsn)
-			require.NoError(t, model.InitDB())
-			database := model.DB
-			// Every table belongs to this run, including when a developer points
-			// a test DSN at a database shared with another test suite.
-			database.Config.NamingStrategy = schema.NamingStrategy{TablePrefix: "endpoint_route_" + common.GetUUID() + "_"}
-			require.NoError(t, database.AutoMigrate(&model.Channel{}, &model.Ability{}, &model.Task{}))
-			t.Cleanup(func() {
-				for _, table := range []any{&model.Ability{}, &model.Channel{}, &model.Task{}} {
-					require.NoError(t, database.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(table).Error)
-				}
-				common.MemoryCacheEnabled = true
-				model.InitChannelCache()
-				require.NoError(t, database.Migrator().DropTable(&model.Ability{}, &model.Channel{}, &model.Task{}))
-				model.DB = previousDB
-				common.SetDatabaseTypes(previousMain, previousLog)
-				common.SQLitePath, common.IsMasterNode = previousPath, previousMaster
-				common.MemoryCacheEnabled, common.RedisEnabled = previousCache, previousRedis
-				if previousDB != nil {
-					model.InitChannelCache()
-				}
-				sqlDB, err := database.DB()
-				require.NoError(t, err)
-				require.NoError(t, sqlDB.Close())
-			})
-			query := "SELECT version()"
-			if dialect == "sqlite" {
-				query = "SELECT sqlite_version()"
-			}
-			var version string
-			require.NoError(t, database.Raw(query).Scan(&version).Error)
-			t.Logf("database version: %s", version)
+			database := setupChannelRoutingTestDB(t, dialect)
 
 			for _, memoryCache := range []bool{false, true} {
 				t.Run(fmt.Sprintf("memory_cache=%t", memoryCache), func(t *testing.T) {
