@@ -80,6 +80,9 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, usedVars map[
 			return value
 		},
 		"fixed": func(amount float64) float64 {
+			if request.FixedPriceOverride != nil {
+				amount = *request.FixedPriceOverride
+			}
 			trace.BillingUnit = BillingUnitRequest
 			trace.FixedPrice = &amount
 			return amount * 1_000_000

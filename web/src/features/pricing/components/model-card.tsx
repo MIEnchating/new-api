@@ -82,6 +82,7 @@ export const ModelCard = memo(function ModelCard(props: ModelCardProps) {
       showRechargePrice,
       priceRate,
       usdExchangeRate,
+      selectedGroup: props.selectedGroup,
       groupRatioMultiplier: getDynamicDisplayGroupRatio(
         model,
         props.selectedGroup

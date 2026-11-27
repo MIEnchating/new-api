@@ -412,6 +412,23 @@ it('opens a failed history record by keyboard and restores focus to that record 
   ).toHaveFocus()
 })
 
+it('keeps the 20 newest detection records after saving a new run', () => {
+  const outcome = { status: 'cancelled' } as const
+  for (let number = 1; number <= 21; number++) {
+    saveDetectionHistory(
+      7,
+      { model: `run-${number}`, group: 'default', effort: '' },
+      outcome,
+      []
+    )
+  }
+
+  const records = readDetectionHistory(7)
+  expect(records).toHaveLength(20)
+  expect(records[0].target.model).toBe('run-21')
+  expect(records.map(({ target }) => target.model)).not.toContain('run-1')
+})
+
 it('shows tokenizer diagnostics next to the sample controls and retries only the probe', async () => {
   const post = vi
     .spyOn(api, 'post')
@@ -514,6 +531,22 @@ it('refreshes the three prompt cards without starting a detection', async () => 
 })
 
 it('celebrates the reference alias for GPT-6.1 Sol and clears the match for a different candidate', async () => {
+  const matchMedia = window.matchMedia
+  vi.spyOn(window, 'matchMedia').mockImplementation((query) => {
+    const media = matchMedia(query)
+    return query.startsWith('(prefers-reduced-motion')
+      ? { ...media, matches: false }
+      : media
+  })
+  const draw = vi.fn()
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    beginPath: vi.fn(),
+    clearRect: vi.fn(),
+    closePath: vi.fn(),
+    fill: draw,
+    lineTo: vi.fn(),
+    moveTo: vi.fn(),
+  } as unknown as CanvasRenderingContext2D)
   const round = result.rounds[0]
   const completeSamples = prompts.map(() => round.samples[0])
   const post = vi.spyOn(api, 'post')
@@ -545,6 +578,7 @@ it('celebrates the reference alias for GPT-6.1 Sol and clears the match for a di
   await user.click(screen.getByRole('button', { name: 'Run detection' }))
 
   expect(await screen.findByText('Model matched')).toBeVisible()
+  await waitFor(() => expect(draw).toHaveBeenCalled())
 
   const ranking = screen.getByRole('button', { name: 'Candidate models' })
   expect(ranking).toHaveAttribute('aria-expanded', 'false')
@@ -552,6 +586,7 @@ it('celebrates the reference alias for GPT-6.1 Sol and clears the match for a di
   expect(screen.getByRole('table')).toBeVisible()
 
   await user.click(screen.getByRole('button', { name: 'Run detection' }))
+  draw.mockClear()
   const report = await screen.findByRole('region', {
     name: 'Detection results',
   })
@@ -559,6 +594,7 @@ it('celebrates the reference alias for GPT-6.1 Sol and clears the match for a di
     await within(report).findByRole('heading', { name: 'a-different-model' })
   ).toBeVisible()
   expect(within(report).queryByText('Model matched')).not.toBeInTheDocument()
+  expect(draw).not.toHaveBeenCalled()
 })
 
 it('shows sampling controls and a reply area on each card before sampling', async () => {

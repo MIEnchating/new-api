@@ -16,172 +16,169 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
+import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, test, vi } from 'vitest'
 
-import { Window } from 'happy-dom'
-import { afterAll, describe, test } from 'vitest'
+import {
+  TopUpStatsSummaryDialog,
+  TopUpStatsSummaryRail,
+} from '../topup-stats-summary-rail'
 
-const domWindow = new Window()
-for (const key of [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'SVGElement',
-  'Node',
-  'Element',
-] as const) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
+const statisticsRange = {
+  start: new Date(2026, 7, 7, 0),
+  end: new Date(2026, 7, 13, 23),
 }
-Object.defineProperty(globalThis, 'requestAnimationFrame', {
-  configurable: true,
-  value: (callback: FrameRequestCallback) => setTimeout(callback, 0),
-})
-Object.defineProperty(globalThis, 'cancelAnimationFrame', {
-  configurable: true,
-  value: (handle: number) => clearTimeout(handle),
-})
-
-const { act } = await import('react')
-const { createRoot } = await import('react-dom/client')
-const { createInstance } = await import('i18next')
-const { I18nextProvider, initReactI18next } = await import('react-i18next')
-const { TopUpStatsSummaryDialog, TopUpStatsSummaryRail } =
-  await import('../topup-stats-summary-rail')
-
-const i18n = createInstance()
-await i18n.use(initReactI18next).init({
-  lng: 'en',
-  resources: { en: { translation: {} } },
-})
-
-const reactTestGlobals = globalThis as typeof globalThis & {
-  IS_REACT_ACT_ENVIRONMENT?: boolean
-}
-reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
+const dailyStats = [
+  {
+    date: '2026-08-13',
+    online_topup: 100,
+    redemption: 20,
+    admin_adjustment: 0,
+    lottery: 0,
+    total: 120,
+  },
+]
 
 describe('order management mobile summary rail', () => {
-  afterAll(() => domWindow.close())
-
-  test('keeps five quota summaries in one non-wrapping mobile rail', async () => {
-    const container = document.createElement('div')
-    document.body.append(container)
-    const root = createRoot(container)
-
-    await act(async () =>
-      root.render(
-        <I18nextProvider i18n={i18n}>
-          <TopUpStatsSummaryRail
-            typeQuotas={{
-              online_topup: 100,
-              redemption: 200,
-              affiliate_transfer: 0,
-              admin_adjustment: 300,
-              lottery_reward: 80,
-              lottery_reversal: -20,
-            }}
-            lotteryQuota={60}
-            totalQuota={540}
-            loading={false}
-          />
-        </I18nextProvider>
-      )
+  test('keeps five quota summaries in one non-wrapping mobile rail', () => {
+    const { container } = render(
+      <TopUpStatsSummaryRail
+        typeQuotas={{
+          online_topup: 100,
+          redemption: 200,
+          affiliate_transfer: 0,
+          admin_adjustment: 300,
+          lottery_reward: 80,
+          lottery_reversal: -20,
+        }}
+        lotteryQuota={60}
+        totalQuota={540}
+        loading={false}
+      />
     )
 
     const rail = container.querySelector<HTMLElement>(
       '[data-mobile-summary-rail]'
     )
-    assert.ok(rail)
-    assert.equal(rail.classList.contains('overflow-x-auto'), true)
-    assert.equal(rail.classList.contains('no-scrollbar'), true)
-    assert.equal(rail.querySelectorAll('[data-summary-item]').length, 5)
-    assert.equal(rail.textContent?.includes('Lottery amount'), true)
-    assert.equal(rail.textContent?.includes('Total Quota'), true)
-    assert.equal(rail.textContent?.includes('Successful orders'), false)
-    assert.equal(rail.textContent?.includes('Paying users'), false)
-    assert.equal(rail.textContent?.includes('Invoiced orders'), false)
+    expect(rail).toHaveClass('overflow-x-auto', 'no-scrollbar')
+    expect(rail?.querySelectorAll('[data-summary-item]')).toHaveLength(5)
+    expect(screen.getByText('Lottery amount')).toBeVisible()
+    expect(screen.getByText('Total Quota')).toBeVisible()
+    expect(screen.queryByText('Successful orders')).toBeNull()
+    expect(screen.queryByText('Paying users')).toBeNull()
+    expect(screen.queryByText('Invoiced orders')).toBeNull()
     const valueTones = [
-      ...rail.querySelectorAll<HTMLElement>('[data-summary-value]'),
+      ...container.querySelectorAll<HTMLElement>('[data-summary-value]'),
     ].map((value) =>
       [...value.classList].find((className) => className.startsWith('text-'))
     )
-    assert.deepEqual(valueTones, [
+    expect(valueTones).toEqual([
       'text-success',
       'text-chart-2',
       'text-warning',
       'text-chart-5',
       'text-primary',
     ])
+  })
+})
 
-    await act(async () => root.unmount())
-    container.remove()
+describe('order management statistics dialog', () => {
+  test('keeps the header outside the scrollable chart body and stacks the date controls on narrow screens', async () => {
+    const user = userEvent.setup()
+    const onOpenChange = vi.fn()
+    const measure = HTMLElement.prototype.getBoundingClientRect
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
+      function (this: HTMLElement) {
+        if (this.classList.contains('recharts-responsive-container')) {
+          return new DOMRect(0, 0, 320, 256)
+        }
+        return measure.call(this)
+      }
+    )
+    render(
+      <TopUpStatsSummaryDialog
+        open
+        onOpenChange={onOpenChange}
+        dailyStats={dailyStats}
+        dailyStatsLoading={false}
+        dailyStatsError={false}
+        onRetry={() => {}}
+        statisticsRange={statisticsRange}
+        onStatisticsRangeChange={() => {}}
+      />
+    )
+
+    const dialog = screen.getByRole('dialog', { name: 'Top-up Stats' })
+    const chartRegion = within(dialog).getByRole('region', {
+      name: 'Daily quota changes',
+    })
+    const scrollBody = chartRegion.closest('[data-slot="dialog-body"]')
+    expect(scrollBody).toHaveClass('overflow-y-auto')
+    expect(scrollBody).not.toContainElement(
+      within(dialog).getByRole('button', { name: 'Close' })
+    )
+    expect(within(chartRegion).getByRole('heading').parentElement).toHaveClass(
+      'flex-col',
+      'sm:flex-row',
+      'sm:flex-wrap'
+    )
+    const dateRange = within(chartRegion).getByRole('button', {
+      name: /2026-08-07.*2026-08-13/,
+    })
+    expect(dateRange).toHaveClass('h-auto', '[&>span]:whitespace-normal')
+    const legend = await within(chartRegion).findByText('Total Quota')
+    expect(
+      legend.closest('.recharts-legend-wrapper')?.firstElementChild
+    ).toHaveClass('flex-wrap')
+    expect(
+      chartRegion.querySelector('.recharts-line-dots circle')
+    ).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+    expect(onOpenChange).toHaveBeenCalledWith(false, expect.anything())
   })
 
-  test('shows the daily quota trend chart in the statistics dialog', async () => {
-    const container = document.createElement('div')
-    document.body.append(container)
-    const root = createRoot(container)
+  test('distinguishes loading, empty, and failed date ranges and lets the user retry', async () => {
+    const user = userEvent.setup()
+    const onRetry = vi.fn()
+    const props = {
+      open: true,
+      onOpenChange: () => {},
+      dailyStats: [],
+      statisticsRange,
+      onStatisticsRangeChange: () => {},
+      onRetry,
+    }
+    const { rerender } = render(
+      <TopUpStatsSummaryDialog
+        {...props}
+        dailyStatsLoading
+        dailyStatsError={false}
+      />
+    )
+    expect(screen.getByRole('status')).toHaveTextContent('Loading...')
+    expect(screen.queryByText('No data available')).toBeNull()
 
-    await act(async () =>
-      root.render(
-        <I18nextProvider i18n={i18n}>
-          <TopUpStatsSummaryDialog
-            open
-            onOpenChange={() => {}}
-            typeQuotas={{
-              online_topup: 100,
-              redemption: 200,
-              affiliate_transfer: 0,
-              admin_adjustment: 300,
-              lottery_reward: 80,
-              lottery_reversal: -20,
-            }}
-            lotteryQuota={60}
-            totalQuota={540}
-            loading={false}
-            dailyStats={[
-              {
-                date: '2026-08-13',
-                online_topup: 100,
-                redemption: 20,
-                admin_adjustment: 0,
-                lottery: 0,
-                total: 120,
-              },
-            ]}
-            dailyStatsLoading={false}
-            statisticsRange={{ start: new Date(), end: new Date() }}
-            onStatisticsRangeChange={() => {}}
-          />
-        </I18nextProvider>
-      )
+    rerender(
+      <TopUpStatsSummaryDialog
+        {...props}
+        dailyStatsLoading={false}
+        dailyStatsError={false}
+      />
     )
+    expect(screen.getByText('No data available')).toBeVisible()
 
-    assert.ok(document.querySelector('[data-statistics-chart]'))
-    assert.ok(document.querySelector('[data-slot="chart"]'))
-    const chartStyles = document.querySelector('[data-slot="chart"] style')
-    assert.match(
-      chartStyles?.textContent ?? '',
-      /--color-total: var\(--primary\)/
+    rerender(
+      <TopUpStatsSummaryDialog
+        {...props}
+        dailyStatsLoading={false}
+        dailyStatsError
+      />
     )
-    assert.doesNotMatch(
-      chartStyles?.textContent ?? '',
-      /--color-total: var\(--foreground\)/
-    )
-    assert.equal(document.querySelectorAll('[data-statistics-item]').length, 0)
-    assert.match(document.body.textContent || '', /Quota trend/)
-    assert.match(document.body.textContent || '', /Daily quota changes/)
-    assert.equal(
-      document.body.textContent?.includes('Successful orders'),
-      false
-    )
-    assert.equal(document.body.textContent?.includes('Paying users'), false)
-    assert.equal(document.body.textContent?.includes('Invoiced orders'), false)
-
-    await act(async () => root.unmount())
-    container.remove()
+    expect(screen.getByText('Failed to load top-up stats')).toBeVisible()
+    expect(screen.queryByText('No data available')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(onRetry).toHaveBeenCalledOnce()
   })
 })

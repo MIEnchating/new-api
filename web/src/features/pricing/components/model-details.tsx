@@ -1203,7 +1203,7 @@ function ProviderGroupPricingSection(
     })
     const formattedPricesByGroup = new Map(
       availableGroups.map((group) => {
-        const ratio = props.groupRatio[group] || 1
+        const ratio = props.groupRatio[group] ?? 1
         return [
           group,
           getDynamicFormattedPricesByTier(dynamicTiers, {
@@ -1213,6 +1213,7 @@ function ProviderGroupPricingSection(
             priceRate: props.priceRate,
             usdExchangeRate: props.usdExchangeRate,
             groupRatioMultiplier: ratio,
+            fixedRequestPrice: props.model.group_request_prices?.[group],
             usageSchema: props.model.billing_usage_schema,
           }),
         ] as const
@@ -1227,7 +1228,7 @@ function ProviderGroupPricingSection(
         <AutoGroupChain model={props.model} autoGroups={props.autoGroups} />
         <div className='space-y-3'>
           {availableGroups.map((group) => {
-            const ratio = props.groupRatio[group] || 1
+            const ratio = props.groupRatio[group] ?? 1
             const formattedPricesByTier =
               formattedPricesByGroup.get(group) ??
               new Map<DynamicPricingTier, Map<string, string>>()

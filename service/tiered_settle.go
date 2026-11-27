@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
@@ -10,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	hosttypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
@@ -184,6 +186,35 @@ func refreshTieredBillingContext(c *gin.Context, relayInfo *relaycommon.RelayInf
 	if snap == nil || snap.BillingMode != "tiered_expr" {
 		return nil, nil
 	}
+	if len(relayInfo.GroupRequestPrices) > 0 {
+		input := *relayInfo.BillingRequestInput
+		price, exists := ratio_setting.GroupRequestPrice(relayInfo.GroupRequestPrices, relayInfo.UsingGroup)
+		if exists {
+			relayInfo.PriceData.GroupRatioInfo = hosttypes.GroupRatioInfo{GroupRatio: 1, GroupSpecialRatio: -1}
+		}
+		previous := input.FixedPriceOverride
+		if (previous != nil) != exists || (previous != nil && *previous != price) {
+			input.FixedPriceOverride = nil
+			if exists {
+				input.FixedPriceOverride = &price
+			}
+			cost, trace, err := billingexpr.RunExprByHashWithRequest(snap.ExprString, snap.ExprHash, billingexpr.TokenParams{}, input)
+			if err != nil {
+				return nil, err
+			}
+			beforeGroup := cost / 1_000_000 * snap.QuotaPerUnit
+			ratio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+			quota, err := billingexpr.QuotaRoundStrict(beforeGroup * ratio)
+			if err != nil {
+				return nil, err
+			}
+			snap.EstimatedQuotaBeforeGroup = beforeGroup
+			snap.EstimatedQuotaAfterGroup = quota
+			snap.EstimatedFixedPrice = trace.FixedPrice
+			snap.GroupRatio = ratio
+			relayInfo.BillingRequestInput = &input
+		}
+	}
 	// A retry can select a channel with a different fixed upstream tier even
 	// within the same group. Reprice with the frozen expression and request;
 	// only the trusted channel context changes.
@@ -267,10 +298,55 @@ func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon
 	if relayInfo.Billing == nil {
 		return PreConsumeBilling(c, snap.EstimatedQuotaAfterGroup, relayInfo)
 	}
-	if err := relayInfo.Billing.Reserve(snap.EstimatedQuotaAfterGroup); err != nil {
+	reserve := relayInfo.Billing.Reserve
+	if len(relayInfo.GroupRequestPrices) > 0 {
+		reserve = relayInfo.Billing.ReserveBeforeSubmit
+	}
+	if err := reserve(snap.EstimatedQuotaAfterGroup); err != nil {
+		var apiErr *types.NewAPIError
+		if errors.As(err, &apiErr) {
+			return apiErr
+		}
 		return types.NewError(err, types.ErrorCodeUpdateDataError, types.ErrOptionWithSkipRetry())
 	}
 	relayInfo.FinalPreConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
+	return nil
+}
+
+// PrepareBillingForSelectedGroup refreshes a fixed price when routing falls
+// back to a different group, before allowing the next upstream attempt.
+func PrepareBillingForSelectedGroup(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
+	if info.LegacyRequestPrice == nil {
+		return PrepareTieredBillingForSelectedGroup(c, info)
+	}
+	price, exists := ratio_setting.GroupRequestPrice(info.GroupRequestPrices, info.UsingGroup)
+	if exists {
+		info.PriceData.GroupRatioInfo = hosttypes.GroupRatioInfo{GroupRatio: 1, GroupSpecialRatio: -1}
+	} else {
+		price = *info.LegacyRequestPrice
+	}
+	info.PriceData.ModelPrice = price * info.LegacyRequestPriceFactor
+	quota, err := common.QuotaFromFloatStrict(info.PriceData.ApplyOtherRatiosToFloat(
+		info.PriceData.ModelPrice * common.QuotaPerUnit * info.PriceData.GroupRatioInfo.GroupRatio))
+	if err != nil {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeModelPriceError, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	info.PriceData.QuotaToPreConsume = quota
+	if quota == 0 {
+		return nil
+	}
+	info.PriceData.FreeModel = false
+	if info.Billing == nil {
+		return PreConsumeBilling(c, quota, info)
+	}
+	if err := info.Billing.ReserveBeforeSubmit(quota); err != nil {
+		var apiErr *types.NewAPIError
+		if errors.As(err, &apiErr) {
+			return apiErr
+		}
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeInsufficientUserQuota, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+	}
+	info.FinalPreConsumedQuota = info.Billing.GetPreConsumedQuota()
 	return nil
 }
 

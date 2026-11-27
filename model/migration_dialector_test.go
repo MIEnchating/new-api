@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -78,6 +79,90 @@ type taskPluginBeforeIcon struct {
 type optionBeforePrimaryKey struct {
 	Key   string `gorm:"size:255"`
 	Value string
+}
+
+func TestGroupRequestPricePersistence(t *testing.T) {
+	originalPrices := ratio_setting.GroupRequestPricesJSON()
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateGroupRequestPrices(originalPrices))
+	})
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			dsn := "local"
+			switch dialect {
+			case "sqlite":
+				previousPath := common.SQLitePath
+				common.SQLitePath = filepath.Join(t.TempDir(), "pricing.db")
+				t.Cleanup(func() { common.SQLitePath = previousPath })
+			case "mysql":
+				dsn = os.Getenv("TEST_MYSQL_DSN")
+			case "postgres":
+				dsn = os.Getenv("TEST_POSTGRES_DSN")
+			}
+			if dsn == "" {
+				t.Skip("test database DSN is not configured")
+			}
+			t.Setenv("GROUP_PRICE_TEST_DSN", dsn)
+			db, dbType, err := chooseDB("GROUP_PRICE_TEST_DSN", false)
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+			previousDB := DB
+			previousKey := commonKeyCol
+			previousDBType := common.MainDatabaseType()
+			previousOptions := common.OptionMap
+			previousModelPrices := ratio_setting.ModelPrice2JSONString()
+			DB = db
+			common.OptionMap = make(map[string]string)
+			common.SetMainDatabaseType(dbType)
+			commonKeyCol = "`key`"
+			if dialect == "postgres" {
+				commonKeyCol = `"key"`
+			}
+			t.Cleanup(func() {
+				DB, commonKeyCol, common.OptionMap = previousDB, previousKey, previousOptions
+				common.SetMainDatabaseType(previousDBType)
+				require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(previousModelPrices))
+				InvalidatePricingCache()
+			})
+			tables := []any{&Option{}, &Ability{}, &Channel{}, &Model{}, &Vendor{}, &SystemTask{}}
+			require.NoError(t, db.AutoMigrate(tables...))
+			t.Cleanup(func() { require.NoError(t, db.Migrator().DropTable(tables...)) })
+			var version string
+			versionQuery := "SELECT VERSION()"
+			if dialect == "sqlite" {
+				versionQuery = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+			t.Log(version)
+			require.NoError(t, db.Create(&Option{Key: "ModelPrice", Value: `{"group-price-test":0.06}`}).Error)
+
+			const name = "group-price-test"
+			snapshot, err := GetModelPricingSnapshot([]string{name})
+			require.NoError(t, err)
+			change := ModelPricingChange{
+				ModelName: name, ExpectedVersion: snapshot.Entries[0].Version,
+				Pricing: PricingValues{
+					"ModelPrice":                           0.06,
+					ratio_setting.GroupRequestPricesOption: map[string]any{"a": 0.15, "b": 0.04, "c": 0.015, "free": 0.0},
+				},
+			}
+			require.NoError(t, UpdateModelPricing([]ModelPricingChange{change}))
+			assert.ErrorIs(t, UpdateModelPricing([]ModelPricingChange{change}), ErrModelPricingConflict)
+			saved, err := GetModelPricingSnapshot([]string{name})
+			require.NoError(t, err)
+			assert.Equal(t, change.Pricing, saved.Entries[0].Configured)
+			assert.Equal(t, map[string]float64{"a": 0.15, "b": 0.04, "c": 0.015, "free": 0}, ratio_setting.GroupRequestPrices(name))
+
+			change.ExpectedVersion = saved.Entries[0].Version
+			change.Pricing[ratio_setting.GroupRequestPricesOption] = map[string]any{"a": -1.0}
+			require.Error(t, UpdateModelPricing([]ModelPricingChange{change}))
+			change.Pricing[ratio_setting.GroupRequestPricesOption] = map[string]any{}
+			require.NoError(t, UpdateModelPricing([]ModelPricingChange{change}))
+			assert.Empty(t, ratio_setting.GroupRequestPrices(name))
+		})
+	}
 }
 
 func TestMigrationSchemaStability(t *testing.T) {

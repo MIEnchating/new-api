@@ -586,12 +586,10 @@ export function TopUpStats() {
       <TopUpStatsSummaryDialog
         open={statisticsOpen}
         onOpenChange={setStatisticsOpen}
-        typeQuotas={typeQuotas}
-        lotteryQuota={lotteryQuota}
-        totalQuota={totalQuota}
-        loading={query.isLoading}
         dailyStats={statisticsQuery.data ?? []}
         dailyStatsLoading={statisticsQuery.isLoading}
+        dailyStatsError={statisticsQuery.isLoadingError}
+        onRetry={() => void statisticsQuery.refetch()}
         statisticsRange={statisticsRange}
         onStatisticsRangeChange={(nextRange) => {
           if (nextRange.start && nextRange.end) {

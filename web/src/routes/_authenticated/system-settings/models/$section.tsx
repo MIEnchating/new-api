@@ -28,6 +28,14 @@ export const Route = createFileRoute(
   '/_authenticated/system-settings/models/$section'
 )({
   beforeLoad: ({ params }) => {
+    if (params.section === 'model-square') {
+      throw redirect({
+        to: '/models/$section',
+        params: { section: 'metadata' },
+        search: { squareOrder: true },
+        replace: true,
+      })
+    }
     if (
       params.section === 'channel-affinity' ||
       params.section === 'routing-reliability' ||

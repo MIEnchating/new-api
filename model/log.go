@@ -858,6 +858,27 @@ func GetAllLogs(filter LogFilter, startIdx int, num int) (logs []*Log, total int
 
 const logSearchCountLimit = 10000
 
+type UserConsumption struct {
+	WalletQuota       int
+	SubscriptionQuota int
+	Count             int64
+}
+
+func GetUserConsumptionForPeriod(ctx context.Context, userID int, start, end int64) (UserConsumption, error) {
+	var usage UserConsumption
+	query := LOG_DB.WithContext(ctx).Model(&Log{}).
+		Where("logs.user_id = ? AND logs.type = ? AND logs.created_at >= ? AND logs.created_at <= ?", userID, LogTypeConsume, start, end)
+	query = applyUserVisibleLogFilter(query, "logs.other")
+	// Consume logs store billing_source in compact JSON. Records without it
+	// predate subscription billing and count toward the wallet.
+	subscription := `%"billing_source":"subscription"%`
+	err := query.Select(`
+		COALESCE(SUM(CASE WHEN logs.other LIKE ? THEN 0 ELSE logs.quota END), 0) AS wallet_quota,
+		COALESCE(SUM(CASE WHEN logs.other LIKE ? THEN logs.quota ELSE 0 END), 0) AS subscription_quota,
+		COUNT(*) AS count`, subscription, subscription).Scan(&usage).Error
+	return usage, err
+}
+
 func GetUserLogs(userId int, filter LogFilter, startIdx int, num int) (logs []*Log, total int64, err error) {
 	tx, err := filter.apply(LOG_DB.Where("logs.user_id = ?", userId))
 	if err != nil {

@@ -7,6 +7,42 @@ import (
 	"github.com/expr-lang/expr/ast"
 )
 
+// FlatRequestPrice identifies an unconditional price for one request.
+func FlatRequestPrice(expression string) (float64, bool) {
+	entry, err := compileEntryFromCacheByHash(expression, ExprHashString(expression))
+	if err != nil || entry.flatRequestPrice == nil {
+		return 0, false
+	}
+	return *entry.flatRequestPrice, true
+}
+
+func fixedLeafPrice(node ast.Node) *float64 {
+	tier, ok := node.(*ast.CallNode)
+	if !ok || len(tier.Arguments) != 2 {
+		return nil
+	}
+	callee, ok := tier.Callee.(*ast.IdentifierNode)
+	if !ok || callee.Value != "tier" {
+		return nil
+	}
+	if _, ok := tier.Arguments[0].(*ast.StringNode); !ok {
+		return nil
+	}
+	fixed, ok := tier.Arguments[1].(*ast.CallNode)
+	if !ok || len(fixed.Arguments) != 1 {
+		return nil
+	}
+	callee, ok = fixed.Callee.(*ast.IdentifierNode)
+	if !ok || callee.Value != "fixed" {
+		return nil
+	}
+	amount, ok := requestRuleNumber(fixed.Arguments[0])
+	if !ok {
+		return nil
+	}
+	return &amount
+}
+
 // UsesFixedPricing includes unselected branches, even when compilation later
 // optimizes them away. Hosts use it to reject unsupported billing entrances.
 func UsesFixedPricing(expression string) bool {

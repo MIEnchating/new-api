@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -35,6 +36,22 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 		}
 		if len(groups) > 0 {
 			item.EnableGroup = groups
+			prices := ratio_setting.GroupRequestPrices(item.ModelName)
+			fixed := item.QuotaType == 1
+			if item.BillingMode == "tiered_expr" {
+				_, fixed = billingexpr.FlatRequestPrice(item.BillingExpr)
+			}
+			if fixed && len(prices) > 0 {
+				item.GroupRequestPrices = make(map[string]float64)
+				for _, group := range groups {
+					if _, visible := usableGroup[group]; !visible {
+						continue
+					}
+					if price, found := ratio_setting.GroupRequestPrice(prices, group); found {
+						item.GroupRequestPrices[group] = price
+					}
+				}
+			}
 			filtered = append(filtered, item)
 		}
 	}
@@ -133,15 +150,17 @@ func GetModelSquareUsage(c *gin.Context) {
 		common.ApiErrorStatus(c, http.StatusBadRequest, err)
 		return
 	}
-	dayCount, _ := strconv.Atoi(days)
-	totals, err := service.GetModelUsageTotals(dayCount)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	usage := make(map[string]model.ModelUsageTotal, len(totals))
-	for _, total := range totals {
-		usage[total.ModelName] = total
+	usage := make(map[string]model.ModelUsageTotal)
+	if c.Query("include_usage") != "false" {
+		dayCount, _ := strconv.Atoi(days)
+		totals, err := service.GetModelUsageTotals(dayCount)
+		if err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		for _, total := range totals {
+			usage[total.ModelName] = total
+		}
 	}
 	pricing := model.GetPricing()
 	vendors := make(map[int]model.PricingVendor)

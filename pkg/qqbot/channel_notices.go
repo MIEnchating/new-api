@@ -54,7 +54,7 @@ func (b *Bot) deliverChannelNotice(notice channelNotice) {
 	if name == "" {
 		name = "#" + strconv.Itoa(notice.id)
 	}
-	text := i18n.Translate("", key, map[string]any{"Name": name})
+	text := botText(key, map[string]any{"Name": name})
 	for _, group := range b.notifyGroups {
 		ctx, cancel := context.WithTimeout(b.ctx, 15*time.Second)
 		err := b.sendQQText(ctx, "/v2/groups/"+group+"/messages", text, "")

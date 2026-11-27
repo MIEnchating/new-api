@@ -29,6 +29,8 @@ import { toast } from 'sonner'
 
 import { AutoGroupOrderItem } from '@/components/auto-group-order-item'
 import { Dialog } from '@/components/dialog'
+import { ErrorState } from '@/components/error-state'
+import { LoadingState } from '@/components/loading-state'
 import { Button } from '@/components/ui/button'
 import { Combobox } from '@/components/ui/combobox'
 import { FieldSet } from '@/components/ui/field'
@@ -40,6 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { compareModelUsage } from '@/features/pricing/lib/filters'
 import { updateSystemOptionsBulk } from '@/features/system-settings/api'
@@ -61,11 +64,13 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { getModelSquareUsage } from '../../api'
 import { modelsQueryKeys } from '../../lib'
 import type { ModelSquareUsage } from '../../types'
+import { ModelSquareVendorOrder } from './model-square-vendor-order'
 
 const MODE_KEY = 'model_square_setting.sort_mode'
 const METRIC_KEY = 'model_square_setting.sort_metric'
 const DAYS_KEY = 'model_square_setting.sort_days'
 const MODELS_KEY = 'model_square_setting.sort_models'
+const VENDORS_KEY = 'ModelSquareVendorOrder'
 
 // Keep the existing vendor order as the default.
 const DEFAULT_ORDER = {
@@ -73,6 +78,7 @@ const DEFAULT_ORDER = {
   [METRIC_KEY]: 'tokens',
   [DAYS_KEY]: 7,
   [MODELS_KEY]: [] as string[],
+  [VENDORS_KEY]: [] as string[],
 }
 
 type OrderOptions = typeof DEFAULT_ORDER
@@ -97,6 +103,7 @@ function ModelIconTile(props: { children: ReactNode }) {
 type ModelSquareOrderDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialTab?: 'sort' | 'vendors'
 }
 
 /** Lets the root admin choose the Recommended order of the model square. */
@@ -106,6 +113,8 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
   const queryClient = useQueryClient()
   const optionsQuery = useSystemOptions(props.open)
   const [draft, setDraft] = useState<OrderOptions | null>(null)
+  const [selectedTab, setSelectedTab] = useState<string | null>(null)
+  const tab = selectedTab ?? props.initialTab ?? 'sort'
 
   const saved = useMemo(() => {
     const options = getOptionValue(optionsQuery.data?.data, DEFAULT_ORDER)
@@ -127,17 +136,24 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
   const days = order[DAYS_KEY]
   const listed = order[MODELS_KEY]
   const usesUsage = mode === 'usage' || mode === 'mixed'
+  const usesModelList = mode === 'manual' || mode === 'mixed'
 
-  // Every square model, whichever group can see it, with its usage
+  const modelsQuery = useQuery({
+    queryKey: modelsQueryKeys.squareModels(),
+    queryFn: async () => requireServerSuccess(await getModelSquareUsage()),
+    enabled: props.open && tab === 'sort' && usesModelList,
+    meta: { errorToast: false },
+  })
   const usageQuery = useQuery({
     queryKey: modelsQueryKeys.squareUsage(days),
     queryFn: async () => requireServerSuccess(await getModelSquareUsage(days)),
-    enabled: props.open && mode !== 'vendor',
+    enabled: props.open && tab === 'sort' && usesUsage,
     placeholderData: keepPreviousData,
+    meta: { errorToast: false },
   })
   const squareModels = useMemo(
-    () => usageQuery.data?.data ?? [],
-    [usageQuery.data]
+    () => modelsQuery.data?.data ?? [],
+    [modelsQuery.data]
   )
 
   const modelByName = useMemo(
@@ -147,7 +163,7 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
 
   const ranked = useMemo(() => {
     const pinned = mode === 'mixed' ? listed : []
-    return squareModels
+    return (usageQuery.data?.data ?? [])
       .filter((model) => !pinned.includes(model.model_name))
       .map((model) => ({
         model,
@@ -155,7 +171,7 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
         usage: metric === 'requests' ? model.requests : model.tokens,
       }))
       .sort(compareModelUsage)
-  }, [metric, mode, listed, squareModels])
+  }, [metric, mode, listed, usageQuery.data])
   const hasUsage = ranked.some((row) => row.usage > 0)
 
   const update = (changes: Partial<OrderOptions>) =>
@@ -170,7 +186,10 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
   }
 
   const handleOpenChange = (open: boolean) => {
-    if (!open) setDraft(null)
+    if (!open) {
+      setDraft(null)
+      setSelectedTab(null)
+    }
     props.onOpenChange(open)
   }
 
@@ -254,209 +273,256 @@ export function ModelSquareOrderDialog(props: ModelSquareOrderDialogProps) {
         </>
       }
     >
-      <FieldSet disabled={!optionsQuery.isSuccess} className='min-w-0 gap-5'>
-        <div className='flex flex-col gap-2'>
-          <div className='text-sm font-medium'>{t('Sort method')}</div>
-          <ToggleGroup
-            value={[mode]}
-            disabled={!optionsQuery.isSuccess}
-            onValueChange={(values) => {
-              const next = values.find((value) => value !== mode)
-              if (next) update({ [MODE_KEY]: next })
-            }}
-            aria-label={t('Sort method')}
-            spacing={1}
-            className={`${SEGMENTED_SWITCH_CLASS} flex-wrap`}
+      <Tabs value={tab} onValueChange={setSelectedTab}>
+        <TabsList>
+          <TabsTrigger value='sort'>{t('Sort method')}</TabsTrigger>
+          <TabsTrigger value='vendors'>
+            {t('Supplier display order')}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value='sort'>
+          <FieldSet
+            disabled={!optionsQuery.isSuccess || saveOrder.isPending}
+            className='min-w-0 gap-5'
           >
-            {modes.map((item) => (
-              <ToggleGroupItem
-                key={item.value}
-                value={item.value}
-                className={SEGMENTED_SWITCH_ITEM_CLASS}
-              >
-                {item.label}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-        </div>
-
-        {usesUsage && (
-          <div className='flex flex-wrap items-start gap-6'>
             <div className='flex flex-col gap-2'>
-              <div className='text-sm font-medium'>{t('Rank by')}</div>
               <ToggleGroup
-                value={[metric]}
+                value={[mode]}
+                disabled={!optionsQuery.isSuccess}
                 onValueChange={(values) => {
-                  const next = values.find((value) => value !== metric)
-                  if (next) update({ [METRIC_KEY]: next })
+                  const next = values.find((value) => value !== mode)
+                  if (next) update({ [MODE_KEY]: next })
                 }}
-                variant='outline'
-                size='sm'
-                aria-label={t('Rank by')}
+                aria-label={t('Sort method')}
+                spacing={1}
+                className={`${SEGMENTED_SWITCH_CLASS} flex-wrap`}
               >
-                <ToggleGroupItem value='requests'>
-                  {t('Requests')}
-                </ToggleGroupItem>
-                <ToggleGroupItem value='tokens'>{t('Tokens')}</ToggleGroupItem>
+                {modes.map((item) => (
+                  <ToggleGroupItem
+                    key={item.value}
+                    value={item.value}
+                    className={SEGMENTED_SWITCH_ITEM_CLASS}
+                  >
+                    {item.label}
+                  </ToggleGroupItem>
+                ))}
               </ToggleGroup>
             </div>
-            <div className='flex flex-col gap-2'>
-              <div className='text-sm font-medium'>{t('Period')}</div>
-              <Select
-                items={periods}
-                value={String(days)}
-                onValueChange={(value) => update({ [DAYS_KEY]: Number(value) })}
-              >
-                <SelectTrigger
-                  size='sm'
-                  className='w-36'
-                  aria-label={t('Period')}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent alignItemWithTrigger={false}>
-                  <SelectGroup>
-                    {periods.map((period) => (
-                      <SelectItem key={period.value} value={period.value}>
-                        {period.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        )}
 
-        {(mode === 'manual' || mode === 'mixed') && (
-          <div className='flex flex-col gap-2'>
-            <div className='flex items-baseline justify-between gap-3'>
-              <div className='text-sm font-medium'>
-                {mode === 'mixed' ? t('Pinned models') : t('Model order')}
-              </div>
-              {listed.length > 1 && (
-                <div className='text-muted-foreground text-xs'>
-                  {t('Drag to reorder')}
-                </div>
-              )}
-            </div>
-            {listed.length > 0 && (
-              <Reorder.Group
-                axis='y'
-                values={listed}
-                onReorder={(next: string[]) => update({ [MODELS_KEY]: next })}
-                className='flex flex-col gap-2'
-              >
-                {listed.map((name, index) => {
-                  const model = modelByName.get(name)
-                  return (
-                    <AutoGroupOrderItem
-                      key={name}
-                      group={name}
-                      index={index}
-                      count={listed.length}
-                      leading={
-                        <ModelIconTile>{modelIcon(name, model)}</ModelIconTile>
-                      }
-                      onMove={moveModel}
-                      onRemove={(removed) =>
-                        update({
-                          [MODELS_KEY]: listed.filter(
-                            (item) => item !== removed
-                          ),
-                        })
-                      }
-                    >
-                      {model?.vendor_name && (
-                        <span className='text-muted-foreground text-xs'>
-                          {model.vendor_name}
-                        </span>
-                      )}
-                    </AutoGroupOrderItem>
-                  )
-                })}
-              </Reorder.Group>
-            )}
-            <Combobox
-              aria-label={addLabel}
-              options={candidates}
-              value=''
-              onValueChange={(name) => {
-                if (name && !listed.includes(name)) {
-                  update({ [MODELS_KEY]: [...listed, name] })
-                }
-              }}
-              placeholder={addLabel}
-              className='sm:w-72'
-            />
-            {mode === 'manual' && (
-              <p className='text-sm'>
-                {t('Models not in the list follow by name.')}
-              </p>
-            )}
-          </div>
-        )}
-
-        {usesUsage && usageQuery.isSuccess && (
-          <div className='flex flex-col gap-2'>
-            <div className='flex items-baseline justify-between gap-3'>
-              <div className='text-sm font-medium'>
-                {mode === 'mixed' ? t('Other models') : t('Current order')}
-              </div>
-              {hasUsage && (
-                <div className='text-muted-foreground text-xs'>
-                  {metricLabel}
-                </div>
-              )}
-            </div>
-            {!hasUsage && (
-              <p className='text-sm'>
-                {t('No usage data, so models are ordered by name.')}
-              </p>
-            )}
-            {hasUsage && (
-              <ol
-                aria-label={
-                  mode === 'mixed' ? t('Other models') : t('Current order')
-                }
-                className='flex flex-col gap-2'
-              >
-                {previewRows.map((row, index) => (
-                  <li
-                    key={row.model.model_name}
-                    className='flex min-w-0 items-center gap-2 rounded-lg border p-2'
+            {usesUsage && (
+              <div className='flex flex-wrap items-start gap-6'>
+                <div className='flex flex-col gap-2'>
+                  <div className='text-sm font-medium'>{t('Rank by')}</div>
+                  <ToggleGroup
+                    value={[metric]}
+                    onValueChange={(values) => {
+                      const next = values.find((value) => value !== metric)
+                      if (next) update({ [METRIC_KEY]: next })
+                    }}
+                    variant='outline'
+                    size='sm'
+                    aria-label={t('Rank by')}
                   >
-                    <span className='text-muted-foreground w-7 shrink-0 text-center text-sm tabular-nums'>
-                      {rankOffset + index + 1}
-                    </span>
-                    <ModelIconTile>
-                      {modelIcon(row.model.model_name, row.model)}
-                    </ModelIconTile>
-                    <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
-                      <span className='min-w-0 truncate text-sm font-medium'>
-                        {row.model.model_name}
-                      </span>
-                      {row.model.vendor_name && (
-                        <span className='text-muted-foreground text-xs'>
-                          {row.model.vendor_name}
-                        </span>
-                      )}
+                    <ToggleGroupItem value='requests'>
+                      {t('Requests')}
+                    </ToggleGroupItem>
+                    <ToggleGroupItem value='tokens'>
+                      {t('Tokens')}
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </div>
+                <div className='flex flex-col gap-2'>
+                  <div className='text-sm font-medium'>{t('Period')}</div>
+                  <Select
+                    items={periods}
+                    value={String(days)}
+                    onValueChange={(value) =>
+                      update({ [DAYS_KEY]: Number(value) })
+                    }
+                  >
+                    <SelectTrigger
+                      size='sm'
+                      className='w-36'
+                      aria-label={t('Period')}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      <SelectGroup>
+                        {periods.map((period) => (
+                          <SelectItem key={period.value} value={period.value}>
+                            {period.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {usesModelList && (
+              <div className='flex flex-col gap-2'>
+                <div className='flex items-baseline justify-between gap-3'>
+                  <div className='text-sm font-medium'>
+                    {mode === 'mixed' ? t('Pinned models') : t('Model order')}
+                  </div>
+                  {listed.length > 1 && (
+                    <div className='text-muted-foreground text-xs'>
+                      {t('Drag to reorder')}
                     </div>
-                    <span className='shrink-0 pe-1 text-sm tabular-nums'>
-                      {formatCompactNumber(row.usage, locale)}
-                    </span>
-                  </li>
-                ))}
-              </ol>
+                  )}
+                </div>
+                {listed.length > 0 && (
+                  <Reorder.Group
+                    axis='y'
+                    values={listed}
+                    onReorder={(next: string[]) =>
+                      update({ [MODELS_KEY]: next })
+                    }
+                    className='flex flex-col gap-2'
+                  >
+                    {listed.map((name, index) => {
+                      const model = modelByName.get(name)
+                      return (
+                        <AutoGroupOrderItem
+                          key={name}
+                          group={name}
+                          index={index}
+                          count={listed.length}
+                          leading={
+                            <ModelIconTile>
+                              {modelIcon(name, model)}
+                            </ModelIconTile>
+                          }
+                          onMove={moveModel}
+                          onRemove={(removed) =>
+                            update({
+                              [MODELS_KEY]: listed.filter(
+                                (item) => item !== removed
+                              ),
+                            })
+                          }
+                        >
+                          {model?.vendor_name && (
+                            <span className='text-muted-foreground text-xs'>
+                              {model.vendor_name}
+                            </span>
+                          )}
+                        </AutoGroupOrderItem>
+                      )
+                    })}
+                  </Reorder.Group>
+                )}
+                {modelsQuery.isPending && <LoadingState inline size='sm' />}
+                {modelsQuery.isError && (
+                  <ErrorState
+                    className='min-h-0'
+                    title={t('Failed to load models')}
+                    onRetry={() => void modelsQuery.refetch()}
+                  />
+                )}
+                {modelsQuery.isSuccess && (
+                  <Combobox
+                    aria-label={addLabel}
+                    options={candidates}
+                    value=''
+                    onValueChange={(name) => {
+                      if (name && !listed.includes(name)) {
+                        update({ [MODELS_KEY]: [...listed, name] })
+                      }
+                    }}
+                    placeholder={addLabel}
+                    className='sm:w-72'
+                  />
+                )}
+                {mode === 'manual' && (
+                  <p className='text-sm'>
+                    {t('Models not in the list follow by name.')}
+                  </p>
+                )}
+              </div>
             )}
-            {hasUsage && hiddenCount > 0 && (
-              <p className='text-muted-foreground text-sm'>
-                {t('And {{count}} more models', { count: hiddenCount })}
-              </p>
+
+            {usesUsage && usageQuery.isFetching && (
+              <LoadingState inline size='sm' />
             )}
-          </div>
-        )}
-      </FieldSet>
+            {usesUsage && usageQuery.isError && (
+              <ErrorState
+                className='min-h-0'
+                title={t('Failed to fetch usage')}
+                onRetry={() => void usageQuery.refetch()}
+              />
+            )}
+            {usesUsage && usageQuery.isSuccess && (
+              <div className='flex flex-col gap-2'>
+                <div className='flex items-baseline justify-between gap-3'>
+                  <div className='text-sm font-medium'>
+                    {mode === 'mixed' ? t('Other models') : t('Current order')}
+                  </div>
+                  {hasUsage && (
+                    <div className='text-muted-foreground text-xs'>
+                      {metricLabel}
+                    </div>
+                  )}
+                </div>
+                {!hasUsage && (
+                  <p className='text-sm'>
+                    {t('No usage data, so models are ordered by name.')}
+                  </p>
+                )}
+                {hasUsage && (
+                  <ol
+                    aria-label={
+                      mode === 'mixed' ? t('Other models') : t('Current order')
+                    }
+                    className='flex flex-col gap-2'
+                  >
+                    {previewRows.map((row, index) => (
+                      <li
+                        key={row.model.model_name}
+                        className='flex min-w-0 items-center gap-2 rounded-lg border p-2'
+                      >
+                        <span className='text-muted-foreground w-7 shrink-0 text-center text-sm tabular-nums'>
+                          {rankOffset + index + 1}
+                        </span>
+                        <ModelIconTile>
+                          {modelIcon(row.model.model_name, row.model)}
+                        </ModelIconTile>
+                        <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
+                          <span className='min-w-0 truncate text-sm font-medium'>
+                            {row.model.model_name}
+                          </span>
+                          {row.model.vendor_name && (
+                            <span className='text-muted-foreground text-xs'>
+                              {row.model.vendor_name}
+                            </span>
+                          )}
+                        </div>
+                        <span className='shrink-0 pe-1 text-sm tabular-nums'>
+                          {formatCompactNumber(row.usage, locale)}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
+                {hasUsage && hiddenCount > 0 && (
+                  <p className='text-muted-foreground text-sm'>
+                    {t('And {{count}} more models', { count: hiddenCount })}
+                  </p>
+                )}
+              </div>
+            )}
+          </FieldSet>
+        </TabsContent>
+        <TabsContent value='vendors'>
+          <ModelSquareVendorOrder
+            order={order[VENDORS_KEY]}
+            disabled={!optionsQuery.isSuccess || saveOrder.isPending}
+            onReorder={(next) => update({ [VENDORS_KEY]: next })}
+          />
+        </TabsContent>
+      </Tabs>
     </Dialog>
   )
 }

@@ -236,9 +236,14 @@ export async function getMissingModels(): Promise<MissingModelsResponse> {
  * model square order
  */
 export async function getModelSquareUsage(
-  days: number
+  days?: number
 ): Promise<ModelSquareUsageResponse> {
-  const res = await api.get('/api/models/square_usage', { params: { days } })
+  const res = await api.get<ModelSquareUsageResponse>(
+    '/api/models/square_usage',
+    {
+      params: days === undefined ? { include_usage: false } : { days },
+    }
+  )
   return res.data
 }
 

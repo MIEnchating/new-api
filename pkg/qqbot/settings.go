@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"net/url"
@@ -164,6 +165,13 @@ func (r *Runtime) ActiveAppID() string {
 		return bot.appID
 	}
 	return ""
+}
+
+func (r *Runtime) ActiveGroups(appID string) map[string]struct{} {
+	if bot := r.currentBot(); bot != nil && bot.appID == appID {
+		return maps.Clone(bot.groups)
+	}
+	return nil
 }
 
 func (r *Runtime) Settings(encoded string) (PublicSettings, error) {

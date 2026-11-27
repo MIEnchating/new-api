@@ -1,3 +1,6 @@
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
+
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -26,7 +29,10 @@ import { VendorMutateDialog } from './dialogs/vendor-mutate-dialog'
 import { ModelMutateDrawer } from './drawers/model-mutate-drawer'
 import { useModels } from './models-provider'
 
-export function ModelsDialogs() {
+export function ModelsDialogs(props: {
+  openSquareOrder?: boolean
+  onCloseSquareOrder?: () => void
+}) {
   const {
     open,
     setOpen,
@@ -35,6 +41,9 @@ export function ModelsDialogs() {
     descriptionData,
     setDescriptionData,
   } = useModels()
+  const isRoot = useAuthStore(
+    (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
+  )
 
   return (
     <>
@@ -75,8 +84,16 @@ export function ModelsDialogs() {
       />
 
       <ModelSquareOrderDialog
-        open={open === 'model-square-order'}
-        onOpenChange={(v) => !v && setOpen(null)}
+        initialTab={props.openSquareOrder ? 'vendors' : 'sort'}
+        open={
+          isRoot && (open === 'model-square-order' || !!props.openSquareOrder)
+        }
+        onOpenChange={(value) => {
+          if (!value) {
+            setOpen(null)
+            props.onCloseSquareOrder?.()
+          }
+        }}
       />
 
       {/* Prefill Groups Management */}

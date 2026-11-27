@@ -28,6 +28,7 @@ import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 const modelsSearchSchema = z.object({
+  squareOrder: z.boolean().optional().catch(undefined),
   vPage: z.number().optional().catch(1),
   vPageSize: z.number().optional().catch(20),
   vFilter: z.string().optional().catch(''),

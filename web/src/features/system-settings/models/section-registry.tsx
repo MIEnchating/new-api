@@ -23,7 +23,6 @@ import { ClaudeSettingsCard } from './claude-settings-card'
 import { GeminiSettingsCard } from './gemini-settings-card'
 import { GlobalSettingsCard } from './global-settings-card'
 import { GrokSettingsCard } from './grok-settings-card'
-import { ModelSquareSettingsSection } from './model-square-settings-section'
 import { RoutingReliabilitySection } from './routing-reliability-section'
 import { SmartRoutingSection } from './smart-routing-section'
 
@@ -63,15 +62,6 @@ const MODELS_SECTIONS = [
               settings['general_setting.ping_interval_seconds'],
           },
         }}
-      />
-    ),
-  },
-  {
-    id: 'model-square',
-    titleKey: 'Model Square',
-    build: (settings: ModelSettings) => (
-      <ModelSquareSettingsSection
-        vendorOrder={settings.ModelSquareVendorOrder}
       />
     ),
   },

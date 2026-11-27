@@ -63,10 +63,12 @@ it('links the QQ profile only after confirmation and re-verifies unlinking', asy
       { code },
       { headers: { 'X-Security-Proof': 'bind-proof' } }
     )
+    expect(screen.getByLabelText('QQ binding code')).toBeVisible()
     await user.click(unbind)
-    expect(
-      await screen.findByLabelText<HTMLInputElement>('QQ binding code')
-    ).toHaveProperty('value', '')
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: 'Unbind' })).toBeNull()
+    )
+    expect(screen.getByLabelText('QQ binding code')).toHaveValue('')
     expect(requestVerification).toHaveBeenLastCalledWith(
       expect.objectContaining({ scope: 'qq_bot.account.unbind' })
     )

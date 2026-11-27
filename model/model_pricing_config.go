@@ -109,6 +109,7 @@ var modelPricingOptionKeys = []string{
 	"AudioCompletionRatio", "AudioRatio", "CacheRatio", "CompletionRatio",
 	"CreateCacheRatio", "ImageRatio", "ModelPrice", "ModelRatio",
 	"billing_setting.billing_expr", "billing_setting.billing_mode", billing_setting.PluginBillingExprOption,
+	ratio_setting.GroupRequestPricesOption,
 }
 
 var modelPricingMutationMu sync.Mutex
@@ -190,6 +191,15 @@ func modelPricingValues(values map[string]map[string]any, name string) PricingVa
 // Plugin expressions are grouped in the draft and flattened only in storage.
 func replaceModelPricing(values map[string]map[string]any, name string, draft PricingValues) {
 	for _, key := range modelPricingOptionKeys {
+		if key == ratio_setting.GroupRequestPricesOption {
+			if groups, supplied := draft[key].(map[string]any); supplied {
+				delete(values[key], name)
+				if len(groups) != 0 {
+					values[key][name] = groups
+				}
+			}
+			continue
+		}
 		if key == billing_setting.PluginBillingExprOption {
 			for variant := range values[key] {
 				if _, model, ok := billing_setting.SplitPluginBillingExprKey(variant); ok && model == name {
@@ -581,6 +591,19 @@ func validateModelPricing(name string, values, previous PricingValues) error {
 		if !IsModelPricingOption(key) {
 			return fmt.Errorf("unsupported pricing field: %s", key)
 		}
+		if key == ratio_setting.GroupRequestPricesOption {
+			groups, ok := value.(map[string]any)
+			if !ok || groups == nil {
+				return errors.New("group request prices must be an object")
+			}
+			for group, value := range groups {
+				price, ok := value.(float64)
+				if !ok || !ratio_setting.ValidGroupRequestPrice(group, price) {
+					return fmt.Errorf("invalid request price for group %q", group)
+				}
+			}
+			continue
+		}
 		if key == "billing_setting.billing_mode" {
 			if value != "ratio" && value != "tiered_expr" {
 				return errors.New("invalid billing mode")
@@ -690,6 +713,7 @@ func UpdateModelPricing(changes []ModelPricingChange) error {
 			pricing := change.Pricing
 			if change.Reset {
 				pricing = modelPricingValues(defaults, change.ModelName)
+				pricing[ratio_setting.GroupRequestPricesOption] = map[string]any{}
 			}
 			if err := validateModelPricing(change.ModelName, pricing, previous); err != nil {
 				return err

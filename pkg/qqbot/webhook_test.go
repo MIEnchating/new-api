@@ -17,13 +17,21 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 const (
@@ -239,12 +247,13 @@ func TestGroupReplyAndReplayProtection(t *testing.T) {
 			assert.Equal(t, []string{"hello"}, prompts)
 			assert.Equal(t, 1, tokenRequests)
 			assert.Equal(t, outboundReply{
-				MsgID: "help", MsgSeq: 1, Content: i18n.Translate("", i18n.MsgQQBotHelp) + "\n" +
-					i18n.Translate("", i18n.MsgQQBotHelpSite) + "\n" + i18n.Translate("", i18n.MsgQQBotHelpChat),
+				MsgID: "help", MsgSeq: 1, Content: i18n.Translate(i18n.LangZhCN, i18n.MsgQQBotHelp) + "\n" +
+					i18n.Translate(i18n.LangZhCN, i18n.MsgQQBotHelpSite) + "\n" + i18n.Translate(i18n.LangZhCN, i18n.MsgQQBotHelpChat) + "\n" +
+					i18n.Translate(i18n.LangZhCN, i18n.MsgQQBotGroupAccountHelp),
 			}, replies[0])
 			assert.Equal(t, outboundReply{MsgID: "site", MsgSeq: 1, Content: "https://example.com"}, replies[1])
 			assert.Equal(t, outboundReply{MsgID: "chat", MsgSeq: 1, Content: "AI reply"}, replies[2])
-			assert.Equal(t, outboundReply{MsgID: "cooldown", MsgSeq: 1, Content: i18n.Translate("", i18n.MsgQQBotChatCooldown)}, replies[3])
+			assert.Equal(t, outboundReply{MsgID: "cooldown", MsgSeq: 1, Content: i18n.Translate(i18n.LangZhCN, i18n.MsgQQBotChatCooldown)}, replies[3])
 		})
 	}
 }
@@ -307,18 +316,19 @@ func TestQQBotPublicSiteCommands(t *testing.T) {
 		command, policy    string
 		includes, excludes []string
 	}{
-		{"/帮助", "", []string{"/models", "/price", "/channels"}, nil},
-		{"/模型　TEXT", "", []string{"(2)", "text/model", "text-tiers"}, []string{"image-fixed"}},
-		{"/价格 text/model", "", []string{"USD 3 input", "USD 12 output", "USD 0.6", "/pricing/text%2Fmodel"}, nil},
-		{"/price image-fixed", "", []string{"per request is USD 0.04"}, nil},
-		{"/价格 text-tiers", "", []string{"full pricing rules", "/pricing/text-tiers"}, []string{"USD"}},
-		{"/价格", "", []string{"<full model name>"}, nil},
-		{"/价格 private-model", "", []string{"public model was not found"}, nil},
-		{"渠道状态", "", []string{"All groups · 10 requests", "default · 8 requests · 87.5%"}, nil},
-		{"/渠道状态 default", "", []string{"default · 8 requests"}, []string{"All groups"}},
-		{"/channels no-samples", "", []string{"No request samples"}, []string{"0.0%"}},
-		{"/模型", `{"pricing":{"requireAuth":true}}`, []string{"information is private"}, []string{"text/model"}},
-		{"/渠道状态", `{"siteStatus":{"tabs":{"uptime":false}}}`, []string{"information is private"}, []string{"All groups"}},
+		{"/帮助", "", []string{"在群里 @ 我", "/模型", "/价格", "/渠道状态"}, []string{"Mention me"}},
+		{"状态", "", []string{"机器人在线。"}, []string{"The bot is online."}},
+		{"/模型　TEXT", "", []string{"找到 2 个公开模型", "text/model", "text-tiers"}, []string{"image-fixed"}},
+		{"/价格 text/model", "", []string{"输入 USD 3", "输出 USD 12", "USD 0.6", "/pricing/text%2Fmodel"}, nil},
+		{"/price image-fixed", "", []string{"每次 USD 0.04"}, nil},
+		{"/价格 text-tiers", "", []string{"完整计费规则", "/pricing/text-tiers"}, []string{"USD"}},
+		{"/价格", "", []string{"<完整模型名>"}, nil},
+		{"/价格 private-model", "", []string{"没有找到这个公开模型"}, nil},
+		{"渠道状态", "", []string{"全部分组 · 10 次请求", "default · 8 次请求 · 成功率 87.5%"}, nil},
+		{"/渠道状态 default", "", []string{"default · 8 次请求"}, []string{"全部分组"}},
+		{"/channels no-samples", "", []string{"暂无可用的请求样本"}, []string{"0.0%"}},
+		{"/模型", `{"pricing":{"requireAuth":true}}`, []string{"本站未公开此信息"}, []string{"text/model"}},
+		{"/渠道状态", `{"siteStatus":{"tabs":{"uptime":false}}}`, []string{"本站未公开此信息"}, []string{"全部分组"}},
 	} {
 		t.Run(tc.command, func(t *testing.T) {
 			common.OptionMapRWMutex.Lock()
@@ -382,7 +392,7 @@ func TestQQBotPersonalRepliesAndNotificationsUseSeparateTargets(t *testing.T) {
 	t.Cleanup(bot.Close)
 	bot.now, bot.qqAPI = func() time.Time { return testTime }, server.URL
 	for _, body := range []string{
-		`{"op":0,"t":"GROUP_AT_MESSAGE_CREATE","d":{"id":"group","group_openid":"allowed","content":"/余额","author":{"member_openid":"member"}}}`,
+		`{"op":0,"t":"GROUP_AT_MESSAGE_CREATE","d":{"id":"group","group_openid":"allowed","content":"/绑定","author":{"member_openid":"member"}}}`,
 		`{"op":0,"t":"C2C_MESSAGE_CREATE","d":{"id":"private","content":"/帮助","author":{"user_openid":"private-user"}}}`,
 	} {
 		ts, sig := signCallback(body, testTime)
@@ -391,9 +401,183 @@ func TestQQBotPersonalRepliesAndNotificationsUseSeparateTargets(t *testing.T) {
 	}
 	bot.deliverChannelNotice(channelNotice{id: 3, name: "Test channel", status: common.ChannelStatusAutoDisabled})
 	require.Len(t, sent, 3)
-	assert.Equal(t, outbound{"/v2/groups/allowed/messages", "group", i18n.Translate("", i18n.MsgQQBotUsePrivateChat)}, <-sent)
-	assert.Equal(t, outbound{"/v2/users/private-user/messages", "private", i18n.Translate("", i18n.MsgQQBotPrivateHelp)}, <-sent)
-	assert.Equal(t, outbound{"/v2/groups/other/messages", "", i18n.Translate("", i18n.MsgQQBotChannelFault, map[string]any{"Name": "Test channel"})}, <-sent)
+	assert.Equal(t, outbound{"/v2/groups/allowed/messages", "group", i18n.Translate(i18n.LangZhCN, i18n.MsgQQBotGroupBindingRequired)}, <-sent)
+	assert.Equal(t, outbound{"/v2/users/private-user/messages", "private", i18n.Translate(i18n.LangZhCN, i18n.MsgQQBotPrivateHelp)}, <-sent)
+	assert.Equal(t, outbound{"/v2/groups/other/messages", "", i18n.Translate(i18n.LangZhCN, i18n.MsgQQBotChannelFault, map[string]any{"Name": "Test channel"})}, <-sent)
+}
+
+func TestQQBotGroupAccountCommands(t *testing.T) {
+	require.NoError(t, i18n.Init())
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(":memory:")
+			case "mysql":
+				dsn := os.Getenv("TEST_MYSQL_DSN")
+				if dsn == "" {
+					t.Skip("TEST_MYSQL_DSN is not configured")
+				}
+				driver = mysql.Open(dsn)
+			case "postgres":
+				dsn := os.Getenv("TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("TEST_POSTGRES_DSN is not configured")
+				}
+				driver = postgres.Open(dsn)
+			}
+			db, err := gorm.Open(driver, &gorm.Config{Logger: gormlogger.Default.LogMode(gormlogger.Silent)})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+			t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+			tables := []any{
+				&model.User{}, &model.Log{}, &model.AuthFlow{}, &model.UserSession{}, &model.ExternalIdentityClaim{}, &model.Checkin{},
+				&model.LotteryCampaign{}, &model.LotteryProfile{}, &model.LotteryDailyActivity{}, &model.LotteryChanceGrant{},
+				&model.LotteryDraw{}, &model.BillingTransaction{}, &model.TopUp{},
+			}
+			for _, table := range tables {
+				require.False(t, db.Migrator().HasTable(table), "the integration test needs an isolated database")
+			}
+			t.Cleanup(func() { require.NoError(t, db.Migrator().DropTable(tables...)) })
+			require.NoError(t, db.AutoMigrate(tables...))
+			versionQuery := "SELECT version()"
+			if dialect == "sqlite" {
+				versionQuery = "SELECT sqlite_version()"
+			}
+			var version string
+			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+			t.Logf("%s version %s", dialect, version)
+
+			previousDB, previousLogDB := model.DB, model.LOG_DB
+			mainType, logType := common.MainDatabaseType(), common.LogDatabaseType()
+			previousRedis := common.RedisEnabled
+			model.DB, model.LOG_DB = db, db
+			common.RedisEnabled = false
+			common.SetMainDatabaseType(common.DatabaseType(dialect))
+			common.SetLogDatabaseType(common.DatabaseType(dialect))
+			checkin := operation_setting.GetCheckinSetting()
+			previousCheckin, previousTurnstile := *checkin, common.TurnstileCheckEnabled
+			*checkin = operation_setting.CheckinSetting{Enabled: true, MinQuota: 100, MaxQuota: 100}
+			common.TurnstileCheckEnabled = false
+			t.Cleanup(func() {
+				model.DB, model.LOG_DB = previousDB, previousLogDB
+				common.RedisEnabled = previousRedis
+				common.SetMainDatabaseType(mainType)
+				common.SetLogDatabaseType(logType)
+				*checkin, common.TurnstileCheckEnabled = previousCheckin, previousTurnstile
+			})
+
+			alice := model.User{Username: "alice", AffCode: "alice", Email: "alice@example.com", Status: common.UserStatusEnabled, AuthVersion: 1, Quota: 600}
+			bob := model.User{Username: "bob", AffCode: "bob", Email: "bob@example.com", Status: common.UserStatusEnabled, AuthVersion: 1, Quota: 700}
+			for _, user := range []*model.User{&alice, &bob} {
+				require.NoError(t, db.Create(user).Error)
+				require.NoError(t, db.Create(&model.UserSession{
+					SID: user.Username, UserID: user.Id, Version: 1, UserAuthVersion: 1,
+					Status: model.UserSessionStatusActive, ExpiresAt: time.Now().Add(time.Hour).Unix(),
+				}).Error)
+			}
+			aliceSession := model.AuthSessionIdentity{UserID: alice.Id, SessionID: "alice", UserAuthVersion: 1, SessionVersion: 1}
+			bobSession := model.AuthSessionIdentity{UserID: bob.Id, SessionID: "bob", UserAuthVersion: 1, SessionVersion: 1}
+			groups := map[string]struct{}{"allowed": {}, "other": {}}
+			code, err := model.CreateQQBotGroupBindingCode(testAppID, "allowed", "alice-member", &alice)
+			require.NoError(t, err)
+			assert.ErrorIs(t, model.BindQQBotGroupIdentity(code, testAppID, bobSession, groups), model.ErrAuthFlowInvalid)
+			assert.ErrorIs(t, model.BindQQBotGroupIdentity(code, "wrong-app", aliceSession, groups), model.ErrAuthFlowInvalid)
+			assert.ErrorIs(t, model.BindQQBotGroupIdentity(code, testAppID, aliceSession, nil), model.ErrAuthFlowInvalid)
+			require.NoError(t, model.BindQQBotGroupIdentity(code, testAppID, aliceSession, groups))
+			assert.ErrorIs(t, model.BindQQBotGroupIdentity(code, testAppID, aliceSession, groups), model.ErrAuthFlowConsumed)
+			expired, err := model.CreateQQBotGroupBindingCode(testAppID, "other", "alice-member", &alice)
+			require.NoError(t, err)
+			require.NoError(t, db.Model(&model.AuthFlow{}).Where("consumed_at IS NULL").Update("expires_at", time.Now().Add(-time.Minute)).Error)
+			assert.ErrorIs(t, model.BindQQBotGroupIdentity(expired, testAppID, aliceSession, groups), model.ErrAuthFlowExpired)
+			conflict, err := model.CreateQQBotGroupBindingCode(testAppID, "allowed", "alice-member", &bob)
+			require.NoError(t, err)
+			assert.ErrorIs(t, model.BindQQBotGroupIdentity(conflict, testAppID, bobSession, groups), model.ErrExternalIdentityAlreadyClaimed)
+			require.NoError(t, db.Create(&model.LotteryChanceGrant{UserId: alice.Id, EventKey: "test-grant", Chances: 2}).Error)
+
+			now := time.Date(2026, 11, 26, 17, 0, 0, 0, time.UTC)
+			require.NoError(t, db.Create(&[]model.Log{
+				{UserId: alice.Id, Quota: 300, CreatedAt: now.Unix() - 3600, Type: model.LogTypeConsume},
+				{UserId: alice.Id, Quota: 200, CreatedAt: now.Unix(), Type: model.LogTypeConsume, Other: `{"billing_source":"subscription"}`},
+				{UserId: alice.Id, Quota: 400, CreatedAt: now.Unix() - 3601, Type: model.LogTypeConsume},
+				{UserId: alice.Id, Quota: 500, CreatedAt: now.Unix(), Type: model.LogTypeConsume, Other: `{"user_visible":false}`},
+				{UserId: bob.Id, Quota: 800, CreatedAt: now.Unix(), Type: model.LogTypeConsume},
+				{UserId: alice.Id, Quota: 900, CreatedAt: now.Unix(), Type: model.LogTypeSystem},
+			}).Error)
+
+			type reply struct{ path, messageID, text string }
+			replies := make(chan reply, 12)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/app/getAppAccessToken" {
+					_, _ = io.WriteString(w, `{"access_token":"qq-token","expires_in":"7200"}`)
+					return
+				}
+				var message struct {
+					ID   string `json:"msg_id"`
+					Text string `json:"content"`
+				}
+				assert.NoError(t, common.DecodeJsonBody(r.Body, &message))
+				replies <- reply{r.URL.Path, message.ID, message.Text}
+				_, _ = io.WriteString(w, `{"id":"qq-reply"}`)
+			}))
+			t.Cleanup(server.Close)
+			bot := newBot(config{appID: testAppID, appSecret: testSecret, groups: groups}, nil)
+			t.Cleanup(bot.Close)
+			bot.now, bot.qqAPI = func() time.Time { return now }, server.URL
+			body := func(event, group, member, id, content string) string {
+				raw, err := common.Marshal(map[string]any{"op": 0, "t": event, "d": map[string]any{
+					"id": id, "group_openid": group, "content": content,
+					"author": map[string]string{"member_openid": member, "user_openid": "alice-member"},
+				}})
+				require.NoError(t, err)
+				return string(raw)
+			}
+			send := func(body string) {
+				ts, sig := signCallback(body, now)
+				require.Equal(t, http.StatusOK, performCallback(bot, body, testAppID, ts, sig).Code)
+				bot.jobs.Wait()
+			}
+			balance := body(groupMessageCreate, "allowed", "alice-member", "balance", "我的余额")
+			assert.Equal(t, http.StatusUnauthorized, performCallback(bot, balance, testAppID, "", "").Code)
+			send(body(groupMessageCreate, "blocked", "alice-member", "blocked", "今日用量"))
+			send(body(groupMessageCreate, "allowed", "alice-member", "chatter", "今日用量有点高"))
+			send(balance)
+			send(body(groupAtMessageCreate, "allowed", "alice-member", "balance", "我的余额"))
+			send(body(groupMessageCreate, "allowed", "alice-member", "usage", "今日用量"))
+			send(body(groupAtMessageCreate, "allowed", "bob-member", "unbound", "我的余额"))
+			send(body(groupAtMessageCreate, "other", "alice-member", "wrong-group", "我的余额"))
+			send(body(groupMessageCreate, "allowed", "alice-member", "checkin", "签到"))
+			send(body(groupAtMessageCreate, "allowed", "alice-member", "checkin", "签到"))
+			send(body(groupMessageCreate, "allowed", "alice-member", "lottery", "抽奖"))
+			send(body(groupAtMessageCreate, "allowed", "alice-member", "lottery", "抽奖"))
+			require.Len(t, replies, 6)
+			assert.Contains(t, (<-replies).text, "钱包余额")
+			usage := <-replies
+			assert.Equal(t, "/v2/groups/allowed/messages", usage.path)
+			assert.Equal(t, "usage", usage.messageID)
+			assert.Contains(t, usage.text, "共 2 次请求")
+			assert.Contains(t, usage.text, "钱包扣费 "+logger.FormatQuota(300))
+			assert.Contains(t, usage.text, "套餐消耗 "+logger.FormatQuota(200))
+			for range 2 {
+				assert.Contains(t, (<-replies).text, "/绑定 <注册邮箱>")
+			}
+			assert.Contains(t, (<-replies).text, "签到成功")
+			assert.Contains(t, (<-replies).text, "剩余 1 次")
+
+			var checkins int64
+			require.NoError(t, db.Model(&model.Checkin{}).Where("user_id = ?", alice.Id).Count(&checkins).Error)
+			assert.EqualValues(t, 1, checkins)
+			var draws int64
+			require.NoError(t, db.Model(&model.LotteryDraw{}).Where("user_id = ?", alice.Id).Count(&draws).Error)
+			assert.EqualValues(t, 1, draws)
+			require.NoError(t, model.UnbindQQBotIdentity(aliceSession))
+			_, err = model.GetQQBotGroupUser(testAppID, "allowed", "alice-member")
+			assert.ErrorIs(t, err, gorm.ErrRecordNotFound)
+		})
+	}
 }
 
 func TestNewFromEnvRequiresCompleteConfiguration(t *testing.T) {

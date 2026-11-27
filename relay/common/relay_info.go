@@ -181,6 +181,10 @@ type RelayInfo struct {
 	requestPluginIngressRecord int
 
 	PriceData hosttypes.PriceData
+	// Freeze per-model overrides and the legacy base price through retries.
+	GroupRequestPrices       map[string]float64
+	LegacyRequestPrice       *float64
+	LegacyRequestPriceFactor float64
 
 	// QuotaClamp is set (non-nil) when a quota conversion saturated at the
 	// supported single-request bound (or NaN fallback) while computing this request's charge.

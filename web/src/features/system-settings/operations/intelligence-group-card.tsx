@@ -1,5 +1,3 @@
-import { useSortable } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -20,15 +18,15 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import {
   ArrowDown01Icon,
+  ArrowUp01Icon,
   Delete02Icon,
-  Drag01Icon,
   PlayIcon,
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { GroupOrderControls } from '@/components/auto-group-order-item'
+import { OrderDragItem } from '@/components/auto-group-order-item'
 import { Button } from '@/components/ui/button'
 import {
   Collapsible,
@@ -41,6 +39,7 @@ import { cn } from '@/lib/utils'
 export function IntelligenceGroupCard(props: {
   id: string
   title: string
+  label: string
   index: number
   count: number
   open: boolean
@@ -53,10 +52,6 @@ export function IntelligenceGroupCard(props: {
   children: ReactNode
 }) {
   const { t } = useTranslation()
-  const sortable = useSortable({
-    id: props.id,
-    disabled: props.pending || props.count < 2,
-  })
   const actions = (
     <>
       <Button
@@ -88,96 +83,108 @@ export function IntelligenceGroupCard(props: {
   )
 
   return (
-    <div
-      ref={sortable.setNodeRef}
-      style={{
-        transform: CSS.Translate.toString(sortable.transform),
-        transition: sortable.transition,
+    <OrderDragItem
+      role='group'
+      value={props.id}
+      label={props.label}
+      disabled={props.pending || props.count < 2}
+      onMove={(direction) => {
+        const target = props.index + (direction === 'up' ? -1 : 1)
+        if (target >= 0 && target < props.count) props.onMove(direction)
       }}
-      className={cn(
-        'relative min-w-0',
-        sortable.isDragging && 'z-10 opacity-80 shadow-lg'
-      )}
+      className='@container relative min-w-0'
     >
-      <Collapsible open={props.open} onOpenChange={props.onOpenChange}>
-        <TitledCard
-          title={
-            <span className='flex min-w-0 items-center gap-2'>
-              <Button
-                ref={sortable.setActivatorNodeRef}
-                {...sortable.attributes}
-                {...sortable.listeners}
-                type='button'
-                variant='ghost'
-                size='icon-sm'
-                disabled={props.pending || props.count < 2}
-                aria-label={t('Drag {{group}} to reorder', {
-                  group: props.title,
-                })}
-                title={t('Drag {{group}} to reorder', { group: props.title })}
-                className='text-muted-foreground shrink-0 touch-none enabled:cursor-grab enabled:active:cursor-grabbing'
-              >
-                <HugeiconsIcon icon={Drag01Icon} aria-hidden='true' />
-              </Button>
-              <span className='truncate' title={props.title}>
-                {props.title}
+      {(handle) => (
+        <Collapsible open={props.open} onOpenChange={props.onOpenChange}>
+          <TitledCard
+            title={
+              <span className='flex min-w-0 items-center gap-2'>
+                {handle}
+                <span className='truncate' title={props.title}>
+                  {props.title}
+                </span>
               </span>
-            </span>
-          }
-          action={
-            <div className='flex flex-wrap items-center justify-end gap-1'>
-              {!props.open && actions}
-              <GroupOrderControls
-                group={props.title}
-                index={props.index}
-                count={props.count}
-                disabled={props.pending}
-                onMove={props.onMove}
-              />
-              <CollapsibleTrigger
-                aria-label={props.open ? t('Collapse') : t('Expand')}
-                render={
+            }
+            action={
+              <div className='flex flex-wrap items-center justify-end gap-1'>
+                {!props.open && actions}
+                <div className='flex shrink-0 gap-1'>
                   <Button
                     type='button'
                     variant='ghost'
-                    size='sm'
-                    className='gap-1'
-                  />
-                }
-              >
-                <HugeiconsIcon
-                  icon={ArrowDown01Icon}
-                  aria-hidden='true'
-                  className={cn(
-                    'transition-transform motion-reduce:transition-none',
-                    props.open && 'rotate-180'
-                  )}
-                />
-                {props.open ? t('Collapse') : t('Expand')}
-              </CollapsibleTrigger>
-            </div>
-          }
-          className='min-w-0 rounded-lg border shadow-none ring-0'
-          headerClassName={cn(
-            'bg-muted/30 rounded-t-lg px-4 py-2! sm:px-4 sm:py-2! [&>div]:flex-row [&>div]:items-center [&>div]:justify-between [&>div]:gap-2 [&>div>div:last-child]:w-auto',
-            !props.open && 'border-b-0'
-          )}
-          titleClassName='truncate text-sm font-semibold tracking-normal sm:text-sm'
-          contentClassName='p-0 sm:p-0'
-          disableHoverEffect
-        >
-          <CollapsibleContent keepMounted>
-            <div className='flex min-w-0 flex-col gap-3 px-4 py-3'>
-              {props.children}
-              {props.open && (
-                <div className='flex flex-wrap items-center justify-between gap-2 border-t pt-2.5'>
-                  {actions}
+                    size='icon-sm'
+                    disabled={props.pending || props.index === 0}
+                    aria-label={t('Move {{group}} up', { group: props.title })}
+                    onClick={() => props.onMove('up')}
+                  >
+                    <HugeiconsIcon
+                      icon={ArrowUp01Icon}
+                      strokeWidth={2}
+                      aria-hidden='true'
+                    />
+                  </Button>
+                  <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon-sm'
+                    disabled={props.pending || props.index === props.count - 1}
+                    aria-label={t('Move {{group}} down', {
+                      group: props.title,
+                    })}
+                    onClick={() => props.onMove('down')}
+                  >
+                    <HugeiconsIcon
+                      icon={ArrowDown01Icon}
+                      strokeWidth={2}
+                      aria-hidden='true'
+                    />
+                  </Button>
                 </div>
-              )}
-            </div>
-          </CollapsibleContent>
-        </TitledCard>
-      </Collapsible>
-    </div>
+                <CollapsibleTrigger
+                  aria-label={props.open ? t('Collapse') : t('Expand')}
+                  render={
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      className='gap-1'
+                    />
+                  }
+                >
+                  <HugeiconsIcon
+                    icon={ArrowDown01Icon}
+                    aria-hidden='true'
+                    className={cn(
+                      'transition-transform motion-reduce:transition-none',
+                      props.open && 'rotate-180'
+                    )}
+                  />
+                  {props.open ? t('Collapse') : t('Expand')}
+                </CollapsibleTrigger>
+              </div>
+            }
+            className='min-w-0 rounded-lg border shadow-none ring-0'
+            headerClassName={cn(
+              'bg-muted/30 rounded-t-lg px-4 py-2! sm:px-4 sm:py-2! [&>div]:flex-row [&>div]:items-center [&>div]:justify-between [&>div]:gap-2 [&>div>div:last-child]:w-auto',
+              !props.open && 'border-b-0'
+            )}
+            titleClassName='truncate text-sm font-semibold tracking-normal sm:text-sm'
+            contentClassName='p-0 sm:p-0'
+            disableHoverEffect
+          >
+            <CollapsibleContent keepMounted>
+              <div className='flex min-w-0 flex-col gap-3 px-4 py-3'>
+                {props.children}
+                {props.open && (
+                  <div className='flex flex-wrap items-center justify-between gap-2 border-t pt-2.5'>
+                    {actions}
+                  </div>
+                )}
+              </div>
+            </CollapsibleContent>
+          </TitledCard>
+        </Collapsible>
+      )}
+    </OrderDragItem>
   )
 }

@@ -1208,10 +1208,24 @@ describe('channel monitor configuration in system settings', () => {
       expect(put).not.toHaveBeenCalled()
       await user.click(screen.getByRole('button', { name: 'Reset' }))
       expect(critical).toHaveValue(60)
+      const backupDrag = screen.getByRole('button', {
+        name: 'Drag Backup to reorder',
+      })
+      expect(backupDrag).toBeDisabled()
       await user.click(
         screen.getByRole('switch', { name: 'Automatically show all groups' })
       )
-      await user.click(screen.getByRole('checkbox', { name: 'Backup' }))
+      backupDrag.focus()
+      await user.keyboard('{ArrowUp}')
+      const primary = screen.getByRole('checkbox', { name: 'Primary' })
+      const backup = screen.getByRole('checkbox', { name: 'Backup' })
+      expect(
+        screen
+          .getAllByRole('checkbox')
+          .find((checkbox) => checkbox === primary || checkbox === backup)
+      ).toBe(backup)
+      await user.click(backup)
+      expect(backupDrag).toBeDisabled()
       await user.clear(baselineInput)
       await user.type(baselineInput, '86')
       expect(baselineInput).toHaveValue(86)

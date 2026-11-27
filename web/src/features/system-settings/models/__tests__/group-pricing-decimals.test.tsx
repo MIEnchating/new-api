@@ -23,9 +23,9 @@ import { assert, expect, test } from 'vitest'
 
 import { GroupRatioVisualEditor } from '../group-ratio-visual-editor'
 
-function PricingFixture() {
+function PricingFixture(props: { groups?: string } = {}) {
   const [settings, setSettings] = useState<Record<string, string>>({
-    GroupRatio: '{"default":1}',
+    GroupRatio: props.groups ?? '{"default":1}',
     TopupGroupRatio: '{}',
     UserUsableGroups: '{}',
     GroupDescriptions: '{}',
@@ -95,3 +95,32 @@ test.each([
     expect(input.validity.rangeUnderflow).toBe(true)
   }
 )
+
+test('reorders pricing groups from the drag handle and disables it during search', async () => {
+  const user = userEvent.setup()
+  render(<PricingFixture groups='{"default":1,"vip":2}' />)
+  const table = screen.getByRole('table', { name: 'Pricing groups' })
+  const groupNames = () =>
+    within(table)
+      .getAllByRole('textbox', { name: 'Group name' })
+      .map((input) => (input as HTMLInputElement).value)
+  expect(groupNames()).toEqual(['default', 'vip'])
+
+  within(table).getByRole('button', { name: 'Drag vip to reorder' }).focus()
+  await user.keyboard('{ArrowUp}')
+  expect(groupNames()).toEqual(['vip', 'default'])
+  const saved = JSON.parse(
+    screen.getByRole('status', { name: 'Saved ratios' }).textContent ?? '{}'
+  )
+  expect(JSON.parse(saved.GroupOrder)).toEqual(['vip', 'default'])
+
+  const search = screen.getByRole('textbox', {
+    name: 'Search groups by name or description',
+  })
+  await user.type(search, 'vip')
+  expect(
+    within(table).getByRole('button', { name: 'Drag vip to reorder' })
+  ).toBeDisabled()
+  await user.clear(search)
+  expect(groupNames()).toEqual(['vip', 'default'])
+})

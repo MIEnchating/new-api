@@ -41,7 +41,7 @@ import {
   getTierCachePricingMode,
   type CachePricingMode,
 } from './cache-pricing'
-import { getDisplayGroupRatio } from './model-helpers'
+import { getDisplayGroupRatio, getDisplayRequestPrice } from './model-helpers'
 import { withPluginPricing } from './plugin-pricing'
 import {
   evaluateTaskVisualConfig,
@@ -59,6 +59,8 @@ export type DynamicPriceOptions = {
   priceRate?: number
   usdExchangeRate?: number
   groupRatioMultiplier?: number
+  fixedRequestPrice?: number
+  selectedGroup?: string
   usageSchema?: BillingUsageSchema
   now?: Date
 }
@@ -296,6 +298,7 @@ export function getDynamicPriceEntries(
     tier.billingUnit === 'request' &&
     typeof tier.fixedPrice === 'number'
   ) {
+    const price = options.fixedRequestPrice ?? tier.fixedPrice
     return [
       {
         key: 'fixed',
@@ -303,8 +306,13 @@ export function getDynamicPriceEntries(
         label: tier.imageCount ? 'Price per image' : 'Price per request',
         shortLabel: tier.imageCount ? 'Per image' : 'Per-call',
         labelKind: 'i18n',
-        value: tier.fixedPrice,
-        formatted: formatTaskUsageUnitPrice(tier.fixedPrice, options),
+        value: price,
+        formatted: formatTaskUsageUnitPrice(
+          price,
+          options.fixedRequestPrice === undefined
+            ? options
+            : { ...options, groupRatioMultiplier: 1 }
+        ),
         unit: tier.imageCount ? 'image' : 'request',
       },
     ]
@@ -520,6 +528,19 @@ export function getDynamicPricingSummary(
       model.model_name
     ),
     usageSchema: model.billing_usage_schema,
+  }
+  if (
+    model.group_request_prices &&
+    tier &&
+    !isTaskPricingTier(tier) &&
+    tier.billingUnit === 'request' &&
+    tier.fixedPrice !== undefined
+  ) {
+    priceOptions.fixedRequestPrice = getDisplayRequestPrice(
+      model,
+      tier.fixedPrice,
+      options.selectedGroup
+    )
   }
   let entries = getDynamicPriceEntries(tier, priceOptions)
   let isMixedBilling = false

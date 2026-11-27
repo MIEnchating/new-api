@@ -55,6 +55,7 @@ export type PricingValues = Partial<
   >
 > & {
   'billing_setting.plugin_billing_expr'?: Record<string, string>
+  ModelGroupRequestPrices?: Record<string, number>
 }
 export type PricingOptions = Record<PricingKey, string>
 
@@ -232,6 +233,7 @@ export function pricingRow(
     name,
     billingMode,
     pluginBillingExpr: values['billing_setting.plugin_billing_expr'],
+    groupRequestPrices: values.ModelGroupRequestPrices,
   }
 }
 
@@ -242,6 +244,9 @@ export function pricingFromDraft(data: ModelRatioData): PricingValues {
       : { 'billing_setting.plugin_billing_expr': data.pluginBillingExpr }),
     'billing_setting.billing_mode':
       data.billingMode === 'tiered_expr' ? 'tiered_expr' : 'ratio',
+  }
+  if (data.groupRequestPrices !== undefined) {
+    values.ModelGroupRequestPrices = data.groupRequestPrices
   }
   for (const [field, key] of Object.entries(pricingFieldMap)) {
     const value = data[field as keyof typeof pricingFieldMap]

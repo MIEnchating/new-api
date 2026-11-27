@@ -111,6 +111,7 @@ Transitive dependencies should be audited before a final external release.
 | web      | production  | npm       | `ai`                                                    | `7.0.136`                            | Apache-2.0              |
 | web      | production  | npm       | `auto-skeleton-react`                                   | `1.0.5`                              | MIT                     |
 | web      | production  | npm       | `axios`                                                 | `1.18.1`                             | MIT                     |
+| web      | production  | npm       | `canvas-confetti`                                       | `1.9.4`                              | ISC                     |
 | web      | production  | npm       | `class-variance-authority`                              | `0.7.1`                              | Apache-2.0              |
 | web      | production  | npm       | `clsx`                                                  | `2.1.1`                              | MIT                     |
 | web      | production  | npm       | `cmdk`                                                  | `1.1.1`                              | MIT                     |
@@ -160,6 +161,7 @@ Transitive dependencies should be audited before a final external release.
 | web      | development | npm       | `@testing-library/jest-dom`                             | `7.0.0`                              | MIT                     |
 | web      | development | npm       | `@testing-library/react`                                | `16.3.2`                             | MIT                     |
 | web      | development | npm       | `@testing-library/user-event`                           | `14.6.1`                             | MIT                     |
+| web      | development | npm       | `@types/canvas-confetti`                                | `1.9.0`                              | MIT                     |
 | web      | development | npm       | `@types/node`                                           | `26.1.1`                             | MIT                     |
 | web      | development | npm       | `@types/node-forge`                                     | `1.3.14`                             | MIT                     |
 | web      | development | npm       | `@types/react`                                          | `19.2.17`                            | MIT                     |
@@ -294,6 +296,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### ISC
 
 ISC License
+
+`canvas-confetti` copyright (c) 2020, Kiril Vatev
 
 Permission to use, copy, modify, and/or distribute this software for any
 purpose with or without fee is hereby granted, provided that the above

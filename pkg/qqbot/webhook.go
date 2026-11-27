@@ -18,6 +18,7 @@ import (
 
 const (
 	groupAtMessageCreate = "GROUP_AT_MESSAGE_CREATE"
+	groupMessageCreate   = "GROUP_MESSAGE_CREATE"
 	groupAddRobot        = "GROUP_ADD_ROBOT"
 	privateMessageCreate = "C2C_MESSAGE_CREATE"
 )
@@ -112,14 +113,16 @@ func (b *Bot) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if *payload.Op == 0 && (payload.Type == groupAtMessageCreate || payload.Type == groupAddRobot) {
+	if *payload.Op == 0 && (payload.Type == groupAtMessageCreate || payload.Type == groupMessageCreate || payload.Type == groupAddRobot) {
 		var event groupMessage
 		if common.Unmarshal(payload.Data, &event) != nil || !groupOpenID.MatchString(event.GroupID) {
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 		if !event.Author.Bot {
-			if payload.Type == groupAtMessageCreate &&
+			command, argument := accountCommand(event.Content)
+			plainAccountCommand := payload.Type == groupMessageCreate && command != "" && (command == "bind" || argument == "")
+			if (payload.Type == groupAtMessageCreate || plainAccountCommand) &&
 				(event.ID == "" || len(event.ID) > 512 || !groupOpenID.MatchString(event.Author.OpenID)) {
 				w.WriteHeader(http.StatusBadRequest)
 				return
@@ -128,6 +131,8 @@ func (b *Bot) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			defer cancel()
 			_, allowed := b.groups[event.GroupID]
 			switch {
+			case payload.Type == groupMessageCreate && (!allowed || !plainAccountCommand):
+				// Plain group messages can trigger only exact account commands.
 			case !allowed:
 				if err := b.discoverGroup(ctx, event.GroupID, now); err != nil {
 					w.WriteHeader(http.StatusServiceUnavailable)
@@ -143,7 +148,7 @@ func (b *Bot) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						logger.LogInfo(ctx, common.LogText("QQ bot discovered group OpenID %s", event.GroupID))
 					}
 				}
-			case payload.Type == groupAtMessageCreate:
+			case payload.Type != groupAddRobot:
 				if err = b.accept(ctx, event); err != nil {
 					w.WriteHeader(http.StatusServiceUnavailable)
 					return

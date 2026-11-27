@@ -280,6 +280,8 @@ func TestQQBotSettingsSaveAndApply(t *testing.T) {
 func TestQQBotBindingRequiresSessionProofAndSingleUse(t *testing.T) {
 	user, _ := setupSecurityEnrollmentTest(t)
 	require.NoError(t, model.DB.AutoMigrate(&model.ExternalIdentityClaim{}))
+	user.Email = "qq-binding@example.com"
+	require.NoError(t, model.DB.Model(user).Update("email", user.Email).Error)
 	t.Setenv("QQ_BOT_ENABLED", "true")
 	t.Setenv("QQ_BOT_APP_ID", "123456")
 	t.Setenv("QQ_BOT_APP_SECRET", "fixture-secret")
@@ -287,7 +289,7 @@ func TestQQBotBindingRequiresSessionProofAndSingleUse(t *testing.T) {
 	t.Setenv("QQ_BOT_CHAT_MODEL", "")
 	t.Setenv("QQ_BOT_CHAT_API_KEY", "")
 	t.Setenv("QQ_BOT_CHAT_API_KEY_FILE", "")
-	t.Setenv("QQ_BOT_GROUP_OPENIDS", "")
+	t.Setenv("QQ_BOT_GROUP_OPENIDS", "allowed")
 	t.Setenv("QQ_BOT_SITE_URL", "")
 	bundle, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "qq-bot-binding-test")
 	require.NoError(t, err)
@@ -345,10 +347,21 @@ func TestQQBotBindingRequiresSessionProofAndSingleUse(t *testing.T) {
 	assert.Contains(t, request(http.MethodPost, other, bindProof(other), true).Body.String(), "ACCOUNT_ALREADY_BOUND")
 	assert.Contains(t, request(http.MethodPost, code, bindProof(code), true).Body.String(), "AUTH_FLOW_INVALID")
 
+	groupCode, err := model.CreateQQBotGroupBindingCode("123456", "allowed", "group-member", user)
+	require.NoError(t, err)
+	assert.Contains(t, request(http.MethodPost, groupCode, "", true).Body.String(), "SECURITY_PROOF_REQUIRED")
+	assert.Contains(t, request(http.MethodPost, groupCode, bindProof(groupCode), true).Body.String(), `"bound":true`)
+	groupOwner, err := model.GetQQBotGroupUser("123456", "allowed", "group-member")
+	require.NoError(t, err)
+	assert.Equal(t, user.Id, groupOwner.Id)
+	assert.Contains(t, request(http.MethodPost, groupCode, bindProof(groupCode), true).Body.String(), "AUTH_FLOW_INVALID")
+
 	assert.Contains(t, request(http.MethodDelete, "", "", true).Body.String(), "SECURITY_PROOF_REQUIRED")
 	unbindProof := issueSecurityEnrollmentProof(t, identity, service.VerificationOperation{Scope: service.VerificationScopeQQBotUnbind}, service.VerificationMethodPassword)
 	assert.Contains(t, request(http.MethodDelete, "", unbindProof, true).Body.String(), `"bound":false`)
 	_, err = model.GetQQBotUser("123456", "private-openid")
+	require.Error(t, err)
+	_, err = model.GetQQBotGroupUser("123456", "allowed", "group-member")
 	require.Error(t, err)
 	require.NoError(t, model.DB.Model(&model.AuthFlow{}).Where("purpose = ? AND consumed_at IS NULL", "qq_bot_bind").
 		Update("expires_at", time.Now().Add(-time.Minute)).Error)
@@ -361,6 +374,7 @@ func TestQQBotBindingRequiresSessionProofAndSingleUse(t *testing.T) {
 	payload, err := common.Marshal(audits)
 	require.NoError(t, err)
 	assert.NotContains(t, string(payload), code)
+	assert.NotContains(t, string(payload), groupCode)
 	assert.NotContains(t, string(payload), "private-openid")
 	assert.NotContains(t, string(payload), unbindProof)
 }

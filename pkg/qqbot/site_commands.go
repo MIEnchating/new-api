@@ -29,7 +29,7 @@ func (b *Bot) siteCommand(ctx context.Context, text string) (string, bool) {
 		return b.modelList(ctx, argument), true
 	case "price", "价格", "價格":
 		if argument == "" {
-			return i18n.Translate("", i18n.MsgQQBotPriceUsage), true
+			return botText(i18n.MsgQQBotPriceUsage), true
 		}
 		return b.modelPrice(ctx, argument), true
 	case "channels", "渠道状态", "渠道狀態":
@@ -42,7 +42,7 @@ func (b *Bot) siteCommand(ctx context.Context, text string) (string, bool) {
 // publicSiteResponse uses the ordinary dashboard endpoints as a guest. Bot
 // credentials, model API keys and incoming QQ headers never reach these routes.
 func (b *Bot) publicSiteResponse(ctx context.Context, path string, data any) (bool, string) {
-	unavailable := i18n.Translate("", i18n.MsgQQBotSiteQueryUnavailable)
+	unavailable := botText(i18n.MsgQQBotSiteQueryUnavailable)
 	if b.gateway == nil {
 		return false, unavailable
 	}
@@ -58,7 +58,7 @@ func (b *Bot) publicSiteResponse(ctx context.Context, path string, data any) (bo
 	b.gateway.ServeHTTP(response, req)
 	switch response.status {
 	case http.StatusUnauthorized, http.StatusForbidden:
-		return false, i18n.Translate("", i18n.MsgQQBotSiteQueryPrivate)
+		return false, botText(i18n.MsgQQBotSiteQueryPrivate)
 	case http.StatusOK:
 		if !response.truncated && common.Unmarshal(response.body.Bytes(), data) == nil {
 			return true, ""
@@ -90,7 +90,7 @@ func (b *Bot) modelList(ctx context.Context, keyword string) string {
 		return msg
 	}
 	if !pricing.Success {
-		return i18n.Translate("", i18n.MsgQQBotSiteQueryUnavailable)
+		return botText(i18n.MsgQQBotSiteQueryUnavailable)
 	}
 	names := make([]string, 0, len(pricing.Data))
 	keyword = strings.ToLower(keyword)
@@ -102,12 +102,12 @@ func (b *Bot) modelList(ctx context.Context, keyword string) string {
 	slices.Sort(names)
 	names = slices.Compact(names)
 	if len(names) == 0 {
-		return i18n.Translate("", i18n.MsgQQBotNoModels)
+		return botText(i18n.MsgQQBotNoModels)
 	}
-	header := i18n.Translate("", i18n.MsgQQBotModelsFound, map[string]any{"Count": len(names)})
+	header := botText(i18n.MsgQQBotModelsFound, map[string]any{"Count": len(names)})
 	result := header + "\n" + strings.Join(names[:min(len(names), siteResultLimit)], "\n")
 	if len(names) > siteResultLimit {
-		result += "\n" + i18n.Translate("", i18n.MsgQQBotMoreModels)
+		result += "\n" + botText(i18n.MsgQQBotMoreModels)
 	}
 	return b.withSiteLink(result, "pricing")
 }
@@ -118,40 +118,40 @@ func (b *Bot) modelPrice(ctx context.Context, name string) string {
 		return msg
 	}
 	if !pricing.Success {
-		return i18n.Translate("", i18n.MsgQQBotSiteQueryUnavailable)
+		return botText(i18n.MsgQQBotSiteQueryUnavailable)
 	}
 	for _, item := range pricing.Data {
 		if item.Name != name {
 			continue
 		}
-		base := i18n.Translate("", i18n.MsgQQBotComplexPrice)
+		base := botText(i18n.MsgQQBotComplexPrice)
 		switch {
 		case item.BillingMode != "" && item.BillingMode != "ratio", len(item.PluginVariants) > 0:
 			// The model square renders request-dependent and plugin rules.
 		case item.QuotaType == 1 && isPriceNumber(item.ModelPrice):
-			base = i18n.Translate("", i18n.MsgQQBotPerCallPrice, map[string]any{
+			base = botText(i18n.MsgQQBotPerCallPrice, map[string]any{
 				"Price": decimal.NewFromFloat(*item.ModelPrice).String(),
 			})
 		case item.QuotaType == 0 && isPriceNumber(item.ModelRatio) && isPriceNumber(item.CompletionRatio):
 			// Match the public model square's base USD credits per million tokens.
 			input := decimal.NewFromFloat(*item.ModelRatio).Mul(decimal.NewFromInt(2))
-			base = i18n.Translate("", i18n.MsgQQBotTokenPrice, map[string]any{
+			base = botText(i18n.MsgQQBotTokenPrice, map[string]any{
 				"Input": input.String(), "Output": input.Mul(decimal.NewFromFloat(*item.CompletionRatio)).String(),
 			})
 			if isPriceNumber(item.CacheReadRatio) {
-				base += "\n" + i18n.Translate("", i18n.MsgQQBotCacheReadPrice, map[string]any{
+				base += "\n" + botText(i18n.MsgQQBotCacheReadPrice, map[string]any{
 					"Price": input.Mul(decimal.NewFromFloat(*item.CacheReadRatio)).String(),
 				})
 			}
 			if isPriceNumber(item.CacheWriteRatio) {
-				base += "\n" + i18n.Translate("", i18n.MsgQQBotCacheWritePrice, map[string]any{
+				base += "\n" + botText(i18n.MsgQQBotCacheWritePrice, map[string]any{
 					"Price": input.Mul(decimal.NewFromFloat(*item.CacheWriteRatio)).String(),
 				})
 			}
 		}
 		return b.withSiteLink(item.Name+"\n"+base, "pricing/"+url.PathEscape(item.Name))
 	}
-	return i18n.Translate("", i18n.MsgQQBotPriceModelMissing)
+	return botText(i18n.MsgQQBotPriceModelMissing)
 }
 
 func isPriceNumber(value *float64) bool {
@@ -168,16 +168,16 @@ func (b *Bot) channelStatus(ctx context.Context, group string) string {
 		return msg
 	}
 	if !status.Success || status.Unavailable {
-		return i18n.Translate("", i18n.MsgQQBotSiteQueryUnavailable)
+		return botText(i18n.MsgQQBotSiteQueryUnavailable)
 	}
 	if !status.Stats.OneHour.HasData {
-		return i18n.Translate("", i18n.MsgQQBotNoChannelSamples)
+		return botText(i18n.MsgQQBotNoChannelSamples)
 	}
-	header := i18n.Translate("", i18n.MsgQQBotChannelStatusHeading)
+	header := botText(i18n.MsgQQBotChannelStatusHeading)
 	if group != "" {
 		stats, found := status.Stats.ByGroup[group]
 		if !found || !stats.OneHour.HasData {
-			return i18n.Translate("", i18n.MsgQQBotNoChannelSamples)
+			return botText(i18n.MsgQQBotNoChannelSamples)
 		}
 		return b.withSiteLink(header+"\n"+formatSiteStatus(group, stats.OneHour), "site-status")
 	}
@@ -188,18 +188,18 @@ func (b *Bot) channelStatus(ctx context.Context, group string) string {
 		}
 	}
 	slices.Sort(names)
-	lines := []string{header, formatSiteStatus(i18n.Translate("", i18n.MsgQQBotAllChannels), status.Stats.OneHour)}
+	lines := []string{header, formatSiteStatus(botText(i18n.MsgQQBotAllChannels), status.Stats.OneHour)}
 	for _, name := range names[:min(len(names), siteResultLimit)] {
 		lines = append(lines, formatSiteStatus(name, status.Stats.ByGroup[name].OneHour))
 	}
 	if len(names) > siteResultLimit {
-		lines = append(lines, i18n.Translate("", i18n.MsgQQBotMoreChannels))
+		lines = append(lines, botText(i18n.MsgQQBotMoreChannels))
 	}
 	return b.withSiteLink(strings.Join(lines, "\n"), "site-status")
 }
 
 func formatSiteStatus(name string, stats perfmetrics.RequestWindowStats) string {
-	return i18n.Translate("", i18n.MsgQQBotChannelStatusLine, map[string]any{
+	return botText(i18n.MsgQQBotChannelStatusLine, map[string]any{
 		"Name": name, "Count": stats.RequestCount, "Rate": strconv.FormatFloat(stats.SuccessRate, 'f', 1, 64),
 	})
 }

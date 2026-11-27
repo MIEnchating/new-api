@@ -16,7 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMemo } from 'react'
+import { ChartLine } from 'lucide-react'
+import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   CartesianGrid,
@@ -29,7 +30,8 @@ import {
 
 import { CompactDateTimeRangePicker } from '@/components/compact-date-time-range-picker'
 import { Dialog } from '@/components/dialog'
-import { Button } from '@/components/ui/button'
+import { EmptyState } from '@/components/empty-state'
+import { ErrorState } from '@/components/error-state'
 import {
   ChartContainer,
   ChartLegend,
@@ -97,170 +99,166 @@ export function TopUpStatsSummaryRail(props: TopUpStatsSummaryRailProps) {
   )
 }
 
-type TopUpStatsSummaryDialogProps = TopUpStatsSummaryRailProps & {
+type TopUpStatsSummaryDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   dailyStats: TopUpStatsDailyStat[]
   dailyStatsLoading: boolean
+  dailyStatsError: boolean
+  onRetry: () => void
   statisticsRange: { start: Date; end: Date }
   onStatisticsRangeChange: (range: { start?: Date; end?: Date }) => void
 }
 
 export function TopUpStatsSummaryDialog(props: TopUpStatsSummaryDialogProps) {
   const { t } = useTranslation()
-  const chartConfig = useMemo<ChartConfig>(
-    () => ({
-      online_topup: {
-        label: t('Online payment'),
-        color: 'var(--success)',
-      },
-      redemption: {
-        label: t('Redemption Code'),
-        color: 'var(--chart-2)',
-      },
-      admin_adjustment: {
-        label: t('Admin Adjustment'),
-        color: 'var(--warning)',
-      },
-      lottery: {
-        label: t('Lottery amount'),
-        color: 'var(--chart-5)',
-      },
-      total: {
-        label: t('Total Quota'),
-        color: 'var(--primary)',
-      },
-    }),
-    [t]
-  )
+  const chartHeadingId = useId()
+  const chartHeight = 'h-64 sm:h-80'
+  const chartConfig = {
+    online_topup: {
+      label: t('Online payment'),
+      color: 'var(--success)',
+    },
+    redemption: {
+      label: t('Redemption Code'),
+      color: 'var(--chart-2)',
+    },
+    admin_adjustment: {
+      label: t('Admin Adjustment'),
+      color: 'var(--warning)',
+    },
+    lottery: {
+      label: t('Lottery amount'),
+      color: 'var(--chart-5)',
+    },
+    total: {
+      label: t('Total Quota'),
+      color: 'var(--primary)',
+    },
+  } satisfies ChartConfig
+
   return (
     <Dialog
       open={props.open}
       onOpenChange={props.onOpenChange}
-      title={t('Top-up Stats')}
-      showCloseButton
-      contentClassName='sm:max-w-2xl'
-      footer={
-        <Button
-          type='button'
-          variant='outline'
-          onClick={() => props.onOpenChange(false)}
-        >
-          {t('Close')}
-        </Button>
+      title={
+        <>
+          <ChartLine
+            aria-hidden='true'
+            className='text-primary size-5 shrink-0'
+          />
+          {t('Top-up Stats')}
+        </>
       }
+      contentClassName='gap-3 overflow-hidden sm:max-w-4xl'
+      headerClassName='border-b pb-3 pe-8 sm:pb-4'
+      titleClassName='flex min-w-0 items-center gap-2.5 text-lg leading-snug font-semibold'
     >
-      <div className='space-y-5' data-statistics-chart>
-        <div className='flex flex-col gap-3 border-b pb-4 sm:flex-row sm:items-end sm:justify-between'>
-          <div className='space-y-1'>
-            <div className='text-muted-foreground text-xs'>
-              {t('Quota trend')}
-            </div>
-            <p className='text-sm font-medium'>{t('Daily quota changes')}</p>
-          </div>
+      <section aria-labelledby={chartHeadingId} className='min-w-0 space-y-3'>
+        <div className='flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between'>
+          <h3 id={chartHeadingId} className='text-sm font-semibold'>
+            {t('Daily quota changes')}
+          </h3>
           <CompactDateTimeRangePicker
             start={props.statisticsRange.start}
             end={props.statisticsRange.end}
             onChange={props.onStatisticsRangeChange}
-            className='w-full sm:w-[21rem]'
+            className='bg-background h-auto min-h-9 min-w-0 py-1.5 sm:w-auto sm:max-w-full [&>span]:text-start [&>span]:whitespace-normal'
           />
         </div>
 
-        {props.dailyStatsLoading ? (
-          <Skeleton className='h-60 w-full' />
-        ) : (
-          <ChartContainer
-            config={chartConfig}
-            className='aspect-auto h-60 w-full [&_.recharts-surface]:outline-none! [&_.recharts-wrapper]:outline-none!'
-          >
-            <LineChart
-              accessibilityLayer={false}
-              data={props.dailyStats}
-              margin={{ top: 8, right: 18, bottom: 4, left: 8 }}
+        <div className='border-border/70 rounded-lg border px-1.5 pt-2 pb-1 sm:px-4 sm:pt-3 sm:pb-2'>
+          {props.dailyStatsLoading ? (
+            <div role='status' className={chartHeight}>
+              <span className='sr-only'>{t('Loading...')}</span>
+              <Skeleton className='h-full w-full motion-reduce:animate-none' />
+            </div>
+          ) : props.dailyStatsError ? (
+            <ErrorState
+              className={`${chartHeight} min-h-0`}
+              title={t('Failed to load top-up stats')}
+              onRetry={props.onRetry}
+            />
+          ) : props.dailyStats.length === 0 ? (
+            <EmptyState
+              className={`${chartHeight} min-h-0`}
+              icon={ChartLine}
+              title={t('No data available')}
+            />
+          ) : (
+            <ChartContainer
+              config={chartConfig}
+              className={`${chartHeight} aspect-auto w-full`}
             >
-              <CartesianGrid vertical={false} strokeDasharray='3 3' />
-              <XAxis
-                dataKey='date'
-                tickLine={false}
-                axisLine={false}
-                minTickGap={22}
-                tickFormatter={(value) => String(value).slice(5)}
-              />
-              <YAxis
-                width={74}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(value) => formatQuota(Number(value))}
-              />
-              <ReferenceLine y={0} stroke='var(--border)' />
-              <ChartTooltip
-                cursor={{ fill: 'var(--muted)', opacity: 0.45 }}
-                content={
-                  <ChartTooltipContent
-                    labelFormatter={(value) => String(value)}
-                    formatter={(value, name) => (
-                      <div className='flex min-w-36 items-center justify-between gap-4'>
-                        <span className='text-muted-foreground'>
-                          {chartConfig[String(name)]?.label ?? String(name)}
-                        </span>
-                        <span className='font-mono font-semibold tabular-nums'>
-                          {formatQuota(Number(value))}
-                        </span>
-                      </div>
-                    )}
+              <LineChart
+                data={props.dailyStats}
+                margin={{ top: 8, right: 10, bottom: 4, left: 0 }}
+              >
+                <CartesianGrid vertical={false} strokeDasharray='3 3' />
+                <XAxis
+                  dataKey='date'
+                  tickLine={false}
+                  axisLine={false}
+                  minTickGap={22}
+                  tickFormatter={(value) => String(value).slice(5)}
+                />
+                <YAxis
+                  width='auto'
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={6}
+                  tickFormatter={(value) => formatQuota(Number(value))}
+                />
+                <ReferenceLine y={0} stroke='var(--border)' />
+                <ChartTooltip
+                  cursor={{
+                    stroke: 'var(--muted-foreground)',
+                    strokeOpacity: 0.35,
+                  }}
+                  content={
+                    <ChartTooltipContent
+                      labelFormatter={(value) => String(value)}
+                      formatter={(value, name, item) => (
+                        <div className='flex w-full items-center gap-2'>
+                          <span
+                            aria-hidden='true'
+                            className='size-2 shrink-0 rounded-sm'
+                            style={{ backgroundColor: item.color }}
+                          />
+                          <span className='text-muted-foreground min-w-0 flex-1'>
+                            {name}
+                          </span>
+                          <span className='ms-2 font-semibold tabular-nums'>
+                            {formatQuota(Number(value))}
+                          </span>
+                        </div>
+                      )}
+                    />
+                  }
+                />
+                <ChartLegend
+                  verticalAlign='bottom'
+                  content={
+                    <ChartLegendContent className='flex-wrap gap-x-4 gap-y-1.5' />
+                  }
+                />
+                {Object.entries(chartConfig).map(([key, series]) => (
+                  <Line
+                    key={key}
+                    dataKey={key}
+                    name={series.label}
+                    stroke={`var(--color-${key})`}
+                    strokeWidth={key === 'total' ? 2.5 : 2}
+                    strokeDasharray={key === 'total' ? '5 4' : undefined}
+                    type='monotone'
+                    dot={props.dailyStats.length === 1 ? { r: 3 } : false}
                   />
-                }
-              />
-              <ChartLegend
-                verticalAlign='top'
-                align='right'
-                content={<ChartLegendContent />}
-              />
-              <Line
-                dataKey='online_topup'
-                name={t('Online payment')}
-                stroke='var(--color-online_topup)'
-                strokeWidth={2}
-                type='monotone'
-                dot={false}
-              />
-              <Line
-                dataKey='redemption'
-                name={t('Redemption Code')}
-                stroke='var(--color-redemption)'
-                strokeWidth={2}
-                type='monotone'
-                dot={false}
-              />
-              <Line
-                dataKey='admin_adjustment'
-                name={t('Admin Adjustment')}
-                stroke='var(--color-admin_adjustment)'
-                strokeWidth={2}
-                type='monotone'
-                dot={false}
-              />
-              <Line
-                dataKey='lottery'
-                name={t('Lottery amount')}
-                stroke='var(--color-lottery)'
-                strokeWidth={2}
-                type='monotone'
-                dot={false}
-              />
-              <Line
-                dataKey='total'
-                name={t('Total Quota')}
-                stroke='var(--color-total)'
-                strokeWidth={2.5}
-                strokeDasharray='5 4'
-                type='monotone'
-                dot={false}
-              />
-            </LineChart>
-          </ChartContainer>
-        )}
-      </div>
+                ))}
+              </LineChart>
+            </ChartContainer>
+          )}
+        </div>
+      </section>
     </Dialog>
   )
 }

@@ -17,30 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core'
-import {
-  restrictToParentElement,
-  restrictToVerticalAxis,
-} from '@dnd-kit/modifiers'
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  verticalListSortingStrategy,
-} from '@dnd-kit/sortable'
-import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
   CalendarClock,
-  GripVertical,
   ChevronDown,
   Search,
   X,
@@ -61,10 +41,7 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import { AutoGroupOrderItem } from '@/components/auto-group-order-item'
-import {
-  StaticDataTable,
-  StaticDataTableDragHandle,
-} from '@/components/data-table/static/static-data-table'
+import { StaticDataTable } from '@/components/data-table/static/static-data-table'
 import { StaticRowActions } from '@/components/data-table/static/static-row-actions'
 import { Dialog } from '@/components/dialog'
 import {
@@ -187,7 +164,6 @@ export function GroupDescriptionInput(props: GroupDescriptionInputProps) {
 const sectionCardClassName =
   'relative shadow-sm ring-0 before:pointer-events-none before:absolute before:inset-0 before:rounded-xl before:border before:border-border/90'
 const sectionHeaderClassName = 'border-b bg-muted/20'
-const verticalDragModifiers = [restrictToVerticalAxis, restrictToParentElement]
 
 let groupPricingIdCounter = 0
 function createGroupPricingId() {
@@ -642,14 +618,6 @@ function GroupPricingTable({
     () => parseGroupRatioSchedules(groupRatioSchedule),
     [groupRatioSchedule]
   )
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: { distance: 6 },
-    }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
-  )
 
   useEffect(() => {
     const incomingSignature = sourceGroupPricingSignature(
@@ -771,19 +739,6 @@ function GroupPricingTable({
     [emitRows, rows]
   )
 
-  const handleDragEnd = useCallback(
-    (event: DragEndEvent) => {
-      if (!event.over || event.active.id === event.over.id) return
-
-      const sourceIndex = rows.findIndex((row) => row._id === event.active.id)
-      const targetIndex = rows.findIndex((row) => row._id === event.over?.id)
-      if (sourceIndex < 0 || targetIndex < 0) return
-
-      emitRows(arrayMove(rows, sourceIndex, targetIndex))
-    },
-    [emitRows, rows]
-  )
-
   const duplicateNames = useMemo(() => {
     const counts = new Map<string, number>()
     for (const row of rows) {
@@ -846,307 +801,289 @@ function GroupPricingTable({
               </InputGroupAddon>
             )}
           </InputGroup>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            modifiers={verticalDragModifiers}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext
-              items={rows.map((row) => row._id)}
-              strategy={verticalListSortingStrategy}
-            >
-              <StaticDataTable
-                tableClassName='min-w-[760px]'
-                tableProps={{ 'aria-label': t('Pricing groups') }}
-                data={visibleRows}
-                getRowKey={(row) => row._id}
-                getSortableRowId={(row) => row._id}
-                emptyClassName='text-muted-foreground h-20 text-sm'
-                emptyContent={
-                  query
-                    ? t('No results found')
-                    : t('No groups yet. Add a group to get started.')
-                }
-                columns={[
-                  {
-                    id: 'order',
-                    header: <span className='sr-only'>{t('Order')}</span>,
-                    className: 'w-10',
-                    cellClassName: 'w-10',
-                    cell: () => (
-                      <StaticDataTableDragHandle
-                        disabled={rows.length <= 1 || !!query}
-                        className={cn(
-                          'text-muted-foreground hover:text-foreground flex size-8 items-center justify-center rounded-md',
-                          rows.length > 1
-                            ? 'cursor-grab active:cursor-grabbing'
-                            : 'cursor-default'
-                        )}
-                        aria-label={t('Drag to reorder')}
-                      >
-                        <GripVertical className='size-4' />
-                      </StaticDataTableDragHandle>
-                    ),
-                  },
-                  {
-                    id: 'group',
-                    header: t('Group name'),
-                    className: 'min-w-40',
-                    cell: (row) => (
-                      <Input
-                        value={row.name}
-                        aria-label={t('Group name')}
-                        onFocus={() => {
-                          editingGroupNameRef.current[row._id] = row.name
-                        }}
-                        onChange={(event) =>
-                          updateRow(row._id, 'name', event.target.value)
-                        }
-                        onBlur={() => {
-                          const previousName =
-                            editingGroupNameRef.current[row._id] || row.name
-                          delete editingGroupNameRef.current[row._id]
-                          const nextName = row.name.trim()
-                          if (nextName !== row.name) {
-                            updateRow(row._id, 'name', nextName)
-                          }
-                          onGroupRename(previousName, nextName)
-                          const nextSchedule = renameGroupRatioSchedule(
-                            groupRatioSchedule,
-                            previousName.trim(),
-                            nextName
-                          )
-                          if (nextSchedule !== groupRatioSchedule) {
-                            onChange('GroupRatioSchedule', nextSchedule)
-                          }
-                          const source = previousName.trim()
-                          const category = categories.get(source)
-                          if (
-                            category !== undefined &&
-                            nextName &&
-                            !categories.has(nextName)
-                          ) {
-                            const nextCategories = new Map(categories)
-                            nextCategories.delete(source)
-                            nextCategories.set(nextName, category)
-                            updateCategories(nextCategories)
-                          }
-                        }}
-                        aria-invalid={duplicateNames.includes(row.name.trim())}
-                      />
-                    ),
-                  },
-                  {
-                    id: 'ratio',
-                    header: t('Ratio'),
-                    className: 'w-28',
-                    cell: (row) => (
-                      <Input
-                        type='number'
-                        min={0}
-                        step={0.0001}
-                        value={row.ratio}
-                        aria-label={t('Ratio')}
-                        onChange={(event) =>
-                          updateRow(row._id, 'ratio', event.target.value)
-                        }
-                        onFocus={(event) => event.currentTarget.select()}
-                        onBlur={(event) => {
-                          const value = Number(event.currentTarget.value)
-                          updateRow(
-                            row._id,
-                            'ratio',
-                            Number.isFinite(value)
-                              ? String(Math.max(0, value))
-                              : '0'
-                          )
-                        }}
-                      />
-                    ),
-                  },
-                  {
-                    id: 'topup-ratio',
-                    header: t('Top-up ratio'),
-                    className: 'w-28',
-                    cell: (row) => (
-                      <Input
-                        type='number'
-                        min={0}
-                        step={0.0001}
-                        value={row.topupRatio}
-                        aria-label={t('Top-up ratio')}
-                        placeholder={t('Not set')}
-                        onChange={(event) =>
-                          updateRow(row._id, 'topupRatio', event.target.value)
-                        }
-                      />
-                    ),
-                  },
-                  {
-                    id: 'selectable',
-                    header: t('Show when creating keys'),
-                    className: 'w-28 text-center',
-                    cell: (row) => (
-                      <div className='flex justify-center'>
-                        <Checkbox
-                          checked={row.selectable}
-                          onCheckedChange={(checked) =>
-                            updateRow(row._id, 'selectable', checked === true)
-                          }
-                          aria-label={t('Show when creating keys')}
-                        />
-                      </div>
-                    ),
-                  },
-                  {
-                    id: 'description',
-                    header: t('Description'),
-                    className: 'min-w-56',
-                    cell: (row) => (
-                      <GroupDescriptionInput
-                        selectable={row.selectable}
-                        description={row.description}
-                        placeholder={t('Group description')}
-                        onChange={(value) =>
-                          updateRow(row._id, 'description', value)
-                        }
-                      />
-                    ),
-                  },
-                  {
-                    id: 'vendor',
-                    header: t('Vendor'),
-                    className: 'min-w-44',
-                    cell: (row) => {
-                      const name = row.name.trim()
-                      const assignment = categories.get(name)?.trim() ?? ''
-                      const vendorValue = assignment.startsWith('vendor:')
-                        ? vendorOptions.find(
-                            (option) => option.value === assignment
-                          )?.value
-                        : vendorValuesByName.get(assignment.toLowerCase())
-                      const automaticVendor = automaticVendors?.[name]
-                      const automaticOption = {
-                        value: 'none',
-                        label: automaticVendor
-                          ? t('Automatic ({{vendor}})', {
-                              vendor: automaticVendor.name,
-                            })
-                          : t('Automatic'),
-                        icon: automaticVendor
-                          ? getLobeIcon(
-                              automaticVendor.icon || automaticVendor.name,
-                              16
-                            )
-                          : undefined,
+          <StaticDataTable
+            tableClassName='min-w-[760px]'
+            tableProps={{ 'aria-label': t('Pricing groups') }}
+            data={visibleRows}
+            getRowKey={(row) => row._id}
+            reorder={{
+              getValue: (row) => row._id,
+              getLabel: (row) => row.name || t('Group name'),
+              disabled: rows.length <= 1 || !!query,
+              onReorder: (order) => {
+                if (query) return
+                const byId = new Map(rows.map((row) => [row._id, row]))
+                emitRows(order.flatMap((id) => byId.get(id) ?? []))
+              },
+            }}
+            emptyClassName='text-muted-foreground h-20 text-sm'
+            emptyContent={
+              query
+                ? t('No results found')
+                : t('No groups yet. Add a group to get started.')
+            }
+            columns={[
+              {
+                id: 'order',
+                header: <span className='sr-only'>{t('Order')}</span>,
+                className: 'w-10',
+                cellClassName: 'w-10',
+                cell: (_row, _index, dragHandle) => dragHandle,
+              },
+              {
+                id: 'group',
+                header: t('Group name'),
+                className: 'min-w-40',
+                cell: (row) => (
+                  <Input
+                    value={row.name}
+                    aria-label={t('Group name')}
+                    onFocus={() => {
+                      editingGroupNameRef.current[row._id] = row.name
+                    }}
+                    onChange={(event) =>
+                      updateRow(row._id, 'name', event.target.value)
+                    }
+                    onBlur={() => {
+                      const previousName =
+                        editingGroupNameRef.current[row._id] || row.name
+                      delete editingGroupNameRef.current[row._id]
+                      const nextName = row.name.trim()
+                      if (nextName !== row.name) {
+                        updateRow(row._id, 'name', nextName)
                       }
-                      return (
-                        <Combobox
-                          options={[automaticOption, ...vendorOptions]}
-                          value={
-                            assignment ? (vendorValue ?? assignment) : 'none'
-                          }
-                          placeholder={t('Select vendor')}
-                          aria-label={`${row.name} · ${t('Vendor')}`}
-                          disabled={!name || vendors === undefined}
-                          showSelectedIcon
-                          onValueChange={(value) => {
-                            const nextCategories = new Map(categories)
-                            if (value && value !== 'none') {
-                              nextCategories.set(name, value)
-                            } else {
-                              nextCategories.delete(name)
-                            }
-                            updateCategories(nextCategories)
-                          }}
-                        />
+                      onGroupRename(previousName, nextName)
+                      const nextSchedule = renameGroupRatioSchedule(
+                        groupRatioSchedule,
+                        previousName.trim(),
+                        nextName
                       )
-                    },
-                  },
-                  {
-                    id: 'actions',
-                    header: t('Actions'),
-                    className: 'text-right',
-                    cellClassName: 'text-right',
-                    cell: (row) => (
-                      <div className='flex justify-end gap-1'>
-                        <Tooltip>
-                          <TooltipTrigger
-                            render={
-                              <Button
-                                variant='ghost'
-                                size='icon-sm'
-                                onClick={() => setScheduleGroupId(row._id)}
-                                disabled={!row.name.trim()}
-                                aria-label={t('Time-based ratio')}
-                                className={cn(
-                                  schedules[row.name.trim()]?.enabled &&
-                                    'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
-                                )}
-                              />
-                            }
-                          >
-                            <CalendarClock className='size-4' />
-                          </TooltipTrigger>
-                          <TooltipContent>
-                            {schedules[row.name.trim()]?.enabled
-                              ? t('Time-based ratio enabled')
-                              : t('Configure time-based ratio')}
-                          </TooltipContent>
-                        </Tooltip>
-                        <Button
-                          variant='ghost'
-                          size='icon-sm'
-                          onClick={() =>
-                            moveRow(
-                              row._id,
-                              rows.findIndex((item) => item._id === row._id) - 1
-                            )
-                          }
-                          disabled={!!query || rows[0]?._id === row._id}
-                          aria-label={t('Move up')}
-                        >
-                          <ArrowUp className='size-4' />
-                        </Button>
-                        <Button
-                          variant='ghost'
-                          size='icon-sm'
-                          onClick={() =>
-                            moveRow(
-                              row._id,
-                              rows.findIndex((item) => item._id === row._id) + 1
-                            )
-                          }
-                          disabled={!!query || rows.at(-1)?._id === row._id}
-                          aria-label={t('Move down')}
-                        >
-                          <ArrowDown className='size-4' />
-                        </Button>
-                        <Button
-                          variant='ghost'
-                          size='icon-sm'
-                          onClick={() => onShowDetail(row.name.trim())}
-                          disabled={!row.name.trim()}
-                          aria-label={t('Details')}
-                        >
-                          <Info className='h-4 w-4' />
-                        </Button>
-                        <Button
-                          variant='ghost'
-                          size='icon-sm'
-                          onClick={() => removeRow(row._id)}
-                          aria-label={t('Delete')}
-                        >
-                          <Trash2 className='h-4 w-4' />
-                        </Button>
-                      </div>
-                    ),
-                  },
-                ]}
-              />
-            </SortableContext>
-          </DndContext>
+                      if (nextSchedule !== groupRatioSchedule) {
+                        onChange('GroupRatioSchedule', nextSchedule)
+                      }
+                      const source = previousName.trim()
+                      const category = categories.get(source)
+                      if (
+                        category !== undefined &&
+                        nextName &&
+                        !categories.has(nextName)
+                      ) {
+                        const nextCategories = new Map(categories)
+                        nextCategories.delete(source)
+                        nextCategories.set(nextName, category)
+                        updateCategories(nextCategories)
+                      }
+                    }}
+                    aria-invalid={duplicateNames.includes(row.name.trim())}
+                  />
+                ),
+              },
+              {
+                id: 'ratio',
+                header: t('Ratio'),
+                className: 'w-28',
+                cell: (row) => (
+                  <Input
+                    type='number'
+                    min={0}
+                    step={0.0001}
+                    value={row.ratio}
+                    aria-label={t('Ratio')}
+                    onChange={(event) =>
+                      updateRow(row._id, 'ratio', event.target.value)
+                    }
+                    onFocus={(event) => event.currentTarget.select()}
+                    onBlur={(event) => {
+                      const value = Number(event.currentTarget.value)
+                      updateRow(
+                        row._id,
+                        'ratio',
+                        Number.isFinite(value)
+                          ? String(Math.max(0, value))
+                          : '0'
+                      )
+                    }}
+                  />
+                ),
+              },
+              {
+                id: 'topup-ratio',
+                header: t('Top-up ratio'),
+                className: 'w-28',
+                cell: (row) => (
+                  <Input
+                    type='number'
+                    min={0}
+                    step={0.0001}
+                    value={row.topupRatio}
+                    aria-label={t('Top-up ratio')}
+                    placeholder={t('Not set')}
+                    onChange={(event) =>
+                      updateRow(row._id, 'topupRatio', event.target.value)
+                    }
+                  />
+                ),
+              },
+              {
+                id: 'selectable',
+                header: t('Show when creating keys'),
+                className: 'w-28 text-center',
+                cell: (row) => (
+                  <div className='flex justify-center'>
+                    <Checkbox
+                      checked={row.selectable}
+                      onCheckedChange={(checked) =>
+                        updateRow(row._id, 'selectable', checked === true)
+                      }
+                      aria-label={t('Show when creating keys')}
+                    />
+                  </div>
+                ),
+              },
+              {
+                id: 'description',
+                header: t('Description'),
+                className: 'min-w-56',
+                cell: (row) => (
+                  <GroupDescriptionInput
+                    selectable={row.selectable}
+                    description={row.description}
+                    placeholder={t('Group description')}
+                    onChange={(value) =>
+                      updateRow(row._id, 'description', value)
+                    }
+                  />
+                ),
+              },
+              {
+                id: 'vendor',
+                header: t('Vendor'),
+                className: 'min-w-44',
+                cell: (row) => {
+                  const name = row.name.trim()
+                  const assignment = categories.get(name)?.trim() ?? ''
+                  const vendorValue = assignment.startsWith('vendor:')
+                    ? vendorOptions.find(
+                        (option) => option.value === assignment
+                      )?.value
+                    : vendorValuesByName.get(assignment.toLowerCase())
+                  const automaticVendor = automaticVendors?.[name]
+                  const automaticOption = {
+                    value: 'none',
+                    label: automaticVendor
+                      ? t('Automatic ({{vendor}})', {
+                          vendor: automaticVendor.name,
+                        })
+                      : t('Automatic'),
+                    icon: automaticVendor
+                      ? getLobeIcon(
+                          automaticVendor.icon || automaticVendor.name,
+                          16
+                        )
+                      : undefined,
+                  }
+                  return (
+                    <Combobox
+                      options={[automaticOption, ...vendorOptions]}
+                      value={assignment ? (vendorValue ?? assignment) : 'none'}
+                      placeholder={t('Select vendor')}
+                      aria-label={`${row.name} · ${t('Vendor')}`}
+                      disabled={!name || vendors === undefined}
+                      showSelectedIcon
+                      onValueChange={(value) => {
+                        const nextCategories = new Map(categories)
+                        if (value && value !== 'none') {
+                          nextCategories.set(name, value)
+                        } else {
+                          nextCategories.delete(name)
+                        }
+                        updateCategories(nextCategories)
+                      }}
+                    />
+                  )
+                },
+              },
+              {
+                id: 'actions',
+                header: t('Actions'),
+                className: 'text-right',
+                cellClassName: 'text-right',
+                cell: (row) => (
+                  <div className='flex justify-end gap-1'>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant='ghost'
+                            size='icon-sm'
+                            onClick={() => setScheduleGroupId(row._id)}
+                            disabled={!row.name.trim()}
+                            aria-label={t('Time-based ratio')}
+                            className={cn(
+                              schedules[row.name.trim()]?.enabled &&
+                                'bg-primary/10 text-primary hover:bg-primary/15 hover:text-primary'
+                            )}
+                          />
+                        }
+                      >
+                        <CalendarClock className='size-4' />
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {schedules[row.name.trim()]?.enabled
+                          ? t('Time-based ratio enabled')
+                          : t('Configure time-based ratio')}
+                      </TooltipContent>
+                    </Tooltip>
+                    <Button
+                      variant='ghost'
+                      size='icon-sm'
+                      onClick={() =>
+                        moveRow(
+                          row._id,
+                          rows.findIndex((item) => item._id === row._id) - 1
+                        )
+                      }
+                      disabled={!!query || rows[0]?._id === row._id}
+                      aria-label={t('Move up')}
+                    >
+                      <ArrowUp className='size-4' />
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='icon-sm'
+                      onClick={() =>
+                        moveRow(
+                          row._id,
+                          rows.findIndex((item) => item._id === row._id) + 1
+                        )
+                      }
+                      disabled={!!query || rows.at(-1)?._id === row._id}
+                      aria-label={t('Move down')}
+                    >
+                      <ArrowDown className='size-4' />
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='icon-sm'
+                      onClick={() => onShowDetail(row.name.trim())}
+                      disabled={!row.name.trim()}
+                      aria-label={t('Details')}
+                    >
+                      <Info className='h-4 w-4' />
+                    </Button>
+                    <Button
+                      variant='ghost'
+                      size='icon-sm'
+                      onClick={() => removeRow(row._id)}
+                      aria-label={t('Delete')}
+                    >
+                      <Trash2 className='h-4 w-4' />
+                    </Button>
+                  </div>
+                ),
+              },
+            ]}
+          />
 
           {duplicateNames.length > 0 && (
             <p className='text-destructive text-sm'>

@@ -57,6 +57,25 @@ export function getConfiguredGroupRatio(
   return typeof ratio === 'number' && Number.isFinite(ratio) ? ratio : 1
 }
 
+export function getDisplayRequestPrice(
+  model: PricingModel,
+  basePrice: number,
+  selectedGroup?: string
+): number {
+  const groups = model.enable_groups ?? []
+  const priceForGroup = (group: string) =>
+    model.group_request_prices?.[group] ??
+    basePrice * getConfiguredGroupRatio(model.group_ratio ?? {}, group)
+  if (selectedGroup && groups.includes(selectedGroup)) {
+    return priceForGroup(selectedGroup)
+  }
+  if (!groups.length) return basePrice
+  return groups.reduce(
+    (lowest, group) => Math.min(lowest, priceForGroup(group)),
+    Infinity
+  )
+}
+
 /**
  * Resolve the group ratio used by model square summary prices.
  *

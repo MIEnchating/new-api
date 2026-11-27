@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -70,7 +71,11 @@ func (h QQBotBinding) Bind(c *gin.Context) {
 		writeSecurityOperationError(c, model.ErrAuthFlowInvalid)
 		return
 	}
-	if err := model.BindQQBotIdentity(code, appID, proof.AuthSessionIdentity); err != nil {
+	err = model.BindQQBotIdentity(code, appID, proof.AuthSessionIdentity)
+	if errors.Is(err, model.ErrAuthFlowInvalid) {
+		err = model.BindQQBotGroupIdentity(code, appID, proof.AuthSessionIdentity, h.Runtime.ActiveGroups(appID))
+	}
+	if err != nil {
 		writeSecurityOperationError(c, err)
 		return
 	}

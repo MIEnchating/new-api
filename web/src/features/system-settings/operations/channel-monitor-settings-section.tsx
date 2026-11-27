@@ -16,37 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import {
-  closestCenter,
-  DndContext,
-  KeyboardSensor,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  type DragEndEvent,
-} from '@dnd-kit/core'
-import { restrictToParentElement } from '@dnd-kit/modifiers'
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  rectSortingStrategy,
-} from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { GripVertical } from 'lucide-react'
+import { Reorder } from 'motion/react'
 import { useId, useRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { z } from 'zod'
 
+import { OrderDragItem } from '@/components/auto-group-order-item'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
-import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Form,
@@ -80,7 +62,6 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 
 const CACHE_SETTINGS_QUERY_KEY = ['channel-monitor-settings']
-const CACHE_GROUP_DRAG_MODIFIERS = [restrictToParentElement]
 const settingsSchema = z.object({
   thresholds: z.object({
     minimum_sample: z.number().int().min(1).max(1000000),
@@ -97,67 +78,47 @@ const settingsSchema = z.object({
 })
 type CacheSettings = z.infer<typeof settingsSchema>
 
-function SortableCacheGroupRow(props: {
+function CacheGroupRow(props: {
   group: string
   selected: boolean
   checkboxDisabled: boolean
   dragDisabled: boolean
   onToggle: () => void
+  onMove: (direction: 'up' | 'down') => void
 }) {
-  const { t } = useTranslation()
   const checkboxId = useId()
-  const sortable = useSortable({
-    id: props.group,
-    disabled: props.dragDisabled,
-    transition: {
-      duration: 220,
-      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
-    },
-  })
 
   return (
-    <div
-      ref={sortable.setNodeRef}
-      style={{
-        transform: CSS.Translate.toString(sortable.transform),
-        transition: sortable.transition,
-        zIndex: sortable.isDragging ? 10 : undefined,
-      }}
+    <OrderDragItem
+      value={props.group}
+      label={props.group}
+      disabled={props.dragDisabled}
+      onMove={props.onMove}
       className={cn(
         'hover:bg-accent relative flex min-w-0 items-center gap-2 rounded-lg border border-transparent px-3 py-2 transition-[background-color,box-shadow,opacity]',
-        props.selected && 'bg-primary/5 border-primary/15',
-        sortable.isDragging && 'bg-accent z-10 opacity-70 shadow-md'
+        props.selected && 'bg-primary/5 border-primary/15'
       )}
     >
-      <label
-        htmlFor={checkboxId}
-        className='flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-1'
-      >
-        <Checkbox
-          id={checkboxId}
-          checked={props.selected}
-          disabled={props.checkboxDisabled}
-          onCheckedChange={props.onToggle}
-        />
-        <span className='min-w-0 flex-1 text-sm [overflow-wrap:anywhere] break-words'>
-          {props.group}
-        </span>
-      </label>
-      <Button
-        type='button'
-        variant='ghost'
-        size='icon'
-        ref={sortable.setActivatorNodeRef}
-        {...sortable.attributes}
-        {...sortable.listeners}
-        disabled={props.dragDisabled}
-        className='text-muted-foreground hover:bg-muted hover:text-foreground flex size-8 shrink-0 touch-none items-center justify-center rounded-md enabled:cursor-grab enabled:active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-30'
-        aria-label={t('Drag to reorder')}
-        title={t('Drag to reorder')}
-      >
-        <GripVertical className='size-4' />
-      </Button>
-    </div>
+      {(handle) => (
+        <>
+          <label
+            htmlFor={checkboxId}
+            className='flex min-w-0 flex-1 cursor-pointer items-center gap-3 py-1'
+          >
+            <Checkbox
+              id={checkboxId}
+              checked={props.selected}
+              disabled={props.checkboxDisabled}
+              onCheckedChange={props.onToggle}
+            />
+            <span className='min-w-0 flex-1 text-sm [overflow-wrap:anywhere] break-words'>
+              {props.group}
+            </span>
+          </label>
+          {handle}
+        </>
+      )}
+    </OrderDragItem>
   )
 }
 
@@ -190,10 +151,6 @@ function ChannelMonitorSettingsForm(props: {
     ...selectedAvailable,
     ...availableGroups.filter((group) => !selectedGroups.includes(group)),
   ]
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
-  )
   const save = useMutation({
     mutationFn: async (values: CacheSettings) => {
       if (
@@ -227,14 +184,17 @@ function ChannelMonitorSettingsForm(props: {
     },
     onError: (error) => handleServerError(error, t('Failed to update setting')),
   })
-  const handleDragEnd = (event: DragEndEvent) => {
-    if (!event.over || event.active.id === event.over.id) return
-    const source = selectedGroups.indexOf(String(event.active.id))
-    const target = selectedGroups.indexOf(String(event.over.id))
-    if (source < 0 || target < 0) return
-    form.setValue('groups', arrayMove(selectedGroups, source, target), {
-      shouldDirty: true,
-    })
+  const reorderGroups = (order: string[]) => {
+    if (allGroups || save.isPending) return
+    const available = new Set(selectedAvailable)
+    const next = order.filter((group) => available.has(group)).values()
+    form.setValue(
+      'groups',
+      selectedGroups.map((group) =>
+        available.has(group) ? (next.next().value ?? group) : group
+      ),
+      { shouldDirty: true }
+    )
   }
   const onSubmit = form.handleSubmit((values) => {
     if (save.isPending || (!values.allGroups && values.groups.length === 0)) {
@@ -296,49 +256,53 @@ function ChannelMonitorSettingsForm(props: {
                   form.setValue('allGroups', checked, { shouldDirty: true })
                 }
               />
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                modifiers={CACHE_GROUP_DRAG_MODIFIERS}
-                onDragEnd={handleDragEnd}
-              >
-                <div className='grid max-h-80 grid-cols-1 gap-2 overflow-y-auto overscroll-contain sm:grid-cols-2'>
-                  <SortableContext
-                    items={orderedGroups}
-                    strategy={rectSortingStrategy}
-                  >
-                    {orderedGroups.length === 0 ? (
-                      <EmptyState title={t('No data')} />
-                    ) : (
-                      orderedGroups.map((group) => (
-                        <SortableCacheGroupRow
-                          key={group}
-                          group={group}
-                          selected={allGroups || selectedGroups.includes(group)}
-                          checkboxDisabled={allGroups || save.isPending}
-                          dragDisabled={
-                            allGroups ||
-                            save.isPending ||
-                            !selectedGroups.includes(group) ||
-                            selectedAvailable.length < 2
-                          }
-                          onToggle={() =>
-                            form.setValue(
-                              'groups',
-                              selectedGroups.includes(group)
-                                ? selectedGroups.filter(
-                                    (item) => item !== group
-                                  )
-                                : [...selectedGroups, group],
-                              { shouldDirty: true }
-                            )
-                          }
-                        />
-                      ))
-                    )}
-                  </SortableContext>
-                </div>
-              </DndContext>
+              {orderedGroups.length === 0 ? (
+                <EmptyState title={t('No data')} />
+              ) : (
+                <Reorder.Group
+                  axis='xy'
+                  layoutScroll
+                  values={orderedGroups}
+                  onReorder={reorderGroups}
+                  className='grid max-h-80 grid-cols-1 gap-2 overflow-y-auto overscroll-contain sm:grid-cols-2'
+                >
+                  {orderedGroups.map((group, index) => (
+                    <CacheGroupRow
+                      key={group}
+                      group={group}
+                      selected={allGroups || selectedGroups.includes(group)}
+                      checkboxDisabled={allGroups || save.isPending}
+                      dragDisabled={
+                        allGroups ||
+                        save.isPending ||
+                        !selectedGroups.includes(group) ||
+                        selectedAvailable.length < 2
+                      }
+                      onMove={(direction) => {
+                        const target = index + (direction === 'up' ? -1 : 1)
+                        if (target < 0 || target >= selectedAvailable.length) {
+                          return
+                        }
+                        const next = [...selectedAvailable]
+                        ;[next[index], next[target]] = [
+                          next[target],
+                          next[index],
+                        ]
+                        reorderGroups(next)
+                      }}
+                      onToggle={() =>
+                        form.setValue(
+                          'groups',
+                          selectedGroups.includes(group)
+                            ? selectedGroups.filter((item) => item !== group)
+                            : [...selectedGroups, group],
+                          { shouldDirty: true }
+                        )
+                      }
+                    />
+                  ))}
+                </Reorder.Group>
+              )}
             </SettingsControlGroup>
             <SettingsControlGroup className='bg-card space-y-5 p-4 sm:p-5'>
               <div className='space-y-1'>

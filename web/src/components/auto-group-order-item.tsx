@@ -38,133 +38,142 @@ type AutoGroupOrderItemProps = {
   leading?: ReactNode
   children?: ReactNode
   actions?: ReactNode
-  disabled?: boolean
   onMove: (index: number, direction: 'up' | 'down') => void
   onRemove?: (group: string) => void
 }
 
-export function AutoGroupOrderItem(props: AutoGroupOrderItemProps) {
+export function OrderDragItem(props: {
+  as?: 'li' | 'tr'
+  role?: 'group'
+  value: string
+  label: string
+  disabled?: boolean
+  className?: string
+  slot?: string
+  onMove: (direction: 'up' | 'down') => void
+  children: (handle: ReactNode) => ReactNode
+}) {
   const { t } = useTranslation()
   const dragControls = useDragControls()
 
   const handleDragStart = (event: PointerEvent<HTMLButtonElement>) => {
-    if (!props.disabled) dragControls.start(event)
+    dragControls.start(event)
   }
 
   const handleDragKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (props.disabled) return
     if (event.key === 'ArrowUp') {
       event.preventDefault()
-      props.onMove(props.index, 'up')
+      props.onMove('up')
     }
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      props.onMove(props.index, 'down')
+      props.onMove('down')
     }
   }
 
-  const remove = props.onRemove
-
   return (
     <Reorder.Item
-      value={props.value ?? props.group}
+      as={props.as}
+      role={props.role}
+      aria-label={props.role ? props.label : undefined}
+      value={props.value}
       dragListener={false}
       dragMomentum={false}
       dragControls={dragControls}
-      className='bg-background relative flex min-w-0 items-center gap-2 rounded-lg border p-2'
+      data-slot={props.slot}
+      className={props.className}
     >
-      <Button
-        type='button'
-        variant='ghost'
-        size='icon-sm'
-        disabled={props.disabled}
-        className='text-muted-foreground cursor-grab touch-none font-mono active:cursor-grabbing'
-        aria-label={t('Drag {{group}} to reorder', { group: props.group })}
-        title={t('Drag {{group}} to reorder', { group: props.group })}
-        onPointerDown={handleDragStart}
-        onKeyDown={handleDragKeyDown}
-      >
-        <HugeiconsIcon icon={Drag01Icon} strokeWidth={2} aria-hidden='true' />
-      </Button>
-      {props.leading}
-      <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
-        <span
-          className='min-w-0 truncate text-sm font-medium'
-          title={props.group}
-        >
-          {props.group}
-        </span>
-        {props.children}
-      </div>
-      <div className='flex shrink-0 gap-1'>
-        <GroupOrderControls
-          group={props.group}
-          index={props.index}
-          count={props.count}
+      {props.children(
+        <Button
+          type='button'
+          variant='ghost'
+          size='icon-sm'
           disabled={props.disabled}
-          onMove={(direction) => props.onMove(props.index, direction)}
-        />
-        {remove && (
-          <Button
-            type='button'
-            variant='ghost'
-            size='icon-sm'
-            disabled={props.disabled}
-            aria-label={t('Remove {{group}}', { group: props.group })}
-            onClick={() => remove(props.value ?? props.group)}
-          >
-            <HugeiconsIcon
-              icon={Cancel01Icon}
-              strokeWidth={2}
-              aria-hidden='true'
-            />
-          </Button>
-        )}
-        {props.actions}
-      </div>
+          className='text-muted-foreground cursor-grab touch-none font-mono active:cursor-grabbing'
+          aria-label={t('Drag {{group}} to reorder', { group: props.label })}
+          title={t('Drag {{group}} to reorder', { group: props.label })}
+          onPointerDown={handleDragStart}
+          onKeyDown={handleDragKeyDown}
+        >
+          <HugeiconsIcon icon={Drag01Icon} strokeWidth={2} aria-hidden='true' />
+        </Button>
+      )}
     </Reorder.Item>
   )
 }
 
-// Shared by compact order rows and full group settings cards.
-export function GroupOrderControls(props: {
-  group: string
-  index: number
-  count: number
-  disabled?: boolean
-  onMove: (direction: 'up' | 'down') => void
-}) {
+export function AutoGroupOrderItem(props: AutoGroupOrderItemProps) {
   const { t } = useTranslation()
+  const remove = props.onRemove
+
   return (
-    <div className='flex shrink-0 gap-1'>
-      <Button
-        type='button'
-        variant='ghost'
-        size='icon-sm'
-        disabled={props.disabled || props.index === 0}
-        aria-label={t('Move {{group}} up', { group: props.group })}
-        onClick={() => props.onMove('up')}
-      >
-        <HugeiconsIcon
-          icon={ArrowUp01Icon}
-          strokeWidth={2}
-          aria-hidden='true'
-        />
-      </Button>
-      <Button
-        type='button'
-        variant='ghost'
-        size='icon-sm'
-        disabled={props.disabled || props.index === props.count - 1}
-        aria-label={t('Move {{group}} down', { group: props.group })}
-        onClick={() => props.onMove('down')}
-      >
-        <HugeiconsIcon
-          icon={ArrowDown01Icon}
-          strokeWidth={2}
-          aria-hidden='true'
-        />
-      </Button>
-    </div>
+    <OrderDragItem
+      value={props.value ?? props.group}
+      label={props.group}
+      onMove={(direction) => props.onMove(props.index, direction)}
+      className='bg-background relative flex min-w-0 items-center gap-2 rounded-lg border p-2'
+    >
+      {(handle) => (
+        <>
+          {handle}
+          {props.leading}
+          <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2'>
+            <span
+              className='min-w-0 truncate text-sm font-medium'
+              title={props.group}
+            >
+              {props.group}
+            </span>
+            {props.children}
+          </div>
+          <div className='flex shrink-0 gap-1'>
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon-sm'
+              disabled={props.index === 0}
+              aria-label={t('Move {{group}} up', { group: props.group })}
+              onClick={() => props.onMove(props.index, 'up')}
+            >
+              <HugeiconsIcon
+                icon={ArrowUp01Icon}
+                strokeWidth={2}
+                aria-hidden='true'
+              />
+            </Button>
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon-sm'
+              disabled={props.index === props.count - 1}
+              aria-label={t('Move {{group}} down', { group: props.group })}
+              onClick={() => props.onMove(props.index, 'down')}
+            >
+              <HugeiconsIcon
+                icon={ArrowDown01Icon}
+                strokeWidth={2}
+                aria-hidden='true'
+              />
+            </Button>
+            {remove && (
+              <Button
+                type='button'
+                variant='ghost'
+                size='icon-sm'
+                aria-label={t('Remove {{group}}', { group: props.group })}
+                onClick={() => remove(props.value ?? props.group)}
+              >
+                <HugeiconsIcon
+                  icon={Cancel01Icon}
+                  strokeWidth={2}
+                  aria-hidden='true'
+                />
+              </Button>
+            )}
+            {props.actions}
+          </div>
+        </>
+      )}
+    </OrderDragItem>
   )
 }

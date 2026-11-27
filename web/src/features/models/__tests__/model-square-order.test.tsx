@@ -28,9 +28,9 @@ import { ModelSquareOrderDialog } from '../components/dialogs/model-square-order
 
 function mockApi(
   saved: Record<string, string> | Promise<Record<string, string>>,
-  usage: Record<string, { requests: number; tokens: number }> = {}
+  usage: Record<string, { requests: number; tokens: number }> | Error = {}
 ) {
-  vi.spyOn(api, 'get').mockImplementation(async (url: string) => {
+  vi.spyOn(api, 'get').mockImplementation(async (url, config) => {
     if (url === '/api/option/') {
       const data = Object.entries(await saved).map(([key, value]) => ({
         key,
@@ -39,12 +39,16 @@ function mockApi(
       return { data: { success: true, data } }
     }
     if (url === '/api/models/square_usage') {
+      const totals = Object.hasOwn(config?.params ?? {}, 'include_usage')
+        ? {}
+        : usage
+      if (totals instanceof Error) throw totals
       // Every square model, including ones only other groups can see
       const data = ['alpha', 'beta', 'gamma'].map((name) => ({
         model_name: name,
         vendor_name: 'Acme',
-        requests: usage[name]?.requests ?? 0,
-        tokens: usage[name]?.tokens ?? 0,
+        requests: totals[name]?.requests ?? 0,
+        tokens: totals[name]?.tokens ?? 0,
       }))
       return { data: { success: true, data } }
     }
@@ -273,5 +277,20 @@ describe('model square order dialog', () => {
     expect(
       await screen.findByText('No usage data, so models are ordered by name.')
     ).toBeVisible()
+  })
+
+  it('keeps the manual picker usable when loading usage fails', async () => {
+    mockApi(
+      { 'model_square_setting.sort_mode': 'mixed' },
+      new Error('context deadline exceeded')
+    )
+    const user = userEvent.setup()
+    renderDialog()
+
+    expect(await screen.findByText('Failed to fetch usage')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: 'Manual order' }))
+    await user.click(screen.getByRole('combobox', { name: 'Add model' }))
+    await user.click(await screen.findByRole('option', { name: /gamma/ }))
+    expect(screen.getByRole('button', { name: 'Remove gamma' })).toBeVisible()
   })
 })

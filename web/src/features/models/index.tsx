@@ -66,6 +66,9 @@ function ModelsContent() {
   const navigate = useNavigate({ from: '/models/$section' })
   const { tabCategory, setTabCategory, setOpen, setCurrentVendor } = useModels()
   const params = route.useParams()
+  const openSquareOrder = route.useSearch({
+    select: (search) => search.squareOrder,
+  })
   const activeSection = (params.section ??
     MODELS_DEFAULT_SECTION) as ModelsSectionId
 
@@ -142,7 +145,17 @@ function ModelsContent() {
         </SectionPageLayout.Content>
       </SectionPageLayout>
 
-      <ModelsDialogs />
+      <ModelsDialogs
+        openSquareOrder={activeSection === 'metadata' && openSquareOrder}
+        onCloseSquareOrder={() => {
+          if (openSquareOrder) {
+            void navigate({
+              search: (previous) => ({ ...previous, squareOrder: undefined }),
+              replace: true,
+            })
+          }
+        }}
+      />
       <CreateDeploymentDrawer
         open={createDeploymentOpen}
         onOpenChange={setCreateDeploymentOpen}

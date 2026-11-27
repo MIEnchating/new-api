@@ -113,6 +113,56 @@ function getCommandItem(label: string): HTMLElement {
 }
 
 describe('API key group combobox', () => {
+  test('filters the results by platform without committing a group and resets on reopen', async () => {
+    const user = userEvent.setup()
+    render(
+      <Harness
+        initialValue='auto'
+        options={[
+          options[0],
+          { ...options[1], vendor: { id: 1, name: 'OpenAI' } },
+          { ...options[2], vendor: { id: 2, name: 'Anthropic' } },
+        ]}
+      />
+    )
+
+    const trigger = getTrigger()
+    await user.click(trigger)
+    const platforms = screen.getByRole('navigation', { name: 'Platform' })
+    expect(platforms.parentElement).toHaveClass('flex-col', 'sm:flex-row')
+    expect(platforms).toHaveClass('overflow-x-auto', 'sm:overflow-y-auto')
+    expect(screen.getByRole('listbox')).toHaveClass('overflow-y-auto')
+    expect(
+      within(platforms).getByRole('button', { name: 'All 3' })
+    ).toHaveAttribute('aria-pressed', 'true')
+
+    const anthropic = within(platforms).getByRole('button', {
+      name: 'Anthropic 1',
+    })
+    anthropic.focus()
+    await user.keyboard('{Enter}')
+    expect(anthropic).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('option')).toHaveTextContent('vip')
+    expect(screen.getByTestId('selected-group')).toHaveTextContent('auto')
+    const search = screen.getByPlaceholderText('Search...')
+    expect(search).toHaveFocus()
+    await user.type(search, 'default')
+    expect(screen.getByText('No group found.')).toBeVisible()
+    await user.keyboard('{Escape}')
+
+    await user.click(trigger)
+    expect(screen.getByPlaceholderText('Search...')).toHaveValue('')
+    expect(screen.getAllByRole('option')).toHaveLength(3)
+    await user.click(screen.getByRole('button', { name: 'Other groups 1' }))
+    expect(screen.getByRole('option')).toHaveTextContent(
+      'Global automatic routing'
+    )
+    await user.click(screen.getByRole('button', { name: 'OpenAI 1' }))
+    await user.keyboard('{Enter}')
+    expect(screen.getByTestId('selected-group')).toHaveTextContent('default')
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  })
+
   test('shows vendor icons, searches by vendor and selects the original group', async () => {
     const user = userEvent.setup()
     const openAI = {
@@ -208,6 +258,7 @@ describe('API key group combobox', () => {
 
     fireEvent.click(trigger)
     expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.queryByRole('navigation', { name: 'Platform' })).toBeNull()
     expect(
       screen.queryByRole('group', { name: 'Other groups' })
     ).not.toBeInTheDocument()

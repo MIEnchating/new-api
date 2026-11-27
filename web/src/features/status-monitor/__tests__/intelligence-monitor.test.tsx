@@ -2264,16 +2264,6 @@ it('reorders test groups from the drag handle and saves their settings in the ne
     </QueryClientProvider>
   )
   const user = userEvent.setup()
-  // jsdom does not lay out the group cards for the drag sensors.
-  const measure = vi
-    .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
-    .mockImplementation(function (this: HTMLElement) {
-      const group = this.closest('[role="group"]')
-      if (group?.getAttribute('aria-label') === 'vip') {
-        return new DOMRect(0, 320, 400, 300)
-      }
-      return new DOMRect(0, 0, 400, 300)
-    })
   try {
     expect(
       screen.getByRole('button', { name: 'Move default up' })
@@ -2281,9 +2271,8 @@ it('reorders test groups from the drag handle and saves their settings in the ne
     expect(screen.getByRole('button', { name: 'Move vip down' })).toBeDisabled()
     const handle = screen.getByRole('button', { name: 'Drag vip to reorder' })
     handle.focus()
-    await user.keyboard('[Space]')
     await user.keyboard('{ArrowUp}')
-    await user.keyboard('[Space]')
+    expect(handle).toHaveFocus()
     expect(
       screen
         .getAllByRole('combobox', { name: 'Model Group' })
@@ -2304,7 +2293,6 @@ it('reorders test groups from the drag handle and saves their settings in the ne
       ).toBeEnabled()
     )
   } finally {
-    measure.mockRestore()
     view.unmount()
     actions.remove()
     client.clear()

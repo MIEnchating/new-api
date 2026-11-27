@@ -119,25 +119,34 @@ export function QQBotBindingCard() {
     <TitledCard
       title={t('QQ Bot')}
       description={
-        binding.bound
-          ? t('Your QQ account is bound.')
-          : t(
-              'Send /bind to the QQ bot in a private chat to get a one-time code.'
+        binding.enabled
+          ? t(
+              'In a QQ group, send /bind followed by your registered email and enter the code from your inbox here. For private chat, send /bind to the bot.'
             )
+          : undefined
+      }
+      action={
+        binding.bound && (
+          <Button
+            type='button'
+            variant='outline'
+            disabled={
+              change.isPending ||
+              verification.dialogProps.state.phase !== 'idle'
+            }
+            onClick={() => void updateBinding()}
+          >
+            {t('Unbind')}
+          </Button>
+        )
       }
     >
-      {binding.bound ? (
-        <Button
-          type='button'
-          variant='outline'
-          disabled={
-            change.isPending || verification.dialogProps.state.phase !== 'idle'
-          }
-          onClick={() => void updateBinding()}
-        >
-          {t('Unbind')}
-        </Button>
-      ) : (
+      {binding.bound && (
+        <p className='text-muted-foreground mb-3 text-sm'>
+          {t('Your QQ account is bound.')}
+        </p>
+      )}
+      {binding.enabled && (
         <Form {...form}>
           <form
             className='flex flex-wrap items-end gap-3'

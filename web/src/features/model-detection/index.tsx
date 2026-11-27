@@ -34,8 +34,8 @@ import {
   runModelDetection,
   type ModelDetectionInput,
 } from './api'
+import { DetectionConfetti } from './confetti'
 import { DetectionForm } from './detection-form'
-import { DetectionFireworks } from './fireworks'
 import { DetectionHistory } from './history'
 import {
   readDetectionHistory,
@@ -228,7 +228,7 @@ export function ModelDetection(props: { userId: number }) {
   return (
     <div className='relative flex min-h-0 min-w-0 flex-1 flex-col'>
       {run.status === 'success' && modelMatched && (
-        <DetectionFireworks key={run.historyId} />
+        <DetectionConfetti key={run.historyId} />
       )}
       <header className='shrink-0'>
         <div className='mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-3 px-3 py-2.5 sm:px-6'>

@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Save } from 'lucide-react'
+import { AlertTriangle, Plus, Save, Trash2 } from 'lucide-react'
 import {
   forwardRef,
   useCallback,
@@ -53,6 +53,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon } from '@/components/ui/input-group'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
   Sheet,
   SheetContent,
@@ -60,7 +61,16 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { getGroups } from '@/features/channels/api'
 import {
   previewModelPricing,
   previewModelPricingConversion,
@@ -80,6 +90,7 @@ import {
 import { PricingCurrencySelector } from '@/features/model-pricing/pricing-currency-selector'
 import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { combineBillingExpr } from '@/features/pricing/lib/billing-expr'
+import { compileBillingExpression } from '@/features/pricing/lib/billing-expression/parser'
 import { pluginExpressionsEqual } from '@/features/pricing/lib/plugin-pricing'
 import {
   createDefaultTaskVisualConfig,
@@ -88,6 +99,7 @@ import {
 import type { BillingUsageSchema } from '@/features/pricing/types'
 import { useDebounce } from '@/hooks/use-debounce'
 import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 import { usePricingPreferencesStore } from '@/stores/pricing-preferences-store'
 import { useSystemConfigStore } from '@/stores/system-config-store'
@@ -134,6 +146,7 @@ type ModelPricingEditorPanelProps = Omit<
 > & {
   className?: string
   embedded?: boolean
+  editGroupRequestPrices?: boolean
 }
 
 export type ModelPricingEditorPanelHandle = {
@@ -202,6 +215,7 @@ export const ModelPricingEditorPanel = forwardRef<
     pluginVariants,
     onDirtyChange,
     embedded = false,
+    editGroupRequestPrices = false,
     scrollHeader,
   },
   ref
@@ -238,6 +252,8 @@ export const ModelPricingEditorPanel = forwardRef<
     meta: { errorToast: false },
   })
   const [requestRuleExpr, setRequestRuleExpr] = useState('')
+  const [groupPrices, setGroupPrices] = useState<Record<string, string>>({})
+  const [groupToAdd, setGroupToAdd] = useState('')
   const [pluginExpressions, setPluginExpressions] = useState<
     Record<string, string>
   >({})
@@ -356,6 +372,45 @@ export const ModelPricingEditorPanel = forwardRef<
     (!billingExpr || billingExpr === DEFAULT_TOKEN_BILLING_EXPR)
       ? defaultTaskBillingExpr
       : billingExpr
+  const fixedExpression = useMemo(() => {
+    if (pricingMode !== 'tiered_expr' || requestRuleExpr.trim()) return false
+    const parsed = compileBillingExpression(resolvedBillingExpr)
+    if (parsed.status !== 'ready') return false
+    const tier = parsed.ast
+    if (
+      tier.kind !== 'call' ||
+      tier.name !== 'tier' ||
+      tier.args.length !== 2
+    ) {
+      return false
+    }
+    const [name, price] = tier.args
+    return (
+      name.kind === 'literal' &&
+      typeof name.value === 'string' &&
+      price.kind === 'call' &&
+      price.name === 'fixed' &&
+      price.args.length === 1 &&
+      price.args[0].kind === 'literal' &&
+      typeof price.args[0].value === 'number' &&
+      price.args[0].value >= 0
+    )
+  }, [pricingMode, requestRuleExpr, resolvedBillingExpr])
+  const showGroupPrices =
+    editGroupRequestPrices &&
+    (pricingMode === 'per-request' || (!usesTaskPricing && fixedExpression))
+  const groupQuery = useQuery({
+    queryKey: ['groups'],
+    queryFn: async () => requireServerSuccess(await getGroups()),
+    enabled: showGroupPrices,
+  })
+  const availableGroups =
+    groupQuery.data?.data?.filter(
+      (group) => group !== 'auto' && !Object.hasOwn(groupPrices, group)
+    ) ?? []
+  const selectedGroupToAdd = availableGroups.includes(groupToAdd)
+    ? groupToAdd
+    : ''
 
   useEffect(() => {
     conversionGeneration.current += 1
@@ -365,6 +420,14 @@ export const ModelPricingEditorPanel = forwardRef<
     setWasConverted(false)
     setConversionPreview(null)
     const nextLaneState = createInitialLaneState(editData)
+    setGroupPrices(
+      Object.fromEntries(
+        Object.entries(editData?.groupRequestPrices ?? {}).map(
+          ([group, price]) => [group, String(price)]
+        )
+      )
+    )
+    setGroupToAdd('')
 
     if (editData) {
       form.reset({
@@ -424,7 +487,18 @@ export const ModelPricingEditorPanel = forwardRef<
         pricingMode !== initialPricingMode ||
         billingExpr !== initialBillingExpr ||
         requestRuleExpr !== (editData?.requestRuleExpr ?? '') ||
-        !pluginExpressionsEqual(pluginExpressions, editData?.pluginBillingExpr)
+        !pluginExpressionsEqual(
+          pluginExpressions,
+          editData?.pluginBillingExpr
+        ) ||
+        (showGroupPrices &&
+          (Object.keys(groupPrices).length !==
+            Object.keys(editData?.groupRequestPrices ?? {}).length ||
+            Object.entries(groupPrices).some(
+              ([group, price]) =>
+                price === '' ||
+                Number(price) !== editData?.groupRequestPrices?.[group]
+            )))
     )
   }, [
     onDirtyChange,
@@ -436,6 +510,8 @@ export const ModelPricingEditorPanel = forwardRef<
     initialPricingMode,
     initialBillingExpr,
     pluginExpressions,
+    groupPrices,
+    showGroupPrices,
   ])
 
   const setFormValue = (field: keyof ModelPricingFormValues, value: string) => {
@@ -710,6 +786,14 @@ export const ModelPricingEditorPanel = forwardRef<
         data.billingExpr = resolvedBillingExpr
         data.requestRuleExpr = requestRuleExpr
       }
+      if (showGroupPrices) {
+        data.groupRequestPrices = Object.fromEntries(
+          Object.entries(groupPrices).map(([group, price]) => [
+            group,
+            Number(price),
+          ])
+        )
+      }
 
       return data
     },
@@ -720,6 +804,8 @@ export const ModelPricingEditorPanel = forwardRef<
       pluginExpressions,
       editData,
       pluginVariants,
+      showGroupPrices,
+      groupPrices,
     ]
   )
 
@@ -1182,6 +1268,109 @@ export const ModelPricingEditorPanel = forwardRef<
                     </TabsContent>
                   </Tabs>
                 </TaskPluginPricingEditor>
+                {showGroupPrices && (
+                  <section className='min-w-0 space-y-3'>
+                    <h3 className='text-sm font-medium'>
+                      {t('Group price overrides')}
+                    </h3>
+                    {Object.keys(groupPrices).length > 0 && (
+                      <div className='rounded-lg border'>
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>{t('Group')}</TableHead>
+                              <TableHead>
+                                {t('Price per request')} ({currency.label})
+                              </TableHead>
+                              <TableHead className='w-10'>
+                                <span className='sr-only'>{t('Remove')}</span>
+                              </TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {Object.entries(groupPrices).map(
+                              ([group, price]) => (
+                                <TableRow key={group}>
+                                  <TableCell className='max-w-36 break-all whitespace-normal'>
+                                    {group}
+                                  </TableCell>
+                                  <TableCell>
+                                    <PricingAmountInput
+                                      aria-label={`${group} · ${t('Price per request')}`}
+                                      className='max-w-36 min-w-20'
+                                      currency={currency}
+                                      value={price}
+                                      required
+                                      pattern='(?:[0-9]+(?:[.][0-9]*)?|[.][0-9]+)'
+                                      onChange={(value) =>
+                                        setGroupPrices((current) => ({
+                                          ...current,
+                                          [group]: value,
+                                        }))
+                                      }
+                                    />
+                                  </TableCell>
+                                  <TableCell>
+                                    <Button
+                                      type='button'
+                                      variant='ghost'
+                                      size='icon-sm'
+                                      aria-label={`${t('Remove')} ${group}`}
+                                      title={t('Remove')}
+                                      onClick={() =>
+                                        setGroupPrices((current) => {
+                                          const next = { ...current }
+                                          delete next[group]
+                                          return next
+                                        })
+                                      }
+                                    >
+                                      <Trash2 />
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              )
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    )}
+                    <div className='flex items-center gap-2'>
+                      <NativeSelect
+                        className='max-w-56'
+                        aria-label={t('Select group')}
+                        value={selectedGroupToAdd}
+                        disabled={!availableGroups.length}
+                        onChange={(event) => setGroupToAdd(event.target.value)}
+                      >
+                        <NativeSelectOption value=''>
+                          {t('Select group')}
+                        </NativeSelectOption>
+                        {availableGroups.map((group) => (
+                          <NativeSelectOption key={group} value={group}>
+                            {group}
+                          </NativeSelectOption>
+                        ))}
+                      </NativeSelect>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        disabled={!selectedGroupToAdd}
+                        onClick={() => {
+                          setGroupPrices((current) => ({
+                            ...current,
+                            [selectedGroupToAdd]: '',
+                          }))
+                          setGroupToAdd('')
+                        }}
+                      >
+                        <Plus data-icon='inline-start' />
+                        {t('Add group')}
+                      </Button>
+                    </div>
+                  </section>
+                )}
               </FieldGroup>
 
               <aside

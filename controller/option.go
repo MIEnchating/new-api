@@ -151,6 +151,7 @@ type GroupSettingsUpdateRequest struct {
 }
 
 var bulkOptionKeys = map[string]struct{}{
+	model.ModelSquareVendorOrderOption:          {},
 	"model_square_setting.sort_mode":            {},
 	"model_square_setting.sort_metric":          {},
 	"model_square_setting.sort_days":            {},

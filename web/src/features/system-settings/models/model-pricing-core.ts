@@ -68,6 +68,7 @@ export type LaneKey =
   | 'audioOutput'
 
 export type ModelRatioData = {
+  groupRequestPrices?: Record<string, number>
   pluginBillingExpr?: Record<string, string>
   name: string
   price?: string

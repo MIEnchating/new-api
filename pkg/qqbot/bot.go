@@ -146,10 +146,19 @@ func (b *Bot) reply(ctx context.Context, event groupMessage, text string) {
 	}
 }
 
+func botText(key string, args ...map[string]any) string {
+	return i18n.Translate(i18n.LangZhCN, key, args...)
+}
+
 func (b *Bot) respond(ctx context.Context, event groupMessage) {
 	text := strings.TrimSpace(event.Content)
 	if event.Private {
-		b.reply(ctx, event, b.privateAccountReply(ctx, event, text))
+		command, argument := accountCommand(text)
+		if command == "" {
+			b.reply(ctx, event, botText(i18n.MsgQQBotPrivateHelp))
+		} else {
+			b.reply(ctx, event, b.accountReply(ctx, event, command, argument))
+		}
 		return
 	}
 	// Some QQ payloads include a mention before the user's text.
@@ -158,59 +167,63 @@ func (b *Bot) respond(ctx context.Context, event groupMessage) {
 			text = strings.TrimSpace(following)
 		}
 	}
+	if command, argument := accountCommand(text); command != "" {
+		if command == "bind" {
+			b.emailGroupBinding(ctx, event, argument)
+			return
+		}
+		b.reply(ctx, event, b.accountReply(ctx, event, command, argument))
+		return
+	}
 	command, _ := strings.CutPrefix(text, "/")
 	switch strings.ToLower(command) {
 	case "", "help", "帮助", "幫助", "菜单", "選單":
-		help := i18n.Translate("", i18n.MsgQQBotHelp)
+		help := botText(i18n.MsgQQBotHelp)
 		if b.siteURL != "" {
-			help += "\n" + i18n.Translate("", i18n.MsgQQBotHelpSite)
+			help += "\n" + botText(i18n.MsgQQBotHelpSite)
 		}
 		if b.chatModel != "" {
-			help += "\n" + i18n.Translate("", i18n.MsgQQBotHelpChat)
+			help += "\n" + botText(i18n.MsgQQBotHelpChat)
 		}
 		if b.gateway != nil {
-			help += "\n" + i18n.Translate("", i18n.MsgQQBotHelpSiteQueries)
-			help += "\n" + i18n.Translate("", i18n.MsgQQBotUsePrivateChat)
+			help += "\n" + botText(i18n.MsgQQBotHelpSiteQueries)
 		}
+		help += "\n" + botText(i18n.MsgQQBotGroupAccountHelp)
 		b.reply(ctx, event, help)
 	case "status", "状态", "狀態":
-		b.reply(ctx, event, i18n.Translate("", i18n.MsgQQBotOnline))
+		b.reply(ctx, event, botText(i18n.MsgQQBotOnline))
 	case "site", "官网", "官網":
 		if b.siteURL == "" {
-			b.reply(ctx, event, i18n.Translate("", i18n.MsgQQBotSiteUnavailable))
+			b.reply(ctx, event, botText(i18n.MsgQQBotSiteUnavailable))
 			return
 		}
 		b.reply(ctx, event, b.siteURL)
 	default:
-		if accountCommand(text) != "" {
-			b.reply(ctx, event, i18n.Translate("", i18n.MsgQQBotUsePrivateChat))
-			return
-		}
 		if reply, handled := b.siteCommand(ctx, command); handled {
 			b.reply(ctx, event, reply)
 			return
 		}
 		if b.chatModel == "" || strings.HasPrefix(text, "/") {
-			b.reply(ctx, event, i18n.Translate("", i18n.MsgQQBotUnknownCommand))
+			b.reply(ctx, event, botText(i18n.MsgQQBotUnknownCommand))
 			return
 		}
 		if len(text) > 8000 {
-			b.reply(ctx, event, i18n.Translate("", i18n.MsgQQBotInputTooLong))
+			b.reply(ctx, event, botText(i18n.MsgQQBotInputTooLong))
 			return
 		}
 		allowed, err := b.claim(ctx, "chat:"+event.GroupID+":"+event.Author.OpenID, 8*time.Second)
 		if err != nil {
-			b.reply(ctx, event, i18n.Translate("", i18n.MsgQQBotChatUnavailable))
+			b.reply(ctx, event, botText(i18n.MsgQQBotChatUnavailable))
 			return
 		}
 		if !allowed {
-			b.reply(ctx, event, i18n.Translate("", i18n.MsgQQBotChatCooldown))
+			b.reply(ctx, event, botText(i18n.MsgQQBotChatCooldown))
 			return
 		}
 		answer, err := b.chat(ctx, text)
 		if err != nil {
 			logger.LogWarn(ctx, common.LogText("QQ bot chat failed: %v", err))
-			answer = i18n.Translate("", i18n.MsgQQBotChatUnavailable)
+			answer = botText(i18n.MsgQQBotChatUnavailable)
 		}
 		b.reply(ctx, event, answer)
 	}

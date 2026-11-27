@@ -18,12 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
-  createMemoryHistory,
-  createRootRoute,
-  createRouter,
-  RouterContextProvider,
-} from '@tanstack/react-router'
-import {
   cleanup,
   render,
   screen,
@@ -31,74 +25,79 @@ import {
   within,
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { useState } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
-import { SettingsPageProvider } from '../../components/settings-page-context'
-import { ModelSquareSettingsSection } from '../model-square-settings-section'
+import { ModelSquareOrderDialog } from '../components/dialogs/model-square-order-dialog'
 
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
 })
 
-function Workspace() {
-  const [actions, setActions] = useState<HTMLDivElement | null>(null)
-  return (
-    <>
-      <div ref={setActions} />
-      <SettingsPageProvider actionsContainer={actions}>
-        <ModelSquareSettingsSection vendorOrder={['OpenAI']} />
-      </SettingsPageProvider>
-    </>
-  )
-}
-
-function renderSettings() {
+function renderSettings(onOpenChange = vi.fn(), initialTab?: 'vendors') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
-  const router = createRouter({
-    routeTree: createRootRoute(),
-    history: createMemoryHistory({ initialEntries: ['/'] }),
-  })
   render(
     <QueryClientProvider client={client}>
-      <RouterContextProvider router={router}>
-        <Workspace />
-      </RouterContextProvider>
+      <ModelSquareOrderDialog
+        open
+        onOpenChange={onOpenChange}
+        initialTab={initialTab}
+      />
     </QueryClientProvider>
   )
   return client
 }
 
-it('keeps the reordered draft after a failed save and publishes it on retry', async () => {
-  const get = vi.spyOn(api, 'get').mockResolvedValue({
-    data: {
-      success: true,
-      data: [
-        { id: 1, name: 'Doubao' },
-        { id: 2, name: 'OpenAI' },
-      ],
-    },
+function mockVendors(
+  ...responses: { id: number; name: string; can_delete?: boolean }[][]
+) {
+  const loadVendors = vi.fn()
+  for (const data of responses) {
+    loadVendors.mockResolvedValueOnce({ data: { success: true, data } })
+  }
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/option/model_square/vendors') return loadVendors()
+    if (url === '/api/option/') {
+      return {
+        data: {
+          success: true,
+          data: [{ key: 'ModelSquareVendorOrder', value: '["OpenAI"]' }],
+        },
+      }
+    }
+    throw new Error(`Unexpected request to ${url}`)
   })
-  const put = vi
-    .spyOn(api, 'put')
-    .mockResolvedValueOnce({
-      data: { success: false, message: 'Could not save' },
-    })
+  return loadVendors
+}
+
+it('keeps model and supplier ordering edits in the same draft and saves them together on retry', async () => {
+  mockVendors([
+    { id: 1, name: 'Doubao' },
+    { id: 2, name: 'OpenAI' },
+  ])
+  let finishFirstSave!: () => void
+  const firstSave = new Promise((resolve) => {
+    finishFirstSave = () =>
+      resolve({ data: { success: false, message: 'Could not save' } })
+  })
+  const post = vi
+    .spyOn(api, 'post')
+    .mockImplementationOnce(() => firstSave)
     .mockResolvedValueOnce({ data: { success: true } })
   const user = userEvent.setup()
-  const client = renderSettings()
+  const onOpenChange = vi.fn()
+  const client = renderSettings(onOpenChange)
   client.setQueryData(['pricing'], { vendor_order: ['OpenAI'] })
 
+  await user.click(screen.getByRole('tab', { name: 'Supplier display order' }))
   const list = await screen.findByRole('list', {
     name: 'Supplier display order',
   })
-  expect(get).toHaveBeenCalledWith('/api/option/model_square/vendors')
-  const save = screen.getByRole('button', { name: 'Save Changes' })
+  const save = screen.getByRole('button', { name: 'Save' })
   expect(save).toBeDisabled()
   expect(
     within(list).getByRole('button', { name: 'Move OpenAI up' })
@@ -108,16 +107,28 @@ it('keeps the reordered draft after a failed save and publishes it on retry', as
   expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('Doubao')
   expect(save).toBeEnabled()
   await user.click(save)
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+  expect(
+    within(list).getByRole('button', { name: 'Drag Doubao to reorder' })
+  ).toBeDisabled()
+  expect(
+    within(list).getByRole('button', { name: 'Move Doubao down' })
+  ).toBeDisabled()
+  finishFirstSave()
   await waitFor(() => expect(save).toBeEnabled())
   expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('Doubao')
   expect(client.getQueryState(['pricing'])?.isInvalidated).toBe(false)
 
+  await user.click(screen.getByRole('tab', { name: 'Sort method' }))
+  await user.click(screen.getByRole('button', { name: 'Most used' }))
   await user.click(save)
-  await waitFor(() => expect(save).toBeDisabled())
-  expect(put).toHaveBeenCalledTimes(2)
-  expect(put).toHaveBeenLastCalledWith('/api/option/', {
-    key: 'ModelSquareVendorOrder',
-    value: '["Doubao","OpenAI"]',
+  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  expect(post).toHaveBeenCalledTimes(2)
+  expect(post).toHaveBeenLastCalledWith('/api/option/bulk', {
+    options: [
+      { key: 'model_square_setting.sort_mode', value: 'usage' },
+      { key: 'ModelSquareVendorOrder', value: '["Doubao","OpenAI"]' },
+    ],
   })
   expect(client.getQueryState(['pricing'])?.isInvalidated).toBe(true)
   client.clear()
@@ -126,10 +137,7 @@ it('keeps the reordered draft after a failed save and publishes it on retry', as
 it('deletes only eligible suppliers after preview and confirmation', async () => {
   const linked = { id: 2, name: 'OpenAI', can_delete: false }
   const unused = { id: 1, name: 'Doubao', can_delete: true }
-  const get = vi
-    .spyOn(api, 'get')
-    .mockResolvedValueOnce({ data: { success: true, data: [unused, linked] } })
-    .mockResolvedValueOnce({ data: { success: true, data: [linked] } })
+  const loadVendors = mockVendors([unused, linked], [linked])
   const post = vi
     .spyOn(api, 'post')
     .mockResolvedValueOnce({
@@ -146,7 +154,7 @@ it('deletes only eligible suppliers after preview and confirmation', async () =>
     })
 
   const user = userEvent.setup()
-  const client = renderSettings()
+  const client = renderSettings(vi.fn(), 'vendors')
   const remove = await screen.findByRole('button', { name: 'Delete Doubao' })
   expect(screen.queryByRole('button', { name: 'Delete OpenAI' })).toBeNull()
   await user.click(remove)
@@ -172,6 +180,6 @@ it('deletes only eligible suppliers after preview and confirmation', async () =>
       expected_version: 'preview-version',
     })
   )
-  expect(get).toHaveBeenCalledTimes(2)
+  expect(loadVendors).toHaveBeenCalledTimes(2)
   client.clear()
 })

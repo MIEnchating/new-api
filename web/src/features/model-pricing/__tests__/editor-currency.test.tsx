@@ -95,7 +95,8 @@ it('reads preview prices and billing metadata from the common data envelope', as
 
 function renderEditor(
   data: Partial<ModelRatioData> = {},
-  usageSchema?: BillingUsageSchema
+  usageSchema?: BillingUsageSchema,
+  editGroupRequestPrices = false
 ) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -116,6 +117,7 @@ function renderEditor(
           ...entry,
         }}
         usageSchema={usageSchema}
+        editGroupRequestPrices={editGroupRequestPrices}
         onDirtyChange={dirty}
       />
     </QueryClientProvider>
@@ -144,6 +146,40 @@ async function commit(
   })
   return result as ModelRatioData | null
 }
+
+it('saves and removes final prices for fixed-price groups', async () => {
+  vi.spyOn(api, 'get').mockImplementation(async (path) => ({
+    data: {
+      success: true,
+      data: path === '/api/group/' ? ['a', 'b', 'c'] : [],
+      vendors: [],
+    },
+  }))
+  const user = userEvent.setup()
+  const { ref } = renderEditor(
+    {
+      billingMode: 'per-request',
+      price: '0.06',
+      groupRequestPrices: { a: 0.15 },
+    },
+    undefined,
+    true
+  )
+  await screen.findByRole('option', { name: 'b' })
+  await user.selectOptions(
+    screen.getByRole('combobox', { name: 'Select group' }),
+    'b'
+  )
+  await user.click(screen.getByRole('button', { name: 'Add group' }))
+  expect(await commit(ref)).toBeNull()
+  await user.type(
+    screen.getByRole('textbox', { name: 'b · Price per request' }),
+    '0.008'
+  )
+  expect((await commit(ref))?.groupRequestPrices).toEqual({ a: 0.15, b: 0.008 })
+  await user.click(screen.getByRole('button', { name: 'Remove a' }))
+  expect((await commit(ref))?.groupRequestPrices).toEqual({ b: 0.008 })
+})
 
 it('previews legacy conversion in the selected currency and applies only after confirmation', async () => {
   const expression = 'tier("base", p * 2 + c * 4 + cr * 0)'

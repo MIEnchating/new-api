@@ -344,6 +344,48 @@ func (s *recordingBillingSettler) ReserveBeforeSubmit(targetQuota int) error {
 	return s.Reserve(targetQuota)
 }
 
+func TestGroupRequestPriceOnRetry(t *testing.T) {
+	const expr = `tier("standard", fixed(0.06))`
+	for _, mode := range []string{"legacy", "expression"} {
+		t.Run(mode, func(t *testing.T) {
+			billing := &recordingBillingSettler{preConsumedQuota: 7500}
+			info := &relaycommon.RelayInfo{
+				Billing:            billing,
+				GroupRequestPrices: map[string]float64{"a": 0.15, "b": 0.04, "c": 0.015, "free": 0},
+			}
+			if mode == "legacy" {
+				info.LegacyRequestPrice = common.GetPointer(0.06)
+				info.LegacyRequestPriceFactor = 1
+			} else {
+				info.BillingRequestInput = &billingexpr.RequestInput{FixedPriceOverride: common.GetPointer(0.015)}
+				info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{
+					BillingMode: "tiered_expr", ExprString: expr, ExprHash: billingexpr.ExprHashString(expr),
+					GroupRatio: 1, QuotaPerUnit: testQuotaPerUnit, EstimatedQuotaBeforeGroup: 7500, EstimatedQuotaAfterGroup: 7500,
+				}
+			}
+			for _, tc := range []struct {
+				group string
+				quota int
+			}{
+				{"a", 75000}, {"b", 20000}, {"c", 7500}, {"free", 0}, {"default", 60000},
+			} {
+				info.UsingGroup = tc.group
+				info.PriceData.GroupRatioInfo = types.GroupRatioInfo{GroupRatio: 2}
+				require.Nil(t, PrepareBillingForSelectedGroup(nil, info))
+				if mode == "expression" {
+					ok, quota, result := TryTieredSettle(info, billingexpr.TokenParams{P: 10, C: 20})
+					require.True(t, ok)
+					require.NotNil(t, result)
+					assert.Equal(t, tc.quota, quota, tc.group)
+				} else {
+					assert.Equal(t, tc.quota, info.PriceData.QuotaToPreConsume, tc.group)
+				}
+			}
+			assert.Equal(t, 75000, billing.preConsumedQuota)
+		})
+	}
+}
+
 func TestPrepareTieredBillingForSelectedGroupUpdatesReservation(t *testing.T) {
 	const expr = `tier("base", p)`
 	billing := &recordingBillingSettler{preConsumedQuota: 50_000}

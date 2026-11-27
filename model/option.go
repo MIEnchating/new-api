@@ -174,6 +174,7 @@ func InitOptionMap() {
 	common.OptionMap["ModelRequestRateLimitGroup"] = setting.ModelRequestRateLimitGroup2JSONString()
 	common.OptionMap["ModelRatio"] = ratio_setting.ModelRatio2JSONString()
 	common.OptionMap["ModelPrice"] = ratio_setting.ModelPrice2JSONString()
+	common.OptionMap[ratio_setting.GroupRequestPricesOption] = ratio_setting.GroupRequestPricesJSON()
 	common.OptionMap["CacheRatio"] = ratio_setting.CacheRatio2JSONString()
 	common.OptionMap["CreateCacheRatio"] = ratio_setting.CreateCacheRatio2JSONString()
 	common.OptionMap["GroupRatio"] = ratio_setting.GroupRatio2JSONString()
@@ -248,7 +249,7 @@ func LoadOptionsFromDatabase() error {
 			passkeyOptions[option.Key] = option.Value
 			continue
 		}
-		if strings.HasPrefix(option.Key, operation_setting.ModelSquareOptionPrefix) {
+		if isModelSquareOption(option.Key) {
 			modelSquareOptions[option.Key] = option.Value
 			continue
 		}
@@ -368,9 +369,13 @@ func validateOptionValue(key string, value string) error {
 	return nil
 }
 
+func isModelSquareOption(key string) bool {
+	return key == ModelSquareVendorOrderOption || strings.HasPrefix(key, operation_setting.ModelSquareOptionPrefix)
+}
+
 func UpdateOption(key string, value string) error {
-	if key == "GroupRatio" || key == "group_ratio_setting.group_ratio" || key == setting.GroupCategoriesOptionKey || key == ModelSquareVendorOrderOption ||
-		key == operation_setting.AffiliateUsageRewardOptionKey || strings.HasPrefix(key, operation_setting.ModelSquareOptionPrefix) {
+	if key == "GroupRatio" || key == "group_ratio_setting.group_ratio" || key == setting.GroupCategoriesOptionKey ||
+		key == operation_setting.AffiliateUsageRewardOptionKey || isModelSquareOption(key) {
 		return UpdateOptionsBulk(map[string]string{key: value})
 	}
 	if IsRequestPolicyOption(key) {
@@ -445,7 +450,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 	// Keep persistence and publication of the saved order in the same order
 	// across concurrent updates and option reloads.
 	for key := range values {
-		if strings.HasPrefix(key, operation_setting.ModelSquareOptionPrefix) {
+		if isModelSquareOption(key) {
 			modelSquareOptionsMu.Lock()
 			defer modelSquareOptionsMu.Unlock()
 			break
@@ -492,7 +497,7 @@ func publishOptionUpdates(values map[string]string) error {
 	keys := make([]string, 0, len(values))
 	common.OptionMapRWMutex.Lock()
 	for key, value := range values {
-		if strings.HasPrefix(key, operation_setting.ModelSquareOptionPrefix) {
+		if isModelSquareOption(key) {
 			common.OptionMap[key] = value
 		} else if _, ok := handled[key]; !ok {
 			keys = append(keys, key)
@@ -872,6 +877,8 @@ func updateOptionMap(key string, value string) (err error) {
 		err = ratio_setting.UpdateCompletionRatioByJSONString(value)
 	case "ModelPrice":
 		err = ratio_setting.UpdateModelPriceByJSONString(value)
+	case ratio_setting.GroupRequestPricesOption:
+		err = ratio_setting.UpdateGroupRequestPrices(value)
 	case "CacheRatio":
 		err = ratio_setting.UpdateCacheRatioByJSONString(value)
 	case "CreateCacheRatio":

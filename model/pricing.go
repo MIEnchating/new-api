@@ -36,6 +36,7 @@ type Pricing struct {
 	QuotaType              int                                  `json:"quota_type"`
 	ModelRatio             float64                              `json:"model_ratio"`
 	ModelPrice             float64                              `json:"model_price"`
+	GroupRequestPrices     map[string]float64                   `json:"group_request_prices,omitempty"`
 	OwnerBy                string                               `json:"owner_by"`
 	CompletionRatio        float64                              `json:"completion_ratio"`
 	CacheRatio             *float64                             `json:"cache_ratio,omitempty"`

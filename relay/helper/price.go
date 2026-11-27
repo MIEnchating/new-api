@@ -79,6 +79,20 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	if billing_setting.GetBillingMode(billingModelName) == billing_setting.BillingModeTieredExpr {
 		return modelPriceHelperTiered(c, info, billingModelName, promptTokens, groupRatioInfo)
 	}
+	if usePrice {
+		info.GroupRequestPrices = ratio_setting.GroupRequestPrices(billingModelName)
+		if len(info.GroupRequestPrices) > 0 {
+			info.LegacyRequestPrice = common.GetPointer(modelPrice)
+			info.LegacyRequestPriceFactor = 1
+			if meta.ImagePriceRatio != 0 {
+				info.LegacyRequestPriceFactor = meta.ImagePriceRatio
+			}
+			if price, exists := ratio_setting.GroupRequestPrice(info.GroupRequestPrices, info.UsingGroup); exists {
+				modelPrice = price
+				groupRatioInfo = hosttypes.GroupRatioInfo{GroupRatio: 1, GroupSpecialRatio: -1}
+			}
+		}
+	}
 
 	var preConsumedQuota int
 	var modelRatio float64
@@ -242,6 +256,12 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (hostt
 	freeModel := false
 
 	if usePrice {
+		if billing_setting.GetBillingMode(info.OriginModelName) != billing_setting.BillingModeTieredExpr {
+			if price, exists := ratio_setting.GroupRequestPrice(ratio_setting.GroupRequestPrices(info.OriginModelName), info.UsingGroup); exists {
+				modelPrice = price
+				groupRatioInfo = hosttypes.GroupRatioInfo{GroupRatio: 1, GroupSpecialRatio: -1}
+			}
+		}
 		var err error
 		quota, err = common.QuotaFromFloatStrict(modelPrice * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
 		if err != nil {
@@ -397,6 +417,17 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 		requestInput, err = ResolveImageBillingRequestInput(c, info, requestInput)
 		if err != nil {
 			return hosttypes.PriceData{}, err
+		}
+	}
+
+	prices := ratio_setting.GroupRequestPrices(billingModelName)
+	if len(prices) > 0 {
+		if _, flat := billingexpr.FlatRequestPrice(exprStr); flat {
+			info.GroupRequestPrices = prices
+			if price, exists := ratio_setting.GroupRequestPrice(prices, info.UsingGroup); exists {
+				requestInput.FixedPriceOverride = common.GetPointer(price)
+				groupRatioInfo = hosttypes.GroupRatioInfo{GroupRatio: 1, GroupSpecialRatio: -1}
+			}
 		}
 	}
 

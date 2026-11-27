@@ -1201,6 +1201,19 @@ func TestModelSquareVendorOrderDatabaseMatrix(t *testing.T) {
 				require.NoError(t, model.LoadOptionsFromDatabase())
 				assert.Equal(t, want, readPublicOrder())
 			}
+
+			var saved struct{ Success bool }
+			modelManagementRequest(t, UpdateOptionsBulk, http.MethodPost, "/api/option/bulk", OptionBulkUpdateRequest{
+				Options: []OptionUpdateRequest{
+					{Key: key, Value: `["Anthropic","OpenAI"]`},
+					{Key: "model_square_setting.sort_mode", Value: "manual"},
+				},
+			}, &saved)
+			require.True(t, saved.Success)
+			assert.Equal(t, []string{"Anthropic", "OpenAI"}, readPublicOrder())
+			var storedMode model.Option
+			require.NoError(t, db.Take(&storedMode, map[string]any{"key": "model_square_setting.sort_mode"}).Error)
+			assert.Equal(t, "manual", storedMode.Value)
 		})
 	}
 }
@@ -2041,6 +2054,19 @@ func TestModelSquareOrderFollowsSavedSetting(t *testing.T) {
 				{ModelName: "gamma"},
 				{ModelName: "vip-only", Icon: "Vip.Color", VendorName: "Acme", VendorIcon: "Acme.Color"},
 			}, modelSquareData[[]modelSquareUsage](t, GetModelSquareUsage, "/api/models/square_usage?days=7", ""))
+
+			// The manual picker can load every model even if the log DB is unavailable.
+			common.DataExportEnabled = true
+			logDB := model.LOG_DB
+			model.LOG_DB = db.Session(&gorm.Session{NewDB: true}).WithContext(t.Context())
+			_ = model.LOG_DB.AddError(errors.New("log database unavailable"))
+			assert.ElementsMatch(t, []modelSquareUsage{
+				{ModelName: "alpha"},
+				{ModelName: "gamma"},
+				{ModelName: "vip-only", Icon: "Vip.Color", VendorName: "Acme", VendorIcon: "Acme.Color"},
+			}, modelSquareData[[]modelSquareUsage](t, GetModelSquareUsage, "/api/models/square_usage?include_usage=false", ""))
+			model.LOG_DB = logDB
+			common.DataExportEnabled = false
 
 			now := time.Now().Unix()
 			require.NoError(t, db.Create(&[]model.Log{
