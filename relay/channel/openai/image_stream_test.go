@@ -10,11 +10,17 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -40,9 +46,26 @@ func newImageTestContext(t *testing.T, body, contentType string, isStream bool) 
 }
 
 func TestImageExpressionUsesCompletedCountAndProtectsAbortedStreams(t *testing.T) {
-	oldTimeout := constant.StreamingTimeout
+	oldTimeout, oldQuotaPerUnit := constant.StreamingTimeout, common.QuotaPerUnit
 	constant.StreamingTimeout = 30
-	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+	common.QuotaPerUnit = 500_000
+	savedConfig := make(map[string]string)
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		savedConfig[key] = value
+		return nil
+	}))
+	savedOverrides := ratio_setting.GroupRequestPricesJSON()
+	t.Cleanup(func() {
+		constant.StreamingTimeout, common.QuotaPerUnit = oldTimeout, oldQuotaPerUnit
+		require.NoError(t, config.GlobalConfig.LoadFromDB(savedConfig))
+		require.NoError(t, ratio_setting.UpdateGroupRequestPrices(savedOverrides))
+	})
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":    `{"image-test":"tiered_expr"}`,
+		"billing_setting.billing_expr":    `{"image-test":"tier(\"image\", fixed(0.08)) * image_count"}`,
+		"group_ratio_setting.group_ratio": `{"discount":2}`,
+	}))
+	require.NoError(t, ratio_setting.UpdateGroupRequestPrices(`{"image-test":{"discount":0.04}}`))
 	for _, tc := range []struct {
 		name, body      string
 		stream, abort   bool
@@ -65,7 +88,12 @@ func TestImageExpressionUsesCompletedCountAndProtectsAbortedStreams(t *testing.T
 			if tc.abort {
 				c, _, resp, info = newDisconnectingImageStream(t, tc.body, "first")
 			}
-			info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{EstimatedImageCount: &tc.requested}
+			info.OriginModelName = "image-test"
+			info.UsingGroup = "discount"
+			info.Request = &dto.ImageRequest{Model: "image-test", N: common.GetPointer(uint(tc.requested))}
+			priceData, err := helper.ModelPriceHelper(c, info, 0, &types.TokenCountMeta{})
+			require.NoError(t, err)
+			assert.Equal(t, 20_000*tc.requested, priceData.QuotaToPreConsume)
 			if tc.stream {
 				_, err := OpenaiImageStreamHandler(c, info, resp)
 				require.Nil(t, err)
@@ -78,6 +106,12 @@ func TestImageExpressionUsesCompletedCountAndProtectsAbortedStreams(t *testing.T
 				count = *info.BillingImageCount
 			}
 			assert.Equal(t, tc.want, count)
+			ok, quota, result := service.TryTieredSettle(info, billingexpr.TokenParams{})
+			require.True(t, ok)
+			require.NotNil(t, result)
+			require.NotNil(t, result.FixedPrice)
+			assert.Equal(t, 0.04, *result.FixedPrice)
+			assert.Equal(t, 20_000*tc.want, quota)
 			assert.Empty(t, info.PriceData.OtherRatios(), "expression quantities must not add a legacy multiplier")
 		})
 	}

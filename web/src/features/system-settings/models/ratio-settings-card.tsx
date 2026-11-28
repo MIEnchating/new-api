@@ -128,6 +128,7 @@ function createJsonStringField(
 const createModelSchema = (t: Translate) =>
   z.object({
     ModelPrice: createJsonStringField(t),
+    ModelGroupRequestPrices: createJsonStringField(t),
     ModelRatio: createJsonStringField(t),
     CacheRatio: createJsonStringField(t),
     CreateCacheRatio: createJsonStringField(t),
@@ -203,7 +204,7 @@ type RatioTabId =
   | 'upstream-sync'
 
 type RatioSettingsCardProps = {
-  modelDefaults: ModelFormValues
+  modelDefaults: Omit<ModelFormValues, 'ModelGroupRequestPrices'>
   groupDefaults: GroupFormValues
   toolPricesDefault: string
   titleKey?: string
@@ -263,6 +264,8 @@ export function RatioSettingsCard({
         ? {
             ...initialModelDefaults,
             ...pricingBaseline.options,
+            ModelGroupRequestPrices:
+              pricingBaseline.options.ModelGroupRequestPrices ?? '{}',
             BillingMode:
               pricingBaseline.options['billing_setting.billing_mode'],
             BillingExpr:
@@ -270,7 +273,7 @@ export function RatioSettingsCard({
             PluginBillingExpr:
               pricingBaseline.options['billing_setting.plugin_billing_expr'],
           }
-        : initialModelDefaults,
+        : { ...initialModelDefaults, ModelGroupRequestPrices: '{}' },
     [initialModelDefaults, pricingBaseline]
   )
   const resetMutation = useMutation({
@@ -296,6 +299,9 @@ export function RatioSettingsCard({
 
   const modelNormalizedDefaults = useRef({
     ModelPrice: normalizeJsonString(modelDefaults.ModelPrice),
+    ModelGroupRequestPrices: normalizeJsonString(
+      modelDefaults.ModelGroupRequestPrices
+    ),
     ModelRatio: normalizeJsonString(modelDefaults.ModelRatio),
     CacheRatio: normalizeJsonString(modelDefaults.CacheRatio),
     CreateCacheRatio: normalizeJsonString(modelDefaults.CreateCacheRatio),
@@ -339,6 +345,9 @@ export function RatioSettingsCard({
     defaultValues: {
       ...modelDefaults,
       ModelPrice: formatJsonForTextarea(modelDefaults.ModelPrice),
+      ModelGroupRequestPrices: formatJsonForTextarea(
+        modelDefaults.ModelGroupRequestPrices
+      ),
       ModelRatio: formatJsonForTextarea(modelDefaults.ModelRatio),
       CacheRatio: formatJsonForTextarea(modelDefaults.CacheRatio),
       CreateCacheRatio: formatJsonForTextarea(modelDefaults.CreateCacheRatio),
@@ -379,6 +388,9 @@ export function RatioSettingsCard({
   useEffect(() => {
     modelNormalizedDefaults.current = {
       ModelPrice: normalizeJsonString(modelDefaults.ModelPrice),
+      ModelGroupRequestPrices: normalizeJsonString(
+        modelDefaults.ModelGroupRequestPrices
+      ),
       ModelRatio: normalizeJsonString(modelDefaults.ModelRatio),
       CacheRatio: normalizeJsonString(modelDefaults.CacheRatio),
       CreateCacheRatio: normalizeJsonString(modelDefaults.CreateCacheRatio),
@@ -398,6 +410,9 @@ export function RatioSettingsCard({
     modelForm.reset({
       ...modelDefaults,
       ModelPrice: formatJsonForTextarea(modelDefaults.ModelPrice),
+      ModelGroupRequestPrices: formatJsonForTextarea(
+        modelDefaults.ModelGroupRequestPrices
+      ),
       ModelRatio: formatJsonForTextarea(modelDefaults.ModelRatio),
       CacheRatio: formatJsonForTextarea(modelDefaults.CacheRatio),
       CreateCacheRatio: formatJsonForTextarea(modelDefaults.CreateCacheRatio),
@@ -470,6 +485,9 @@ export function RatioSettingsCard({
     async (values: ModelFormValues) => {
       const normalized = {
         ModelPrice: normalizeJsonString(values.ModelPrice),
+        ModelGroupRequestPrices: normalizeJsonString(
+          values.ModelGroupRequestPrices
+        ),
         ModelRatio: normalizeJsonString(values.ModelRatio),
         CacheRatio: normalizeJsonString(values.CacheRatio),
         CreateCacheRatio: normalizeJsonString(values.CreateCacheRatio),

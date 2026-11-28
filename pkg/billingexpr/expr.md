@@ -216,6 +216,12 @@ existing tool surcharges are calculated separately and added as before. A stream
 does not incur a fixed fee per chunk. Realtime and task usage expressions reject
 `fixed()` before upstream submission or reservation.
 
+A model's group price override can replace the amount in a single unconditional
+`tier(name, fixed(amount))`, including when it is multiplied once by
+`image_count`. The override uses the unit of the expression and takes precedence
+over group ratios. Image quantities still follow the ordinary reservation and
+settlement rules.
+
 The amount must be a finite, non-negative numeric literal whose v1 scaled value
 is finite. Explicit `fixed(0)` is valid and stays free. Expressions using `fixed`
 must consist of a conditional pricing tree and the standard request multiplier

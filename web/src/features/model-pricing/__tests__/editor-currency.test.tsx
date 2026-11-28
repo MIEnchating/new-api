@@ -147,39 +147,60 @@ async function commit(
   return result as ModelRatioData | null
 }
 
-it('saves and removes final prices for fixed-price groups', async () => {
-  vi.spyOn(api, 'get').mockImplementation(async (path) => ({
-    data: {
-      success: true,
-      data: path === '/api/group/' ? ['a', 'b', 'c'] : [],
-      vendors: [],
-    },
-  }))
-  const user = userEvent.setup()
-  const { ref } = renderEditor(
-    {
-      billingMode: 'per-request',
-      price: '0.06',
-      groupRequestPrices: { a: 0.15 },
-    },
-    undefined,
-    true
-  )
-  await screen.findByRole('option', { name: 'b' })
-  await user.selectOptions(
-    screen.getByRole('combobox', { name: 'Select group' }),
-    'b'
-  )
-  await user.click(screen.getByRole('button', { name: 'Add group' }))
-  expect(await commit(ref)).toBeNull()
-  await user.type(
-    screen.getByRole('textbox', { name: 'b · Price per request' }),
-    '0.008'
-  )
-  expect((await commit(ref))?.groupRequestPrices).toEqual({ a: 0.15, b: 0.008 })
-  await user.click(screen.getByRole('button', { name: 'Remove a' }))
-  expect((await commit(ref))?.groupRequestPrices).toEqual({ b: 0.008 })
-})
+it.each([
+  { billingExpr: 'tier("request", fixed(0.06))', label: 'Price per request' },
+  {
+    billingExpr: 'tier("image", fixed(0.08)) * image_count',
+    label: 'Price per image',
+  },
+])(
+  'saves and removes group overrides with $label',
+  async ({ billingExpr, label }) => {
+    vi.spyOn(api, 'get').mockImplementation(async (path) => ({
+      data: {
+        success: true,
+        data: path === '/api/group/' ? ['a', 'b', 'c'] : [],
+        vendors: [],
+      },
+    }))
+    const user = userEvent.setup()
+    const { ref } = renderEditor(
+      {
+        billingMode: 'tiered_expr',
+        billingExpr,
+        groupRequestPrices: { a: 0.15 },
+      },
+      undefined,
+      true
+    )
+    const rules = screen.getByRole('region', { name: 'Request rule pricing' })
+    const picker = await within(rules).findByRole('combobox', {
+      name: 'Select group',
+    })
+    await waitFor(() => expect(picker).toBeEnabled())
+    await user.click(picker)
+    await user.type(picker, 'b')
+    expect(screen.queryByRole('option', { name: 'c' })).not.toBeInTheDocument()
+    await user.keyboard('{ArrowDown}{Enter}')
+    expect(picker).toHaveValue('b')
+    await user.click(within(rules).getByRole('button', { name: 'Add group' }))
+    expect(
+      within(rules).getByRole('textbox', { name: `b · ${label}` })
+    ).toBeVisible()
+    expect(await commit(ref)).toBeNull()
+    await user.type(
+      screen.getByRole('textbox', { name: `b · ${label}` }),
+      '0.008'
+    )
+    expect(await commit(ref)).toMatchObject({
+      billingMode: 'tiered_expr',
+      billingExpr,
+      groupRequestPrices: { a: 0.15, b: 0.008 },
+    })
+    await user.click(screen.getByRole('button', { name: 'Remove a' }))
+    expect((await commit(ref))?.groupRequestPrices).toEqual({ b: 0.008 })
+  }
+)
 
 it('previews legacy conversion in the selected currency and applies only after confirmation', async () => {
   const expression = 'tier("base", p * 2 + c * 4 + cr * 0)'

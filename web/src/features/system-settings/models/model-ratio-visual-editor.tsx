@@ -96,6 +96,7 @@ type ModelRatioVisualEditorProps = {
   savedBillingMode: string
   savedBillingExpr: string
   savedPluginBillingExpr?: string
+  savedGroupRequestPrices?: string
   modelPrice: string
   modelRatio: string
   cacheRatio: string
@@ -107,6 +108,7 @@ type ModelRatioVisualEditorProps = {
   billingMode: string
   billingExpr: string
   pluginBillingExpr?: string
+  groupRequestPrices?: string
   candidateModelNames?: string[]
   candidateModelsLoading?: boolean
   filterMode?: 'all' | 'unset'
@@ -147,6 +149,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     savedBillingMode,
     savedBillingExpr,
     savedPluginBillingExpr = '{}',
+    savedGroupRequestPrices = '{}',
     modelPrice,
     modelRatio,
     cacheRatio,
@@ -158,6 +161,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
     billingMode,
     billingExpr,
     pluginBillingExpr = '{}',
+    groupRequestPrices = '{}',
     candidateModelNames,
     candidateModelsLoading,
     filterMode = 'all',
@@ -276,6 +280,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         BillingMode: savedBillingMode,
         BillingExpr: savedBillingExpr,
         PluginBillingExpr: savedPluginBillingExpr,
+        ModelGroupRequestPrices: savedGroupRequestPrices,
       }),
     [
       savedModelPrice,
@@ -289,6 +294,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       savedBillingMode,
       savedBillingExpr,
       savedPluginBillingExpr,
+      savedGroupRequestPrices,
     ]
   )
   const draftOptions = useMemo(
@@ -305,6 +311,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         BillingMode: billingMode,
         BillingExpr: billingExpr,
         PluginBillingExpr: pluginBillingExpr,
+        ModelGroupRequestPrices: groupRequestPrices,
       }),
     [
       modelPrice,
@@ -318,6 +325,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       billingMode,
       billingExpr,
       pluginBillingExpr,
+      groupRequestPrices,
     ]
   )
 
@@ -438,6 +446,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         billingMode: editBillingMode,
         billingExpr: editableModel.billingExpr,
         pluginBillingExpr: editableModel.pluginBillingExpr,
+        groupRequestPrices: editableModel.groupRequestPrices,
         requestRuleExpr: editableModel.requestRuleExpr,
       })
       setEditorOpen(true)
@@ -546,6 +555,14 @@ const ModelRatioVisualEditorComponent = forwardRef<
         JSON.stringify(pluginExprMap)
       )
 
+      const groupPriceMap = safeJsonParse<
+        Record<string, Record<string, number>>
+      >(groupRequestPrices, { fallback: {} })
+      delete groupPriceMap[name]
+      onChange(
+        'ModelGroupRequestPrices',
+        JSON.stringify(groupPriceMap, null, 2)
+      )
       onChange('ModelPrice', JSON.stringify(priceMap, null, 2))
       onChange('ModelRatio', JSON.stringify(ratioMap, null, 2))
       onChange('CacheRatio', JSON.stringify(cacheMap, null, 2))
@@ -581,6 +598,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
       billingMode,
       billingExpr,
       pluginBillingExpr,
+      groupRequestPrices,
       onChange,
     ]
   )
@@ -923,6 +941,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
         <div className='hidden min-h-0 min-w-0 md:block'>
           {editorOpen ? (
             <ModelPricingEditorPanel
+              editGroupRequestPrices
               ref={editorPanelRef}
               editData={editData}
               scrollHeader={scrollHeader}
@@ -973,6 +992,7 @@ const ModelRatioVisualEditorComponent = forwardRef<
 
       {isMobile && (
         <ModelPricingSheet
+          editGroupRequestPrices
           ref={editorPanelRef}
           open={sheetOpen}
           onOpenChange={setSheetOpen}
@@ -1014,6 +1034,7 @@ export const ModelRatioVisualEditor = memo(
       prevProps.savedBillingMode === nextProps.savedBillingMode &&
       prevProps.savedBillingExpr === nextProps.savedBillingExpr &&
       prevProps.savedPluginBillingExpr === nextProps.savedPluginBillingExpr &&
+      prevProps.savedGroupRequestPrices === nextProps.savedGroupRequestPrices &&
       prevProps.modelPrice === nextProps.modelPrice &&
       prevProps.modelRatio === nextProps.modelRatio &&
       prevProps.cacheRatio === nextProps.cacheRatio &&
@@ -1025,6 +1046,7 @@ export const ModelRatioVisualEditor = memo(
       prevProps.billingMode === nextProps.billingMode &&
       prevProps.billingExpr === nextProps.billingExpr &&
       prevProps.pluginBillingExpr === nextProps.pluginBillingExpr &&
+      prevProps.groupRequestPrices === nextProps.groupRequestPrices &&
       prevProps.candidateModelNames === nextProps.candidateModelNames &&
       prevProps.candidateModelsLoading === nextProps.candidateModelsLoading &&
       prevProps.filterMode === nextProps.filterMode &&

@@ -105,9 +105,9 @@ export function withBasePricing(model: PricingModel): PricingModel {
   return model.ordinary_pricing ? withOrdinaryPricing(model) : model
 }
 
-export function pluginExpressionsEqual(
-  left: Record<string, string> = {},
-  right: Record<string, string> = {}
+export function pricingMapsEqual(
+  left: Record<string, string | number> = {},
+  right: Record<string, string | number> = {}
 ): boolean {
   const keys = Object.keys(left)
   return (

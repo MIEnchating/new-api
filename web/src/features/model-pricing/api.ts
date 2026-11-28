@@ -24,7 +24,7 @@ import {
 } from '@tanstack/react-query'
 import { t } from 'i18next'
 
-import { pluginExpressionsEqual } from '@/features/pricing/lib/plugin-pricing'
+import { pricingMapsEqual } from '@/features/pricing/lib/plugin-pricing'
 import type {
   BillingUsageSchema,
   BillingUsageExample,
@@ -190,11 +190,15 @@ export function buildPricingChanges(
   for (const name of new Set([...previous.keys(), ...next.keys()])) {
     const oldValues = previous.get(name) ?? {}
     const newValues = next.get(name) ?? {}
-    const dirty = PRICING_KEYS.filter((key) =>
-      key === 'billing_setting.plugin_billing_expr'
-        ? !pluginExpressionsEqual(oldValues[key], newValues[key])
-        : oldValues[key] !== newValues[key]
-    )
+    const dirty = PRICING_KEYS.filter((key) => {
+      if (
+        key === 'billing_setting.plugin_billing_expr' ||
+        key === 'ModelGroupRequestPrices'
+      ) {
+        return !pricingMapsEqual(oldValues[key], newValues[key])
+      }
+      return oldValues[key] !== newValues[key]
+    })
     if (!dirty.length) continue
     const entry = entries.get(name)
     const pricing = { ...entry?.configured }
@@ -202,6 +206,8 @@ export function buildPricingChanges(
       delete pricing[key]
       if (newValues[key] !== undefined) {
         Object.assign(pricing, { [key]: newValues[key] })
+      } else if (key === 'ModelGroupRequestPrices') {
+        pricing[key] = {}
       }
     }
     if (newValues['billing_setting.billing_mode'] === 'tiered_expr') {

@@ -24,6 +24,7 @@ import { formatPricingNumber } from './pricing-format'
 
 export type ModelPricingSnapshotInput = {
   modelPrice: string
+  groupRequestPrices?: string
   modelRatio: string
   cacheRatio: string
   createCacheRatio: string
@@ -38,6 +39,7 @@ export type ModelPricingSnapshotInput = {
 
 export type ModelPricingSnapshot = {
   pluginBillingExpr?: Record<string, string>
+  groupRequestPrices?: Record<string, number>
   name: string
   price?: string
   ratio?: string
@@ -159,6 +161,7 @@ export const buildModelSnapshots = ({
   billingMode,
   billingExpr,
   pluginBillingExpr = '{}',
+  groupRequestPrices = '{}',
 }: ModelPricingSnapshotInput): ModelPricingSnapshot[] => {
   const priceMap = safeJsonParse<Record<string, number>>(modelPrice, {
     fallback: {},
@@ -215,7 +218,11 @@ export const buildModelSnapshots = ({
       [plugin]: expression,
     })
   }
+  const groupPricesByModel = safeJsonParse<
+    Record<string, Record<string, number>>
+  >(groupRequestPrices, { fallback: {}, context: 'group request prices' })
   const modelNames = new Set([
+    ...Object.keys(groupPricesByModel),
     ...pluginExpressionsByModel.keys(),
     ...Object.keys(priceMap),
     ...Object.keys(ratioMap),
@@ -247,6 +254,9 @@ export const buildModelSnapshots = ({
       return {
         name,
         pluginBillingExpr: pluginExpressionsByModel.get(name),
+        groupRequestPrices: Object.hasOwn(groupPricesByModel, name)
+          ? groupPricesByModel[name]
+          : undefined,
         billingMode: 'tiered_expr',
         billingExpr: pureExpr,
         requestRuleExpr,
@@ -265,6 +275,9 @@ export const buildModelSnapshots = ({
     return {
       name,
       pluginBillingExpr: pluginExpressionsByModel.get(name),
+      groupRequestPrices: Object.hasOwn(groupPricesByModel, name)
+        ? groupPricesByModel[name]
+        : undefined,
       price,
       ratio,
       cacheRatio: cache,
@@ -301,6 +314,9 @@ export const getSnapshotSignature = (snapshot?: ModelPricingSnapshot) => {
     billingMode: snapshot.billingMode || 'per-token',
     billingExpr: snapshot.billingExpr || '',
     requestRuleExpr: snapshot.requestRuleExpr || '',
+    groupRequestPrices: Object.entries(snapshot.groupRequestPrices ?? {}).sort(
+      ([a], [b]) => a.localeCompare(b)
+    ),
     pluginBillingExpr: Object.entries(snapshot.pluginBillingExpr ?? {}).sort(
       ([a], [b]) => a.localeCompare(b)
     ),

@@ -36,6 +36,7 @@ import type { ModelPricingEntry } from './api'
 
 export const PRICING_KEYS = [
   'ModelPrice',
+  'ModelGroupRequestPrices',
   'ModelRatio',
   'CompletionRatio',
   'CacheRatio',
@@ -50,7 +51,10 @@ export const PRICING_KEYS = [
 export type PricingKey = (typeof PRICING_KEYS)[number]
 export type PricingValues = Partial<
   Record<
-    Exclude<PricingKey, 'billing_setting.plugin_billing_expr'>,
+    Exclude<
+      PricingKey,
+      'billing_setting.plugin_billing_expr' | 'ModelGroupRequestPrices'
+    >,
     number | string
   >
 > & {
@@ -169,6 +173,7 @@ export function pricingOptions(
 export function pricingRows(options: PricingOptions): ModelPricingSnapshot[] {
   return buildModelSnapshots({
     modelPrice: options.ModelPrice,
+    groupRequestPrices: options.ModelGroupRequestPrices,
     modelRatio: options.ModelRatio,
     completionRatio: options.CompletionRatio,
     cacheRatio: options.CacheRatio,
@@ -286,6 +291,7 @@ export function applyPricingDraft(
   // to other models, while still committing the source provider draft.
   const copied = { ...values }
   delete copied['billing_setting.plugin_billing_expr']
+  delete copied.ModelGroupRequestPrices
   const next = applyPricingValues(options, copied, names)
   return names.includes(data.name)
     ? applyPricingValues(next, values, [data.name])
@@ -318,11 +324,18 @@ function applyPricingValues(
         }
         return [key, JSON.stringify(map)]
       }
+      if (key === 'ModelGroupRequestPrices' && values[key] === undefined) {
+        return [key, JSON.stringify(map)]
+      }
       for (const name of names) {
         delete map[name]
-        if (values[key] !== undefined) {
+        const value = values[key]
+        if (
+          value !== undefined &&
+          (typeof value !== 'object' || Object.keys(value).length > 0)
+        ) {
           Object.defineProperty(map, name, {
-            value: values[key],
+            value,
             enumerable: true,
             writable: true,
             configurable: true,
@@ -344,6 +357,23 @@ export function pricingValuesByModel(
       throw new Error(t('Pricing must be a JSON object'))
     }
     for (const [name, value] of Object.entries(map)) {
+      if (key === 'ModelGroupRequestPrices') {
+        if (
+          !value ||
+          typeof value !== 'object' ||
+          Array.isArray(value) ||
+          !Object.values(value).every(
+            (price) =>
+              typeof price === 'number' && Number.isFinite(price) && price >= 0
+          )
+        ) {
+          throw new Error(t('Invalid pricing value'))
+        }
+        const model = models.get(name) ?? {}
+        model[key] = value
+        models.set(name, model)
+        continue
+      }
       if (typeof value !== 'number' && typeof value !== 'string') {
         throw new Error(t('Invalid pricing value'))
       }
@@ -391,7 +421,8 @@ export function applyPriceSyncSelections(
           .join('') as PricingKey
         if (
           PRICING_KEYS.includes(key) &&
-          key !== 'billing_setting.plugin_billing_expr'
+          key !== 'billing_setting.plugin_billing_expr' &&
+          key !== 'ModelGroupRequestPrices'
         ) {
           next[key] = value
         }

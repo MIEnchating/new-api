@@ -23,6 +23,8 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { afterEach, expect, it, vi } from 'vitest'
 
+import { buildPricingChanges } from '@/features/model-pricing/api'
+import { pricingOptions } from '@/features/model-pricing/pricing'
 import { api } from '@/lib/api'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
@@ -51,9 +53,10 @@ const saved = {
   ImageRatio: '{}',
   AudioRatio: '{}',
   AudioCompletionRatio: '{}',
-  BillingMode: '{}',
+  BillingMode: '{"gpt-image-2":"ratio"}',
   BillingExpr: '{}',
   PluginBillingExpr: '{}',
+  ModelGroupRequestPrices: '{}',
   ExposeRatioEnabled: false,
 }
 
@@ -92,6 +95,9 @@ async function renderForm(
   fixture: { draft?: Partial<typeof saved>; issues?: ModelPricingIssue[] } = {}
 ) {
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/group/') {
+      return { data: { success: true, data: ['a', 'b'] } }
+    }
     if (url === '/api/option/model_pricing/issues') {
       return { data: { success: true, data: fixture.issues ?? [] } }
     }
@@ -158,6 +164,80 @@ it('keeps a deleted saved price listed as pending deletion with an undo action',
     within(row).queryByRole('button', { name: 'Open menu' })
   ).not.toBeInTheDocument()
   expect(onSave).not.toHaveBeenCalled()
+})
+
+it('includes a group override in the model price confirmation and save payload', async () => {
+  const user = userEvent.setup()
+  const { onSave } = await renderForm()
+  await user.click(screen.getByText('gpt-image-2'))
+  const picker = screen.getByRole('combobox', { name: 'Select group' })
+  await waitFor(() => expect(picker).toBeEnabled())
+  await user.click(picker)
+  await user.click(await screen.findByRole('option', { name: 'a' }))
+  await user.click(screen.getByRole('button', { name: 'Add group' }))
+  await user.type(
+    screen.getByRole('textbox', { name: 'a · Price per request' }),
+    '0.015'
+  )
+  await user.click(saveButton())
+
+  const dialog = await screen.findByRole('alertdialog', {
+    name: 'Confirm price changes',
+  })
+  const change = within(dialog).getByRole('row', { name: /gpt-image-2/ })
+  expect(within(change).getByText('Group price overrides')).toBeVisible()
+  expect(within(change).getByText('$0.015')).toBeVisible()
+  await user.click(
+    within(dialog).getByRole('button', { name: 'Confirm and save' })
+  )
+  await waitFor(() => expect(onSave).toHaveBeenCalledOnce())
+
+  const before = pricingOptions(saved)
+  const after = pricingOptions(onSave.mock.calls[0][0])
+  const snapshot = {
+    entries: [
+      {
+        model_name: 'gpt-image-2',
+        configured: {
+          ModelPrice: 0.04,
+          'billing_setting.billing_mode': 'ratio',
+        },
+        effective: { ModelPrice: 0.04 },
+        version: 'previous',
+      },
+    ],
+    options: before,
+    empty_version: 'empty',
+  }
+  expect(buildPricingChanges(snapshot, before, after)).toEqual([
+    {
+      model_name: 'gpt-image-2',
+      expected_version: 'previous',
+      pricing: {
+        ModelPrice: 0.04,
+        'billing_setting.billing_mode': 'ratio',
+        ModelGroupRequestPrices: { a: 0.015 },
+      },
+    },
+  ])
+
+  const reopened = {
+    ...snapshot,
+    entries: [
+      {
+        ...snapshot.entries[0],
+        configured: {
+          ...snapshot.entries[0].configured,
+          ModelGroupRequestPrices: { a: 0.015 },
+        },
+      },
+    ],
+  }
+  expect(buildPricingChanges(reopened, after, before)[0].pricing).toEqual({
+    ModelPrice: 0.04,
+    'billing_setting.billing_mode': 'ratio',
+    ModelGroupRequestPrices: {},
+  })
 })
 
 it('restores the saved price into the draft when a pending deletion is undone', async () => {

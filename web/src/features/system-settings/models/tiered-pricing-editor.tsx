@@ -25,6 +25,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -1188,6 +1189,7 @@ export type TieredPricingEditorProps = {
   modelName?: string
   billingExpr: string
   requestRuleExpr: string
+  groupPriceOverrides?: ReactNode
   onBillingExprChange: (next: string) => void
   onRequestRuleExprChange: (next: string) => void
 }
@@ -1205,6 +1207,7 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
   modelName,
   billingExpr: currentExpr,
   requestRuleExpr: currentRequestRuleExpr,
+  groupPriceOverrides,
   onBillingExprChange,
   onRequestRuleExprChange,
 }: TieredPricingEditorProps) {
@@ -1388,64 +1391,71 @@ export const TieredPricingEditor = memo(function TieredPricingEditor({
           </p>
         )}
 
-        {editorMode === 'visual' && (
-          <div className='space-y-3 border-t pt-3'>
+        {(editorMode === 'visual' || groupPriceOverrides) && (
+          <section
+            aria-label={t('Request rule pricing')}
+            className='space-y-3 border-t pt-3'
+          >
             <div className='space-y-1'>
               <h4 className='text-sm font-medium'>
                 {t('Request rule pricing')}
               </h4>
-              <p className='text-muted-foreground text-xs'>
-                {t(
-                  'When conditions match, the final price is multiplied by X. Multiple matches multiply together; values < 1 act as discounts.'
-                )}
-              </p>
+              {editorMode === 'visual' && (
+                <p className='text-muted-foreground text-xs'>
+                  {t(
+                    'When conditions match, the final price is multiplied by X. Multiple matches multiply together; values < 1 act as discounts.'
+                  )}
+                </p>
+              )}
             </div>
 
-            {ruleExpr && !canUseVisualRules ? (
-              <Alert>
-                <AlertDescription className='text-xs'>
-                  {t(
-                    'This expression is too complex for the visual editor. Please switch to expression mode to edit.'
-                  )}
-                </AlertDescription>
-              </Alert>
-            ) : (
-              <>
-                {requestRuleGroups.map((group, groupIndex) => (
-                  <RuleGroupCard
-                    // eslint-disable-next-line react/no-array-index-key -- Parsed editor rows have no IDs; preserve input identity while their editable labels and values change.
-                    key={groupIndex}
-                    group={group}
-                    index={groupIndex}
-                    onChange={(next) => {
-                      const updated = [...requestRuleGroups]
-                      updated[groupIndex] = next
-                      handleRuleGroupsChange(updated)
-                    }}
-                    onRemove={() =>
-                      handleRuleGroupsChange(
-                        requestRuleGroups.filter((_, i) => i !== groupIndex)
-                      )
+            {editorMode === 'visual' &&
+              (ruleExpr && !canUseVisualRules ? (
+                <Alert>
+                  <AlertDescription className='text-xs'>
+                    {t(
+                      'This expression is too complex for the visual editor. Please switch to expression mode to edit.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <>
+                  {requestRuleGroups.map((group, groupIndex) => (
+                    <RuleGroupCard
+                      // eslint-disable-next-line react/no-array-index-key -- Parsed editor rows have no IDs; preserve input identity while their editable labels and values change.
+                      key={groupIndex}
+                      group={group}
+                      index={groupIndex}
+                      onChange={(next) => {
+                        const updated = [...requestRuleGroups]
+                        updated[groupIndex] = next
+                        handleRuleGroupsChange(updated)
+                      }}
+                      onRemove={() =>
+                        handleRuleGroupsChange(
+                          requestRuleGroups.filter((_, i) => i !== groupIndex)
+                        )
+                      }
+                    />
+                  ))}
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    className='h-9 w-36 justify-center'
+                    onClick={() =>
+                      handleRuleGroupsChange([
+                        ...requestRuleGroups,
+                        createEmptyRuleGroup(),
+                      ])
                     }
-                  />
-                ))}
-                <Button
-                  variant='outline'
-                  size='sm'
-                  className='h-9 w-36 justify-center'
-                  onClick={() =>
-                    handleRuleGroupsChange([
-                      ...requestRuleGroups,
-                      createEmptyRuleGroup(),
-                    ])
-                  }
-                >
-                  <Plus className='mr-2 h-4 w-4' />
-                  {t('Add rule group')}
-                </Button>
-              </>
-            )}
-          </div>
+                  >
+                    <Plus className='mr-2 h-4 w-4' />
+                    {t('Add rule group')}
+                  </Button>
+                </>
+              ))}
+            {groupPriceOverrides}
+          </section>
         )}
       </div>
 

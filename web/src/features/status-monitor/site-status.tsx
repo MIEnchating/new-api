@@ -251,7 +251,7 @@ const HeartbeatTimeline = memo(function HeartbeatTimeline(props: {
             <span
               key={`empty-${index}`}
               aria-hidden='true'
-              className='bg-muted/70 block h-7 min-w-0 rounded-sm'
+              className='bg-success/25 block h-7 min-w-0 rounded-sm'
             />
           ))}
           {heartbeats.map((heartbeat, index) => {

@@ -69,6 +69,7 @@ import { formatJsonForTextarea } from './utils'
 
 type ModelFormValues = {
   ModelPrice: string
+  ModelGroupRequestPrices: string
   ModelRatio: string
   CacheRatio: string
   CreateCacheRatio: string
@@ -289,6 +290,9 @@ export const ModelRatioForm = memo(function ModelRatioForm({
     form.reset({
       ...savedValues,
       ModelPrice: formatJsonForTextarea(savedValues.ModelPrice),
+      ModelGroupRequestPrices: formatJsonForTextarea(
+        savedValues.ModelGroupRequestPrices
+      ),
       ModelRatio: formatJsonForTextarea(savedValues.ModelRatio),
       CacheRatio: formatJsonForTextarea(savedValues.CacheRatio),
       CreateCacheRatio: formatJsonForTextarea(savedValues.CreateCacheRatio),
@@ -438,6 +442,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
             <ModelRatioVisualEditor
               ref={visualEditorRef}
               savedModelPrice={savedValues.ModelPrice}
+              savedGroupRequestPrices={savedValues.ModelGroupRequestPrices}
               savedModelRatio={savedValues.ModelRatio}
               savedCacheRatio={savedValues.CacheRatio}
               savedCreateCacheRatio={savedValues.CreateCacheRatio}
@@ -449,6 +454,7 @@ export const ModelRatioForm = memo(function ModelRatioForm({
               savedBillingExpr={savedValues.BillingExpr}
               savedPluginBillingExpr={savedValues.PluginBillingExpr}
               modelPrice={form.watch('ModelPrice')}
+              groupRequestPrices={form.watch('ModelGroupRequestPrices')}
               modelRatio={form.watch('ModelRatio')}
               cacheRatio={form.watch('CacheRatio')}
               createCacheRatio={form.watch('CreateCacheRatio')}

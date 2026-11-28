@@ -39,7 +39,7 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 			prices := ratio_setting.GroupRequestPrices(item.ModelName)
 			fixed := item.QuotaType == 1
 			if item.BillingMode == "tiered_expr" {
-				_, fixed = billingexpr.FlatRequestPrice(item.BillingExpr)
+				_, fixed = billingexpr.FlatFixedPrice(item.BillingExpr)
 			}
 			if fixed && len(prices) > 0 {
 				item.GroupRequestPrices = make(map[string]float64)

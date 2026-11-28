@@ -7,16 +7,24 @@ import (
 	"github.com/expr-lang/expr/ast"
 )
 
-// FlatRequestPrice identifies an unconditional price for one request.
-func FlatRequestPrice(expression string) (float64, bool) {
+// FlatFixedPrice identifies an unconditional price per request or per image.
+func FlatFixedPrice(expression string) (float64, bool) {
 	entry, err := compileEntryFromCacheByHash(expression, ExprHashString(expression))
-	if err != nil || entry.flatRequestPrice == nil {
+	if err != nil || entry.flatFixedPrice == nil {
 		return 0, false
 	}
-	return *entry.flatRequestPrice, true
+	return *entry.flatFixedPrice, true
 }
 
-func fixedLeafPrice(node ast.Node) *float64 {
+func flatFixedPrice(node ast.Node) *float64 {
+	if product, ok := node.(*ast.BinaryNode); ok && product.Operator == "*" {
+		switch {
+		case isImageCount(product.Left):
+			node = product.Right
+		case isImageCount(product.Right):
+			node = product.Left
+		}
+	}
 	tier, ok := node.(*ast.CallNode)
 	if !ok || len(tier.Arguments) != 2 {
 		return nil
@@ -43,6 +51,11 @@ func fixedLeafPrice(node ast.Node) *float64 {
 	return &amount
 }
 
+func isImageCount(node ast.Node) bool {
+	identifier, ok := node.(*ast.IdentifierNode)
+	return ok && identifier.Value == "image_count"
+}
+
 // UsesFixedPricing includes unselected branches, even when compilation later
 // optimizes them away. Hosts use it to reject unsupported billing entrances.
 func UsesFixedPricing(expression string) bool {
@@ -63,7 +76,7 @@ func containsPricingMarker(node ast.Node) bool {
 }
 
 func isRequestPriceMultiplier(node ast.Node) bool {
-	if identifier, ok := node.(*ast.IdentifierNode); ok && identifier.Value == "image_count" {
+	if isImageCount(node) {
 		return true
 	}
 	conditional, ok := node.(*ast.ConditionalNode)

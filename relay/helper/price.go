@@ -422,7 +422,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 
 	prices := ratio_setting.GroupRequestPrices(billingModelName)
 	if len(prices) > 0 {
-		if _, flat := billingexpr.FlatRequestPrice(exprStr); flat {
+		if _, flat := billingexpr.FlatFixedPrice(exprStr); flat {
 			info.GroupRequestPrices = prices
 			if price, exists := ratio_setting.GroupRequestPrice(prices, info.UsingGroup); exists {
 				requestInput.FixedPriceOverride = common.GetPointer(price)

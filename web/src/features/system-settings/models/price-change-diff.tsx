@@ -140,6 +140,19 @@ function getPriceGroups(
   for (const [plugin, expression] of providers) {
     groups.push(...getExpressionGroups(expression, t, plugin))
   }
+  const overrides = Object.entries(snapshot.groupRequestPrices ?? {})
+  if (overrides.length > 0) {
+    groups.push({
+      key: 'group-request-prices',
+      title: t('Group price overrides'),
+      lines: overrides.flatMap(([group, price]) =>
+        getSyncPriceLines({ model_price: price }, t).map((line) => ({
+          label: group,
+          value: line.value,
+        }))
+      ),
+    })
+  }
   return groups
 }
 

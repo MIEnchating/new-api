@@ -331,7 +331,7 @@ describe('status page separation', () => {
   })
 
   it.each([1, 3, 50])(
-    'places the newest of %i requests at the right edge and reserves empty slots on the left',
+    'places the newest of %i requests at the right edge and uses light green for empty slots',
     async (count) => {
       const heartbeats = Array.from({ length: count }, (_, index) => ({
         time: new Date(Date.UTC(2026, 10, 10, 10, index)).toISOString(),
@@ -366,6 +366,7 @@ describe('status page separation', () => {
         expect.stringContaining(`Request ${Math.max(1, count - 47)}`)
       )
       if (count < 48) {
+        expect(timeline.firstElementChild).toHaveClass('bg-success/25')
         expect(timeline.firstElementChild).toHaveAttribute(
           'aria-hidden',
           'true'
